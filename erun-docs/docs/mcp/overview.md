@@ -4,7 +4,7 @@ title: MCP overview
 
 # Model Context Protocol (MCP)
 
-MCP is **the typed-tool surface for an environment.** Where shell-level work happens over SSH, MCP carries typed actions — inspection (`idle`, `doctor`, `list`, `version`), operational wrappers around the CLI (`build`, `push`, `deploy`, `release`, `logs`, `open`, `init`, `delete`), and an escape hatch (`raw`). Agents (and any other code that wants structured, auditable access) talk to ERun over MCP; every call lands in the same audit trail the Operator reads.
+MCP is **the typed-tool surface for an environment.** Where shell-level work happens over SSH, MCP carries typed actions — inspection (`idle`, `doctor`, `list`, `version`, `observe`), operational wrappers around the CLI (`build`, `push`, `deploy`, `release`, `expose`, `init`, `delete`, and the `cloud_*`/`context_*`/`platform_*`/`review_*` families), and an escape hatch (`exec_raw`). Agents (and any other code that wants structured, auditable access) talk to ERun over MCP; every call lands in the same audit trail the Operator reads. The [full tool index](#full-tool-index) at the end of this page lists every registered tool.
 
 ERun's conventions reach the Agent through a separate mechanism — [skill bundles](/concepts/skills) deployed into the env, loaded by the Agent's own skill loader. Skills are not MCP tools; they're content the Agent reads to know how to write conformant code. The MCP surface stays focused on inspection + action + escape; "how to scaffold a Go service" lives in the Agent's loaded skill, not behind a tool call.
 
@@ -22,7 +22,7 @@ edge.
 **Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app](/desktop/overview).
 
 <figure className="erun-hero-figure">
-  <img src="/img/mcp-flow.svg" alt="How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three labelled category rows. INSPECTION row holds five chips: idle, doctor, list, version, logs. ACTION row holds seven chips: build, push, deploy, release, open, init, delete. ESCAPE row holds raw with a note that it's arbitrary argv, last-resort, every call audited. Below the MCP server, an audit-trail strip captures every call from every category. An Operator pill below the strip is connected by a dashed cyan arrow indicating the Operator can replay any session." />
+  <img src="/img/mcp-flow.svg" alt="How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three labelled category rows. INSPECTION row holds five chips: idle, doctor, list, version, observe. ACTION row holds seven chips: build, push, deploy, release, expose, init, delete. ESCAPE row holds raw with a note that it's arbitrary argv, last-resort, every call audited. Below the MCP server, an audit-trail strip captures every call from every category. An Operator pill below the strip is connected by a dashed cyan arrow indicating the Operator can replay any session." />
   <figcaption>Agent calls typed tools over JSON-RPC. Every call is recorded in the audit trail; the Operator can replay any session. That's how Agents earn autonomy without losing the loop.</figcaption>
 </figure>
 
@@ -65,7 +65,7 @@ JSON-RPC 2.0 over `POST http://127.0.0.1:<port>/mcp` with `Accept: application/j
 
 ### Authentication
 
-An env deployed with a trust anchor requires a **bearer on every request**, including idle probes — the `raw` tool can `kubectl exec`, so the edge is authenticated ahead of any tool running. The anchor is the desktop identity's public key, injected into the pod at deploy time; the matching private key stays on the machine that deployed the env.
+An env deployed with a trust anchor requires a **bearer on every request**, including idle probes — the `exec_raw` tool can `kubectl exec`, so the edge is authenticated ahead of any tool running. The anchor is the desktop identity's public key, injected into the pod at deploy time; the matching private key stays on the machine that deployed the env.
 
 | Property | Value |
 |---|---|
@@ -127,7 +127,7 @@ The response payload is the typed shape from [Structured tool schemas](#structur
 
 ## Built-in tools
 
-Four categories. The protocol treats them all as MCP tools; the categorisation is about *what they do*. (A fifth category — opinionated code-generation skills — used to live here and has moved off the MCP surface entirely. See [Skills](/concepts/skills) for how Agents pick up project conventions now.)
+MCP groups every tool into a family, carried on the wire as `_meta.family` so a client can render the tree without splitting names on `_`. The sections below cover each family; the [full tool index](#full-tool-index) at the end lists every one of them in one place, mechanically kept in sync with the registered surface.
 
 ### Inspection — read-only
 
@@ -138,7 +138,6 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
 | `version` | Build version and commit of the MCP server. |
-| `logs` | Tail logs from any container in the env's namespace, with optional filters. |
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
 | `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. On a macOS host an arriving macOS binary carrying no code signature is signed first — the system kills an unsigned one on exec without printing anything — with the host's stable local identity when it has one and ad-hoc otherwise, and the optional `signing: {path, signed, identity, note}` field reports it (`identity` is empty for an ad-hoc signature); a signing failure is reported in `note` and never fails the call. `preview` returns name/type/size without the bytes. |
 
@@ -162,12 +161,16 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `build` | `erun build` | Minted `version`, per-component status (`built` / `cached` / `error`), image tags, fingerprints. |
 | `push` | `erun push` | Per-component status, registry URLs, published chart ref. Requires `version`. |
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
+| `publish` | `erun publish` | Mirrors an already-built version's images from the FROM registry to each TO registry, without building or deploying. Requires `version`. |
 | `release` | `erun release` | Released version, tag, multi-arch confirmation, and the read-back that proves the published version resolves. |
+| `upgrade` | `erun upgrade` | Redeploys an opted-in, lagging environment to the latest version for its release channel. High blast radius: rolls out a new runtime image and restarts pods. `preview` returns the plan (channel, current → target) without deploying. |
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. `preview` returns the plan without writing. |
-| `open` | `erun open` | Local SSH + MCP ports, status (`opened` / `already_open`). |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
+| `unexpose` | `erun unexpose` | Removes an environment's per-env wildcard DNS record — the DNS-side counterpart to `expose`, run at teardown. Supports preview. |
+| `terraform` | `erun terraform` | Runs a hosted platform's per-environment Terraform (`apply`/`plan`/`destroy`). `apply`/`destroy` mutate real cloud and cluster state and require `confirm` to equal the environment name. `preview` returns the resolved commands without executing them. |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
+| `contribute_clone` | `erun contribute clone` | Clones the ERun source repository into the environment so contribute-mode tabs can build and run a local checkout. Idempotent. |
 | `activity_lease_take` | `erun activity lease take` | The lease held, plus every lease still held on the env. |
 | `activity_lease_release` | `erun activity lease release` | Every lease still held on the env. |
 | `activity_lease_list` | `erun activity lease list` | Every lease still held on the env. Reading the list also reclaims leases that expired or whose holder process is gone, so it returns what is actually deferring auto-stop. |
@@ -187,7 +190,7 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 | `job_output` | Read a page of a job's output, including while it runs. |
 | `job_cancel` | Signal a running job's work by its recorded process. |
 
-**Reach for these instead of `raw` for anything you will need to come back to.** `raw` is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
+**Reach for these instead of `exec_raw` for anything you will need to come back to.** `exec_raw` is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
 
 The job tools remove all five:
 
@@ -219,7 +222,90 @@ Two things follow with no change to any other tool's contract:
 
 `agent` accepts `claude` or `codex`, and excludes `command`. Do **not** scrape the agent's private transcript (`~/.claude/projects/…`) or diff the worktree to report progress: that layout is not erun's contract and can change under you, and it cannot work at all for a remote-agent env whose worktree is not host-mounted. Poll `job_status` instead. The full progress schema, the normalized verb set, and the per-tool event mapping are in [Agent reference · Agent jobs](/agent-reference/cli-flags#agent-jobs).
 
-### Credential tools — desktop-only
+### Cloud — provider aliases {#cloud-tools}
+
+Registers and manages the root-level cloud provider aliases an environment attaches to (`erun cloud set`) for build/push registries, DNS, and docs publishing. See [`erun cloud`](/cli/cloud).
+
+| Tool | Read/Work | Caller | Purpose |
+|---|---|---|---|
+| `cloud_list` | Read | Agent | List configured root-level cloud provider aliases and their token status. MCP-only — no CLI leaf of its own. |
+| `cloud_init_aws` | Work (idempotent) | Agent | Register an AWS SSO provider alias. |
+| `cloud_init_cloudflare` | Work (idempotent) | Agent | Register a Cloudflare provider alias from a delegated API token (Zone + DNS edit, plus Pages for docs sites). |
+| `cloud_init_erun` | Work (idempotent) | Agent | Register a hosted erun platform alias, discovering its OIDC issuer and CLI client id from the platform's own `/v1/platform` endpoint. |
+| `cloud_login` | Work | Agent | Sign in to a configured provider alias (Device Authorization Grant, falling back to Authorization Code + PKCE for `erun`). |
+| `cloud_oidc` | Work (idempotent) | Agent | Refresh the OIDC issuer for a configured provider alias. |
+| `cloud_set` | Work (idempotent) | Agent | Attach a cloud provider alias to a tenant environment. |
+| `cloud_inject_aws_credentials` | Work (idempotent) | **Desktop-only** | Write temporary AWS credentials into the pod (see [Credential tools](#credential-tools-desktop-only), below). |
+| `cloud_clear_aws_credentials` | Work (destructive, idempotent) | **Desktop-only** | Remove the injected `erun-host` AWS profile (see [Credential tools](#credential-tools-desktop-only), below). |
+
+All but the two credential tools support `preview`. Every `cloud_*` tool reaches an external system (a cloud SSO endpoint, a registry, the erun platform) and is advertised `openWorld: true`.
+
+### Cloud contexts — managed Kubernetes clusters {#context-tools}
+
+Manages the lifecycle of an erun-managed cloud k3s cluster. See [`erun context`](/cli/context).
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `context_list` | Read | List managed erun cloud Kubernetes contexts. |
+| `context_init` | Work | Bootstrap a managed cloud k3s Kubernetes context. |
+| `context_start` | Work (idempotent) | Start a stopped managed cloud context. |
+| `context_stop` | Work (destructive, idempotent) | Stop a managed cloud context. |
+
+All four support `preview` and are agent-callable.
+
+### Platform — hosted erun control plane {#platform-tools}
+
+Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud alias `cloud_init_erun`/`cloud_login` set up. Every call requires that alias to be attached and authenticated first. See [`erun platform`](/cli/platform).
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `platform_whoami` | Read | Resolve the caller's identity against the platform. |
+| `platform_tenant_list` | Read | List tenants visible to the caller — every tenant for an operations-tenant caller, otherwise just the caller's own. |
+| `platform_tenant_create` | Work | Register a new tenant. Requires an operations-tenant caller. |
+| `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
+| `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`. |
+| `platform_env_list` | Read | List the caller's tenant's hosted environments. |
+| `platform_env_get` | Read | Fetch one hosted environment by id. |
+| `platform_env_register` | Work | Register a hosted environment. For a runtime environment with `runtimeVersion` and a deploy executor configured, this also starts a server-side deploy — poll `platform_env_get` to watch it converge. |
+| `platform_env_deploy` | Work | Start a server-side deploy of an already-registered environment. Fails with a conflict if one is already in progress. |
+| `platform_env_stop` | Work (destructive, idempotent) | Scale a hosted environment's runtime to zero — the server-side equivalent of `erun stop`. |
+| `platform_env_delete` | Work (destructive, idempotent) | Start deleting a hosted environment and tearing down its namespace — the server-side equivalent of `erun delete`. Not recoverable. This call never prompts: pass `confirm=true` to actually delete. The teardown runs in the background; poll `platform_env_get` for `"deleting"` → gone or `"deletion-blocked"`. |
+| `platform_context_list` | Read | List the caller's tenant's cloud contexts (managed clusters) on the platform. |
+| `platform_context_get` | Read | Fetch one platform-tracked cloud context by id. |
+| `platform_context_create` | Work | **Billing warning:** without `planOnly`, this launches a real cloud VM and provisions k3s on it, billing the tenant's cloud account until stopped. `planOnly` asks the platform to resolve and return the bootstrap plan without creating anything — a real API call, distinct from `preview`, which skips the network call entirely. |
+| `platform_provision` | Read | Resolve and return the ordered plan for provisioning a hosted environment — tenant, quota, context bootstrap or reuse, namespace, register, deploy — without executing any of it or writing to the database. |
+
+Every `platform_*` tool that isn't `platform_provision` supports `preview` and is advertised `openWorld: true` (it reaches the platform's API over the network). All are agent-callable.
+
+### Reviews — hosted code review and merge queue {#review-tools}
+
+Drives the erun platform's review flow: open a review against a pushed branch, comment, close, and inspect or advance a target branch's merge queue. See [`erun review`](/cli/review).
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `review_list` | Read | List reviews, narrowed by any combination of `targetBranch`, `sourceBranch`, `status`, `authorUserId`, and `reviewerUserId`. `mine`/`waitingOnMe` resolve to the caller's own user id via `platform_whoami`. |
+| `review_show` | Read | Fetch one review together with its comment threads and recorded builds. |
+| `review_create` | Work | Open a review. `name` is the eventual squash-merge message and must be unique per tenant. `sourceBranch` must already be pushed (`exec_push`) — the platform can only fetch what has actually landed on the remote. |
+| `review_comment` | Work | Comment on a review line, or reply to an existing comment via `parentCommentId`. |
+| `review_close` | Work (idempotent) | Close a review without merging it. |
+| `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
+| `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGED` — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`. |
+
+All seven support `preview` except the immediate writes (`review_create`, `review_comment`, `review_close`, `review_queue_advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+
+### Idle & auto-stop history {#idle-stop-tools}
+
+`idle` (above, under Inspection) reports the *current* idle state. These three cover the auto-stop record and the pending-warning lifecycle around it. See [Agent reference · Idle policy](/agent-reference/idle-policy).
+
+| Tool | Read/Work | Caller | Purpose |
+|---|---|---|---|
+| `idle_stop_history` | Read | Agent | Return the last N (cap 10) auto-stop audit entries for the env, newest first, each carrying the per-marker idle/active breakdown captured when the auto-stop grace was armed. |
+| `idle_stop_record` | Work (idempotent) | **Desktop-only** | Record a host-driven stop entry (`source=host-manual`). Called by the desktop's Stop button so the History tab can also explain "you clicked Stop" alongside the in-pod monitor's auto-stops. |
+| `idle_stop_cancel` | Work (idempotent) | Agent | Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed. |
+
+None of the three are on the CLI — `idle_stop_history`/`_record`/`_cancel` are MCP-only wire primitives; `idle` itself wraps `erun idle`.
+
+### Credential tools — desktop-only {#credential-tools-desktop-only}
 
 | Tool | Purpose |
 |---|---|
@@ -230,37 +316,121 @@ Two things follow with no change to any other tool's contract:
 
 ### Working tree — typed mutations, no shell
 
-The two mutations an orchestrator performs constantly on an environment's own repository — writing file content and committing — used to have no name of their own: doing either through `raw` meant composing a heredoc or a `python3 -` script and passing it through a shell, so a backtick or a `$(...)` in the content changed the meaning of the command. Neither tool below ever interprets its payload as a shell fragment.
+The mutations an orchestrator performs constantly on an environment's own repository — writing file content, committing, and pushing — used to have no name of their own: doing any of them through `exec_raw` meant composing a heredoc or a `python3 -` script and passing it through a shell, so a backtick or a `$(...)` in the content changed the meaning of the command. None of the three tools below ever interprets its payload as a shell fragment.
 
 | Tool | Purpose |
 |---|---|
-| `write` | Write `content` to `path` in the runtime repo's working tree, byte-for-byte. `content` is a JSON string field, never composed into a command line, so it round-trips verbatim regardless of what it contains. Refuses if `path` would resolve outside the repo root. Reports the resolved path and byte count written. Set `preview` to trace the write without performing it. |
-| `commit` | Stage every change (or, with `paths` set, only those paths) in the runtime repo's working tree and commit it with `message`, taken the same way as `write`'s content. `branch` is the caller's claim about the current branch, verified against `git rev-parse --abbrev-ref HEAD` rather than assumed — a mismatch is refused, loudly, instead of landing the commit on whichever branch HEAD happens to be on. When `paths` is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set `preview` to verify the branch and trace the files that would be committed without committing. |
+| `exec_write` | Write `content` to `path` in the runtime repo's working tree, byte-for-byte. `content` is a JSON string field, never composed into a command line, so it round-trips verbatim regardless of what it contains. Refuses if `path` would resolve outside the repo root. Reports the resolved path and byte count written. Set `preview` to trace the write without performing it. |
+| `exec_commit` | Stage every change (or, with `paths` set, only those paths) in the runtime repo's working tree and commit it with `message`, taken the same way as `exec_write`'s content. `branch` is the caller's claim about the current branch, verified against `git rev-parse --abbrev-ref HEAD` rather than assumed — a mismatch is refused, loudly, instead of landing the commit on whichever branch HEAD happens to be on. When `paths` is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set `preview` to verify the branch and trace the files that would be committed without committing. |
+| `exec_push` | Push the runtime repo's working tree's current branch to a remote. `branch` must match the tree's actual current branch, checked the same way as `exec_commit`. A real, immediate mutation of shared remote state — push before opening a review with `review_create`, since the platform can only fetch a branch once it has actually landed there. Set `preview` to verify the branch and trace the push without running it. |
 
-Same command as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit).
+Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit) / [`erun exec push`](/cli/exec#exec-push). `write`, `commit`, and `diff` (see below) are retired aliases for `exec_write`, `exec_commit`, and `exec_diff`, kept callable for one release (#1186) — new callers should use the `exec_*` names.
 
 ### Escape hatch
 
 | Tool | Purpose |
 |---|---|
-| `raw` | Run an arbitrary `argv` in the runtime pod. Last-resort escape hatch — see [raw spec](#raw--the-escape-hatch). |
+| `exec_raw` | Run an arbitrary `argv` in the runtime pod. Last-resort escape hatch — see [raw spec](#raw--the-escape-hatch). Retired alias: `raw`. |
 
 ### Tool selection rule
 
-In order of preference: **inspection > action > working tree > jobs > raw.**
+In order of preference: **inspection > action > working tree > jobs > `exec_raw`.**
 
 - If a question is "what's the state of X" — reach for an inspection tool.
-- If you're invoking a known CLI command — reach for the action wrapper, not `raw`.
-- If the work is long-running and you will need to know how it ended — reach for [`job_start`](#job-tools), not `raw`. `raw` returns only when the process exits, so using it for lifecycle observation means re-implementing job bookkeeping in shell.
-- If none of the above apply — use `raw`.
+- If you're invoking a known CLI command — reach for the action wrapper, not `exec_raw`.
+- If the work is long-running and you will need to know how it ended — reach for [`job_start`](#job-tools), not `exec_raw`. `exec_raw` returns only when the process exits, so using it for lifecycle observation means re-implementing job bookkeeping in shell.
+- If none of the above apply — use `exec_raw`.
 
 Generating conventional code (a new service, a migration job, an Ingress, …) isn't a tool-call decision — load the relevant [skill](/concepts/skills) and write the files by hand. The skill teaches the convention; the MCP surface stays out of the generation path.
 
-Every call lands in the audit trail with its tool name, so `raw` invocations are immediately distinguishable from typed ones.
+Every call lands in the audit trail with its tool name, so `exec_raw` invocations are immediately distinguishable from typed ones.
+
+### Full tool index {#full-tool-index}
+
+Every tool the server can register, one row each, grouped by `_meta.family` and matching `erun-common`'s `MCPToolDescriptor` table exactly — a scripted test (`TestMCPOverviewDocumentsEveryTool` in `erun-mcp`) fails the build if a tool is registered here without a row below, or a row below names a tool that isn't registered. Retired aliases (`diff`, `raw`, `write`, `commit`, `workspace_sync`) are omitted; see [Working tree](#working-tree--typed-mutations-no-shell) and [Host-served](#host-served) above for those.
+
+| Family | Tool | CLI equivalent | Read/Work |
+|---|---|---|---|
+| *(top-level)* | `version` | `erun version` | Read |
+| *(top-level)* | `list` | `erun list` | Read |
+| *(top-level)* | `init` | `erun init` | Work |
+| *(top-level)* | `build` | `erun build` | Work |
+| *(top-level)* | `push` | `erun push` | Work |
+| *(top-level)* | `deploy` | `erun deploy` | Work |
+| *(top-level)* | `publish` | `erun publish` | Work |
+| *(top-level)* | `upgrade` | `erun upgrade` | Work |
+| *(top-level)* | `release` | `erun release` | Work |
+| *(top-level)* | `pin` | `erun pin` | Work |
+| *(top-level)* | `expose` | `erun expose` | Work |
+| *(top-level)* | `unexpose` | `erun unexpose` | Work |
+| *(top-level)* | `terraform` | `erun terraform` | Work |
+| *(top-level)* | `doctor` | `erun doctor` | Work |
+| *(top-level)* | `observe` | `erun observe` | Read |
+| *(top-level)* | `delete` | `erun delete` | Work |
+| exec | `exec_diff` | `erun exec diff` | Read |
+| exec | `exec_raw` | `erun exec raw` | Work |
+| exec | `exec_write` | `erun exec write` | Work |
+| exec | `exec_commit` | `erun exec commit` | Work |
+| exec | `exec_push` | `erun exec push` | Work |
+| job | `job_start` | *(MCP-only)* | Work |
+| job | `job_attach` | *(MCP-only)* | Work |
+| job | `job_status` | *(MCP-only)* | Read |
+| job | `job_await` | *(MCP-only)* | Read |
+| job | `job_output` | *(MCP-only)* | Read |
+| job | `job_cancel` | *(MCP-only)* | Work |
+| cloud | `cloud_list` | *(MCP-only)* | Read |
+| cloud | `cloud_init_aws` | `erun cloud init aws` | Work |
+| cloud | `cloud_init_cloudflare` | `erun cloud init cloudflare` | Work |
+| cloud | `cloud_init_erun` | `erun cloud init erun` | Work |
+| cloud | `cloud_login` | `erun cloud login` | Work |
+| cloud | `cloud_oidc` | `erun cloud oidc` | Work |
+| cloud | `cloud_set` | `erun cloud set` | Work |
+| cloud | `cloud_inject_aws_credentials` | *(MCP-only, desktop-only)* | Work |
+| cloud | `cloud_clear_aws_credentials` | *(MCP-only, desktop-only)* | Work |
+| context | `context_list` | `erun context list` | Read |
+| context | `context_init` | `erun context init` | Work |
+| context | `context_start` | `erun context start` | Work |
+| context | `context_stop` | `erun context stop` | Work |
+| platform | `platform_whoami` | `erun platform whoami` | Read |
+| platform | `platform_tenant_list` | `erun platform tenant list` | Read |
+| platform | `platform_tenant_create` | `erun platform tenant create` | Work |
+| platform | `platform_user_list` | `erun platform user list` | Read |
+| platform | `platform_user_enroll` | `erun platform user enroll` | Work |
+| platform | `platform_env_list` | `erun platform env list` | Read |
+| platform | `platform_env_get` | `erun platform env get` | Read |
+| platform | `platform_env_register` | `erun platform env register` | Work |
+| platform | `platform_env_deploy` | `erun platform env deploy` | Work |
+| platform | `platform_env_stop` | `erun platform env stop` | Work |
+| platform | `platform_env_delete` | `erun platform env delete` | Work |
+| platform | `platform_context_list` | `erun platform context list` | Read |
+| platform | `platform_context_get` | `erun platform context get` | Read |
+| platform | `platform_context_create` | `erun platform context create` | Work |
+| platform | `platform_provision` | `erun platform provision` | Read |
+| review | `review_list` | `erun review list` | Read |
+| review | `review_show` | `erun review show` | Read |
+| review | `review_create` | `erun review create` | Work |
+| review | `review_comment` | `erun review comment` | Work |
+| review | `review_close` | `erun review close` | Work |
+| review | `review_queue_list` | `erun review queue list` | Read |
+| review | `review_queue_advance` | `erun review queue advance` | Work |
+| idle | `idle` | `erun idle` | Read |
+| idle | `idle_stop_history` | *(MCP-only)* | Read |
+| idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |
+| idle | `idle_stop_cancel` | *(MCP-only)* | Work |
+| activity | `activity_lease_list` | *(MCP-only)* | Read |
+| activity | `activity_lease_take` | *(MCP-only)* | Work |
+| activity | `activity_lease_release` | *(MCP-only)* | Work |
+| outputs | `outputs_list` | `erun outputs list` | Read |
+| outputs | `outputs_download` | `erun outputs download` | Read |
+| inputs | `inputs_upload` | `erun inputs upload` | Work |
+| sshd | `sshd_sync` | `erun sshd sync` | Work |
+| contribute | `contribute_clone` | `erun contribute clone` | Work |
+
+74 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 
-Anyone running a long-lived Agent in a shared environment wants two things: the Agent should *be able to act* (otherwise it's useless), and the Operator should *see what it did* (otherwise it's unsafe). Typed MCP tools deliver both — structured input/output the Operator can audit, with `raw` available for emergencies. As the Agent earns trust through audit, the Operator can grant more autonomy without losing the loop.
+Anyone running a long-lived Agent in a shared environment wants two things: the Agent should *be able to act* (otherwise it's useless), and the Operator should *see what it did* (otherwise it's unsafe). Typed MCP tools deliver both — structured input/output the Operator can audit, with `exec_raw` available for emergencies. As the Agent earns trust through audit, the Operator can grant more autonomy without losing the loop.
 
 ## Structured tool schemas
 
@@ -351,7 +521,7 @@ Runs a fixed set of in-pod health checks. Each check returns `ok | warn | fail` 
 }
 ```
 
-A failing check returns `status: "fail"` and a `detail` describing the symptom. Agents should prefer running `doctor` before `raw` when they see unexpected behaviour.
+A failing check returns `status: "fail"` and a `detail` describing the symptom. Agents should prefer running `doctor` before `exec_raw` when they see unexpected behaviour.
 
 `doctor` also reports why a deploy may have failed (helm release status + runtime pods, read-only) and can recover a failing runtime release. Two boolean inputs request the recovery actions, each mutating the live release: `clearPendingHelm` clears a stuck helm pending-install/upgrade lock, and `rollback` rolls the release back to its last successful revision. They are alternative fixes — requesting both in one call is rejected. See [CLI flag spec · Deploy recovery actions](/agent-reference/cli-flags#deploy-recovery-actions) for the exact commands and when to use each.
 
@@ -393,36 +563,6 @@ The build version and commit of the MCP server running in the pod.
   "build": "1.0.308",
   "commit": "abc123def456",
   "date": "2026-05-20T11:42:00Z"
-}
-```
-
-### `logs`
-
-Tail logs from a container in the env's namespace. Useful when an Agent is debugging a failed deploy or watching a service.
-
-**Input:**
-
-| Field | Type | Description |
-|---|---|---|
-| `component` | string | The component / pod name (matches a deployment label). |
-| `container` | string (optional) | Container inside the pod. Defaults to the pod's first container. |
-| `lines` | integer (optional) | How many trailing lines to return. Default `100`, max `2000`. |
-| `since` | string (optional) | RFC3339 timestamp **or** Go-style duration. |
-| `previous` | bool (optional) | When `true`, return logs from the previous container instance (crash-loop debugging). |
-
-`since` duration grammar: the subset of [Go's `time.ParseDuration`](https://pkg.go.dev/time#ParseDuration) covering positive durations with units `ns`, `us`, `µs`, `ms`, `s`, `m`, `h`. Examples: `5m`, `1h30m`, `45s`. Negative values and bare numbers are rejected (`INVALID_SINCE`).
-
-**Output:**
-
-```jsonc
-{
-  "pod": "api-79f5b9c64",
-  "container": "api",
-  "lines": [
-    { "timestamp": "2026-05-25T14:31:02Z", "stream": "stderr", "text": "starting on :8080" },
-    { "timestamp": "2026-05-25T14:31:03Z", "stream": "stdout", "text": "GET / 200" }
-  ],
-  "truncated": false
 }
 ```
 
@@ -585,7 +725,7 @@ An [agent job](#agent-jobs) carries three more fields on the same record. `progr
 
 ### Other action tools
 
-`push`, `release`, `open`, `init`, `delete` follow the same shape — typed `arguments` matching their CLI flags, typed `result` payload mirroring the CLI's structured output. The MCP tool name matches the CLI subcommand exactly. Like the CLI, the `push` tool takes a **required** `version` (it publishes a specific version's image + chart and never mints one); omitting it is rejected with `NO_VERSION`. Field-by-field semantics, flag defaults, and per-tool error codes live in the [CLI flag spec](/agent-reference/cli-flags) — every CLI command listed there corresponds 1:1 to the MCP tool of the same name.
+`push`, `publish`, `release`, `upgrade`, `pin`, `expose`, `unexpose`, `terraform`, `doctor`, `observe`, `init`, `delete`, `contribute_clone`, and every `cloud_*`/`context_*`/`platform_*`/`review_*`/`idle_stop_*`/`activity_lease_*` tool follow the same shape — typed `arguments` matching their CLI flags (where a CLI command exists; see the [full tool index](#full-tool-index) for which do not), typed `result` payload mirroring the CLI's structured output where applicable. The MCP tool name matches the CLI subcommand exactly wherever one exists. Like the CLI, the `push` tool takes a **required** `version` (it publishes a specific version's image + chart and never mints one); omitting it is rejected with `NO_VERSION`. Field-by-field semantics, flag defaults, and per-tool error codes live in the [CLI flag spec](/agent-reference/cli-flags) — every CLI command listed there corresponds 1:1 to the MCP tool of the same name.
 
 ### Tool-call error responses
 
@@ -618,9 +758,9 @@ When a `tools/call` fails, the MCP response wraps a typed error. The envelope:
 
 `data.errorCode` mirrors the CLI error codes — the canonical list is in [Agent reference · CLI flag spec](/agent-reference/cli-flags). A successful call returns `result` with the per-tool typed output documented above.
 
-## `raw` — the escape hatch
+## `exec_raw` — the escape hatch {#raw--the-escape-hatch}
 
-`raw` runs an arbitrary `argv` inside the runtime pod's `erun-devops` container. Reserved for actions the structured tools don't cover.
+`exec_raw` runs an arbitrary `argv` inside the runtime pod's `erun-devops` container. Reserved for actions the structured tools don't cover. Retired alias: `raw`, kept callable for one release (#1186).
 
 **Input:**
 
@@ -645,14 +785,14 @@ When a `tools/call` fails, the MCP response wraps a typed error. The envelope:
 - Runs as the pod's ServiceAccount. All env-level RBAC applies — the Agent has the same scope as a shell in the same pod.
 - Cannot break out of the container, mount host paths, or escalate privileges. The pod's SecurityContext is the wall.
 - Output beyond 1 MiB per stream is truncated; the `truncated` flag is set and a note appears in stderr.
-- Every call is recorded in the audit trail with `argv`, `cwd`, exit code, and timestamp. There is no anonymous `raw` call.
+- Every call is recorded in the audit trail with `argv`, `cwd`, exit code, and timestamp. There is no anonymous `exec_raw` call.
 
 **When to use it (and when not):**
 
 - ✅ Inspecting state the structured tools don't surface (a specific log file, a kubectl debug command).
 - ✅ Running project-specific scripts (`./scripts/seed-test-data.sh`).
 - ❌ Anything an existing tool covers — `list`, `doctor`, `idle` give typed output that's much easier for the Operator to scan.
-- ❌ Long-running work you need to observe or come back to — `raw` is request/response; it returns when the process exits. Use the [job tools](#job-tools), which detach the work, capture its exit status in the env, and let you poll status and output by handle.
+- ❌ Long-running work you need to observe or come back to — `exec_raw` is request/response; it returns when the process exits. Use the [job tools](#job-tools), which detach the work, capture its exit status in the env, and let you poll status and output by handle.
 - ❌ Long-running daemons — same reason. Start them as a job and cancel by handle.
 
 ## Skills are not MCP tools
