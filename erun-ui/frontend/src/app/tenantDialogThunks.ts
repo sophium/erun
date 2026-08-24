@@ -285,10 +285,16 @@ export const loadTenantDashboard =
       return;
     }
     dispatch(patchTenantDashboard({ loading: true, error: '' }));
+    // forceRefetch: true, because this fires on every dashboard open and every
+    // Refresh click — without it RTK Query's cache (never invalidated here)
+    // just replays the first successful result for the life of the process.
+    // unsubscribe once consumed so the one-shot call doesn't pin that cache
+    // entry open forever either.
+    const request = dispatch(
+      tenantApi.endpoints.getTenantDashboard.initiate(input, { forceRefetch: true }),
+    );
     try {
-      const loadedData = await dispatch(
-        tenantApi.endpoints.getTenantDashboard.initiate(input),
-      ).unwrap();
+      const loadedData = await request.unwrap();
       if (getState().tenantDashboard.tenant !== target) {
         return;
       }
@@ -311,6 +317,8 @@ export const loadTenantDashboard =
           data: null,
         }),
       );
+    } finally {
+      request.unsubscribe();
     }
   };
 
