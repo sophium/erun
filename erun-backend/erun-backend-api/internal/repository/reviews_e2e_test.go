@@ -265,7 +265,7 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("review while afterClose is live error = %v, want ErrConflict", err)
 	}
-	build, err := builds.Create(ctx, model.Build{ReviewID: afterClose.ReviewID, Successful: true, CommitID: "commit-merge", Version: "1.0.0"})
+	build, err := builds.Create(ctx, model.Build{ReviewID: afterClose.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "commit-merge", Version: "1.0.0"})
 	mustNoErr(t, err, "create merge build")
 	afterClose.Status = model.ReviewStatusMerged
 	afterClose.LastMergedBuildID = build.BuildID
@@ -315,5 +315,109 @@ func TestReviewTenantIsolation(t *testing.T) {
 
 	if _, err := reviews.Get(ctxB, reviewA.ReviewID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("tenant B fetching tenant A's review by ID: err = %v, want ErrNotFound", err)
+	}
+}
+
+// openReview is a small helper for the builds.kind tests below: they only
+// need a review to attach a build to, not any particular review workflow.
+func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, name, sourceBranch string) model.Review {
+	t.Helper()
+	review, err := reviews.Create(ctx, model.Review{
+		Name: name, TargetBranch: "main", SourceBranch: sourceBranch, Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "create review "+name)
+	return review
+}
+
+// TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail is the
+// database contract #1196 needs `builds.kind` for: a GATE build (the merge
+// queue's own prospective-merge build) mints no version, so it must be
+// insertable without one; a RECORDED build (a client-reported build, or a
+// release's own) still requires one; and a failed GATE build must carry
+// failure_detail in the gate's own words.
+func TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+
+	review := openReview(t, reviews, ctx, "gate build contract review", "feature/gate-contract")
+
+	successful, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-ok",
+	})
+	mustNoErr(t, err, "create a successful GATE build with no version")
+	if successful.Version != "" {
+		t.Fatalf("version = %q, want empty for a GATE build", successful.Version)
+	}
+
+	if _, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: false, CommitID: "merge-sha-bad",
+	}); err == nil {
+		t.Fatal("a failed GATE build with no failure_detail was accepted, want the CHECK constraint to refuse it")
+	}
+
+	failed, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: false, CommitID: "merge-sha-bad",
+		FailureDetail: "erun build failed: go vet found 3 issues",
+	})
+	mustNoErr(t, err, "create a failed GATE build with failure_detail")
+	if failed.FailureDetail == "" {
+		t.Fatal("failureDetail was not persisted for a failed GATE build")
+	}
+
+	if _, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "source-sha",
+	}); err == nil {
+		t.Fatal("a RECORDED build with no version was accepted, want the CHECK constraint to require one")
+	}
+
+	recorded, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "source-sha", Version: "1.0.0",
+	})
+	mustNoErr(t, err, "create a RECORDED build with a version")
+	if recorded.Version != "1.0.0" {
+		t.Fatalf("version = %q, want 1.0.0", recorded.Version)
+	}
+}
+
+// TestBuildTenantIsolation proves a caller from one tenant cannot see or fetch
+// another tenant's builds, including a GATE build the merge queue produced —
+// the same RLS boundary every tenant-owned table must hold.
+func TestBuildTenantIsolation(t *testing.T) {
+	db, tenantA := reviewsDatabase(t)
+	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
+	ctxA := reviewsContext(tenantA, authorA)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+
+	reviewA := openReview(t, reviews, ctxA, "tenant a build review", "feature/tenant-a-build")
+	buildA, err := builds.Create(ctxA, model.Build{
+		ReviewID: reviewA.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-tenant-a",
+	})
+	mustNoErr(t, err, "create tenant A's build")
+
+	tenantB := seedReviewsTenant(t, db, "reviews-e2e-tenant-b-builds")
+	t.Cleanup(func() { clearReviewsTenant(t, db, tenantB) })
+	authorB := seedReviewsUser(t, db, tenantB, "tenant-b-author")
+	ctxB := reviewsContext(tenantB, authorB)
+
+	reviewB := openReview(t, reviews, ctxB, "tenant b build review", "feature/tenant-b-build")
+	_, err = builds.Create(ctxB, model.Build{
+		ReviewID: reviewB.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "commit-b", Version: "1.0.0",
+	})
+	mustNoErr(t, err, "create tenant B's build")
+
+	listedByB, err := builds.List(ctxB, BuildFilter{})
+	mustNoErr(t, err, "list builds as tenant B")
+	for _, build := range listedByB {
+		if build.BuildID == buildA.BuildID {
+			t.Fatalf("tenant B's build list included tenant A's build %s", buildA.BuildID)
+		}
+	}
+
+	if _, err := builds.Get(ctxB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("tenant B fetching tenant A's build by ID: err = %v, want ErrNotFound", err)
 	}
 }

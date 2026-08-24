@@ -6,6 +6,11 @@ title: Builds
 
 A **build** records the outcome of building a specific commit on a specific review. Builds drive review status transitions — a `READY` review is one with a successful latest build.
 
+There are two kinds, distinguished by `kind`, and they are against different commits:
+
+- **`RECORDED`** — a *reported* build: a client's `POST /builds` (typically `erun build --release` or your own CI, against the review's `sourceBranch` tip), or the [release queue](#release-queue)'s own build (against the merge commit, once it already landed). A `RECORDED` build always names the `version` it produced.
+- **`GATE`** — the [merge queue](#merge-queue)'s own build of the *prospective* merge — the review's source squashed onto its current target, before anything is pushed. A `GATE` build publishes nothing, so it never has a `version`; a failed one carries `failureDetail` in the gate's own words.
+
 ## Resource shape
 
 ```jsonc
@@ -14,20 +19,23 @@ A **build** records the outcome of building a specific commit on a specific revi
   "tenantId": "tnt_01H...",
   "reviewId": "rev_01H...",
   "reviewName": "Refactor pricing engine",   // read-only display field
+  "kind": "RECORDED",                       // RECORDED | GATE
   "successful": true,
   "commitId": "abc123def456",
-  "version": "1.2.3",
+  "version": "1.2.3",                       // absent for a GATE build
   "createdAt": "2026-05-24T11:13:00Z",
   "updatedAt": "2026-05-24T11:13:00Z"
 }
 ```
 
+A failed `GATE` build additionally carries `failureDetail` (a string, the gate's own account of why it did not succeed) instead of `version`.
+
 ## Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review. |
-| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build. Body: `commitId`, `version`, `successful`. |
+| `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. |
+| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new `RECORDED` build. Body: `commitId`, `version`, `successful`. (`GATE` builds are written only by the merge queue itself, never by `POST`.) |
 | `GET` | `/v1/reviews/{reviewId}/builds/{buildId}` | Fetch one build. |
 
 ## How builds connect to review status
@@ -58,7 +66,26 @@ Recording builds on the server (instead of treating them as ephemeral CI artifac
 
 Recording a build is decoupled from running one. Any Agent or pipeline that produced a build (often `erun build --release`, or build infrastructure you already have) can call `POST /builds` once it completes, and the outcome funnels into the same review/merge-queue model.
 
-ERun also ships its own trigger for the one case it owns end to end: an accepted review on a target branch. That is the [release queue](#release-queue), below.
+ERun also ships its own trigger for two cases it owns end to end: gating a review's merge (the [merge queue](#merge-queue), directly below) and, once a review is `MERGED`, releasing what it merged (the [release queue](#release-queue), below).
+
+## Merge queue
+
+A `GATE` build is never `POST`ed — it is written by the merge queue itself once a review reaches `MERGE` (see [Reviews · Merge queue](/collaboration/reviews#merge-queue) for the promotion and dispatch workflow). Where a `RECORDED` build is against whatever commit its reporter names, a `GATE` build is always against the specific commit the merge queue built: the prospective squash merge of the review's `sourceBranch` onto its target branch as that target stood *at gate time* — not the source branch tip, and not a stale target.
+
+```jsonc
+{
+  "buildId": "bld_01H...",
+  "reviewId": "rev_01H...",
+  "kind": "GATE",
+  "successful": false,
+  "commitId": "9f1c2b3d4e5f60718293a4b5c6d7e8f901234567",   // the attempted merge commit, or the source tip if the merge itself conflicted
+  "failureDetail": "CONFLICT (content): Merge conflict in pricing.go",
+  "createdAt": "2026-08-24T09:12:44Z",
+  "updatedAt": "2026-08-24T09:12:44Z"
+}
+```
+
+A successful `GATE` build has no `version` (the gate publishes nothing) and no `failureDetail`; its `commitId` is the merge commit that was actually pushed to the target branch, and the review's `lastMergedBuildId` points at it. There is no PATCH to follow: the merge queue applies the review's `MERGE` → `MERGED`/`FAILED` transition itself from the gate's own outcome.
 
 ## Release queue
 
@@ -133,15 +160,17 @@ A release whose control plane stops reporting for 4 hours is failed with a reaso
 | The release Job fails | `status: failed`, `failureReason` carries the run's own output (read off the pod before it is reclaimed). The next queued release still runs. | Fix the cause, re-trigger the same commit — it re-queues as a new attempt. |
 | The Job exits 0 but names no version | `status: failed`. A release nothing can name is not recorded as a success. | Re-trigger the commit. |
 | The queue is not configured | The trigger is still recorded as `queued`; nothing runs. | Enable the queue on the control plane, then re-trigger. |
-| Moving the review to `MERGED` succeeds but the trigger fails | `500`, naming that the review **is** merged and that the recovery is `POST /v1/releases`. The transition is not rolled back. | `POST /v1/releases` with the merge commit. |
+| The review reaches `MERGED` but enqueuing its release fails | No HTTP caller to answer — the merge queue's own gate build already landed the merge asynchronously, so there is nothing left in flight to return a `500` to. The review stays `MERGED`; only the release trigger did not run. | `POST /v1/releases` with the merge commit. |
 
 ## Validation rules
 
 | Field | Rule |
 |---|---|
 | `commitId` | Exactly 40 lowercase hex characters: `^[0-9a-f]{40}$`. |
-| `version` | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`). |
+| `version` | Required and must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`) — for a `RECORDED` build. Absent for a `GATE` build, which publishes nothing. |
 | `successful` | Required. Boolean. |
+| `kind` | Ignored on `POST` — every client-reported build is `RECORDED`. `GATE` is written only by the merge queue. |
+| `failureDetail` | Required, non-empty, on a failed `GATE` build. Not settable on `POST` (client-reported builds carry no `failureDetail`). |
 
 ## Errors
 

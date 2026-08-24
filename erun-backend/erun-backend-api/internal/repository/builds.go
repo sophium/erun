@@ -24,7 +24,7 @@ func (r *BuildRepository) Create(ctx context.Context, build model.Build) (model.
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		if err := tx.NewInsert().
 			Model(&created).
-			Column("review_id", "successful", "commit_id", "version").
+			Column("review_id", "kind", "successful", "commit_id", "version", "failure_detail").
 			Returning("*").
 			Scan(ctx); err != nil {
 			return err
@@ -38,7 +38,7 @@ func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build,
 	var build model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
-			SELECT b.build_id, b.tenant_id, b.review_id, b.successful, b.commit_id, b.version, b.created_at, b.updated_at, r.name AS review_name
+			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name
 			  FROM builds b
 			  JOIN reviews r
 			    ON r.tenant_id = b.tenant_id
@@ -54,7 +54,7 @@ func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model
 	var builds []model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		query := `
-			SELECT b.build_id, b.tenant_id, b.review_id, b.successful, b.commit_id, b.version, b.created_at, b.updated_at, r.name AS review_name
+			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name
 			  FROM builds b
 			  JOIN reviews r
 			    ON r.tenant_id = b.tenant_id

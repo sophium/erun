@@ -35,8 +35,8 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | `POST` | `/v1/reviews` | Create a review. Body: `name`, `sourceBranch`, `targetBranch`. Refused with `409 Conflict` if another non-`MERGED`/`CLOSED` review already proposes the same `sourceBranch` onto the same `targetBranch`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
 | `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`. |
-| `GET` | `/v1/reviews/merge-queue` | List reviews queued to merge (status `MERGE`). Optional `?targetBranch=<name>`. |
-| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next queued review to `MERGED`. Body: `targetBranch`. |
+| `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge for a target branch (status `READY`, not yet promoted). Optional `?targetBranch=<name>`. |
+| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE` and dispatch its merge-queue gate. Body: `targetBranch`. Does not itself produce `MERGED` — see [Merge queue](#merge-queue). |
 | `GET` | `/v1/reviews/{reviewId}/reviewers` | List the review's reviewers. |
 | `POST` | `/v1/reviews/{reviewId}/reviewers` | Add a reviewer. Body: `userId`. |
 | `DELETE` | `/v1/reviews/{reviewId}/reviewers/{userId}` | Remove a reviewer. `204 No Content` on success. |
@@ -77,8 +77,10 @@ stateDiagram-v2
     OPEN --> FAILED: failed build
     OPEN --> READY: successful build
     FAILED --> READY: fix + build
-    READY --> MERGE: queue
-    MERGE --> MERGED: advance queue
+    READY --> MERGE: merge-queue/advance
+    MERGE --> MERGED: gate build passes
+    MERGE --> FAILED: gate build fails
+    MERGE --> READY: missed merge window
     OPEN --> CLOSED: abandon
     READY --> CLOSED
     FAILED --> CLOSED
@@ -89,7 +91,7 @@ stateDiagram-v2
     class MERGED,CLOSED endpoint
 ```
 
-The status transitions are enforced server-side: an Agent cannot directly mark a review `MERGED`. The only path to `MERGED` is via the merge queue, which `POST /v1/reviews/merge-queue/advance` controls.
+The status transitions are enforced server-side: an Agent cannot directly mark a review `MERGE` or `MERGED` — `PATCH .../status` refuses both. The only path to `MERGED` is the merge queue's own gate: once `merge-queue/advance` promotes a review to `MERGE`, the queue builds the prospective merge of the review's source onto its *current* target branch, gates that build with a real build, and pushes only on green. `MERGED` means that gate actually ran and actually passed, not that any caller asserted it.
 
 ## Status meanings
 
@@ -98,13 +100,13 @@ The status transitions are enforced server-side: an Agent cannot directly mark a
 | `OPEN` | Review exists, no successful build yet, no decision either way. |
 | `FAILED` | The latest build for this review failed. The corresponding build id is stored in `lastFailedBuildId`. |
 | `READY` | The latest build succeeded; the review is mergeable. |
-| `MERGE` | Queued for merge. Waiting for the queue to advance to its target branch. |
-| `MERGED` | Successfully merged. Terminal. `lastMergedBuildId` records the merging build. |
+| `MERGE` | Promoted to the head of its target branch's queue; the merge queue is building the prospective merge and gating it with a build right now. |
+| `MERGED` | The gate build passed and the merge was pushed to the target branch. Terminal. `lastMergedBuildId` records the gate build (kind `GATE`; it publishes nothing, so it carries no version — see [Builds](/collaboration/builds)). |
 | `CLOSED` | Closed without merge (abandoned). Terminal. |
 
 ## Merge queue
 
-The merge queue is **shared per target branch**. All reviews with status `MERGE` and the same `targetBranch` form a single FIFO. `POST /v1/reviews/merge-queue/advance` advances the head:
+The merge queue is **shared per target branch**. Every `READY` review for a given `targetBranch` waits in a single FIFO — `GET /v1/reviews/merge-queue?targetBranch=main` lists that waiting line. The review currently being gated (status `MERGE`) has already left the waiting line; only one review per target branch may be `MERGE` at a time. `POST /v1/reviews/merge-queue/advance` promotes the head of the waiting line:
 
 ```
 POST /v1/reviews/merge-queue/advance
@@ -113,9 +115,11 @@ Content-Type: application/json
 { "targetBranch": "main" }
 ```
 
-The server picks the head of the queue for that target branch and transitions it to `MERGED`. The response is the promoted review. If the queue is empty, the API returns an error.
+The server picks the head of the waiting line for that target branch, transitions it to `MERGE`, and dispatches the merge queue's gate for it: fetch the review's target and source branches, build the prospective merge of the source onto the *current* target, run a real build against that prospective merge, and push it only if the build passes. The response to `advance` is the promoted (now `MERGE`) review, not the merged one — poll `GET /v1/reviews/{reviewId}` for the terminal `MERGED` or `FAILED` outcome. If the waiting line is empty, or another review is already `MERGE` for that target branch, the API returns an error.
 
-This mechanism gives an organization a single, fair, audit-trail-friendly merge order even when many agents are submitting in parallel.
+This is what catches two reviews that are each green on their own but broken together: the second review promoted onto a target branch is always gated against whatever the first one just landed, not against a stale snapshot, so their combination is tested before the target branch ever sees it.
+
+If a `MERGE` review's gate never reaches a terminal state (an operator-diagnosed stuck run), `PATCH /v1/reviews/{reviewId}/status` with `{"status": "READY"}` and no `buildId` requeues it: it moves back to `READY` and rejoins the waiting line at the tail rather than being promoted again immediately.
 
 ## Errors
 
@@ -131,11 +135,11 @@ All endpoints return JSON error bodies:
 
 | Status | When | Example |
 |---|---|---|
-| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches. | `POST /v1/reviews` without `sourceBranch`. |
+| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result. |
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
 | `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller. | `GET /v1/reviews/rev_unknown`. |
-| `409 Conflict` | Invalid state transition or queue-state mismatch; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review. | `PATCH .../status` to `MERGED` directly; `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does. |
+| `409 Conflict` | Invalid state transition or queue-state mismatch; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review. | `POST /v1/reviews/merge-queue/advance` while another review is already `MERGE` for that target branch; `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does. |
 | `422 Unprocessable Entity` | Structurally valid but semantically invalid. | `PATCH status` to `READY` without a successful build. |
 | `429 Too Many Requests` | Rate limit exceeded. | Burst of `POST /comments`. |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |

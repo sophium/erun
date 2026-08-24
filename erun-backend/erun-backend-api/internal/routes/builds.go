@@ -45,6 +45,10 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	build.ReviewID = req.PathValue("review_id")
+	// GATE is written only by the merge queue's own executor, which records it
+	// through the raw repository, never through this route — a client-supplied
+	// kind is always ignored, the same as tenant ID and timestamps.
+	build.Kind = model.BuildKindRecorded
 	build, err := r.service.Create(req.Context(), build)
 	if err != nil {
 		writeRepositoryError(w, err)

@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mergeexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/releaseexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -60,6 +61,12 @@ type HandlerOptions struct {
 	// and the runtime image version. Unset leaves the release queue recording
 	// triggers without running them.
 	Release provision.ReleaseConfig
+	// Merge is the per-instance placement for merge-gate Jobs: the agent
+	// environment whose warm caches and writable checkout the merge queue's gate
+	// build runs against. Unset leaves a review reaching MERGE (via
+	// AdvanceMergeQueue) with nothing to gate it until an operator advances the
+	// queue again by hand.
+	Merge provision.MergeConfig
 	// Platform is this instance's own self-describing config, served
 	// unauthenticated at GET /v1/platform so a client can discover it before it
 	// has a token. Unset fields render as empty strings, never as an error.
@@ -199,13 +206,25 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	if contextCredentials != nil {
 		placementCredentials = contextCredentials
 	}
+	// reviewService is deliberately built with no dependency on the merge
+	// executor: the executor (via BuildService, below) already depends back on
+	// reviewService's own MarkBuildResult, and Go composition cannot wire the
+	// resulting cycle. See AGENTS.md "Merge Queue".
 	reviewService := service.NewReviewService(reviews, builds)
-	buildService := service.NewBuildService(builds, reviewService)
 	commentService := service.NewCommentService(comments)
-	releaseService := service.NewReleaseService(releases, buildService, newReleaseRunner(options))
+	// releaseService records its build against the raw repository, not through
+	// BuildService: by the time a release runs, the review it recorded against
+	// (if any) is already MERGED, so BuildService's extra MarkBuildResult call
+	// would be an inert no-op — going through the raw repository instead is what
+	// keeps releaseService out of the mergeQueueService -> releaseRoutes ->
+	// releaseService cycle that routing it through BuildService would create.
+	releaseService := service.NewReleaseService(releases, builds, newReleaseRunner(options))
 	releaseRoutes := routes.RegisterReleaseRoutes(register, releases, releaseService, newReleaseQueue(options, releaseService), tenants)
+	mergeQueueService := service.NewMergeQueueService(reviews, builds, newMergeRunner(options), releaseRoutes)
+	mergeQueue := newMergeQueue(options, mergeQueueService, tenants)
+	buildService := service.NewBuildService(builds, reviewService, mergeQueue)
 	routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
-	routes.RegisterReviewRoutes(register, reviews, reviewReviewers, reviewService, builds, releaseRoutes)
+	routes.RegisterReviewRoutes(register, reviews, reviewReviewers, reviewService, mergeQueue)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
 	deleter := newEnvironmentDeleter(options, environments, usageEvents, placementCredentials)
@@ -368,6 +387,28 @@ func newReleaseQueue(options HandlerOptions, coordinator provision.ReleaseCoordi
 		return nil
 	}
 	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release, newRuntimeImageChecker(options))
+}
+
+// newMergeRunner wires the merge-gate Job launcher. Without an in-cluster
+// client there is nothing to launch, so a promotion to MERGE (AdvanceMergeQueue
+// already recorded it) has no gate run for it.
+func newMergeRunner(options HandlerOptions) service.MergeRunner {
+	if options.KubeClient == nil {
+		return nil
+	}
+	return mergeexec.NewLauncher(options.KubeClient)
+}
+
+// newMergeQueue wires the durable merge-gate workflow, which needs DBOS, an
+// in-cluster client, and the full merge placement — including a writable
+// checkout the merge Job can fetch, commit, and push against. Anything missing
+// leaves the dispatcher nil: a review still reaches MERGE, just with nothing to
+// gate it until an operator advances the queue again by hand.
+func newMergeQueue(options HandlerOptions, coordinator provision.MergeCoordinator, tenants provision.MergeTenantResolver) service.MergeQueueDispatcher {
+	if options.DBOSContext == nil || options.KubeClient == nil || !options.Merge.Configured() {
+		return nil
+	}
+	return provision.NewMergeQueue(options.DBOSContext, coordinator, options.Merge, tenants, newRuntimeImageChecker(options))
 }
 
 func registerHealthRoute(mux *http.ServeMux) {
