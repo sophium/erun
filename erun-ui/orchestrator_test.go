@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -852,6 +853,87 @@ func TestOrchestratorSkillsResolveFromCheckoutAroundExecutable(t *testing.T) {
 	}
 }
 
+// sessionStartHookEntry and sessionStartGroup decode one SessionStart hook
+// block from settings.json, shared by the tests below.
+type sessionStartHookEntry struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+type sessionStartGroup struct {
+	Matcher string                  `json:"matcher"`
+	Hooks   []sessionStartHookEntry `json:"hooks"`
+}
+
+// readSessionStartGroups decodes the SessionStart hook blocks currently
+// written to settings.json at path, returning the raw bytes too so callers can
+// include them in failure messages.
+func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []byte) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var settings struct {
+		Hooks struct {
+			SessionStart []sessionStartGroup `json:"SessionStart"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
+	}
+	return settings.Hooks.SessionStart, data
+}
+
+// sessionStartCommandCounts flattens every command across the given groups
+// into a command -> occurrence-count map.
+func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
+	seen := map[string]int{}
+	for _, group := range groups {
+		for _, hook := range group.Hooks {
+			seen[hook.Command]++
+		}
+	}
+	return seen
+}
+
+// assertSessionStartCommandsUnique fails if any SessionStart command appears
+// more than once across all groups: two matcher blocks ("startup", "resume")
+// carrying the same three commands would mean every SessionStart command,
+// including the ~5.5KB contract injection, is installed (and so read into
+// every session's context) twice.
+func assertSessionStartCommandsUnique(t *testing.T, groups []sessionStartGroup, data []byte) {
+	t.Helper()
+	for cmd, count := range sessionStartCommandCounts(groups) {
+		if count != 1 {
+			t.Fatalf("SessionStart command installed %d times, want 1:\n%s\nfull settings:\n%s", count, cmd, data)
+		}
+	}
+}
+
+// assertSessionStartMatchersCover fails unless every source is matched by
+// some group's matcher, tested the same way Claude Code itself resolves a
+// SessionStart matcher: as a regex against the event's source.
+func assertSessionStartMatchersCover(t *testing.T, groups []sessionStartGroup, data []byte, sources ...string) {
+	t.Helper()
+	for _, source := range sources {
+		matched := false
+		for _, group := range groups {
+			re, err := regexp.Compile(group.Matcher)
+			if err != nil {
+				t.Fatalf("SessionStart matcher %q does not compile as a regex: %v", group.Matcher, err)
+			}
+			if re.MatchString(source) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("no SessionStart matcher covers source %q:\n%s", source, data)
+		}
+	}
+}
+
 func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -860,27 +942,9 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
-	if err != nil {
-		t.Fatalf("read orchestrator settings.json: %v", err)
-	}
-	var settings struct {
-		Hooks struct {
-			SessionStart []struct {
-				Matcher string `json:"matcher"`
-				Hooks   []struct {
-					Type    string `json:"type"`
-					Command string `json:"command"`
-				} `json:"hooks"`
-			} `json:"SessionStart"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
-	}
-	matchers := map[string]bool{}
-	for _, group := range settings.Hooks.SessionStart {
-		matchers[group.Matcher] = true
+	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
+
+	for _, group := range groups {
 		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
 			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
 		}
@@ -888,9 +952,89 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 			t.Fatalf("SessionStart command does not inject the contract (print CLAUDE.md):\n%s", group.Hooks[0].Command)
 		}
 	}
-	for _, want := range []string{"startup", "resume"} {
-		if !matchers[want] {
-			t.Fatalf("SessionStart hook missing matcher %q:\n%s", want, data)
+	assertSessionStartCommandsUnique(t, groups, data)
+	assertSessionStartMatchersCover(t, groups, data, "startup", "resume")
+}
+
+// TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks
+// seeds settings.json with the shape an earlier release left on disk -- two
+// matcher blocks, each carrying the full three-command SessionStart payload --
+// alongside an operator-owned SessionStart hook the installer has never seen.
+// Installing on top of that must collapse the
+// duplicate blocks down to one clean copy, leave the operator's own hook alone,
+// and stay exactly that size across a second install (simulating a further
+// desktop restart), never growing.
+func TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	dir := orchestratorsRoot()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	staleContractCommand := orchestratorSkillHookCommand(dir)
+	stale := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{"matcher": "startup", "hooks": []any{
+					map[string]any{"type": "command", "command": staleContractCommand},
+				}},
+				map[string]any{"matcher": "resume", "hooks": []any{
+					map[string]any{"type": "command", "command": staleContractCommand},
+				}},
+				map[string]any{"matcher": "clear", "hooks": []any{
+					map[string]any{"type": "command", "command": "echo operator-owned"},
+				}},
+			},
+		},
+	}
+	raw, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	groupsAfterFirst, data := readSessionStartGroups(t, settingsPath)
+	assertSessionStartContractCommandPrunedToOne(t, groupsAfterFirst, data)
+	if !strings.Contains(string(data), "echo operator-owned") {
+		t.Fatalf("expected the operator's own SessionStart hook preserved:\n%s", data)
+	}
+
+	// A further install (another desktop restart) against the now-clean file
+	// must not grow the count.
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace (second run): %v", err)
+	}
+	groupsAfterSecond, data2 := readSessionStartGroups(t, settingsPath)
+	if got, want := sessionStartTotalCommands(groupsAfterSecond), sessionStartTotalCommands(groupsAfterFirst); got != want {
+		t.Fatalf("SessionStart command count changed across a second install: got %d, want %d (unchanged):\n%s", got, want, data2)
+	}
+}
+
+// sessionStartTotalCommands counts every hook entry across all groups.
+func sessionStartTotalCommands(groups []sessionStartGroup) int {
+	n := 0
+	for _, group := range groups {
+		n += len(group.Hooks)
+	}
+	return n
+}
+
+// assertSessionStartContractCommandPrunedToOne fails if the contract-injection
+// command (identified by its fallback text) appears more than once.
+func assertSessionStartContractCommandPrunedToOne(t *testing.T, groups []sessionStartGroup, data []byte) {
+	t.Helper()
+	for cmd, count := range sessionStartCommandCounts(groups) {
+		if strings.Contains(cmd, orchestratorContractFallback) && count != 1 {
+			t.Fatalf("expected the earlier duplicate contract-injection blocks pruned to one, found %d:\n%s", count, data)
 		}
 	}
 }

@@ -640,7 +640,8 @@ func ensureOrchestratorRoleFile(dir, id string) error {
 
 // ensureOrchestratorSessionStartHook writes a SessionStart hook into the shared
 // orchestrators root's .claude/settings.json, merging so it never clobbers other
-// keys or hook events already there. SessionStart fires on a new session
+// keys, hook events, or hook blocks already there -- including a SessionStart
+// block the operator added themselves. SessionStart fires on a new session
 // (startup) and a reopened one (resume), so every orchestrator has its contract
 // injected both on start and on reopen.
 func ensureOrchestratorSessionStartHook(dir string) error {
@@ -657,7 +658,8 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	if hooks == nil {
 		hooks = map[string]any{}
 	}
-	hooks["SessionStart"] = orchestratorSessionStartHook(dir)
+	hooks["SessionStart"] = mergeOrchestratorHookBlocks(
+		hooks["SessionStart"], orchestratorSessionStartHook(dir), isOrchestratorSessionStartHookBlock)
 	// The agent reports its own turn boundaries. Whether it is working cannot be
 	// read off its terminal: an agent TUI repaints continuously, so an
 	// output-driven latch never clears.
@@ -756,6 +758,15 @@ func isOrchestratorNoAskStopGuardBlock(block any) bool {
 	return false
 }
 
+// orchestratorSessionStartMatcher is a single pattern matching both sources
+// this hook cares about, rather than two separate matcher blocks carrying the
+// same three commands: SessionStart's matcher is tested as a regex against the
+// event's source, and alternation is already how this file scopes a matcher to
+// more than one value (see orchestratorShellActivityHookBlocks' "TaskOutput|
+// TaskStop"). Two blocks with identical hooks would mean every SessionStart
+// command is stored twice on disk for no behavioral gain.
+const orchestratorSessionStartMatcher = "startup|resume"
+
 // orchestratorSessionStartHook is the SessionStart hook block: the contract-
 // injecting command runs on both new starts (startup) and reopens (resume).
 func orchestratorSessionStartHook(dir string) []any {
@@ -769,10 +780,37 @@ func orchestratorSessionStartHook(dir string) []any {
 	// Resetting it here to whatever id this launch actually starts with is what
 	// keeps a stale record from outliving the run that wrote it.
 	liveSession := map[string]any{"type": "command", "command": orchestratorSessionRecordHookCommand()}
-	matcher := func(source string) map[string]any {
-		return map[string]any{"matcher": source, "hooks": []any{command, idle, liveSession}}
+	return []any{map[string]any{
+		"matcher": orchestratorSessionStartMatcher,
+		"hooks":   []any{command, idle, liveSession},
+	}}
+}
+
+// isOrchestratorSessionStartHookBlock reports whether a settings hook block is
+// one of ours, so a rewrite recognizes and replaces any block(s) it previously
+// wrote -- whether that is today's single combined-matcher block or the pair of
+// per-source blocks an earlier version of this file installed -- instead of
+// stacking another copy beside them. The contract-injection command's fallback
+// text is unique to us and present regardless of which shape wrote it.
+func isOrchestratorSessionStartHookBlock(block any) bool {
+	group, ok := block.(map[string]any)
+	if !ok {
+		return false
 	}
-	return []any{matcher("startup"), matcher("resume")}
+	hooks, ok := group["hooks"].([]any)
+	if !ok {
+		return false
+	}
+	for _, hook := range hooks {
+		entry, ok := hook.(map[string]any)
+		if !ok {
+			continue
+		}
+		if command, ok := entry["command"].(string); ok && strings.Contains(command, orchestratorContractFallback) {
+			return true
+		}
+	}
+	return false
 }
 
 // copyDirTree recursively copies src into dst (files + subdirectories), portable
