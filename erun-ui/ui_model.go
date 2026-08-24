@@ -701,17 +701,23 @@ type pastedFileResult struct {
 }
 
 type uiIdleStatus struct {
-	TimeoutSeconds      int64          `json:"timeoutSeconds"`
-	SecondsUntilStop    int64          `json:"secondsUntilStop"`
-	StopEligible        bool           `json:"stopEligible"`
-	OutsideWorkingHours bool           `json:"outsideWorkingHours"`
-	ManagedCloud        bool           `json:"managedCloud"`
-	StopBlockedReason   string         `json:"stopBlockedReason,omitempty"`
-	StopError           string         `json:"stopError,omitempty"`
-	CloudContextName    string         `json:"cloudContextName,omitempty"`
-	CloudContextStatus  string         `json:"cloudContextStatus,omitempty"`
-	CloudContextLabel   string         `json:"cloudContextLabel,omitempty"`
-	Markers             []uiIdleMarker `json:"markers,omitempty"`
+	TimeoutSeconds      int64 `json:"timeoutSeconds"`
+	SecondsUntilStop    int64 `json:"secondsUntilStop"`
+	StopEligible        bool  `json:"stopEligible"`
+	OutsideWorkingHours bool  `json:"outsideWorkingHours"`
+	ManagedCloud        bool  `json:"managedCloud"`
+	// FromPod is true only when this reading came from the pod's own idle
+	// monitor over MCP. False means it was assembled on the host because the
+	// pod could not be reached — the same moment the sidebar may be showing
+	// this environment as unreachable — so the countdown it carries is a
+	// best-effort local reconstruction, not a live observation.
+	FromPod            bool           `json:"fromPod"`
+	StopBlockedReason  string         `json:"stopBlockedReason,omitempty"`
+	StopError          string         `json:"stopError,omitempty"`
+	CloudContextName   string         `json:"cloudContextName,omitempty"`
+	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
+	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
+	Markers            []uiIdleMarker `json:"markers,omitempty"`
 	// StopPendingSince carries the RFC3339 timestamp at which this env
 	// first became StopEligible. When set, the desktop has armed the
 	// grace-period warning and the user has SecondsUntilForcedStop
