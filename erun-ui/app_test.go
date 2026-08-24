@@ -577,8 +577,61 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
+	// A closed local port is the "nobody opened it" shape (#1230), not a stale
+	// forward — the review panel needs the two apart to stop presenting a
+	// stopped environment as a broken connection.
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_NOT_OPEN: ") {
+		t.Fatalf("expected the not-open reachability marker, got %v", err)
+	}
 	if ensureCalls != 0 || loadCalls != 0 {
 		t.Fatalf("LoadDiff must not run erun open or attempt the dial when the port is closed; got ensure=%d load=%d", ensureCalls, loadCalls)
+	}
+}
+
+// TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead is the sibling
+// case to the not-open one above: the local port is still held (a live
+// listener), but the edge behind it never answers, so the review panel must
+// treat this as an actual fault worth reconnecting rather than an
+// informational "not running" state (#1230).
+func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				DefaultEnvironment: "test",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/test": {
+				Name:              "test",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "orbstack",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store: store,
+		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
+			return false
+		},
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+			return eruncommon.DiffResult{}, nil
+		},
+	})
+
+	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	if err == nil {
+		t.Fatalf("expected unreachable error when the edge never answers")
+	}
+	if !errors.Is(err, errMCPUnreachable) {
+		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
+		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
 	}
 }
 
@@ -623,6 +676,12 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	}
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	}
+	// The port is still held here (canConnectLocalPort returns true) — the RPC
+	// dial failed mid-call, not the initial reachability probe — so this is
+	// the stale-forward shape, not not-open.
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
+		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
 	}
 	if ensureCalls != 0 {
 		t.Fatalf("LoadDiff must not implicitly run erun open after a dial failure; got ensureCalls=%d", ensureCalls)

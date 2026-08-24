@@ -810,15 +810,29 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableError(errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)))
+		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(
+			a.classifyMCPUnreachable(mcpPort),
+			errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
+		)
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableError(err)
+		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return diff, err
+}
+
+// classifyMCPUnreachable reports which locally observable shape of
+// unreachability the review panel is looking at, through the same injectable
+// port-bound check the rest of erun-ui uses (so it stays testable without a
+// real dial).
+func (a *App) classifyMCPUnreachable(port int) eruncommon.LocalMCPUnreachableKind {
+	if a.deps.canConnectLocalPort != nil && a.deps.canConnectLocalPort(port) {
+		return eruncommon.LocalMCPStaleForward
+	}
+	return eruncommon.LocalMCPNotOpen
 }
 
 func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {

@@ -5,7 +5,11 @@ import { sessionApi } from './api/sessionApi';
 import { chooseSelectedDiffPath } from './diffUtils';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
-import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
+import {
+  mcpUnreachableKind,
+  type ReachabilityKind,
+  stripMcpUnreachableMarker,
+} from './reconnectCopy';
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
 import { selectReviewEnvTargets } from './selectors';
 import { setChangedFilesOpen } from './slices/layoutSlice';
@@ -106,9 +110,15 @@ function applyReviewDiffFailure(
     dispatch(setEnvDiff({ envKey, diff: null }));
   }
   const message = readError(error);
-  if (isMcpUnreachableMessage(message)) {
+  const kind = mcpUnreachableKind(message);
+  if (kind) {
     dispatch(
-      setEnvDiffError({ envKey, error: stripMcpUnreachableMarker(message), reconnectable: true }),
+      setEnvDiffError({
+        envKey,
+        error: stripMcpUnreachableMarker(message),
+        reconnectable: true,
+        kind,
+      }),
     );
   } else {
     dispatch(setEnvDiffError({ envKey, error: message, reconnectable: false }));
@@ -250,25 +260,31 @@ const idleReconnect = () => ({
   status: 'idle' as const,
   tenant: '',
   environment: '',
+  kind: 'stale-forward' as const,
   lines: [] as string[],
   error: '',
 });
 
-export const requestReconnect = (): AppThunk => (dispatch, getState) => {
-  const selection = getState().selection.selected;
-  if (!selection) {
-    return;
-  }
-  dispatch(
-    setReconnect({
-      status: 'confirm',
-      tenant: selection.tenant,
-      environment: selection.environment,
-      lines: [],
-      error: '',
-    }),
-  );
-};
+// requestReconnect takes its target explicitly from the caller (the specific
+// linked environment whose card was clicked) rather than the sidebar's
+// globally-selected environment. An orchestrator session shows one card per
+// linked environment, and the selected env is rarely the one that failed, so
+// deriving the target from selection.selected reconnected the wrong
+// environment (#1230).
+export const requestReconnect =
+  (tenant: string, environment: string, kind: ReachabilityKind): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      setReconnect({
+        status: 'confirm',
+        tenant,
+        environment,
+        kind,
+        lines: [],
+        error: '',
+      }),
+    );
+  };
 
 export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
   if (getState().review.reconnect.status === 'running') {
@@ -278,22 +294,22 @@ export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
 };
 
 export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-  const state = getState();
-  const selection = state.selection.selected;
-  if (!selection || state.review.reconnect.status === 'running') {
+  const { tenant, environment, kind, status } = getState().review.reconnect;
+  if (!tenant || !environment || status === 'running') {
     return;
   }
   dispatch(
     setReconnect({
       status: 'running',
-      tenant: selection.tenant,
-      environment: selection.environment,
+      tenant,
+      environment,
+      kind,
       lines: [],
       error: '',
     }),
   );
   try {
-    await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
+    await dispatch(sessionApi.endpoints.reconnectMCP.initiate({ tenant, environment })).unwrap();
     dispatch(setReconnect(idleReconnect()));
     await dispatch(loadReviewDiff());
   } catch (error: unknown) {
@@ -305,6 +321,7 @@ export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, 
         status: 'error',
         tenant: reconnect.tenant,
         environment: reconnect.environment,
+        kind: reconnect.kind,
         lines: reconnect.lines,
         error: readError(error),
       }),

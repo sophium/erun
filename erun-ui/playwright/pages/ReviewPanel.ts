@@ -67,9 +67,6 @@ export class ReviewPanel {
 
   // The "Changed files N" collapsible header inside the aside, distinct from
   // the titlebar's "Toggle changed files list" (which hides the whole aside).
-  // Collapsing it hides the changed-files tree's own per-env headers and error
-  // alerts, so a spec asserting on the diff list's alone can scope past the
-  // tree's duplicate rendering of the same slot.
   changedFilesSectionToggle(): Locator {
     return this.page.getByRole('button', { name: /^Changed files/ });
   }
@@ -78,12 +75,20 @@ export class ReviewPanel {
     await this.changedFilesSectionToggle().click();
   }
 
-  // The changed-files tree renders its own DiffErrorAlert for the same
-  // per-env slot (#1178), so counting alerts document-wide double-counts once
-  // both surfaces are visible. Callers that care about the diff list's own
-  // alert count should collapseChangedFilesSection() first.
+  // The changed-files tree renders a short status line rather than its own
+  // copy of the diff panel's alert for the same per-env slot (#1230) — the
+  // diff panel is the one place a linked environment's outage renders as an
+  // actionable alert, so this locator only ever matches once per environment.
   errorAlerts(): Locator {
     return this.page.getByRole('alert');
+  }
+
+  // reachabilityStatuses locates the informational "environment not running"
+  // status DiffErrorAlert renders for the not-open reachability kind (#1230).
+  // Unlike errorAlerts() this is role="status", not role="alert": it is not a
+  // fault, so it must not be announced as one (WCAG 4.1.3 / Nielsen #1).
+  reachabilityStatuses(): Locator {
+    return this.page.getByRole('status');
   }
 
   // reviewBoundaryButton locates a "Review layers" scope button by its visible
