@@ -25,6 +25,7 @@ const (
 	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"
 	envActivityEvent            = "env-activity"
+	appCloseGateEvent           = "app-close-gate"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
@@ -88,6 +89,7 @@ type erunUIDeps struct {
 	windowMaximised           func(context.Context) bool
 	cloneERun                 func(context.Context, string, string) error
 	contributeStatePath       string
+	interruptedActivityPath   string
 	orchestratorRestoreDir    string
 	orchestratorOpenPath      string
 	relaunchApp               func() error
@@ -170,6 +172,11 @@ type App struct {
 	cloudContextStatusesMu sync.RWMutex
 	cloudContextStatuses   map[string]string
 	cloudContextPollerStop chan struct{}
+
+	// closeConfirmed latches the operator's explicit "close anyway" choice from
+	// the running-work confirmation, so the second beforeClose pass that
+	// wailsruntime.Quit triggers proceeds instead of prompting again.
+	closeConfirmed bool
 
 	// workingIssueCache memoizes the resolved working issue per env so the sidebar
 	// hover card doesn't re-run git + gh on every hover.
@@ -440,6 +447,9 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.contributeStatePath == "" {
 		deps.contributeStatePath = defaultContributeStatePath()
 	}
+	if deps.interruptedActivityPath == "" {
+		deps.interruptedActivityPath = defaultInterruptedActivityPath()
+	}
 	if deps.orchestratorRestoreDir == "" {
 		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
 	}
@@ -480,6 +490,11 @@ func (a *App) shutdown(context.Context) {
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
+	if !a.consumeCloseConfirmed() {
+		if gate := a.PrepareWindowClose(); gate.Blocked {
+			return true
+		}
+	}
 	_ = saveAppWindowState(a.deps.windowStatePath, appWindowState{
 		Maximised: a.deps.windowMaximised(ctx),
 	})

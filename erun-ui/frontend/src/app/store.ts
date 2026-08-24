@@ -21,6 +21,7 @@ import { uiTraceMiddleware } from './middleware/uiTraceMiddleware';
 import activityReducer from './slices/activitySlice';
 import aiActivityReducer from './slices/aiActivitySlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
+import closeGateReducer from './slices/closeGateSlice';
 import contributeReducer from './slices/contributeSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
@@ -70,6 +71,7 @@ export const store = configureStore({
     tenantDashboard: tenantDashboardReducer,
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
+    closeGate: closeGateReducer,
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
     outputsDialog: outputsDialogReducer,

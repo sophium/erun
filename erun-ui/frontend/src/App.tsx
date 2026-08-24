@@ -7,6 +7,7 @@ import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
+import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { ErrorBoundary } from '@/components/app/ErrorBoundary';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
@@ -115,6 +116,7 @@ export function App(): React.ReactElement {
         <PinVersionDialog />
         <OrchestratorDialog />
         <AutoStartPromptDialog />
+        <CloseConfirmDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}

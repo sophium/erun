@@ -15,6 +15,7 @@ import {
   normalizeVersionSuggestionNotices,
   normalizeVersionSuggestions,
 } from './versionSuggestions';
+import { loadInterruptedActivityNotice } from './windowCloseThunks';
 
 // boot deliberately does not seed the env-init dialog's kubectl context
 // list — that dialog owns and refreshes its own.
@@ -33,6 +34,10 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
         normalizeVersionSuggestionNotices(loaded.versionSuggestionNotices ?? []),
       ),
     );
+    // A previous launch's confirmed "close anyway" may have interrupted a
+    // build/deploy/release with no record until now; report it once, right
+    // after the state it interrupted has loaded (erun#1214).
+    await dispatch(loadInterruptedActivityNotice());
     if (loaded.message !== undefined && loaded.message !== '') {
       dispatch(showTerminalMessage(loaded.message));
       return;
