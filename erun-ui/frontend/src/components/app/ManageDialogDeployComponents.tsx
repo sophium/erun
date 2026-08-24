@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import * as React from 'react';
 
 import {
@@ -13,7 +14,6 @@ import {
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
-import { Button } from '@/components/ui/button';
 
 type ManageDialog = AppState['manageDialog'];
 

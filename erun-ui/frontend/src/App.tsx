@@ -1,3 +1,4 @@
+import { cn, ErrorBoundary, ResizeHandle, TooltipProvider } from 'erun-kit';
 import * as React from 'react';
 
 import { ControllerProvider } from '@/app/ControllerContext';
@@ -10,7 +11,6 @@ import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialo
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
-import { ErrorBoundary } from '@/components/app/ErrorBoundary';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -19,13 +19,10 @@ import { OutputsDialog } from '@/components/app/OutputsDialog';
 import { PinVersionDialog } from '@/components/app/PinVersionDialog';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
-import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
 import { UpgradeAllDialog } from '@/components/app/UpgradeAllDialog';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';

@@ -1,7 +1,6 @@
+import { cn } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
-
-import { cn } from '@/lib/utils';
 
 // BusyRowSpinner is the shared "this row is working" indicator for sidebar
 // rows. Shared by AI-orchestrator and environment rows so both report activity

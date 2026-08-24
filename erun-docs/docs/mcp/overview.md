@@ -367,6 +367,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `terraform` | `erun terraform` | Work |
 | *(top-level)* | `doctor` | `erun doctor` | Work |
 | *(top-level)* | `observe` | `erun observe` | Read |
+| *(top-level)* | `usage` | `erun usage` | Read |
 | *(top-level)* | `delete` | `erun delete` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |

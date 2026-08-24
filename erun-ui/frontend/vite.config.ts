@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': new URL('./src', import.meta.url).pathname,
+      '@kit': new URL('../../erun-kit/src', import.meta.url).pathname,
     },
   },
 });

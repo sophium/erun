@@ -1,3 +1,4 @@
+import { Button, SelectField } from 'erun-kit';
 import { Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
@@ -28,8 +29,6 @@ import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
 import { RuntimeDeployVersionPicker } from '@/components/app/ManageDialogVersionPicker';
 import { PinVersionAction } from '@/components/app/PinVersionAction';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
-import { SelectField } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
 import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];

@@ -1,18 +1,18 @@
-import { AlertTriangle, LoaderCircle } from 'lucide-react';
-import * as React from 'react';
-
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { cancelCloseGate, confirmCloseGate } from '@/app/windowCloseThunks';
-import { activityTargetLabel } from '@/components/app/ActivityQueueDrawer.helpers';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { AlertTriangle, LoaderCircle } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { cancelCloseGate, confirmCloseGate } from '@/app/windowCloseThunks';
+import { activityTargetLabel } from '@/components/app/ActivityQueueDrawer.helpers';
 
 // Shown when the operator tries to close the window while a build, deploy, or
 // release is still running. Closing used to SIGKILL every one of these with

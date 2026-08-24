@@ -1,3 +1,4 @@
+import { Input, Label } from 'erun-kit';
 import * as React from 'react';
 
 import {
@@ -11,8 +12,6 @@ import {
   runtimeResourceBounds,
   runtimeResourceValidation,
 } from '@/app/runtimeResources';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import type { UIRuntimePodConfig, UIRuntimeResourceStatus } from '@/types';
 
 interface RuntimeResourceControlsProps {

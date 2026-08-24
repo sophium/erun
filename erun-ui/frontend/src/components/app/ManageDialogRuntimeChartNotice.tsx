@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { AlertTriangle } from 'lucide-react';
 import * as React from 'react';
 
@@ -12,7 +13,6 @@ import {
   statedRuntimeChart,
 } from '@/app/runtimeChartPlan';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
 
 type ManageDialog = AppState['manageDialog'];
 

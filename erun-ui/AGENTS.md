@@ -53,8 +53,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend Workflow
 
 - Use Yarn for dependency management and frontend builds. Do not introduce `npm` or `pnpm` lockfiles unless the user explicitly asks for a toolchain change.
-- Use the pinned shadcn CLI from `erun-ui/frontend/package.json`. Do not use `shadcn@latest` or `yarn dlx shadcn@latest`; run shadcn commands through `yarn shadcn ...` from `erun-ui/frontend`.
-- Keep generated shadcn files aligned with the pinned CLI. After adding or updating shadcn components, run `yarn shadcn:check` from `erun-ui/frontend`; it regenerates the installed components and fails if committed generated files differ.
+- The shadcn primitives, `components.json`, `lib/utils.ts`, and `styles/theme.css` live in `erun-kit`, not here — see `erun-kit/AGENTS.md`. Run shadcn commands and `yarn shadcn:check` from `erun-kit`, never from `erun-ui/frontend`.
 - Edit source files, not generated artifacts such as bindings, bundles, generated models, generated clients, or generated component output. Regenerate artifacts through the repository's generator command and inspect the generated diff instead of hand-editing the output.
 - Do not patch generated files manually, even temporarily to satisfy a compiler, type checker, import, or test. When generated output is missing or stale, first change the source contract that owns it, then run the appropriate generator.
 - If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `wails generate module` from `erun-ui`.
@@ -79,9 +78,10 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 
 ## Frontend Component Discovery
 
-- Before adding a new frontend control or composing a custom interaction, search for an existing local component and usage pattern with `rg` in `erun-ui/frontend/src/components` and `erun-ui/frontend/src/app`. Search by user-facing label, role, primitive name, and behavior, such as `Popover`, `Command`, `VersionField`, `choicesOpen`, `dropdown`, `select`, or the closest visible label.
-- Prefer reusing or extracting from an existing app-owned component when the behavior already exists. For example, editable picker behavior should be compared against `VersionField` before using browser-native `datalist` or building a separate one-off control.
-- Check both shadcn primitives in `erun-ui/frontend/src/components/ui` and app-owned wrappers in `erun-ui/frontend/src/components/app` before choosing an implementation. Use primitives directly only when no app-owned wrapper already expresses the same interaction.
+- Check `erun-kit` first: the shadcn primitives, and the generic widgets (`StatusBadge`, `EmptyState`, `IconTooltip`, `FieldLabel`, `SelectField`, `EditableComboField`, `ErrorBoundary`, `ResizeHandle`, `FileIcon`) live there now, not under `erun-ui/frontend/src/components`. See `erun-kit/AGENTS.md` for what belongs there and how to add to it.
+- Before adding a new frontend control or composing a custom interaction, search for an existing local component and usage pattern with `rg` in `erun-ui/frontend/src/components`, `erun-ui/frontend/src/app`, and `erun-kit/src`. Search by user-facing label, role, primitive name, and behavior, such as `Popover`, `Command`, `VersionField`, `choicesOpen`, `dropdown`, `select`, or the closest visible label.
+- Prefer reusing or extracting from an existing component when the behavior already exists. For example, editable picker behavior should be compared against `VersionField` before using browser-native `datalist` or building a separate one-off control.
+- Check both shadcn primitives and generic widgets in `erun-kit` and desktop-owned wrappers in `erun-ui/frontend/src/components/app` before choosing an implementation. Use primitives directly only when no existing wrapper already expresses the same interaction.
 - Before adding hover, focus, tooltip, popover, toast, badge-detail, or other secondary information UI, search for `Tooltip`, `IconTooltip`, `Popover`, `Dialog`, existing status badges, and nearby titlebar/sidebar patterns. Do not use the browser-native `title` attribute for meaningful product UI, diagnostics, errors, guidance, or multi-line content.
 - If a native browser control is used for non-trivial behavior, verify it renders and behaves correctly in the Wails WebView target. Do not assume browser-native affordances such as `datalist` are visible or usable in the desktop runtime without checking the rendered surface.
 - When a new reusable interaction is still needed after discovery, make it an app-owned component with explicit props rather than duplicating markup inline across dialogs.
@@ -89,15 +89,15 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend Styling
 
 - Use Tailwind utilities as the default for component-owned layout, spacing, color, typography, hover/focus/disabled state, and responsive behavior.
-- Keep shadcn-generated files under `erun-ui/frontend/src/components/ui`, `erun-ui/frontend/src/lib/utils.ts`, `erun-ui/frontend/src/styles/theme.css`, `components.json`, `package.json`, and `yarn.lock` aligned with the pinned shadcn CLI. Do not hand-edit generated shadcn output unless the change is intentionally local and `yarn shadcn:check` still passes.
-- Keep `src/styles/theme.css` shadcn-compatible. Put app-owned Tailwind theme extensions in separate app CSS files, then import them from `src/styles/index.css`.
+- The shadcn-generated primitives, `lib/utils.ts` (`cn`), and `styles/theme.css` live in `erun-kit` (see `erun-kit/AGENTS.md`) and are imported from there (`erun-kit`, `erun-kit/theme.css`). Do not hand-edit them from this module; change them in `erun-kit` and run `yarn shadcn:check` there.
+- Put app-owned Tailwind theme extensions in separate app CSS files, then import them from `src/styles/index.css` alongside the `erun-kit/theme.css` import.
 - Keep global CSS small and reserved for true globals: root sizing/reset rules, xterm internals, Wails drag or resize state hooks, pseudo-elements that would be awkward in markup, and runtime CSS variables that are set from controller state.
 - Prefer shadcn primitives and variants for buttons, inputs, dialogs, tabs, popovers, tooltips, labels, and checkboxes before adding custom local controls.
 - Preserve CSS variables for runtime-sized panels and computed values such as sidebar width, review width, file-list width, tree depth, and diff content width.
 - Use semantic Tailwind tokens such as `bg-background`, `text-foreground`, `border-border`, `bg-sidebar`, and app-owned tokens from app theme files instead of repeating raw color values in component markup.
 - Avoid reintroducing broad semantic CSS class files for ordinary component styling. If a selector is only used by one React component and does not require a true global rule, keep the styling beside that component in `className`.
 - Do not add padding (or borders that affect layout) directly to the element passed to `Terminal.open` (`terminalRoot`). xterm's `FitAddon` reads that element's computed height to compute row count but does not subtract its own padding, so padding there over-counts rows and clips the bottom line behind whatever sits beneath the terminal (tab strip, debug panel, status bar). Keep visual padding on a wrapper around `terminalRoot` instead.
-- For frontend styling changes, run `yarn build`, `yarn shadcn:check`, and `go test ./...` from the relevant module paths unless the change is documentation-only.
+- For frontend styling changes, run `yarn build` and `go test ./...` from the relevant module paths, plus `yarn shadcn:check` from `erun-kit` if a primitive changed, unless the change is documentation-only.
 
 ## Professional UX
 

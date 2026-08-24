@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip } from 'erun-kit';
 import {
   AlertOctagon,
   Ban,
@@ -31,9 +32,6 @@ import {
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
 } from '@/components/app/ActivityQueueDrawer.helpers';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 export interface ActivityCardProps {
   entry: ActivityQueueEntry;

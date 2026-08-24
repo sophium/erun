@@ -1,11 +1,10 @@
+import { cn, ResizeHandle } from 'erun-kit';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setDebugOpen, startDebugResize } from '@/app/layoutThunks';
 import { type DiagnosticsContext, selectDiagnosticsContext } from '@/app/selectors';
-import { ResizeHandle } from '@/components/app/ResizeHandle';
-import { cn } from '@/lib/utils';
 
 import { AppLogPane, OrchestratorPane } from './DebugPanel.AppLog';
 import { ErunTracePane } from './DebugPanel.ErunTrace';

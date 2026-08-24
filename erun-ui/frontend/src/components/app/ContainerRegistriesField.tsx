@@ -1,11 +1,7 @@
+import { Button, Checkbox, EditableComboField, IconTooltip, Label } from 'erun-kit';
 import { Boxes, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
-import { EditableComboField } from '@/components/app/EditableComboField';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import type { UIContainerRegistryEntry } from '@/types';
 
 // Mirrors eruncommon.RegistryRole and must stay in lockstep; ordered by build → copy → deploy pipeline phase.

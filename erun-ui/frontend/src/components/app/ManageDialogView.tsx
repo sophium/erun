@@ -1,3 +1,17 @@
+import {
+  Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from 'erun-kit';
 import { AlertTriangle, LoaderCircle, Rocket, Save, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -28,17 +42,6 @@ import {
   SSHAccessSection,
   WorkspaceSyncSection,
 } from '@/components/app/ManageDialogSSHTab';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
 import type { ManageEditTab, ManageTab } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];

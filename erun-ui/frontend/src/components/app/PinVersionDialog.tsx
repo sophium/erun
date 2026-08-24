@@ -1,3 +1,13 @@
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  SelectField,
+} from 'erun-kit';
 import { LoaderCircle, Undo2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,16 +15,6 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { applyPin, closePinVersion, previewPin, revertPin } from '@/app/pinVersionThunks';
 import type { PinPlanView } from '@/app/slices/pinVersionSlice';
 import { setPinTarget } from '@/app/slices/pinVersionSlice';
-import { SelectField } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 // The plan is always shown before anything is written. A re-pin rewrites files
 // across the repo, so the operator should be agreeing to a specific set of

@@ -1,3 +1,14 @@
+import {
+  Button,
+  cn,
+  IconTooltip,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from 'erun-kit';
 import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -10,11 +21,6 @@ import {
 } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 

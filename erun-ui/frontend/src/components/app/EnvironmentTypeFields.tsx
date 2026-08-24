@@ -1,3 +1,4 @@
+import { SelectField } from 'erun-kit';
 import * as React from 'react';
 
 import { updateEnvironmentDialog } from '@/app/environmentDialogThunks';
@@ -5,7 +6,6 @@ import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 
 import { LocalRepoPathInput } from './LocalRepoPathInput';
-import { SelectField } from './SelectField';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 

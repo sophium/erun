@@ -1,3 +1,4 @@
+import { cn, FileIcon } from 'erun-kit';
 import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
 
@@ -8,8 +9,6 @@ import { selectReviewEnvTargets } from '@/app/selectors';
 import { diffPathKey } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { ReviewStatus } from '@/components/app/DiffList';
-import { FileIcon } from '@/components/app/FileIcon';
-import { cn } from '@/lib/utils';
 import type { DiffTreeNode } from '@/types';
 
 export function ChangedFileTree(): React.ReactElement {

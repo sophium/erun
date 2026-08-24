@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { Label } from '@/components/ui/label';
+import { Label } from './ui/label';
 
 // FieldLabel is the shared label for form fields in the app's dialogs. It renders
 // an explicit required marker so users can see at a glance which fields are

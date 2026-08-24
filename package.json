@@ -2,6 +2,7 @@
   "name": "erun-frontend-workspaces",
   "private": true,
   "workspaces": [
+    "erun-kit",
     "erun-ui/frontend",
     "erun-console"
   ],

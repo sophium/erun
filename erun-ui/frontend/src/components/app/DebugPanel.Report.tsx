@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { Bug, CheckCircle2, ClipboardList } from 'lucide-react';
 import * as React from 'react';
 
@@ -8,7 +9,6 @@ import {
 } from '@/app/diagnosticsIssue';
 import { useDiagnosticsReportAssembly } from '@/app/diagnosticsReportAssembly';
 import type { DiagnosticsContext } from '@/app/selectors';
-import { Button } from '@/components/ui/button';
 
 import { BrowserOpenURL, ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 

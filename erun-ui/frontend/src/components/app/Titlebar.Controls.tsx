@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip } from 'erun-kit';
 import {
   Blocks,
   Code2,
@@ -14,15 +15,12 @@ import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
 import { isMacPlatform } from '@/app/platform';
 import { selectIsOrchestratorSession } from '@/app/selectors';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { ContributeToggle } from '@/components/app/Titlebar.ContributeToggle';
 import {
   ideTooltipLabel,
   isEnvOpenedAndRunning,
   isIdeDisabled,
 } from '@/components/app/Titlebar.helpers';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
 const titlebarButtonClassName =

@@ -1,3 +1,4 @@
+import { cn, IconTooltip } from 'erun-kit';
 import { GitFork, Plus, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,8 +7,6 @@ import { openOrchestrator, stopOrchestrator } from '@/app/orchestratorThunks';
 import { selectIsOrchestratorSession } from '@/app/selectors';
 import { addTerminalTab, closeTerminalTab, selectTerminalTab } from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { cn } from '@/lib/utils';
 
 // StripTab is the render-agnostic tab model. The strip has two modes — the env's
 // in-pod/host tabs, and the cross-env orchestrator sessions — but both render

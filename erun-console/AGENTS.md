@@ -6,7 +6,7 @@ Module-specific guidance for `erun-console`. Follow the repository root `AGENTS.
 
 - `erun-console` is the **hosted web console** for erunpaas (issue #606): a browser SPA served at `console.<base-domain>` where an Operator signs in and views their tenant's erun config. It is a **separate app from `erun-ui`** (the Wails desktop app): the desktop is the _local_ control plane and talks to a Go backend over Wails IPC; the console is the _hosted_ control plane and talks to a backend over HTTP.
 - **Architecture (decided).** The console calls **erun-backend-api directly** — that service already carries the OIDC/JWKS auth middleware, the tenant boundary, and `GET /v1/config`. There is **no separate BFF service** in this increment. Keep the console a thin read/render layer over the API contract; shared tenant/environment resolution stays in `erun-common` and is exposed to the console only through the API.
-- The console **may later reuse `erun-ui/frontend`'s components**, but it does **not** import the desktop module today and must not modify it. When component reuse lands, extract the shared piece into a shared package rather than importing across app boundaries.
+- The console does **not** import `erun-ui/frontend` and must not modify it. Component reuse with the desktop happens through the shared `erun-kit` workspace package (issue #1211) — never by importing across the two app boundaries directly. See `erun-kit/AGENTS.md` for what lives there and how to consume it.
 - **Installable as an independent PaaS instance (#603/#606): hardcode no instance-specific names.** The API base, brand, and OIDC issuer are configuration (Vite env / runtime config), never literals in source. `erunpaas.com` / `console.erunpaas.com` are one instance's values, shown as examples.
 
 ## What is verifiable here vs. what is a flagged placeholder
@@ -42,7 +42,7 @@ When you implement it, replace the placeholder with the real flow and add the ve
 - Vite + React 19 + strict TypeScript, **Yarn** (`yarn@1.22.22`), matching `erun-ui/frontend`'s style. Do not introduce `npm`/`pnpm` lockfiles.
 - ESLint flat config (`eslint.config.mjs`) mirrors `erun-ui/frontend`: type-aware `strictTypeChecked` + `stylisticTypeChecked`, `complexity:10`, `max-lines-per-function:100`, `max-lines:500`, React hooks/refresh, `jsx-a11y`. Every rule is `error`; fix findings by correcting the code — never disable, suppress, or downgrade a rule.
 - Prettier (`.prettierrc.json`) is the formatter, same config as `erun-ui/frontend`.
-- Styling is plain CSS (`src/styles.css`) for this first increment — intentionally minimal, no Tailwind/shadcn yet. Add a design system only when the surface grows enough to need one.
+- Styling is Tailwind 4 + `erun-kit`'s design tokens (`src/styles.css` imports `erun-kit/theme.css` and declares a Tailwind `@source` pointing at `erun-kit/src`, since the kit's utility classes live under `node_modules` via the workspace symlink and are otherwise excluded from Tailwind's default content scan — see `erun-kit/AGENTS.md`). `src/styles.css` still carries console-specific layout that has no kit widget yet; convert a selector to a kit widget and delete it from here as each panel adopts one, rather than letting bespoke and shared styling coexist for the same concept (the duplicated `.status-badge` rules this repo used to carry alongside the desktop's `StatusBadge` are exactly what #1211 removed).
 
 ## Validation
 

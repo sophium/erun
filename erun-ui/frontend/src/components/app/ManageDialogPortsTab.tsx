@@ -1,9 +1,9 @@
+import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import type { AppState } from '@/app/state';
 import { ReadonlyField } from '@/components/app/ManageDialog.fields';
 import { portRangeValue } from '@/components/app/ManageDialog.helpers';
-import { cn } from '@/lib/utils';
 import type { UIPortStatus } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];

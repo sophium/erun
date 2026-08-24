@@ -1,7 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { type IDisposable, Terminal } from '@xterm/xterm';
+import { noop } from 'erun-kit';
 
-import { noop } from '@/lib/utils';
 import type { TerminalOutputPayload } from '@/types';
 
 import { RepaintSession, ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';

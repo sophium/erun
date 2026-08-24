@@ -1,3 +1,4 @@
+import { Button, EmptyState, Label } from 'erun-kit';
 import { Cloud, LoaderCircle, Plus, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
@@ -9,14 +10,11 @@ import {
 } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
-import { EmptyState } from '@/components/app/EmptyState';
 import {
   cloudProviderSummary,
   cloudProviderTypeLabel,
 } from '@/components/app/GlobalConfigDialog.helpers';
 import { CloudAliasAction, CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { CloudProviderAWS, CloudProviderCloudflare, type UICloudProviderStatus } from '@/types';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];

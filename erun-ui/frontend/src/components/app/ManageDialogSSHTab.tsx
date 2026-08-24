@@ -1,3 +1,4 @@
+import { Button, cn, Input, Label } from 'erun-kit';
 import { FolderOpen, Server, Stethoscope } from 'lucide-react';
 import * as React from 'react';
 
@@ -15,10 +16,6 @@ import type { AppState } from '@/app/state';
 import { selectionKey } from '@/app/versionSuggestions';
 import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
 import { relativeTimeFromNow } from '@/components/app/ManageDialog.helpers';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
 
 type ManageDialog = AppState['manageDialog'];
 

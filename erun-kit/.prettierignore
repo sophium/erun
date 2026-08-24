@@ -1,0 +1,7 @@
+dist
+node_modules
+src/components/ui
+components.json
+package.json
+yarn.lock
+*.tsbuildinfo

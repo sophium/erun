@@ -1,3 +1,16 @@
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EditableComboField,
+  Label,
+  uniqueSuggestions,
+} from 'erun-kit';
 import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
@@ -21,20 +34,7 @@ import {
 } from '@/app/storage';
 import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
 
-import { EditableComboField } from './EditableComboField';
-import { uniqueSuggestions } from './EditableComboField.helpers';
 import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
 import { RuntimeResourceControls } from './RuntimeResourceControls';

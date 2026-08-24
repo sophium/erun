@@ -1,3 +1,4 @@
+import { Button, Tabs, TabsList, TabsTrigger } from 'erun-kit';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
@@ -9,13 +10,10 @@ import {
   visibleTenantDashboardTabs,
 } from '@/app/tenantDashboardPanels';
 import { refreshTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { UITenant } from '@/types';
 
 import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
-
 export function TenantDashboardView(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const dashboard = useAppSelector((state) => state.tenantDashboard);

@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { Power } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,7 +7,6 @@ import { useAppDispatch } from '@/app/hooks';
 import { submitManageStop } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
 
 // RuntimePowerField sits directly under Deploy because that is where the
 // operator is standing when they find the resource sliders capped: the figures

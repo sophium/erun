@@ -1,8 +1,8 @@
+import { Button } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import type { ActivityLockEvent } from '@/app/activityQueueState';
-import { Button } from '@/components/ui/button';
 
 interface ActivityLockOverlayProps {
   lock: ActivityLockEvent;

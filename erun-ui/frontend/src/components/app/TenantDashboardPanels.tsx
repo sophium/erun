@@ -1,8 +1,8 @@
+import { EmptyState, StatusBadge, TabsContent } from 'erun-kit';
 import * as React from 'react';
 
 import type { AppState } from '@/app/state';
 import { formatDashboardDate, tenantDashboardPanel } from '@/app/tenantDashboardPanels';
-import { TabsContent } from '@/components/ui/tabs';
 import type {
   UITenantDashboardAudit,
   UITenantDashboardBuild,
@@ -10,8 +10,6 @@ import type {
   UITenantDashboardUser,
 } from '@/types';
 
-import { EmptyState } from './EmptyState';
-import { StatusBadge } from './StatusBadge';
 import { DashboardMessage, DataCell, DataTable } from './TenantDashboardMessage';
 
 type TenantDashboardData = AppState['tenantDashboard']['data'];
