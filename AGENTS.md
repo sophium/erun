@@ -23,6 +23,7 @@ Each module owns its own `AGENTS.md` with the details for working in it; read th
 - `erun-mcp` — MCP server module (the `emcp` executable). See `erun-mcp/AGENTS.md`.
 - `erun-backend` — backend service area containing the API and database migration modules. See `erun-backend/AGENTS.md` (plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md`).
 - `erun-devops` — runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows. See `erun-devops/AGENTS.md`.
+- `erun-kit` — shared, transport-agnostic frontend foundation (design tokens, shadcn primitives, generic widgets, and eventually shared models/slices) consumed by both `erun-ui/frontend` and `erun-console` via Yarn workspaces; the frontend-side analogue of `erun-common`. See `erun-kit/AGENTS.md`.
 - `erun-ui` — desktop app built with Wails (Go backend + TypeScript/Yarn frontend). See `erun-ui/AGENTS.md` (plus `erun-ui/playwright/AGENTS.md`).
 - `erun-console` — hosted web console SPA (Vite + React + TypeScript/Yarn); separate from the desktop `erun-ui`, talks to `erun-backend-api` directly over HTTP. See `erun-console/AGENTS.md` (plus `erun-console/playwright/AGENTS.md` for the real-Zitadel OIDC sign-in e2e).
 - `erun-docs` — public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`. See `erun-docs/AGENTS.md`.
