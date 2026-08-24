@@ -6,8 +6,15 @@ import { ConfigFetchError, fetchConfig } from './config/client';
 import { ConfigView } from './config/ConfigView';
 import type { TenantConfigView } from './config/types';
 import { EnvironmentsPanel } from './environments/EnvironmentsPanel';
+import { OrgSettingsPanel } from './identity/OrgSettingsPanel';
+import { UsersPanel } from './identity/UsersPanel';
 import { MCPAccessPanel } from './mcp/MCPAccessPanel';
 import { ProvisionPanel } from './provision/ProvisionPanel';
+
+// Identity administration (issue #1209) is restricted server-side to an
+// OPERATIONS tenant; gating it here too keeps a COMPANY-tenant operator from
+// ever seeing a form whose submit would just come back 403.
+const OPERATIONS_TENANT_TYPE = 'OPERATIONS';
 
 type LoadState =
   | { status: 'loading' }
@@ -125,6 +132,12 @@ function ActionPanels({
       />
       <ProvisionPanel token={token} />
       <MCPAccessPanel token={token} environments={config.environments} />
+      {config.tenant.type === OPERATIONS_TENANT_TYPE && (
+        <>
+          <UsersPanel token={token} />
+          <OrgSettingsPanel token={token} />
+        </>
+      )}
     </>
   );
 }

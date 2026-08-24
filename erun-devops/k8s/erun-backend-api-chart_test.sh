@@ -425,4 +425,31 @@ grep -A2 'apiGroups: \["cert-manager.io"\]' "${provisioner}" | grep -q '"delete"
 grep -A2 'apiGroups: \["cert-manager.io"\]' "${provisioner}" | grep -q '"list"' ||
     fail "the env-provisioner must be able to list certificates, since the retraction deletes them with --all"
 
-echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC"
+# --- 16. Identity administration (issue #1209): with no platform.authHost,
+#         the pod is byte-for-byte unchanged -- no zitadel-management-pat
+#         volume, no ERUN_ZITADEL_* env vars. With it set, the PAT Secret
+#         mounts optional (an env with no zitadel component, or one still
+#         bootstrapping, must still start), and the external domain used for
+#         the outgoing Host header is the same platform.authHost the OIDC
+#         issuer above already uses. ---
+rendered=$(render)
+container "${rendered}" >"${core}"
+grep -q 'ERUN_ZITADEL_MANAGEMENT_API_URL' "${core}" &&
+    fail "ERUN_ZITADEL_MANAGEMENT_API_URL must not render without platform.authHost -- there is no external domain to target"
+grep -q 'zitadel-management-pat' "${rendered}" &&
+    fail "the zitadel-management-pat volume must not render without platform.authHost"
+
+rendered=$(render --set-string platform.authHost=auth.example.com)
+container "${rendered}" >"${core}"
+grep -A1 'name: ERUN_ZITADEL_MANAGEMENT_API_URL' "${core}" | grep -q 'value: "http://team-zitadel:8080"' ||
+    fail "ERUN_ZITADEL_MANAGEMENT_API_URL must default to the tenant's own zitadel Service address"
+grep -A1 'name: ERUN_ZITADEL_EXTERNAL_DOMAIN' "${core}" | grep -q 'value: "auth.example.com"' ||
+    fail "ERUN_ZITADEL_EXTERNAL_DOMAIN must default to platform.authHost, the same host the OIDC issuer uses"
+grep -A1 'name: ERUN_ZITADEL_MANAGEMENT_PAT_PATH' "${core}" | grep -q 'value: "/etc/erun/zitadel-management/admin-sa.pat"' ||
+    fail "ERUN_ZITADEL_MANAGEMENT_PAT_PATH must point at the mounted admin-sa.pat key"
+grep -A2 'name: zitadel-management-pat' "${rendered}" | grep -q 'secretName: team-zitadel-pats' ||
+    fail "the zitadel-management-pat volume must default to <tenant>-zitadel-pats, the erun-zitadel chart's own Secret"
+grep -A3 'name: zitadel-management-pat' "${rendered}" | grep -q 'optional: true' ||
+    fail "the zitadel-management-pat volume must be optional -- an env with no zitadel component must still start"
+
+echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring"

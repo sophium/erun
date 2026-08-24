@@ -708,6 +708,8 @@ Both act on the caller's own resolved tenant by default. An explicit `tenantId` 
 
 Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build. Enrollment grants the same predefined `ReadAll`/`WriteAll` roles every bootstrapped user gets — there is no finer-grained role-assignment surface yet.
 
+This endpoint requires the caller to already know the enrollee's `issuer`/`subject` from the identity provider. [`POST /v1/identity/users`](/agent-reference/identity-administration) is the higher-level alternative for a platform running its own IdP (Zitadel): it creates the IdP identity itself and calls this same mapping with the subject the IdP returns, in one action, restricted to an `OPERATIONS` tenant.
+
 ```jsonc
 // GET /v1/users?tenantId=019a… (operations-only cross-tenant; omit tenantId for the caller's own tenant)
 // 200 response

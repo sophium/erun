@@ -23,6 +23,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -104,6 +105,7 @@ func run(args []string) error {
 			Brand:           cfg.PlatformBrand,
 		},
 		BootstrapTenantName: cfg.BootstrapTenantName,
+		IdentityAdmin:       optional.identityAdmin,
 	})
 	if err != nil {
 		return err
@@ -147,6 +149,9 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.StringVar(&cfg.ACMEEmail, "acme-email", cfg.ACMEEmail, "Contact email for the ACME account a deploy Job uses to provision a hosted env's per-env TLS certificate through the DNS-01 broker; unset skips TLS cert provisioning")
 	flags.StringVar(&cfg.ACMEServer, "acme-server", cfg.ACMEServer, "ACME directory URL for per-env TLS certificate provisioning")
 	flags.StringVar(&cfg.DNS01WebhookGroupName, "dns01-webhook-group-name", cfg.DNS01WebhookGroupName, "API group the cluster's cert-manager DNS-01 webhook shim registers under; must match the shim actually installed in this cluster")
+	flags.StringVar(&cfg.ZitadelManagementAPIURL, "zitadel-management-api-url", cfg.ZitadelManagementAPIURL, "Base URL of the platform's Zitadel Management API (e.g. http://<tenant>-zitadel:8080); unset disables the /v1/identity/* routes")
+	flags.StringVar(&cfg.ZitadelExternalDomain, "zitadel-external-domain", cfg.ZitadelExternalDomain, "The externally reachable host Zitadel resolves the instance from; every Management API call carries it as the outgoing Host header")
+	flags.StringVar(&cfg.ZitadelManagementPATPath, "zitadel-management-pat-path", cfg.ZitadelManagementPATPath, "Path to the mounted org-owner Zitadel PAT the erun-zitadel chart provisions; never passed as a flag value in practice, only as a file path")
 	if err := flags.Parse(args); err != nil {
 		return apiConfig{}, err
 	}
@@ -156,11 +161,12 @@ func resolveConfig(args []string) (apiConfig, error) {
 // apiDependencies are the runtime pieces the API only gets when their
 // configuration is present; each stays nil otherwise, disabling its feature.
 type apiDependencies struct {
-	cipher      *secrets.Cipher
-	dbosCtx     dbos.DBOSContext
-	mcpSigner   *mcptoken.Signer
-	dns01Broker *dns01broker.Broker
-	kubeClient  kubernetes.Interface
+	cipher        *secrets.Cipher
+	dbosCtx       dbos.DBOSContext
+	mcpSigner     *mcptoken.Signer
+	dns01Broker   *dns01broker.Broker
+	kubeClient    kubernetes.Interface
+	identityAdmin *zitadel.Client
 }
 
 func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
@@ -184,13 +190,31 @@ func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
 	if err != nil {
 		return apiDependencies{}, err
 	}
+	identityAdmin, err := optionalIdentityAdmin(cfg)
+	if err != nil {
+		return apiDependencies{}, err
+	}
 	return apiDependencies{
-		cipher:      cipher,
-		dbosCtx:     dbosCtx,
-		mcpSigner:   mcpSigner,
-		dns01Broker: dns01Broker,
-		kubeClient:  kubeClient,
+		cipher:        cipher,
+		dbosCtx:       dbosCtx,
+		mcpSigner:     mcpSigner,
+		dns01Broker:   dns01Broker,
+		kubeClient:    kubeClient,
+		identityAdmin: identityAdmin,
 	}, nil
+}
+
+// optionalIdentityAdmin wires the Zitadel Management API client (issue
+// #1209). Any of the three settings missing leaves it nil -- the
+// /v1/identity/* routes then do not register at all -- but a set-but-broken
+// PAT path (unreadable, empty) is a hard misconfiguration, matching every
+// other optional dependency's convention in this file.
+func optionalIdentityAdmin(cfg apiConfig) (*zitadel.Client, error) {
+	return zitadel.NewClientFromFile(zitadel.Config{
+		BaseURL:        cfg.ZitadelManagementAPIURL,
+		ExternalDomain: cfg.ZitadelExternalDomain,
+		PATPath:        cfg.ZitadelManagementPATPath,
+	})
 }
 
 func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {
@@ -312,6 +336,14 @@ type apiConfig struct {
 	// <tenant>-devops finds an image the platform actually publishes,
 	// instead of a synthetic placeholder falling back only when it is unset.
 	BootstrapTenantName string
+	// Identity administration (issue #1209) drives Zitadel's Management API
+	// with the org-owner PAT the erun-zitadel chart already provisions and
+	// persists. All three fields must be set for the /v1/identity/* routes
+	// to register; any one missing leaves them off, same as every other
+	// optional dependency in this config.
+	ZitadelManagementAPIURL  string
+	ZitadelExternalDomain    string
+	ZitadelManagementPATPath string
 }
 
 func configFromEnv() apiConfig {
@@ -356,6 +388,10 @@ func configFromEnv() apiConfig {
 		PlatformBrand:           strings.TrimSpace(os.Getenv("ERUN_PLATFORM_BRAND")),
 
 		BootstrapTenantName: strings.TrimSpace(os.Getenv("ERUN_TENANT")),
+
+		ZitadelManagementAPIURL:  strings.TrimSpace(os.Getenv("ERUN_ZITADEL_MANAGEMENT_API_URL")),
+		ZitadelExternalDomain:    strings.TrimSpace(os.Getenv("ERUN_ZITADEL_EXTERNAL_DOMAIN")),
+		ZitadelManagementPATPath: strings.TrimSpace(os.Getenv("ERUN_ZITADEL_MANAGEMENT_PAT_PATH")),
 	}
 }
 
