@@ -174,6 +174,8 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 
 Take an activity lease before **detaching** long work in the env — a build, a test suite, an agent run. A detached job makes no calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting; with one, the env reports as busy with the lease's name and the operator can see it. Pass the detached job's `pid` so an abandoned lease is reclaimed, and release it when the work finishes. See [Agent reference · Idle policy](/agent-reference/idle-policy#activity-leases). Work started through the job tools below takes and releases its lease for you.
 
+`activity_lease_take` also accepts `exclusive: true` (plus `scope`, default `worktree`) to claim a scope exclusively rather than merely holding it busy: a second exclusive take in the same scope is refused and told who the current holder is, and a fresh (non-renewal) claim is also refused while an operator's own SSH session is active in the env. Take this before any mutating work — a git checkout, staging, a commit — in a target env; a plain lease says only "something is here", the exclusive claim says "nobody else may mutate this worktree right now". See [Agent reference · Idle policy · Exclusive claims](/agent-reference/idle-policy#exclusive-claims).
+
 ### Jobs — long work you come back to {#job-tools}
 
 | Tool | Purpose |

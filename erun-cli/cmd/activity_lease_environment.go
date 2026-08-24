@@ -24,6 +24,11 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "pid", params.PID)
 	putEnvironmentToolArgument(arguments, "ttlSeconds", leaseTTLSeconds(params.TTL))
+	if params.Exclusive {
+		arguments["exclusive"] = true
+	}
+	putEnvironmentToolArgument(arguments, "scope", params.Scope)
+	putEnvironmentToolArgument(arguments, "orchestrator", params.Holder.Orchestrator)
 	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "activity_lease_take", arguments, false)
 	if err != nil || !resolved {
 		return common.EnvironmentActivityLease{}, resolved, err
@@ -34,9 +39,13 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	return *result.Lease, resolved, nil
 }
 
-func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (bool, error) {
+func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", id)
+	if exclusive {
+		arguments["exclusive"] = true
+	}
+	putEnvironmentToolArgument(arguments, "scope", scope)
 	_, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, tenant, environment, "activity_lease_release", arguments, false)
 	return resolved, err
 }

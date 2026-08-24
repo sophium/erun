@@ -69,12 +69,47 @@ MCP tool shapes:
 
 | Tool | Input | Output |
 |---|---|---|
-| `activity_lease_take` | `{tenant?, environment?, name, id?, pid?, ttlSeconds?}` | `{tenant, environment, lease, held[]}` |
-| `activity_lease_release` | `{tenant?, environment?, id}` | `{tenant, environment, held[]}` |
+| `activity_lease_take` | `{tenant?, environment?, name, id?, pid?, ttlSeconds?, exclusive?, scope?, orchestrator?}` | `{tenant, environment, lease, held[]}` |
+| `activity_lease_release` | `{tenant?, environment?, id, exclusive?, scope?}` | `{tenant, environment, held[]}` |
 
 Errors: a `take` with no `name` returns `lease name is required`; either tool with no resolvable tenant + environment returns `tenant and environment are required`; a `release` with no `id` returns `lease id is required`. All are tool-call errors, not partial writes.
 
 A [job](/agent-reference/cli-flags#erun-job) is a lease plus an outcome, and holds one for its whole lifetime under the id `job-<job id>` with the supervisor's `pid`. Starting long work through `erun job start` (or the `job_start` MCP tool) therefore defers auto-stop with nothing extra to call, and the reconciliation above is what reclaims the claim if the supervisor dies.
+
+### Exclusive claims {#exclusive-claims}
+
+Everything above is **presence**: any number of leases can be held on an env at once, and taking one never checks whether anyone else is doing the same thing. That is fine for "is something using this env" — it says nothing about "is it safe for me to start mutating the worktree right now". An **exclusive claim** is the second, stricter mode `activity_lease_take` supports, added for two collisions that presence alone cannot prevent: two agent jobs (or an orchestrator and a job) interleaving `git checkout`/staging/commits in the same worktree, and an agent starting mutating work in an environment an operator is already sitting in over SSH.
+
+| Property | Value |
+|---|---|
+| Requested by | `activity_lease_take` with `exclusive: true` (CLI: `erun activity lease take --exclusive`). |
+| Scope | `scope` (CLI: `--scope`), default `worktree`. Exclusivity is **per scope, never per environment** — a second clone of the same repo in the same pod claims its own scope and is unaffected by another clone's claim. Two takes in different scopes always both succeed. |
+| Holder identity | `orchestrator` (CLI: `--orchestrator`) is caller-supplied and recorded verbatim. `tenant`/`user` on the lease's `holder` come from the caller's resolved auth identity over MCP, never from request input — a lease cannot be taken out in someone else's name. |
+| Conflict | A second exclusive take in the same scope, by a different holder id, is refused. The error names the current holder (`orchestrator`/`user`/`tenant`, lease `name`, lease `id`) rather than failing opaquely. |
+| Renewal | The same holder id re-taking the same scope renews rather than conflicting — this is how a long job keeps its claim, the same as a plain lease. |
+| Operator presence | A **fresh** exclusive claim (not a renewal) is also refused while an SSH session is active in the env — the operator never takes a lease, so their presence is read from the `ssh` activity marker instead. A renewal of a claim the caller already holds skips this check: by the time work is running, its own process is indistinguishable from an operator's on the other markers, so gating renewal on them would make a job refuse itself. This check is deliberately narrower than "any AI session is running" — see the note below. |
+| Default TTL | `5m` instead of the plain default's `15m`. An exclusive holder has no PID to probe when it is a remote orchestrator driving over MCP, so the TTL is the only reclaim path for that case; the shorter default matches the orchestrate skill's own polling cadence so a holder that stops renewing lapses promptly. |
+| Reclaim | Same rules as a plain lease (expiry, lifetime ceiling, PID liveness when `pid` is set), evaluated against the scope's current holder. |
+| Storage | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/leases/exclusive/<scope>.json` — a separate file per scope, keyed by scope rather than by holder id, which is what makes the take atomic: the file is created with `O_CREATE\|O_EXCL`, so of any number of concurrent claimants only one create can land. |
+| Release | `activity_lease_release` with `exclusive: true` and the same `scope`. Only the id that took the claim can release it — releasing by scope name alone, without proving you are the current holder, would let a stale or mistaken release drop a different holder's exclusivity out from under them. A mismatched or already-vacated scope is a no-op success. |
+
+Why the operator-presence check is SSH-only, not "any busy marker": the resident-process sampler's `process` marker and the codex-wrapper's `codex` marker both fire for *any* invocation of the wrapped `claude`/`codex` binaries — including the one a detached job itself starts. Gating an exclusive take on either would make a job refuse its own renewal, and would make a second legitimate job in a different scope of the same pod refuse against the first job's own resident process — exactly the "exclusivity became a global mutex" outcome this feature exists to avoid. `ssh` has no such ambiguity: no agent job opens an interactive shell into its own pod as part of normal work, so it is the one marker that unambiguously names a human.
+
+Exclusive lease JSON adds three fields to the [shape above](#activity-leases):
+
+```jsonc
+{
+  "id": "job-fix-1245",
+  "name": "job-fix-1245",
+  "startedAt": "2026-08-24T12:00:00Z",
+  "expiresAt": "2026-08-24T12:05:00Z",
+  "scope": "worktree",
+  "exclusive": true,
+  "holder": { "orchestrator": "petios", "tenant": "erun", "user": "rihards" }
+}
+```
+
+The [erun-orchestrate skill](/agent-reference/skills-spec#erun-orchestrate) takes this claim before any mutating work in a target environment, and on refusal stops and reports the holder rather than retrying or falling back to working in the tree anyway.
 
 ## Predicate evaluation cadence
 
