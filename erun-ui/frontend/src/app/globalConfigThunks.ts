@@ -22,7 +22,12 @@ import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type { CloudInitProvider } from './model';
-import { hideTerminalMessage, showNotification, showTerminalMessage } from './notificationThunks';
+import {
+  hideTerminalMessage,
+  showNotification,
+  showTerminalError,
+  showTerminalMessage,
+} from './notificationThunks';
 import { openSelection } from './sessionThunks';
 import { patchGlobalConfigDialog, setGlobalConfigDialog } from './slices/globalConfigDialogSlice';
 import { setIdleCloudContextBusy, setIdleStatus } from './slices/idleSlice';
@@ -158,7 +163,7 @@ export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispa
   } catch (error) {
     const message = readError(error);
     dispatch(patchGlobalConfigDialog({ error: message }));
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -182,7 +187,7 @@ export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispat
   } catch (error) {
     const message = readError(error);
     dispatch(patchGlobalConfigDialog({ error: message }));
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -233,7 +238,7 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -291,7 +296,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
     const message = readError(error);
     dispatch(setIdleCloudContextBusy(false));
     dispatch(showNotification('error', message));
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -340,7 +345,7 @@ const startCloudInitSession =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };
 
@@ -397,7 +402,7 @@ export const loginGlobalCloudProvider =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };
 
@@ -432,7 +437,7 @@ export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -510,6 +515,6 @@ const updateCloudContextPower =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };

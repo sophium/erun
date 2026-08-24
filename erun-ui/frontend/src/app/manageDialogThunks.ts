@@ -20,7 +20,7 @@ import {
   nextPendingRedeploy,
   versionSourceSignature,
 } from './manageDialogHelpers';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
   runtimePodConfigToKubernetes,
@@ -389,7 +389,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 

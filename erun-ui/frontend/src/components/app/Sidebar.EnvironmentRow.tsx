@@ -5,7 +5,7 @@ import * as React from 'react';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { openOutputs } from '@/app/outputsThunks';
 import { selectSidebarFocus } from '@/app/selectors';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
@@ -166,7 +166,7 @@ function EnvStatusIndicator({
         onClick={(event) => {
           event.stopPropagation();
           void dispatch(closeEnvironment(selection)).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           });
         }}
       >
@@ -206,7 +206,7 @@ function EnvironmentRowOpenButton({
       aria-current={selected ? 'page' : undefined}
       onClick={() => {
         void dispatch(openSelection(selection)).catch((error: unknown) => {
-          dispatch(showTerminalMessage(readError(error)));
+          dispatch(showTerminalError(readError(error)));
         });
       }}
     >

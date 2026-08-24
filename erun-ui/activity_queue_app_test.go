@@ -397,6 +397,77 @@ func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerRecordsDetailWithoutAPTY locks down that
+// recordOutputLine's only caller used to be the PTY reader
+// (feedActivityTraceFromTerminal), so the desktop's subprocess-captured
+// build/push/deploy orchestration (deploy_orchestration.go, which has no PTY
+// and calls the trace handler directly) never populated entry.Detail. The
+// handler itself must record every line it sees, regardless of caller.
+func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	// Call the handler directly, exactly as runErunCaptured's onLine callback
+	// does for the desktop's orchestrated build — no managedTerminal, no PTY.
+	handler("==> Building")
+	handler("./main.go:12:2: undefined: fmt.Sprintfff")
+	handler("==> Build failed after 3m12s")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Detail, "undefined: fmt.Sprintfff") {
+		t.Fatalf("Detail missing the actual compiler error, got %q", all[0].Detail)
+	}
+	if strings.Contains(all[0].Error, "==>") || strings.Contains(all[0].Error, "after 3m12s") {
+		t.Fatalf("Error should be cleaned of the trace marker and elapsed clause, got %q", all[0].Error)
+	}
+}
+
+// TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive
+// locks down that the wrong card cannot fail: a bare deploy-failure line (no
+// tenant/env, e.g. "==> Deploy failed after 4s") must finalize the deploy
+// entry specifically, never a same-tenant/env build entry that is still
+// running. Before the fix this used findActive, whose plain map iteration
+// picks an arbitrary entry when both are active — this test is deterministic
+// under the fix (findActiveByCommand) regardless of Go's map iteration order.
+func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Building")
+	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+		t.Fatal("expected an active build entry")
+	}
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "local"})
+
+	handler("Error: UPGRADE FAILED: timeout")
+	handler("==> Deploy failed after 4s")
+
+	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+		t.Fatal("the still-running build entry must not have been finalized by the deploy failure")
+	}
+	if _, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local"); ok {
+		t.Fatal("the deploy entry should have been finalized")
+	}
+	all := app.activityQueue.list()
+	var deployEntry *activityQueueEntry
+	for i := range all {
+		if all[i].Command == "deploy" {
+			deployEntry = &all[i]
+		}
+	}
+	if deployEntry == nil || deployEntry.Status != activityQueueStatusFailed {
+		t.Fatalf("expected a failed deploy entry in history, got %+v", all)
+	}
+	if !strings.Contains(deployEntry.Error, "UPGRADE FAILED") && !strings.Contains(deployEntry.Detail, "UPGRADE FAILED") {
+		t.Fatalf("expected the captured tool error on the deploy entry, got %+v", deployEntry)
+	}
+}
+
 func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	// A generic Local shell at the repo root has no tenant/env bound to
 	// it. Build traces observed there must NOT register an entry — a

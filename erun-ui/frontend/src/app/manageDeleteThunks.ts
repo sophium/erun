@@ -4,7 +4,7 @@ import { environmentApi } from './api/environmentApi';
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
 import { readError } from './errors';
 import { closeManageDialog } from './manageDialogThunks';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError, showTerminalFailure, showTerminalMessage } from './notificationThunks';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { setSelected } from './slices/selectionSlice';
 import { setSessionId } from './slices/terminalSlice';
@@ -54,6 +54,7 @@ export const submitManageDelete =
       dispatch(setManageDialog(defaultManageDialog()));
       dispatch(setTerminalCopyOutput(''));
       dispatch(setTerminalCopyStatus(''));
+      const deletedLabel = `Deleted ${result.tenant} / ${result.environment}.`;
       const warnings = [
         result.namespaceDeleteError
           ? `Namespace deletion failed: ${result.namespaceDeleteError}`
@@ -64,8 +65,19 @@ export const submitManageDelete =
       ]
         .filter(Boolean)
         .join(' ');
-      const warning = warnings ? ` ${warnings}` : '';
-      dispatch(showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`));
+      // A delete that left a live namespace or cloud context running is a
+      // failure, even though the environment record itself is gone — it must
+      // render as an error with the failure clause visible and a Copy
+      // action, not the plain success pill (which used to append the
+      // warning as an afterthought after the copy buffer had already been
+      // cleared, so there was nothing to copy).
+      if (warnings) {
+        dispatch(
+          showTerminalFailure(deletedLabel, warnings, `${deletedLabel} ${warnings}`, '', null),
+        );
+      } else {
+        dispatch(showTerminalMessage(deletedLabel));
+      }
     } catch (error) {
       const message = readError(error);
       dispatch(
@@ -76,12 +88,6 @@ export const submitManageDelete =
           error: message,
         }),
       );
-      dispatch(
-        setTerminalCopyOutput(
-          `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`,
-        ),
-      );
-      dispatch(setTerminalCopyStatus(''));
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };

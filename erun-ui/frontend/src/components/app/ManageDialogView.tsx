@@ -25,7 +25,7 @@ import {
   submitManageDelete,
   submitManageDeploy,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { runtimeResourceValidation } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { useController } from '@/app/useController';
@@ -269,7 +269,7 @@ function RedeployBanner({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           disabled={deploying}
           onClick={() =>
             void dispatch(submitManageDeploy()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
@@ -445,7 +445,7 @@ function EditActions({
         aria-describedby={hasSaveStatus ? saveStatusId : undefined}
         onClick={() =>
           void dispatch(submitManageConfig()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
       >

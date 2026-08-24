@@ -17,7 +17,7 @@ import {
   updateManageConfig,
   updateManageDialog,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { RUNTIME_CHART_NOTICE_ID, runtimeChartBlocksDeploy } from '@/app/runtimeChartPlan';
 import type { AppState } from '@/app/state';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
@@ -67,12 +67,12 @@ export function RuntimeTab(): React.ReactElement {
         }}
         onDeploy={() =>
           void dispatch(submitManageDeploy()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
         onCreateVersion={() =>
           void dispatch(submitCreateVersion()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
       />

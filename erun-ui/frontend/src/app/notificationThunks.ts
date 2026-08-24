@@ -17,7 +17,14 @@ import {
 import type { AppNotification, TerminalStatusAction } from './state';
 import type { AppThunk } from './store';
 
-let notificationTimer = 0;
+// notificationIdCounter mints a unique id per queued notification within this
+// session so a specific entry's auto-dismiss timer or explicit dismiss click
+// can target it without disturbing sibling entries queued before or after it.
+let notificationIdCounter = 0;
+function nextNotificationId(): string {
+  notificationIdCounter += 1;
+  return `notification-${notificationIdCounter.toString()}`;
+}
 let terminalCopyStatusTimer = 0;
 
 export const showTerminalMessage =
@@ -56,6 +63,21 @@ export const showTerminalFailure =
     dispatch(setTerminalCopyOutput(effectiveCopy));
     dispatch(setTerminalCopyStatus(''));
     dispatch(setRetrySelection(action === 'wait-longer' ? retrySelection : null));
+  };
+
+// showTerminalError is the one-argument shorthand for the common
+// `catch (error) { dispatch(showTerminalError(readError(error))) }` shape.
+// Dozens of catch blocks used to call showTerminalMessage (kind: 'info',
+// unconditional) with the caught error's text, so failures rendered as a
+// neutral grey pill — polite aria-live, no role="alert", and no Copy action
+// (the terminal copy buffer only gets set by showTerminalFailure). This
+// wraps showTerminalFailure with the defaults that shape needs: no detail
+// beyond the message, the message itself as the copyable text, and no retry
+// action.
+export const showTerminalError =
+  (message: string): AppThunk =>
+  (dispatch) => {
+    dispatch(showTerminalFailure(message, '', message, '', null));
   };
 
 function joinMessageForCopy(message: string, detail: string): string {
@@ -107,9 +129,10 @@ export const showNotification =
     if (!trimmed) {
       return;
     }
-    window.clearTimeout(notificationTimer);
+    const id = nextNotificationId();
     dispatch(
       showNotificationAction({
+        id,
         kind,
         message: trimmed,
         tenant: meta?.tenant,
@@ -118,19 +141,28 @@ export const showNotification =
       }),
     );
     if (kind === 'success' || kind === 'info') {
-      notificationTimer = window.setTimeout(() => {
-        dispatch(dismissNotification());
+      // Bound to this entry's own id, not a shared timer: a second toast
+      // queued before this one auto-dismisses must not have its timer
+      // clobbered (and must not, in turn, dismiss this one early).
+      window.setTimeout(() => {
+        dispatch(dismissNotificationAction(id));
       }, 3200);
     }
   };
 
-export const dismissNotification = (): AppThunk => (dispatch, getState) => {
-  window.clearTimeout(notificationTimer);
-  if (!getState().notification.notification) {
-    return;
-  }
-  dispatch(dismissNotificationAction());
-};
+// dismissNotification dismisses a specific queued entry by id, or — from the
+// titlebar's dismiss button, which only ever shows the front of the queue —
+// the oldest entry when no id is given.
+export const dismissNotification =
+  (id?: string): AppThunk =>
+  (dispatch, getState) => {
+    const notifications = getState().notification.notifications;
+    const target = id ?? notifications[0]?.id;
+    if (!target) {
+      return;
+    }
+    dispatch(dismissNotificationAction(target));
+  };
 
 export const waitLongerForTerminalStatus =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {

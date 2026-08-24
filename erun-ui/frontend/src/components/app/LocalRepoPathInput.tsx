@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useChooseLocalRepoPathMutation } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 
 // LocalRepoPathInput is the shared host-worktree-path field for the init dialog
 // and the env-settings General tab, so both edit the path identically. Free-text
@@ -38,7 +38,7 @@ export function LocalRepoPathInput({
         onChange(picked);
       }
     } catch (error) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
   return (

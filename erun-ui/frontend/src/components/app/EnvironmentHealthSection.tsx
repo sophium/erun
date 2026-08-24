@@ -16,7 +16,7 @@ import {
   deployFromHealthCheck,
   focusRegistryFieldFromHealthCheck,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import type { UIEnvironmentHealthCheck } from '@/uiDiagnosticsTypes';
 
@@ -45,7 +45,7 @@ export function EnvironmentHealthSection({ dialog }: { dialog: ManageDialog }): 
           disabled={dialog.busy || dialog.configLoading || loading}
           onClick={() =>
             void dispatch(checkManageEnvironmentHealth()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
@@ -127,7 +127,7 @@ function HealthCheckFix({
         disabled={disabled}
         onClick={() =>
           void dispatch(deployFromHealthCheck()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
       >

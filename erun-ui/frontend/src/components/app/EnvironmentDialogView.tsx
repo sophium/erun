@@ -24,7 +24,7 @@ import {
 } from '@/app/environmentDialogThunks';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import {
@@ -97,7 +97,7 @@ export function EnvironmentDialogView(): React.ReactElement {
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitEnvironmentDialog(event.currentTarget)).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             });
           }}
         >

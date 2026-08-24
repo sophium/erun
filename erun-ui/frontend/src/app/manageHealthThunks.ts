@@ -2,7 +2,7 @@ import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
 import { submitManageDeploy } from './manageDeployThunks';
 import { setManageTab } from './manageDialogThunks';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppThunk } from './store';
 
@@ -32,7 +32,7 @@ export const checkManageEnvironmentHealth =
       }
       const message = readError(error);
       dispatch(patchManageDialog({ healthLoading: false, error: message }));
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };
 

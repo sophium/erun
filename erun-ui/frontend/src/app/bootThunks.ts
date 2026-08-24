@@ -3,7 +3,7 @@ import type { UITenant } from '@/types';
 import { stateApi } from './api/stateApi';
 import { planEnvActivitySeed } from './envActivitySeed';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError, showTerminalMessage } from './notificationThunks';
 import { loadOrchestrators, restoreOpenOrchestrators } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
 import { setEnvActivityForEnv } from './slices/envStatusSlice';
@@ -87,7 +87,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 
     dispatch(showTerminalMessage(noSelectionBootMessage(getState().tenants.tenants)));
   } catch (error: unknown) {
-    dispatch(showTerminalMessage(readError(error)));
+    dispatch(showTerminalError(readError(error)));
   }
 };
 

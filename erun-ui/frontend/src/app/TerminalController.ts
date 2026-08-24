@@ -10,7 +10,7 @@ import { decodeBase64Bytes } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
 import { store } from './store';
@@ -186,7 +186,7 @@ export class TerminalController {
     }
     this.pasteHandler = (event: ClipboardEvent) => {
       void this.clipboard.handlePaste(event).catch((error: unknown) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       });
     };
     root.addEventListener('paste', this.pasteHandler, true);
@@ -237,7 +237,7 @@ export class TerminalController {
       (data) =>
         SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       },
       // Suppress replies to queries re-parsed from a replayed display buffer:
       // the asking tool consumed the live reply long ago, so a second reply
@@ -246,7 +246,7 @@ export class TerminalController {
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       });
     });
 

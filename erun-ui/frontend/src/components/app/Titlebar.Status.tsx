@@ -19,7 +19,7 @@ import {
   dismissTerminalStatus,
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
-import type { AppState } from '@/app/state';
+import type { AppNotification, AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
@@ -42,6 +42,10 @@ interface TitlebarStatusValue {
   copyOutput: string;
   copyStatus: string;
   action: AppState['terminalStatusAction'];
+  // Set only for source: 'notification' — identifies which queued entry this
+  // is, so dismissing it removes exactly this one even if another has been
+  // queued behind it since render.
+  notificationId?: string;
 }
 
 const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
@@ -59,7 +63,10 @@ const statusIconClassNames: Record<TitlebarStatusKind, string> = {
 };
 
 export function TitlebarStatus(): React.ReactElement | null {
-  const notification = useAppSelector((state) => state.notification.notification);
+  // The queue can hold several concurrent failures; the titlebar has room for
+  // one pill, so it always shows (and dismisses) the oldest — the others stay
+  // queued behind it rather than being silently overwritten.
+  const notification = useAppSelector((state) => state.notification.notifications[0]);
   const terminalStatus = useAppSelector((state) => state.terminalStatus);
   const status = computeTitlebarStatus(notification, terminalStatus);
   if (!status) {
@@ -96,7 +103,7 @@ export function TitlebarStatus(): React.ReactElement | null {
 }
 
 function computeTitlebarStatus(
-  notification: AppState['notification'],
+  notification: AppNotification | undefined,
   terminal: {
     terminalMessage: string;
     terminalStatusKind: AppState['terminalStatusKind'];
@@ -109,7 +116,9 @@ function computeTitlebarStatus(
 ): TitlebarStatusValue | null {
   if (notification) {
     return {
-      ...notification,
+      kind: notification.kind,
+      message: notification.message,
+      notificationId: notification.id,
       source: 'notification',
       detail: '',
       busy: false,
@@ -317,7 +326,7 @@ function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React
 
 function dismissTitlebarStatus(dispatch: AppDispatch, status: TitlebarStatusValue): void {
   if (status.source === 'notification') {
-    dispatch(dismissNotification());
+    dispatch(dismissNotification(status.notificationId));
     return;
   }
   dispatch(dismissTerminalStatus());

@@ -19,7 +19,7 @@ import {
   updateGlobalConfig,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { useController } from '@/app/useController';
 import { CloudAliasesSection } from '@/components/app/GlobalConfigDialog.CloudAliases';
@@ -53,7 +53,7 @@ export function GlobalConfigDialogView(): React.ReactElement {
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitGlobalConfig()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             });
           }}
         >

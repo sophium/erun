@@ -149,4 +149,45 @@ test.describe('app-notification toast', () => {
     await expect(page.locator('[role="status"]')).toHaveCount(statusBefore);
     await expect(page.locator('[role="alert"]')).toHaveCount(alertBefore + 1);
   });
+
+  // The notification slot used to be a single `AppNotification | null` value,
+  // so a burst of concurrent failures (e.g. several "Upgrade all" members
+  // failing within milliseconds of each other) silently overwrote one
+  // another — only the last dispatch survived. Five concurrent error toasts
+  // must all remain readable: the titlebar shows one at a time, and
+  // dismissing it reveals a still-queued one rather than it having been lost.
+  // Delivery order across the fake-backend event bridge isn't guaranteed (it
+  // interleaves these five arbitrarily), so this asserts the set of five is
+  // fully seen — not that they arrive in a specific order.
+  test('five concurrent error notifications all remain readable, none overwritten', async ({
+    app: _app,
+    page,
+  }) => {
+    const messages = Array.from({ length: 5 }, (_, i) => `Concurrent failure marker ${String(i)}`);
+    await page.evaluate((msgs) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
+      for (const message of msgs) {
+        runtime.EventsEmit('app-notification', { kind: 'error', message });
+      }
+    }, messages);
+
+    const seen = new Set<string>();
+    for (let i = 0; i < messages.length; i++) {
+      const pill = page.getByRole('alert').filter({ hasText: /Concurrent failure marker \d/ });
+      await expect(pill).toBeVisible();
+      const text = (await pill.textContent()) ?? '';
+      seen.add((/Concurrent failure marker \d/.exec(text) ?? [''])[0]);
+      await pill.getByRole('button', { name: 'Dismiss status' }).click();
+    }
+    // All five distinct failures were shown at some point across the dismiss
+    // sequence — none silently dropped by an overwrite.
+    expect([...seen].sort()).toEqual(messages.slice().sort());
+    await expect(
+      page.getByRole('alert').filter({ hasText: /Concurrent failure marker/ }),
+    ).toHaveCount(0);
+  });
 });

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -139,21 +140,36 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	return startSessionResult{Selection: selection, Orchestrated: true}, true
 }
 
+// deployOrchestrationFailureReasonMaxLen caps the single-line reason surfaced
+// in the failure notification; the full captured output is still available in
+// the activity card's Detail (see recordOutputLine).
+const deployOrchestrationFailureReasonMaxLen = 300
+
 // deployOrchestrationFailureReason condenses a background build/push/deploy error
-// into a single-line notification reason.
+// into a single-line notification reason. For an *erunCommandError it drops
+// erun's own "==> ..." progress markers — captured stderr's first line is
+// always one, since erun routes Info to stderr, and it carries no diagnostic
+// value — and keeps the actual compiler/tool output that follows, which used
+// to be discarded by truncating to that first line.
 func deployOrchestrationFailureReason(err error) string {
 	if err == nil {
 		return ""
 	}
-	msg := strings.TrimSpace(err.Error())
-	if i := strings.IndexByte(msg, '\n'); i >= 0 {
-		msg = strings.TrimSpace(msg[:i])
+	var cmdErr *erunCommandError
+	if errors.As(err, &cmdErr) {
+		return truncateFailureReasonTail(cmdErr.meaningfulReason(), deployOrchestrationFailureReasonMaxLen)
 	}
-	const maxLen = 300
-	if len(msg) > maxLen {
-		msg = msg[:maxLen] + "..."
+	return truncateFailureReasonTail(strings.TrimSpace(err.Error()), deployOrchestrationFailureReasonMaxLen)
+}
+
+// truncateFailureReasonTail keeps the tail of an over-long reason rather than
+// the head: the actionable content (the actual error) sits at the end of
+// captured tool output, after any preceding log noise.
+func truncateFailureReasonTail(msg string, maxLen int) string {
+	if len(msg) <= maxLen {
+		return msg
 	}
-	return msg
+	return "..." + msg[len(msg)-maxLen:]
 }
 
 // runErunCaptured runs `erun <args>` in dir and returns its captured stdout. erun
@@ -199,12 +215,52 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 	<-done
 
 	if err := cmd.Wait(); err != nil {
-		if detail := strings.TrimSpace(lastErr.String()); detail != "" {
-			return stdoutBuf.String(), fmt.Errorf("erun %s: %w: %s", args[0], err, detail)
+		return stdoutBuf.String(), &erunCommandError{
+			Command: args[0],
+			Err:     err,
+			Detail:  strings.TrimSpace(lastErr.String()),
 		}
-		return stdoutBuf.String(), fmt.Errorf("erun %s: %w", args[0], err)
 	}
 	return stdoutBuf.String(), nil
+}
+
+// erunCommandError reports a failed `erun <Command>` subprocess invocation
+// alongside its full captured stderr, so a caller can pick the meaningful
+// content out of Detail (see meaningfulReason) instead of string-parsing an
+// already-flattened error message.
+type erunCommandError struct {
+	Command string
+	Err     error
+	Detail  string
+}
+
+func (e *erunCommandError) Error() string {
+	if e.Detail == "" {
+		return fmt.Sprintf("erun %s: %v", e.Command, e.Err)
+	}
+	return fmt.Sprintf("erun %s: %v: %s", e.Command, e.Err, e.Detail)
+}
+
+func (e *erunCommandError) Unwrap() error { return e.Err }
+
+// meaningfulReason drops erun's own "==> ..." progress markers from Detail —
+// each one is routed to stderr via Info — and joins what remains, which is
+// the actual compiler/tool output a build/push/deploy failure produced. Falls
+// back to the bare exec error when Detail carried nothing but markers (e.g. a
+// process that exited non-zero before producing any tool output).
+func (e *erunCommandError) meaningfulReason() string {
+	var kept []string
+	for _, line := range strings.Split(e.Detail, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "==> ") {
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	if len(kept) == 0 {
+		return fmt.Sprintf("erun %s: %v", e.Command, e.Err)
+	}
+	return fmt.Sprintf("erun %s: %v: %s", e.Command, e.Err, strings.Join(kept, " "))
 }
 
 func scanErunStderr(stderrPipe io.Reader, onLine func(string), lastErr *strings.Builder) {

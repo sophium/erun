@@ -4,7 +4,7 @@ import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import { cloudApi } from './api/cloudApi';
 import { replaceCloudProvider } from './cloudContextState';
 import { readError } from './errors';
-import { showNotification, showTerminalMessage } from './notificationThunks';
+import { showNotification, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { setSidebarCloudAliasBusy } from './slices/sidebarSlice';
 import { setCloudProviders } from './slices/tenantsSlice';
 import type { AppThunk, RootState } from './store';
@@ -60,7 +60,7 @@ export const getPrimaryCloudProviderBearerToken =
     } catch (error) {
       const message = readError(error);
       dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
       dispatch(showNotification('error', message));
     }
   };
@@ -91,7 +91,7 @@ const updatePrimaryCloudProvider =
     } catch (error) {
       const message = readError(error);
       dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
       dispatch(showNotification('error', message));
     }
   };

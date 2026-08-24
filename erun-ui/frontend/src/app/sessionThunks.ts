@@ -12,7 +12,7 @@ import {
 import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { resolveAutoStartGate } from './autoStartGate';
 import { readError } from './errors';
-import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
+import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
@@ -332,7 +332,7 @@ export const openSelection =
     } catch (error: unknown) {
       if (isCurrentSelection()) {
         dispatch(setSelected(previousSelected));
-        dispatch(showTerminalMessage(readError(error)));
+        dispatch(showTerminalError(readError(error)));
       }
       throw error;
     } finally {
@@ -528,7 +528,7 @@ export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, ge
     controller.focusTerminalSoon();
     controller.queueTerminalResize();
   } catch (error: unknown) {
-    dispatch(showTerminalMessage(readError(error)));
+    dispatch(showTerminalError(readError(error)));
   }
 };
 
@@ -581,7 +581,7 @@ export const closeTerminalTab =
     try {
       await CloseSession(sessionId);
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
       return;
     }
     const remaining = dispatch(removeTab(key, sessionId));

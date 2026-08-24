@@ -10,7 +10,14 @@ import { SEED_TENANT } from '../fixtures/seedRoot.js';
 // available resource status clears the capacity blocker, leaving the value
 // requirements (environment name, container registry) as the only blockers —
 // which is exactly what this spec exercises.
-async function stubDialogCluster(page: Page): Promise<void> {
+// clusterRegistryFailure, when set, makes the LoadClusterRegistry stub return
+// this error instead of the endpoint's usual pass-through — used by
+// stubDialogClusterWithRegistryFailure below. A single page.route handler (not
+// two stacked registrations) is required: Playwright runs the most-recently
+// registered handler first, and its route.continue() sends the request to the
+// real backend rather than falling through to an earlier handler, so stacking
+// silently defeated the first stub instead of composing with it.
+async function stubDialogCluster(page: Page, clusterRegistryFailure?: string): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method === 'LoadKubernetesContexts') {
@@ -46,8 +53,25 @@ async function stubDialogCluster(page: Page): Promise<void> {
         }),
       });
     }
+    if (body.method === 'LoadClusterRegistry' && clusterRegistryFailure) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ error: clusterRegistryFailure }),
+      });
+    }
     await route.continue();
   });
+}
+
+// stubDialogClusterWithRegistryFailure makes a context resolve and its
+// capacity load, but the cluster-registry probe (LoadClusterRegistry) fail —
+// a VPN hiccup or an RBAC gap, not a real "no registry deployed" answer. This
+// used to be a bare `catch { ... }` that silently reset
+// clusterRegistry/useClusterRegistry with no error surfaced anywhere,
+// indistinguishable from "no in-cluster registry found". The dialog must show
+// the probe failure instead.
+async function stubDialogClusterWithRegistryFailure(page: Page): Promise<void> {
+  await stubDialogCluster(page, 'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER');
 }
 
 test.describe('environment init dialog', () => {
@@ -417,6 +441,25 @@ test.describe('environment init dialog', () => {
     await expect(help).toBeVisible();
     await expect(help).toContainText('ghcr.io/your-org');
     await expect(help).toContainText('Cloud aliases');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('a cluster-registry probe failure shows the failure, not a silent reset (#1212)', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogClusterWithRegistryFailure(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // Selecting the context fires refreshDialogClusterRegistry, which fails.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+
+    await expect(app.envInitDialog.locator().getByRole('alert')).toContainText(
+      'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER',
+    );
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

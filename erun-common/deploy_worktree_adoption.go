@@ -89,7 +89,7 @@ func worktreeClaimExists(args []string) (bool, error) {
 		return true, nil
 	}
 	message := strings.TrimSpace(string(output))
-	if kubernetesResourceNotFound(message) {
+	if KubernetesResourceNotFound(message) {
 		return false, nil
 	}
 	if message == "" {
