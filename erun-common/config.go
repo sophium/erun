@@ -166,8 +166,16 @@ type EnvConfig struct {
 	// Empty leaves the pod pulling anonymously, so envs on public images (the erun
 	// product tenant's own) are unaffected. erun references an operator-provisioned
 	// secret by name; it does not create the credential.
-	ImagePullSecrets []string            `yaml:"imagepullsecrets,omitempty" json:"imagePullSecrets,omitempty"`
-	RuntimePod       RuntimePodResources `yaml:"runtimepod,omitempty"`
+	ImagePullSecrets []string `yaml:"imagepullsecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	// RegistryCredentialSecretName names a Kubernetes dockerconfigjson Secret that
+	// `erun init` minted from the host's own resolved ghcr.io credential, so the
+	// pod it deploys can read from and push to a registry it has never
+	// authenticated to on its own. Empty means init found no host
+	// credential to provision; an existing in-pod credential, if any, is
+	// unaffected. Only init mints or rotates this value -- a plain `erun deploy`
+	// only carries the persisted name forward.
+	RegistryCredentialSecretName string              `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
+	RuntimePod                   RuntimePodResources `yaml:"runtimepod,omitempty"`
 	// NamespaceQuota is a hard per-namespace ceiling (ResourceQuota + LimitRange)
 	// distinct from RuntimePod's own-container sizing; see NamespaceResourceQuota.
 	NamespaceQuota      NamespaceResourceQuota  `yaml:"namespacequota,omitempty" json:"namespaceQuota,omitempty"`

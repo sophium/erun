@@ -1225,9 +1225,15 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, projectRoot, s.envConfig)
+	req, repository, registryCredentialSecretName, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, projectRoot, s.envConfig)
 	if err != nil {
 		return err
+	}
+	// Persist what this run resolved so a later `erun deploy` carries the same
+	// secret name forward instead of losing it on the next helm upgrade.
+	if registryCredentialSecretName != s.envConfig.RegistryCredentialSecretName {
+		s.envConfig.RegistryCredentialSecretName = registryCredentialSecretName
+		s.envConfigChanged = true
 	}
 	if s.params.Bootstrap {
 		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + DevopsComponentName + " chart")

@@ -164,10 +164,17 @@ type HelmDeploySpec struct {
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
 	ImagePullSecrets []string
-	ResetDatabase    bool
-	Idle             EnvironmentIdleConfig
-	Claude           EnvironmentClaudeConfig
-	RuntimePod       RuntimePodResources
+	// RegistryCredentialSecretName names the dockerconfigjson Secret `erun init`
+	// minted from the host's own resolved ghcr.io credential, threaded to
+	// the runtime chart as registryCredentialSecretName so it can mount it into
+	// the pod's docker config. Empty renders nothing, so an env init never
+	// provisioned one for is byte-for-byte unchanged. Mirrors
+	// EnvConfig.RegistryCredentialSecretName; only the runtime chart consumes it.
+	RegistryCredentialSecretName string
+	ResetDatabase                bool
+	Idle                         EnvironmentIdleConfig
+	Claude                       EnvironmentClaudeConfig
+	RuntimePod                   RuntimePodResources
 	// NamespaceQuota is a hard per-namespace ceiling applied via a Kubernetes
 	// ResourceQuota + LimitRange (kubernetes_resource_quota.go), distinct from
 	// RuntimePod which only sizes the runtime container itself. Zero applies no
@@ -1422,6 +1429,12 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 			deployInput.ContainerRegistry = registry
 		}
 	}
+	// registryCredentialSecretName is a runtime-chart-only value (it mounts into
+	// the erun-devops container's docker config); a component deploy carries
+	// nothing, since newHelmDeploySpecWithValues never sets it.
+	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
+		deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
+	}
 	// Mirror the snapshot DB-reset decision so re-installing a snapshot behaves
 	// the same as first deploying one.
 	deployInput.ResetDatabase = deployResetsDatabase(true, deployInput.Version)
@@ -2357,6 +2370,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
 	args = append(args, helmImagePullSecretSetArgs(d.ImagePullSecrets)...)
+	args = append(args, helmRegistryCredentialSecretSetArgs(d.RegistryCredentialSecretName)...)
 	args = append(args, helmPlatformSetArgs(d.Platform)...)
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
@@ -2684,6 +2698,16 @@ func helmImagePullSecretSetArgs(secrets []string) []string {
 		idx++
 	}
 	return args
+}
+
+// helmRegistryCredentialSecretSetArgs renders registryCredentialSecretName as
+// a single helm --set key, empty input yielding no args so an env init never
+// provisioned a credential for is byte-for-byte unchanged.
+func helmRegistryCredentialSecretSetArgs(name string) []string {
+	if name = strings.TrimSpace(name); name == "" {
+		return nil
+	}
+	return []string{"--set-string", "registryCredentialSecretName=" + name}
 }
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {

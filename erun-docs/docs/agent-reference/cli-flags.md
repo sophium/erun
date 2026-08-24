@@ -103,11 +103,12 @@ An env created by this same run skips the reconcile entirely — it was written 
 2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list.
 3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository`.
 4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default.
-5. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`.
-6. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. Abort if none resolves; the pod is left deployed (init is safe to re-run once authenticated).
-7. With `--remote`: open SSH and write the in-pod bootstrap marker.
-8. Update default-tenant pointer if `--set-default-tenant`.
-9. Exit `0`.
+5. With `--remote`/`--type=remote-agent` (and `--type=runtime`): resolve a ghcr.io credential from the machine running `init` itself (a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`) for every registry the env is configured to build to or deploy from. When one resolves, mint (or refresh) a `kubernetes.io/dockerconfigjson` Secret named `<tenant>-devops-registry-credential` via `kubectl apply -f -` and persist its name to `EnvConfig.registrycredentialsecretname`, so step 6's chart install mounts it. Resolves to nothing (no error) when the host itself has no credential to give.
+6. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`, threading `registryCredentialSecretName` when step 5 minted one.
+7. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. The Secret step 5 minted is what usually makes this resolve on a freshly created environment; abort if none resolves regardless — the pod is left deployed (init is safe to re-run once authenticated).
+8. With `--remote`: open SSH and write the in-pod bootstrap marker.
+9. Update default-tenant pointer if `--set-default-tenant`.
+10. Exit `0`.
 
 ### Error codes
 
@@ -118,7 +119,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |
-| `REGISTRY_CREDENTIAL_MISSING` | The pod init just deployed has no ghcr.io credential for a registry it is configured to build to or deploy from (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). The pod is left deployed; authenticate it (`erun open`) and re-run `erun init` to confirm. | `1` |
+| `REGISTRY_CREDENTIAL_MISSING` | The pod init just deployed has no ghcr.io credential for a registry it is configured to build to or deploy from (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`), and the machine running `init` had none to provision either. The pod is left deployed; authenticate it (`erun open`) and re-run `erun init` to confirm. | `1` |
 
 ---
 

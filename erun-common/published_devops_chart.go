@@ -397,6 +397,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
+	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
 	deployInput.RuntimeChartRegistry = chart.registry
 	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version); image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
