@@ -3,7 +3,7 @@
 {"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{"file_path":"erun-common/mcp_client.go"}}]}}
 audit: erun job output --environment dev --id sweep --tenant team
 next offset: 308 (more: false, complete: false)
-running: sweep, pid <PID>, agent claude, editing erun-common/mcp_client.go, 1 turn, 1 tool, 308 bytes of output
+running: sweep, pid <PID>, last beat <ALIVE_AGE>ms ago, agent claude, editing erun-common/mcp_client.go, 1 turn, 1 tool, 308 bytes of output
 audit: erun job status --environment dev --id sweep --tenant team
   job-sweep: sweep: editing erun-common/mcp_client.go, 1 turn, 1 tool, expires in <REMAINING>, pid <PID>
 audit: erun activity lease list --environment dev --tenant team

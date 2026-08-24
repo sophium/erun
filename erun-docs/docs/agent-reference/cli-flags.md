@@ -866,6 +866,20 @@ Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sen
 
 The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
 
+### The alive contract {#alive-contract}
+
+`state` alone answers "did the work finish", but it can only be as fresh as the last thing that read and reconciled the record — a pid-liveness check runs only when something calls `status`/`await`/`output`. A supervisor can also die between reads (a `SIGTERM`'d container, an OOM kill) with nothing to say so from the inside until the next reconcile. To close that gap every job record carries three more fields, written by the supervisor on a fixed cadence independent of the work's own output:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `lastAliveAt` | RFC3339 timestamp | The supervisor's own clock timestamp at its last beat, stamped every ~1 second (`EnvironmentJobAliveHeartbeatInterval`) for as long as the supervisor runs — an image pull or a silent test suite beats exactly as often as a chatty one. |
+| `aliveSeq` | integer | A monotonic counter bumped on every beat, so a caller can distinguish "still beating" from "the same timestamp read twice" at second resolution. |
+| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job (no supervisor loop exists for it) or one whose supervisor has not registered its first beat yet. |
+
+**The caller rule:** once `aliveAgeMs` exceeds `5000`, stop waiting and treat the job as failed — report it as an `unknown` outcome, never as a success and never as the tool itself having errored — even if `state` still reads `running`. 1 second of beat cadence against a 5 second bound is 5× headroom for poll jitter and scheduling delay, not slack for the beat itself to run late by design. A silent-but-healthy command never trips this: the beat has nothing to do with `outputBytes`.
+
+In practice the two signals — `state` and `aliveAgeMs` — usually agree, because the same pid-liveness check that would demote `state` to `unknown` also stops finding a live supervisor at the same moment beats stop landing. `aliveAgeMs` matters when a caller cannot afford to wait for the next reconcile, or when a reused pid could otherwise pass a liveness probe without actually being the job's supervisor: verified end to end by killing a real supervisor process with `SIGKILL` and confirming `aliveAgeMs` exceeds `5000` within ~6 seconds of the kill, with `state` landing on `unknown` in the same window.
+
 ### `erun job start`
 
 `erun job start [flags] -- <command> [args...]`
@@ -957,8 +971,10 @@ An attached job resolves against the named pid and nothing else. It reads `runni
 For an [agent job](#agent-jobs) the text line and the record both carry the progress view, so `status` answers what the agent is doing rather than only that it is running:
 
 ```
-running: sweep, pid 4243, agent claude, editing erun-common/mcp_client.go, 12 turns, 47 tools, 91204 bytes of output
+running: sweep, pid 4243, last beat 210ms ago, agent claude, editing erun-common/mcp_client.go, 12 turns, 47 tools, 91204 bytes of output
 ```
+
+The `last beat <n>ms ago` segment is the text rendering of `aliveAgeMs` (see [The alive contract](#alive-contract)) for a running job — present whenever the record has beaten at least once.
 
 An agent job that has not emitted yet reads `agent claude, no events yet` — distinct from an idle one, and the honest answer while the tool is still starting.
 

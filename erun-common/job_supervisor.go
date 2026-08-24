@@ -593,6 +593,8 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	}
 	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl, agent)
 	defer stop()
+	stopAlive := startEnvironmentJobAliveBeat(recorder)
+	defer stopAlive()
 
 	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, agent: agent, onTruncate: func() {
 		recorder.update(func(job *EnvironmentJob) { job.OutputTruncated = true })
@@ -652,6 +654,46 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.ExitCode = &code
 	})
 	return nil
+}
+
+// startEnvironmentJobAliveBeat stamps the job's alive fields immediately and
+// then on a fixed cadence for as long as the supervisor runs, independent of
+// the lease-renewal/progress ticker below: that one backs off to a 300s
+// interval for a command job, which is 60x too slow to answer "is the
+// supervisor still there" within the 5s bound a caller applies. Stopping it is
+// best-effort like the activity lease — if the supervisor is killed outright,
+// the beat simply stops, and that silence past EnvironmentJobAliveStaleMs is
+// itself the failure signal a caller reads; nothing needs to be undone.
+func startEnvironmentJobAliveBeat(recorder *jobRecorder) func() {
+	beatOnce := func() {
+		recorder.update(func(job *EnvironmentJob) {
+			job.LastAliveAt = time.Now()
+			job.AliveSeq++
+		})
+	}
+	beatOnce()
+
+	done := make(chan struct{})
+	var once sync.Once
+	var stopped sync.WaitGroup
+	stopped.Add(1)
+	go func() {
+		defer stopped.Done()
+		ticker := time.NewTicker(EnvironmentJobAliveHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				beatOnce()
+			}
+		}
+	}()
+	return func() {
+		once.Do(func() { close(done) })
+		stopped.Wait()
+	}
 }
 
 // agentJobProgressInterval is how often an agent job's stream is folded. It is

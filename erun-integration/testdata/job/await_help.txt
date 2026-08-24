@@ -1,7 +1,14 @@
 The wait is bounded and the call returns either an outcome or "still
 running" — it never holds a connection open for the work's lifetime, which
 is what drops under load and leaves a caller unable to tell a dead stream
-from a dead job.
+from a dead job. A job whose supervisor died reads back as unknown with
+timedOut false, its own third case distinct from both success and "still
+running" — never re-await it expecting a different answer.
+
+The reported job's aliveAgeMs is the faster of the two signals: it crosses
+the 5000ms caller threshold before state necessarily catches up, so a
+caller in a hurry can act on it directly instead of waiting for the next
+reconcile (see `erun job status --help`).
 
 Exit codes are the contract: 0 when the job exited 0, 124 when the timeout
 elapsed with the job still running, 125 when the outcome is unknown, and 1
