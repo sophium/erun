@@ -573,6 +573,100 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerStartsAndFinishesSSHDInit: `erun sshd init` runs
+// piped into the shared Local shell, which never produces a PTY exit, so the
+// `==> SSHD init ...` trace lines are its only completion signal — the same
+// structural defect erun#1268 fixed for doctor.
+func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	entry, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev")
+	if !ok {
+		t.Fatal("expected sshd-init entry to be active after ==> SSHD init")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> SSHD init done team/dev")
+	if _, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev"); ok {
+		t.Fatal("expected sshd-init entry to be finished after ==> SSHD init done")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	handler("==> SSHD init failed team/dev: sync remote authorized_keys from key.pub: exit status 1")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if all[0].Error != "sync remote authorized_keys from key.pub: exit status 1" {
+		t.Fatalf("expected parsed reason, got %q", all[0].Error)
+	}
+}
+
+// TestStartSSHDInitFromTraceLocksTerminals: sshd init runs no interactive
+// recovery prompts of its own — unlike doctor, it is a one-shot provisioning
+// action like init/deploy — so it takes the same lockTerminalsForActivity
+// path those do (today a no-op for non-deploy commands per
+// sessionMatchesActivity, but consistent with init's own call).
+func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
+	app.sessions[localSession.key] = localSession
+	app.startSSHDInitFromTrace(selection, "team", "dev")
+	if _, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev"); !ok {
+		t.Fatal("expected sshd-init entry to be active")
+	}
+}
+
+// TestSSHDInitCompletedEventRecordsLastRunOutcome: sshd init's outcome must
+// reach the frontend even though it runs piped into the shared Local shell (no
+// PTY exit) — this is what the Manage dialog's SSH access section renders as
+// the persisted last-run result.
+func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	handler("==> SSHD init failed team/dev: kubectl not reachable")
+
+	events := emits.events(sshdInitCompletedEvent)
+	if len(events) != 1 {
+		t.Fatalf("sshd-init-completed emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(uiSSHDInitCompletedPayload)
+	if !ok {
+		t.Fatalf("sshd-init-completed payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" {
+		t.Fatalf("payload selection = %+v, want team/dev", payload)
+	}
+	if payload.Success {
+		t.Fatalf("expected success=false, got %+v", payload)
+	}
+	if payload.Message != "kubectl not reachable" {
+		t.Fatalf("expected parsed message, got %q", payload.Message)
+	}
+}
+
 func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	// Build/release/push run IN the user's terminal, so locking the session
 	// would freeze the very tab they are reading output in — unlike deploy, they

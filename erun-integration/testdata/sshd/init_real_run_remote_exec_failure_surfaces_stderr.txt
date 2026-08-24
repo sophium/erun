@@ -1,4 +1,5 @@
 audit: erun sshd init --local-port 64022 --public-key <TMP> team dev
+==> SSHD init team/dev
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
@@ -10,4 +11,5 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 5m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+==> SSHD init failed team/dev: sync remote authorized_keys from <TMP> exit status 1: error: unable to upgrade connection: Forbidden (user cannot exec into pod)
 sync remote authorized_keys from <TMP> exit status 1: error: unable to upgrade connection: Forbidden (user cannot exec into pod)

@@ -104,6 +104,21 @@ func sshdSyncSummary(dryRun bool, synced common.WorkspaceSyncResult) string {
 }
 
 func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+	// The desktop pipes `erun sshd init` into its shared Local shell, which
+	// never produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion
+	// And State-Refresh Wiring"), so these are the only completion signal the
+	// desktop has: an activity-queue entry to show the run in progress, and a
+	// recorded outcome the Manage dialog can display as the last run's result.
+	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
+	if err := runSSHDInitForTarget(ctx, result, publicKeyPath, localPort, saveEnvConfig, findProjectRoot, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig); err != nil {
+		ctx.Info(fmt.Sprintf("==> SSHD init failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))
+		return err
+	}
+	ctx.Info(fmt.Sprintf("==> SSHD init done %s/%s", result.Tenant, result.Environment))
+	return nil
+}
+
+func runSSHDInitForTarget(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}

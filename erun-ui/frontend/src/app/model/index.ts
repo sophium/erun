@@ -15,6 +15,7 @@ export type { NormalizedEnvironmentDialogValues } from './normalizedEnvironmentD
 export type { OrchestratorGuidanceLayer } from './orchestratorGuidanceLayer';
 export type { OrchestratorShellActivityPayload } from './orchestratorShellActivityPayload';
 export type { SidebarFocus } from './sidebarFocus';
+export type { SSHDInitCompletedPayload } from './sshdInitCompletedPayload';
 export type { TerminalDataDisposable } from './terminalDataDisposable';
 export type { TerminalExitSelections } from './terminalExitSelections';
 export type { TerminalWriteData } from './terminalWriteData';
