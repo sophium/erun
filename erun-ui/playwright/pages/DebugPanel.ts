@@ -22,16 +22,30 @@ export class DebugPanel {
     return (await this.resizeHandle().count()) > 0 && (await this.resizeHandle().isVisible());
   }
 
-  tab(name: 'erun trace' | 'UI trace'): Locator {
+  tab(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Locator {
     return this.page.getByRole('tab', { name });
   }
 
-  async selectTab(name: 'erun trace' | 'UI trace'): Promise<void> {
+  async selectTab(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Promise<void> {
     await this.tab(name).click();
   }
 
   erunTracePane(): Locator {
     return this.page.getByLabel('erun trace output');
+  }
+
+  // The orchestrator context's own identity block (name, status, linked
+  // environments) sits above its app-log tail (orchestratorLogPane()).
+  orchestratorPane(): Locator {
+    return this.page.getByLabel('orchestrator diagnostics');
+  }
+
+  orchestratorLogPane(): Locator {
+    return this.page.getByLabel('orchestrator output');
+  }
+
+  appLogPane(): Locator {
+    return this.page.getByLabel('app log output');
   }
 
   uiTracePane(): Locator {
@@ -62,5 +76,11 @@ export class DebugPanel {
 
   copyReportButton(): Locator {
     return this.page.getByRole('button', { name: /^(Copy report|Copied|Copy failed)$/ });
+  }
+
+  reportIssueButton(): Locator {
+    return this.page.getByRole('button', {
+      name: /^(Report an erun issue|Opened — full report copied|Could not open issue)$/,
+    });
   }
 }

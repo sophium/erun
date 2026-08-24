@@ -46,6 +46,16 @@ export interface UIEnvTrace {
   notice?: string;
 }
 
+// UIAppLog is the Diagnostics console's read model for the desktop's own
+// durable log — evidence for an orchestrator or app-level fault, neither of
+// which has an env trace to fall back on.
+export interface UIAppLog {
+  available: boolean;
+  content?: string;
+  path: string;
+  reason?: string;
+}
+
 // UIUpgradeVersionCandidate is one newer version an env's registries offered,
 // tagged with the registry it came from.
 export interface UIUpgradeVersionCandidate {

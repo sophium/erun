@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -58,6 +59,58 @@ func TestInitDurableAppLogCapturesLogPrintfCalls(t *testing.T) {
 func restoreLogOutputAfter(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+}
+
+func TestLoadAppLogReportsNoLogCapturedYetWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+
+	app := NewApp(erunUIDeps{})
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+
+	result, err := app.LoadAppLog()
+	if err != nil {
+		t.Fatalf("LoadAppLog: %v", err)
+	}
+	if result.Available {
+		t.Fatalf("expected Available=false with no log file, got %+v", result)
+	}
+	if result.Reason != "no log captured yet" {
+		t.Fatalf("expected the honest empty reason, got %q", result.Reason)
+	}
+}
+
+func TestLoadAppLogReturnsTheDurableLogTail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+
+	app := NewApp(erunUIDeps{})
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+
+	restoreLogOutputAfter(t)
+	closeLog := initDurableAppLog()
+	log.Printf("erun-app: orchestrator erun-issues spawned session 42")
+	closeLog()
+
+	result, err := app.LoadAppLog()
+	if err != nil {
+		t.Fatalf("LoadAppLog: %v", err)
+	}
+	if !result.Available {
+		t.Fatalf("expected Available=true once the log has content, got %+v", result)
+	}
+	if !strings.Contains(result.Content, "orchestrator erun-issues spawned session 42") {
+		t.Fatalf("expected the log line in the read tail, got:\n%s", result.Content)
+	}
+	path, err := appLogPath()
+	if err != nil {
+		t.Fatalf("appLogPath: %v", err)
+	}
+	if result.Path != path {
+		t.Fatalf("expected Path %q, got %q", path, result.Path)
+	}
 }
 
 func TestBoundedLogFileRotatesPastTheCap(t *testing.T) {

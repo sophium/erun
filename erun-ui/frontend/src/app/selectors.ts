@@ -166,6 +166,31 @@ export interface ReviewEnvTarget {
   environment: string;
 }
 
+// DiagnosticsContext names which evidence the Diagnostics console shows: an
+// orchestrator's own state, the selected environment's, or — when neither is
+// active — the desktop app itself, so the panel is never blank.
+export type DiagnosticsContext =
+  | { kind: 'orchestrator'; orchestrator: OrchestratorInfo }
+  | { kind: 'environment'; tenant: string; environment: string }
+  | { kind: 'app' };
+
+// selectDiagnosticsContext mirrors selectReviewEnvTargets' own precedence
+// (orchestrator session over sidebar selection) rather than introducing a
+// second notion of "what's active" — an orchestrator session used to leave
+// the Diagnostics panel reading "environment: none selected" with no trace,
+// because it derived its context from state.selection.selected alone (#1241).
+export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', orchestrator };
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    return { kind: 'environment', tenant: selected.tenant, environment: selected.environment };
+  }
+  return { kind: 'app' };
+};
+
 // selectReviewEnvTargets resolves which environments the diff panel shows: an
 // orchestrator session's linked environments in its configured order, else the
 // single selected environment. A single environment is the one-entry case, so
