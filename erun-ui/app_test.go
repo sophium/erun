@@ -4787,7 +4787,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 		ManagedCloud: true,
 		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
-	})
+	}, true)
 
 	if ui.CloudContextStatus != eruncommon.CloudContextStatusRunning {
 		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusRunning, ui.CloudContextStatus)
@@ -4835,7 +4835,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 		ManagedCloud: true,
 		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
-	})
+	}, true)
 
 	if ui.CloudContextStatus != eruncommon.CloudContextStatusStopped {
 		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusStopped, ui.CloudContextStatus)
