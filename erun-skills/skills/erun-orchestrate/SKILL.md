@@ -90,6 +90,7 @@ Read what you control from erun's config store — never infer it from what happ
 
 - **Detach long work and poll cheaply.** A held-open stream dies under load and can outlive its own authorization; a detached job survives both.
 - **Take an activity lease for the lifetime of detached work** (`erun activity lease take --name <what>`, or the MCP lease tool), and release it when the work ends. The lease is the environment's, wherever you take it from, and so is any `--pid` you reconcile it against — a pid from your own machine names nothing there. A detached job makes no calls while it runs, so without a lease the environment reports as idle and auto-stop may take it out mid-run — and the operator sees nothing happening. The lease also names the work, which is what the desktop renders. It expires and reconciles against its holder, so a crashed job cannot pin an environment awake.
+- **Before any mutating work in a target environment — a git checkout, staging, or a commit — take the exclusive worktree lease first** (`erun activity lease take --name <what> --exclusive --orchestrator "$ERUN_ORCHESTRATOR_ID"`, or the MCP lease tool with `exclusive: true`). This is not the presence lease above; it is a real claim, and it can be refused. A refusal names the current holder — another agent job's lease, or an operator's own SSH session in the environment. On refusal, **stop and report the holder; do not retry-loop or fall back to working in the tree anyway.** A holder that looks stale is not yours to clear by hand — the lease reclaims a dead or lapsed holder on its own read; if it is not reclaiming, that is a signal to investigate, not to route around. Release the exclusive claim when the work ends, the same as any other lease. Exclusivity is scoped to the worktree you are driving, not to the whole environment: a second clone of the same repo in the same pod claims its own scope (`--scope <path>`) and is not blocked by yours, so this is a per-tree claim, never a reason to serialize unrelated work in the same pod.
 - **Send a transferred script, not an interpolated string.** Anything a wrapper can expand, it will — in the wrong place.
 - **Judge by artifacts**, not by an exit code a wrapper captured: the tool's own verdict, its
   reports, committed state. A wrapper reports its *last* command, so one ending in an `echo`, a
@@ -110,11 +111,12 @@ Read what you control from erun's config store — never infer it from what happ
   true, misreporting a pending challenge as an issued certificate. Select by `type` —
   `conditions[?(@.type=="Ready")]`, or `kubectl wait --for=condition=Ready`, which cannot be indexed
   wrongly — for any status array, not just certificates.
-- **One agent per working tree.** Check for a live one before starting another, and never assume a
-  branch is based where you think. The rule governs *your* hands too, and in every environment, not
-  just the one you are driving: uncommitted work in an idle-looking tree may be a running job's, and
-  a release in flight owns its build host until it exits. Check for live work before you touch a
-  tree, prune a cache, or move a HEAD.
+- **One agent per working tree.** The exclusive worktree lease above is what actually enforces
+  this now — take it before touching a tree, prune a cache, or move a HEAD, rather than eyeballing
+  whether one looks idle. Never assume a branch is based where you think. The rule governs *your*
+  hands too, and in every environment, not just the one you are driving: uncommitted work in an
+  idle-looking tree may be a running job's, and a release in flight owns its build host until it
+  exits.
 - **Check capacity before launching heavy work.** Limits cap, they do not reserve, and a process killed inside a container may leave no trace on the container.
 - **A tree you did not look for is not a tree that does not exist.** "No tree is free" is a claim
   about the world, not a memory of one, and it is cheap to check: a leftover clone from an earlier

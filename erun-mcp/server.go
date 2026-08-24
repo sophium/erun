@@ -181,11 +181,12 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name: "activity_lease_take",
 		Description: "Hold a named lease for the lifetime of long work in this env, so it reports as busy and idle-stop leaves it alone. " +
 			"Take one before detaching a build, test suite, or agent run: a detached job makes no MCP calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting. " +
-			"Re-taking the same id renews it. Pass the detached job's pid so the lease is reclaimed if it dies; a lease also expires on its own, so it can never pin the env awake forever.",
+			"Re-taking the same id renews it. Pass the detached job's pid so the lease is reclaimed if it dies; a lease also expires on its own, so it can never pin the env awake forever. " +
+			"Set exclusive=true before any mutating work (git checkout, staging, committing) in a target environment: at most one exclusive holder is allowed per scope (default 'worktree'), so a second agent job or orchestrator already working the same worktree is refused and named in the error, while a job in a different scope - a separate clone in the same pod - is unaffected. An exclusive take is also refused while an operator's own SSH session is active in the environment, since the operator never takes a lease of their own.",
 	}, activityLeaseTakeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
-		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds.",
+		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it.",
 	}, activityLeaseReleaseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_list",

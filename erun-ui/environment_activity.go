@@ -194,30 +194,11 @@ func environmentBusyFromIdleStatus(status eruncommon.EnvironmentIdleStatus) (boo
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
 		}
-		if detail := environmentBusyMarkerDetail(marker.Name); detail != "" {
+		if detail := eruncommon.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
 			return true, detail
 		}
 	}
 	return false, ""
-}
-
-func environmentBusyMarkerDetail(marker string) string {
-	switch marker {
-	case eruncommon.ActivityKindProcess:
-		return "running build or agent processes"
-	case eruncommon.ActivityKindMCP:
-		return "an agent is driving it over MCP"
-	case eruncommon.ActivityKindCodex:
-		return "an AI session is working"
-	case eruncommon.ActivityKindSSH:
-		return "an SSH session is active"
-	case eruncommon.ActivityKindAPI:
-		return "serving API traffic"
-	case eruncommon.ActivityKindCLI:
-		return "running erun commands"
-	default:
-		return "working"
-	}
 }
 
 // emitEnvActivityIfChanged publishes only transitions. Most environments in a

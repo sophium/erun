@@ -265,6 +265,36 @@ func TestActivityLeaseOffEnvironment(t *testing.T) {
 		}
 	})
 
+	t.Run("take_exclusive_forwards_the_exclusive_claim_to_the_environment", func(t *testing.T) {
+		// erun#1245's exclusive mode has to reach the environment the same way
+		// plain presence already does: through activity_lease_take, counting
+		// as activity, never as an idle probe.
+		skipIfPortsBusy(t, leaseEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", leaseEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"held"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev",` +
+			`"lease":{"id":"job-fix-1245","name":"job-fix-1245","exclusive":true,"scope":"worktree","expiresAt":"2099-01-01T00:00:00Z"},` +
+			`"held":[{"id":"job-fix-1245","name":"job-fix-1245","exclusive":true,"scope":"worktree","expiresAt":"2099-01-01T00:00:00Z"}]}}`}}
+		edge.start(t, leaseEdgeLocalPort)
+
+		result := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--exclusive", "--orchestrator", "petios",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "activity_lease_take" {
+			t.Fatalf("the environment was asked for %q, want activity_lease_take", call.Tool)
+		}
+		if call.IdleProbe {
+			t.Errorf("an exclusive activity_lease_take must not carry the idle-probe header")
+		}
+	})
+
 	t.Run("list_reads_the_environments_held_leases", func(t *testing.T) {
 		skipIfPortsBusy(t, leaseEdgeLocalPort)
 		setup := env.New(t)

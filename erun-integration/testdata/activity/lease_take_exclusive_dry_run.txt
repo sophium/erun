@@ -1,0 +1,2 @@
+audit: erun activity lease take --dry-run --environment dev --exclusive --name job-fix-1245 --orchestrator petios --tenant team
+activity lease-take team dev job-fix-1245 --exclusive --scope worktree

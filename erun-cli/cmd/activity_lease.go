@@ -37,6 +37,9 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	var id string
 	var pid int
 	var ttl time.Duration
+	var exclusive bool
+	var scope string
+	var orchestrator string
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "take",
@@ -45,12 +48,25 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 			"reports as busy with the lease's name, and idle-stop will not stop it.\n\n" +
 			"Taking an existing id renews it, so a wrapper can refresh on a timer. A lease\n" +
 			"expires without renewal, and one whose --pid is gone is reclaimed on the next\n" +
-			"read, so a crashed job cannot keep an environment awake.",
+			"read, so a crashed job cannot keep an environment awake.\n\n" +
+			"Pass --exclusive before any mutating work in a target environment (erun#1245):\n" +
+			"at most one exclusive holder is allowed per --scope (default \"worktree\"), so a\n" +
+			"second agent job or orchestrator already working the same worktree is refused\n" +
+			"and named in the error, while a job in a different scope - a separate clone in\n" +
+			"the same pod - is unaffected. An exclusive take is also refused while an\n" +
+			"operator's own SSH session is active in the environment.",
 		Example: "  # From inside the environment, wrap a long build so it stays busy for the build.\n" +
 			"  erun activity lease take --tenant team --environment dev --name gradle-build --pid $$\n" +
-			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT",
+			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT\n\n" +
+			"  # Before mutating work: claim exclusivity over the worktree, refusing if another\n" +
+			"  # job or orchestrator already holds it.\n" +
+			"  erun activity lease take --tenant team --environment dev --name job-fix-1245 \\\n" +
+			"    --exclusive --orchestrator \"$ERUN_ORCHESTRATOR_ID\"",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if exclusive && !cmd.Flags().Changed("ttl") {
+				ttl = common.DefaultExclusiveEnvironmentActivityLeaseTTL
+			}
 			return runActivityLeaseTake(cmd, resolveOpen, common.TakeEnvironmentActivityLeaseParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -58,6 +74,9 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 				ID:          id,
 				PID:         pid,
 				TTL:         ttl,
+				Scope:       scope,
+				Exclusive:   exclusive,
+				Holder:      common.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			}, jsonOutput)
 		},
 	}
@@ -65,7 +84,10 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "What the lease is holding the environment for (shown to the operator)")
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to take or renew (defaults to the name)")
 	cmd.Flags().IntVar(&pid, "pid", 0, "Holder process in the environment to reconcile the lease against; the lease is reclaimed once it exits")
-	cmd.Flags().DurationVar(&ttl, "ttl", common.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal")
+	cmd.Flags().DurationVar(&ttl, "ttl", common.DefaultEnvironmentActivityLeaseTTL, "How long the lease holds without a renewal (defaults to 5m instead when --exclusive is set)")
+	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
+	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
+	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON")
 	addDryRunFlag(cmd)
 	return cmd
@@ -97,7 +119,15 @@ func takeLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenR
 		return takeLeaseInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
-		commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
+		if params.Exclusive {
+			scope := params.Scope
+			if strings.TrimSpace(scope) == "" {
+				scope = "worktree"
+			}
+			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name, "--exclusive", "--scope", scope)
+		} else {
+			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
+		}
 		return common.EnvironmentActivityLease{}, false, nil
 	}
 	lease, err := common.TakeEnvironmentActivityLease(params)
@@ -111,23 +141,28 @@ func newActivityLeaseReleaseCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var id string
+	var exclusive bool
+	var scope string
 	cmd := &cobra.Command{
-		Use:     "release",
-		Short:   "Release a held lease so the environment can go idle again",
-		Long:    "Releasing a lease that was never taken, or has already expired, succeeds — so a\nwrapper's exit trap never fails a job that finished cleanly.",
-		Example: "  erun activity lease release --tenant team --environment dev --id gradle-build",
-		Args:    cobra.NoArgs,
+		Use:   "release",
+		Short: "Release a held lease so the environment can go idle again",
+		Long:  "Releasing a lease that was never taken, or has already expired, succeeds — so a\nwrapper's exit trap never fails a job that finished cleanly.\n\nPass --exclusive and the same --scope used at take time to release an\nexclusive claim; only the id that took it can release it.",
+		Example: "  erun activity lease release --tenant team --environment dev --id gradle-build\n" +
+			"  erun activity lease release --tenant team --environment dev --id job-fix-1245 --exclusive",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivityLeaseRelease(cmd, resolveOpen, tenant, environment, id)
+			return runActivityLeaseRelease(cmd, resolveOpen, tenant, environment, id, scope, exclusive)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Lease id to release")
+	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Release an exclusive claim rather than a plain lease; must match how it was taken")
+	cmd.Flags().StringVar(&scope, "scope", "", "The scope the exclusive claim was taken on (default \"worktree\"); only meaningful with --exclusive")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment, id string) error {
+func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
@@ -135,7 +170,7 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 		return fmt.Errorf("lease id is required")
 	}
 	ctx := commandContext(cmd)
-	resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id)
+	resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
 	if err != nil {
 		return err
 	}
@@ -146,13 +181,27 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 	return err
 }
 
-func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (bool, error) {
+func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (bool, error) {
 	if !environmentTargetsItself() {
-		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
+		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
 	if commandCtx.DryRun {
-		commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
+		if exclusive {
+			resolvedScope := scope
+			if strings.TrimSpace(resolvedScope) == "" {
+				resolvedScope = "worktree"
+			}
+			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id, "--exclusive", "--scope", resolvedScope)
+		} else {
+			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
+		}
 		return false, nil
+	}
+	if exclusive {
+		if err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if err := common.ReleaseEnvironmentActivityLease(tenant, environment, id); err != nil {
 		return false, err

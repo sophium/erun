@@ -765,6 +765,93 @@ func TestActivity(t *testing.T) {
 		golden.Equal(t, "activity/lease_take_requires_a_name", normalize.Apply(result.Combined))
 	})
 
+	t.Run("lease_take_exclusive_dry_run", func(t *testing.T) {
+		// erun#1245: the dry-run trace must show the exclusive claim and its
+		// resolved scope, since that is the decision the command would make.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--exclusive", "--orchestrator", "petios", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "activity/lease_take_exclusive_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("lease_take_exclusive_refuses_a_second_holder_and_names_it", func(t *testing.T) {
+		// The collision #1245 exists to close: two agent jobs in the same
+		// worktree. The second exclusive take must fail and name the first.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		first := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1201", "--id", "job-fix-1201", "--exclusive", "--orchestrator", "petios",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if first.ExitCode != 0 {
+			t.Fatalf("first take: exit %d: %s", first.ExitCode, first.Combined)
+		}
+		second := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--id", "job-fix-1245", "--exclusive", "--orchestrator", "erun",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if second.ExitCode == 0 {
+			t.Fatalf("expected the second exclusive take to be refused, got exit 0: %s", second.Combined)
+		}
+		if !strings.Contains(second.Combined, "job-fix-1201") || !strings.Contains(second.Combined, "petios") {
+			t.Fatalf("refusal must name the actual holder (id and orchestrator), got:\n%s", second.Combined)
+		}
+	})
+
+	t.Run("lease_take_exclusive_allows_a_different_scope_to_coexist", func(t *testing.T) {
+		// Two clones of the same repo in one pod is legitimate parallelism,
+		// not a collision - exclusivity must be scoped, not environment-wide.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		first := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "clone-a-job", "--id", "clone-a-job", "--exclusive", "--scope", "/git/clone-a",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if first.ExitCode != 0 {
+			t.Fatalf("first take: exit %d: %s", first.ExitCode, first.Combined)
+		}
+		second := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "clone-b-job", "--id", "clone-b-job", "--exclusive", "--scope", "/git/clone-b",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if second.ExitCode != 0 {
+			t.Fatalf("expected a different scope to succeed without conflict, got exit %d: %s", second.ExitCode, second.Combined)
+		}
+	})
+
+	t.Run("lease_release_exclusive_round_trip", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--id", "job-fix-1245", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		release := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev",
+			"--id", "job-fix-1245", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if release.ExitCode != 0 {
+			t.Fatalf("release: exit %d: %s", release.ExitCode, release.Combined)
+		}
+		// The scope is free again: a fresh exclusive take on it succeeds.
+		again := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1250", "--id", "job-fix-1250", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if again.ExitCode != 0 {
+			t.Fatalf("expected the scope free after release, got exit %d: %s", again.ExitCode, again.Combined)
+		}
+	})
+
 	t.Run("stop_ready_blocked_by_a_held_lease", func(t *testing.T) {
 		// AC6 of the stop work: an otherwise-idle cloud-managed env that holds a
 		// lease must not be stopped, and the refusal must name the lease so an

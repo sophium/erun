@@ -1,9 +1,11 @@
 package eruncommon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -192,5 +194,295 @@ func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
 	}
 	if len(leased.Leases) != 1 {
 		t.Errorf("the status must carry the leases so a client can render them, got %+v", leased.Leases)
+	}
+}
+
+// erun#1245: two orchestrators, or two agent jobs, driving the same worktree
+// with no shared visibility. A plain lease is presence, not exclusion, so the
+// tests below cover the exclusive mode that actually refuses a second holder.
+
+func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	first, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
+		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "petios"}, Now: now,
+	})
+	if err != nil {
+		t.Fatalf("first take: %v", err)
+	}
+	if first.Scope != "worktree" {
+		t.Errorf("expected the default scope to be worktree, got %q", first.Scope)
+	}
+
+	_, err = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1245", ID: "job-fix-1245",
+		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "erun"}, Now: now.Add(time.Second),
+	})
+	var conflict *EnvironmentActivityLeaseConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected a conflict error, got %v", err)
+	}
+	if conflict.Holder.ID != "job-fix-1201" || conflict.Holder.Holder.Orchestrator != "petios" {
+		// The Validation section of #1245 is explicit: assert on the identity
+		// carried in the error, not merely that the call failed.
+		t.Fatalf("refusal must name the actual holder, got %+v", conflict.Holder)
+	}
+}
+
+func TestExclusiveLeaseAllowsDifferentScopesToCoexist(t *testing.T) {
+	// Two clones of the same repo in one pod: legitimate parallelism, not a
+	// collision. Exclusivity must be scoped, never environment-wide.
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "pod", Name: "clone-a-job", ID: "clone-a-job",
+		Scope: "/home/erun/work/clone-a", Exclusive: true, Now: now,
+	}); err != nil {
+		t.Fatalf("take scope a: %v", err)
+	}
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "pod", Name: "clone-b-job", ID: "clone-b-job",
+		Scope: "/home/erun/work/clone-b", Exclusive: true, Now: now,
+	}); err != nil {
+		t.Fatalf("expected a different scope to succeed without conflict, got %v", err)
+	}
+
+	held, err := loadEnvironmentActivityLeases("erun", "pod", now.Add(time.Minute), alwaysAlive)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(held) != 2 {
+		t.Fatalf("expected both scoped claims held, got %+v", held)
+	}
+}
+
+func TestExclusiveLeaseRenewalBySameHolderSucceeds(t *testing.T) {
+	isolateActivityCache(t)
+	start := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
+		Exclusive: true, TTL: 5 * time.Minute, Now: start,
+	}); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	renewal, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
+		Exclusive: true, TTL: 5 * time.Minute, Now: start.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("expected the same holder's renewal to succeed, got %v", err)
+	}
+	if !renewal.StartedAt.Equal(start) {
+		t.Errorf("renewal must keep the original start, got %s", renewal.StartedAt)
+	}
+	if !renewal.ExpiresAt.Equal(start.Add(time.Minute).Add(5 * time.Minute)) {
+		t.Errorf("renewal must extend the expiry from now, got %s", renewal.ExpiresAt)
+	}
+}
+
+func TestExclusiveLeaseTakeRaceExactlyOneWins(t *testing.T) {
+	// The test #1245 calls out explicitly: two concurrent exclusive takes in
+	// the same scope, exactly one succeeds. Plain os.WriteFile (create-or-
+	// overwrite) cannot pass this; only the O_EXCL create can.
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	const contenders = 8
+	var wg sync.WaitGroup
+	successes := make([]bool, contenders)
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id := "job-" + string(rune('a'+i))
+			_, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+				Tenant: "erun", Environment: "race", Name: id, ID: id,
+				Exclusive: true, Now: now,
+			})
+			successes[i] = err == nil
+		}(i)
+	}
+	wg.Wait()
+
+	won := 0
+	for _, ok := range successes {
+		if ok {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("expected exactly one of %d concurrent claimants to win, got %d", contenders, won)
+	}
+
+	held, err := loadEnvironmentActivityLeases("erun", "race", now.Add(time.Minute), alwaysAlive)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("expected exactly one holder on disk, got %+v", held)
+	}
+}
+
+func TestExclusiveLeaseReclaimsALapsedRemoteHolder(t *testing.T) {
+	// No PID to probe for a remote holder (an orchestrator driving over MCP
+	// from another host), so an expired TTL is the only reclaim path.
+	isolateActivityCache(t)
+	start := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "stale-job", ID: "stale-job",
+		Exclusive: true, TTL: time.Minute, Now: start,
+	}); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	after := start.Add(5 * time.Minute)
+	next, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "fresh-job", ID: "fresh-job",
+		Exclusive: true, TTL: time.Minute, Now: after,
+	})
+	if err != nil {
+		t.Fatalf("expected the lapsed holder to be reclaimed, got %v", err)
+	}
+	if next.ID != "fresh-job" {
+		t.Errorf("expected the new holder to win the scope, got %+v", next)
+	}
+}
+
+func TestExclusiveLeaseReclaimsADeadLocalHolderOnRead(t *testing.T) {
+	// A real dead pid is racy and recyclable (see the file header comment on
+	// TestActivityLeaseOrphanedByADeadHolderIsReclaimed), so this drives the
+	// same read-path reclaim through the injectable liveness function rather
+	// than a real pid.
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "detached-job", ID: "detached-job",
+		PID: 4242, Exclusive: true, TTL: time.Hour, Now: now,
+	}); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	held, err := loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
+	if err != nil {
+		t.Fatalf("load with live holder: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("expected the live holder's exclusive claim held, got %+v", held)
+	}
+
+	held, err = loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), neverAlive)
+	if err != nil {
+		t.Fatalf("load with dead holder: %v", err)
+	}
+	if len(held) != 0 {
+		t.Fatalf("expected the orphaned exclusive claim reclaimed, got %+v", held)
+	}
+}
+
+func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
+		Exclusive: true, Now: now,
+	}); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	// A caller that never held the scope releasing by scope name alone must
+	// not be able to drop the real holder's claim out from under them.
+	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else"); err != nil {
+		t.Fatalf("mismatched release must be a no-op, not an error: %v", err)
+	}
+	held, err := loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("expected the real holder's claim to survive a mismatched release, got %+v", held)
+	}
+
+	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	held, err = loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
+	if err != nil {
+		t.Fatalf("load after release: %v", err)
+	}
+	if len(held) != 0 {
+		t.Fatalf("expected the scope free after its own holder released it, got %+v", held)
+	}
+
+	// Releasing an already-vacated scope is success, matching the shared
+	// lease's idempotence.
+	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
+		t.Fatalf("expected releasing a vacated scope to succeed, got %v", err)
+	}
+}
+
+func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
+		Exclusive: true, Now: now,
+	}); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+
+	// observe/diff/usage-shaped reads go through exactly this path (leases,
+	// then idle status) and must see the exclusive claim without being
+	// refused by it - only a second *exclusive take* can be refused.
+	held, err := LoadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("read-only list must not be blocked, got %v", err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("expected the exclusive claim visible to a read-only caller, got %+v", held)
+	}
+
+	status, err := ResolveEnvironmentIdleStatus(EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}, nil, held, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("resolve idle status: %v", err)
+	}
+	if status.StopEligible {
+		t.Fatal("a held exclusive lease must still defer idle-stop like any other lease")
+	}
+}
+
+func TestEnvironmentOperatorPresenceReason(t *testing.T) {
+	idleMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: true} }
+	busyMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: false} }
+
+	if _, present := EnvironmentOperatorPresenceReason(EnvironmentIdleStatus{}); present {
+		t.Error("no markers at all must not report an operator present")
+	}
+
+	sshBusy := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(ActivityKindSSH)}}
+	reason, present := EnvironmentOperatorPresenceReason(sshBusy)
+	if !present || reason == "" {
+		t.Fatalf("a busy ssh marker must report an operator present, got present=%v reason=%q", present, reason)
+	}
+
+	// Deliberately narrower than a literal reading of #1245: "process" and
+	// "codex" also fire for an orchestrator's own detached job (job_agent.go
+	// execs the same wrapped claude/codex binaries the interactive session
+	// uses), so gating on them would make an orchestrator refuse itself and
+	// would make a second legitimate job in a different clone of the same pod
+	// refuse against the first job's resident process. Only ssh is
+	// unambiguous. See the comment on environmentOperatorPresenceMarkers.
+	for _, kind := range []string{ActivityKindProcess, ActivityKindCodex, ActivityKindMCP, ActivityKindCLI, ActivityKindAPI} {
+		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(ActivityKindSSH)}}
+		if _, present := EnvironmentOperatorPresenceReason(status); present {
+			t.Errorf("marker %q must not by itself report an operator present", kind)
+		}
 	}
 }
