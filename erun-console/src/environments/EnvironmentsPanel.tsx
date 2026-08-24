@@ -1,3 +1,13 @@
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  FieldLabel,
+  Input,
+  SelectField,
+} from 'erun-kit';
 import * as React from 'react';
 
 import { type CloudContext, type Environment, isTearingDown } from '../config/types';
@@ -9,36 +19,26 @@ import { useDeployController, useRegisterEnvironmentController } from './control
 // layer over the two controllers — no business logic lives here.
 
 const ENV_TYPES = ['runtime', 'remote-agent', 'local-agent'];
+// Radix Select items cannot carry an empty-string value, so "no cloud context"
+// needs a sentinel distinct from every real contextId.
+const NO_CONTEXT = '__none__';
 
 function RegisterFeedback({ state }: { state: RegisterState }): React.ReactElement | null {
   if (state.status === 'created') {
     return (
-      <p className="provision-feedback provision-feedback--ok" role="status">
+      <p className="text-sm text-muted-foreground" role="status">
         Environment {state.environment.name} registered.
       </p>
     );
   }
   if (state.status === 'error') {
     return (
-      <p className="provision-feedback provision-feedback--error" role="alert">
+      <p className="text-sm text-destructive" role="alert">
         Could not register environment: {state.message}
       </p>
     );
   }
   return null;
-}
-
-function ContextOptions({ contexts }: { contexts: CloudContext[] }): React.ReactElement {
-  return (
-    <>
-      {contexts.map((context) => (
-        <option key={context.contextId} value={context.contextId}>
-          {context.name}
-          {context.status !== undefined ? ` (${context.status})` : ''}
-        </option>
-      ))}
-    </>
-  );
 }
 
 interface RegisterFormValues {
@@ -47,6 +47,16 @@ interface RegisterFormValues {
   contextId: string;
   kubernetesContext: string;
   runtimeVersion: string;
+}
+
+function contextOptions(contexts: CloudContext[]): { value: string; label: string }[] {
+  return [
+    { value: NO_CONTEXT, label: '— none —' },
+    ...contexts.map((context) => ({
+      value: context.contextId,
+      label: context.status !== undefined ? `${context.name} (${context.status})` : context.name,
+    })),
+  ];
 }
 
 function RegisterForm({
@@ -60,73 +70,78 @@ function RegisterForm({
 }): React.ReactElement {
   const [name, setName] = React.useState('');
   const [type, setType] = React.useState('runtime');
-  const [contextId, setContextId] = React.useState('');
+  const [contextId, setContextId] = React.useState(NO_CONTEXT);
   const [kubernetesContext, setKubernetesContext] = React.useState('');
   const [runtimeVersion, setRuntimeVersion] = React.useState('');
   const busy = state.status === 'creating';
 
   const submit = (event: React.SyntheticEvent): void => {
     event.preventDefault();
-    onRegister({ name, type, contextId, kubernetesContext, runtimeVersion });
+    onRegister({
+      name,
+      type,
+      contextId: contextId === NO_CONTEXT ? '' : contextId,
+      kubernetesContext,
+      runtimeVersion,
+    });
   };
 
   return (
-    <form className="provision-form" onSubmit={submit} aria-labelledby="register-env-heading">
-      <h3 id="register-env-heading">Register an environment</h3>
-      <label htmlFor="env-name">Name</label>
-      <input
-        id="env-name"
-        value={name}
-        onChange={(e) => {
-          setName(e.target.value);
-        }}
-        required
-      />
-      <label htmlFor="env-type">Type</label>
-      <select
+    <form className="grid max-w-md gap-3" onSubmit={submit} aria-labelledby="register-env-heading">
+      <h3 id="register-env-heading" className="text-sm font-semibold text-foreground">
+        Register an environment
+      </h3>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="env-name" required>
+          Name
+        </FieldLabel>
+        <Input
+          id="env-name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <SelectField
         id="env-type"
+        label="Type"
         value={type}
-        onChange={(e) => {
-          setType(e.target.value);
-        }}
-      >
-        {ENV_TYPES.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-      <label htmlFor="env-context">Cloud context</label>
-      <select
+        options={ENV_TYPES.map((option) => ({ value: option, label: option }))}
+        onChange={setType}
+      />
+      <SelectField
         id="env-context"
+        label="Cloud context"
         value={contextId}
-        onChange={(e) => {
-          setContextId(e.target.value);
-        }}
-      >
-        <option value="">— none —</option>
-        <ContextOptions contexts={contexts} />
-      </select>
-      <label htmlFor="env-kubernetes-context">Kubernetes context (optional)</label>
-      <input
-        id="env-kubernetes-context"
-        value={kubernetesContext}
-        onChange={(e) => {
-          setKubernetesContext(e.target.value);
-        }}
+        options={contextOptions(contexts)}
+        onChange={setContextId}
       />
-      <label htmlFor="env-runtime-version">Runtime version (optional)</label>
-      <input
-        id="env-runtime-version"
-        value={runtimeVersion}
-        onChange={(e) => {
-          setRuntimeVersion(e.target.value);
-        }}
-        placeholder="1.2.3"
-      />
-      <button type="submit" disabled={busy}>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="env-kubernetes-context">Kubernetes context (optional)</FieldLabel>
+        <Input
+          id="env-kubernetes-context"
+          value={kubernetesContext}
+          onChange={(e) => {
+            setKubernetesContext(e.target.value);
+          }}
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="env-runtime-version">Runtime version (optional)</FieldLabel>
+        <Input
+          id="env-runtime-version"
+          value={runtimeVersion}
+          onChange={(e) => {
+            setRuntimeVersion(e.target.value);
+          }}
+          placeholder="1.2.3"
+        />
+      </div>
+      <Button type="submit" disabled={busy} className="justify-self-start">
         {busy ? 'Registering…' : 'Register environment'}
-      </button>
+      </Button>
       <RegisterFeedback state={state} />
     </form>
   );
@@ -191,9 +206,13 @@ function DeployStatus({
   // version, the registries probed, and the ways out.
   const reason = state.status === 'failed' ? state.environment.provisionError : undefined;
   return (
-    <div className="deploy-status" role={deployFeedbackRole(state)} aria-live="polite">
+    <div
+      className="text-sm text-muted-foreground"
+      role={deployFeedbackRole(state)}
+      aria-live="polite"
+    >
       <p>{line}</p>
-      {reason !== undefined && <p className="context-error">{reason}</p>}
+      {reason !== undefined && <p className="text-xs text-destructive">{reason}</p>}
     </div>
   );
 }
@@ -208,16 +227,16 @@ function DeployStatus({
 function TeardownRow({ environment }: { environment: Environment }): React.ReactElement {
   const deleting = environment.status === 'deleting';
   return (
-    <li className="deploy-row deploy-row--tearing-down">
-      <span className="deploy-env-name">{environment.name}</span>
-      <div className="deploy-status" role="status" aria-live="polite">
+    <li className="grid gap-1 border-b border-border py-3 last:border-b-0">
+      <span className="font-medium text-foreground">{environment.name}</span>
+      <div className="text-sm text-muted-foreground" role="status" aria-live="polite">
         <p>
           {deleting
             ? `${environment.name} is being deleted, so it cannot be deployed.`
             : `${environment.name}'s delete is blocked and still outstanding, so it cannot be deployed. Resolve the teardown first.`}
         </p>
         {environment.deleteError !== undefined && (
-          <p className="context-error">{environment.deleteError}</p>
+          <p className="text-xs text-destructive">{environment.deleteError}</p>
         )}
       </div>
     </li>
@@ -240,26 +259,30 @@ function EnvironmentDeployRow({
     return <TeardownRow environment={environment} />;
   }
   return (
-    <li className="deploy-row">
-      <span className="deploy-env-name">{environment.name}</span>
-      <label htmlFor={versionInputId}>Version</label>
-      <input
-        id={versionInputId}
-        value={version}
-        onChange={(e) => {
-          setVersion(e.target.value);
-        }}
-        placeholder={environment.runtimeVersion ?? 'pinned version'}
-      />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          onDeploy(environment.environmentId, version.trim());
-        }}
-      >
-        {busy ? 'Deploying…' : 'Deploy'}
-      </button>
+    <li className="grid gap-2 border-b border-border py-3 last:border-b-0">
+      <span className="font-medium text-foreground">{environment.name}</span>
+      <div className="flex items-end gap-2">
+        <div className="grid gap-2">
+          <FieldLabel htmlFor={versionInputId}>Version</FieldLabel>
+          <Input
+            id={versionInputId}
+            value={version}
+            onChange={(e) => {
+              setVersion(e.target.value);
+            }}
+            placeholder={environment.runtimeVersion ?? 'pinned version'}
+          />
+        </div>
+        <Button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            onDeploy(environment.environmentId, version.trim());
+          }}
+        >
+          {busy ? 'Deploying…' : 'Deploy'}
+        </Button>
+      </div>
       <DeployStatus state={state} environment={environment} />
     </li>
   );
@@ -276,10 +299,10 @@ function DeployList({
 }): React.ReactElement {
   const runtimeEnvironments = environments.filter((environment) => environment.type === 'runtime');
   if (runtimeEnvironments.length === 0) {
-    return <p className="empty-state">No runtime environments to deploy.</p>;
+    return <p className="text-sm text-muted-foreground">No runtime environments to deploy.</p>;
   }
   return (
-    <ul className="deploy-list">
+    <ul>
       {runtimeEnvironments.map((environment) => (
         <EnvironmentDeployRow
           key={environment.environmentId}
@@ -307,25 +330,35 @@ export function EnvironmentsPanel({
   const { states, deploy } = useDeployController(token, onChanged);
 
   return (
-    <section className="provision-panel" aria-labelledby="environments-panel-heading">
-      <h2 id="environments-panel-heading">Register and deploy environments</h2>
-      <RegisterForm
-        contexts={contexts}
-        state={state}
-        onRegister={(values) => {
-          register({
-            name: values.name.trim(),
-            type: values.type,
-            contextId: values.contextId.trim() === '' ? undefined : values.contextId.trim(),
-            kubernetesContext:
-              values.kubernetesContext.trim() === '' ? undefined : values.kubernetesContext.trim(),
-            runtimeVersion:
-              values.runtimeVersion.trim() === '' ? undefined : values.runtimeVersion.trim(),
-          });
-        }}
-      />
-      <h3>Deploy a runtime environment</h3>
-      <DeployList environments={environments} states={states} onDeploy={deploy} />
-    </section>
+    <Card aria-labelledby="environments-panel-heading">
+      <CardHeader>
+        <CardTitle id="environments-panel-heading">Register and deploy environments</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-6">
+        <RegisterForm
+          contexts={contexts}
+          state={state}
+          onRegister={(values) => {
+            register({
+              name: values.name.trim(),
+              type: values.type,
+              contextId: values.contextId.trim() === '' ? undefined : values.contextId.trim(),
+              kubernetesContext:
+                values.kubernetesContext.trim() === ''
+                  ? undefined
+                  : values.kubernetesContext.trim(),
+              runtimeVersion:
+                values.runtimeVersion.trim() === '' ? undefined : values.runtimeVersion.trim(),
+            });
+          }}
+        />
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-foreground">
+            Deploy a runtime environment
+          </h3>
+          <DeployList environments={environments} states={states} onDeploy={deploy} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,24 +1,21 @@
+import { TooltipProvider } from 'erun-kit';
 import * as React from 'react';
 
-import { beginLogin, type OidcConfig, resolveOidcConfig, resolveToken, signOut } from './auth/auth';
-import { readTokenIdentity } from './auth/identity';
+import { type OidcConfig, resolveOidcConfig, resolveToken, signOut } from './auth/auth';
 import { ConfigFetchError, fetchConfig } from './config/client';
-import { ConfigView } from './config/ConfigView';
+import { fetchPlatformConfig } from './config/platform';
 import type { TenantConfigView } from './config/types';
-import { EnvironmentsPanel } from './environments/EnvironmentsPanel';
-import { OrgSettingsPanel } from './identity/OrgSettingsPanel';
-import { UsersPanel } from './identity/UsersPanel';
-import { MCPAccessPanel } from './mcp/MCPAccessPanel';
-import { ProvisionPanel } from './provision/ProvisionPanel';
-
-// Identity administration (issue #1209) is restricted server-side to an
-// OPERATIONS tenant; gating it here too keeps a COMPANY-tenant operator from
-// ever seeing a form whose submit would just come back 403.
-const OPERATIONS_TENANT_TYPE = 'OPERATIONS';
+import { AppShell } from './shell/AppShell';
+import {
+  ErrorScreen,
+  LoadingScreen,
+  NotEnrolledScreen,
+  SignInScreen,
+} from './shell/PreShellScreens';
 
 type LoadState =
   | { status: 'loading' }
-  | { status: 'ready'; config: TenantConfigView }
+  | { status: 'ready'; config: TenantConfigView; token: string }
   | { status: 'signed-out' }
   // Signed in with the identity provider, but the API does not recognise the
   // identity — it belongs to no tenant yet. Distinct from signed-out because
@@ -26,121 +23,6 @@ type LoadState =
   // same successful sign-in and lands here once more (#1167).
   | { status: 'not-enrolled'; token: string }
   | { status: 'error'; message: string };
-
-// The signed-out view. With OIDC configured it offers a real Sign in button
-// (Authorization Code + PKCE redirect to the issuer); without it (local dev), it
-// only explains that a token is required. `fallbackReason` surfaces why the
-// local VITE_OIDC_* override is in play when platform discovery could not
-// supply the config, so a misconfigured instance is visible rather than silent.
-function SignInPrompt({
-  oidc,
-  fallbackReason,
-}: {
-  oidc: OidcConfig | undefined;
-  fallbackReason: string | undefined;
-}): React.ReactElement {
-  return (
-    <div className="message" role="status">
-      <p>Sign in to view your environments.</p>
-      {oidc !== undefined && (
-        <button
-          type="button"
-          onClick={() => {
-            void beginLogin(oidc);
-          }}
-        >
-          Sign in
-        </button>
-      )}
-      {fallbackReason !== undefined && <p className="platform-fallback-note">{fallbackReason}</p>}
-    </div>
-  );
-}
-
-// Signing out is the operator's only recovery from a session signed in as the
-// wrong identity: it drops the held token and returns to the signed-out view.
-function SignOutButton({ onSignedOut }: { onSignedOut: () => void }): React.ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        signOut();
-        onSignedOut();
-      }}
-    >
-      Sign out
-    </button>
-  );
-}
-
-// The dead end a self-signed-up user hits: OIDC succeeded, so a token is held,
-// but the API rejects the identity because it is enrolled in no tenant. Showing
-// the signed-out prompt here was the bug — it offered Sign in, which succeeds
-// and returns to this same screen forever, while a Sign out button sat beside
-// it because a token did exist. This says what actually has to happen, and
-// names the identity an operator needs in order to do it.
-function NotEnrolledPrompt({ token }: { token: string }): React.ReactElement {
-  const identity = readTokenIdentity(token);
-  return (
-    <div className="message" role="status">
-      <p>You are signed in, but your account is not yet part of a tenant on this platform.</p>
-      <p>
-        An operator has to enrol you before you can see any environments. Signing in again will not
-        change this.
-      </p>
-      {(identity.email !== undefined || identity.subject !== undefined) && (
-        <p className="identity-detail">
-          Give them this identity: {identity.email ?? identity.subject}
-          {identity.email !== undefined && identity.subject !== undefined
-            ? ` (subject ${identity.subject})`
-            : ''}
-          {identity.issuer !== undefined ? ` from ${identity.issuer}` : ''}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function ErrorMessage({ message }: { message: string }): React.ReactElement {
-  return (
-    <div className="message" role="alert">
-      <p>Could not load your environments.</p>
-      <p className="error-detail">{message}</p>
-    </div>
-  );
-}
-
-// The write surfaces, shown only once a token has produced a rendered config.
-// onChanged lets a write surface trigger a config refetch so a newly
-// registered environment or a settled deploy shows up in the read view above.
-function ActionPanels({
-  token,
-  config,
-  onChanged,
-}: {
-  token: string;
-  config: TenantConfigView;
-  onChanged: () => void;
-}): React.ReactElement {
-  return (
-    <>
-      <EnvironmentsPanel
-        token={token}
-        contexts={config.contexts}
-        environments={config.environments}
-        onChanged={onChanged}
-      />
-      <ProvisionPanel token={token} />
-      <MCPAccessPanel token={token} environments={config.environments} />
-      {config.tenant.type === OPERATIONS_TENANT_TYPE && (
-        <>
-          <UsersPanel token={token} />
-          <OrgSettingsPanel token={token} />
-        </>
-      )}
-    </>
-  );
-}
 
 // A 401 means two completely different things depending on whether a token was
 // held. With no token the caller is simply signed out. With a token, the
@@ -154,47 +36,47 @@ function loadStateFromError(error: unknown, token: string | undefined): LoadStat
   return { status: 'error', message };
 }
 
-// LoadStateView renders whichever of the load states is current. Split out of
-// App purely so App stays inside the module's max-lines-per-function budget;
-// the exhaustive switch also means a new LoadState variant is a type error here
-// rather than a silently blank screen.
-function LoadStateView({
-  state,
-  oidc,
-  fallbackReason,
-}: {
-  state: LoadState;
-  oidc: OidcConfig | undefined;
-  fallbackReason: string | undefined;
-}): React.ReactElement {
-  switch (state.status) {
-    case 'loading':
-      return (
-        <div className="message" role="status">
-          <p>Loading your environments…</p>
-        </div>
-      );
-    case 'signed-out':
-      return <SignInPrompt oidc={oidc} fallbackReason={fallbackReason} />;
-    case 'not-enrolled':
-      return <NotEnrolledPrompt token={state.token} />;
-    case 'error':
-      return <ErrorMessage message={state.message} />;
-    case 'ready':
-      return <ConfigView config={state.config} />;
-  }
+// useBrand resolves the platform's display name from discovery (GET
+// /v1/platform) and mirrors it into the document title — the one thing that
+// used to be a hardcoded literal (`erun console`) despite the value already
+// being fetched and parsed for OIDC config. There is no logo/favicon field in
+// the platform contract today, so the favicon stays the static build asset.
+function useBrand(): string | undefined {
+  const [brand, setBrand] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchPlatformConfig()
+      .then((platform) => {
+        if (!cancelled && platform !== undefined && platform.brand.length > 0) {
+          setBrand(platform.brand);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  React.useEffect(() => {
+    document.title = brand !== undefined ? `${brand} console` : 'ERun console';
+  }, [brand]);
+  return brand;
 }
 
-export function App(): React.ReactElement {
-  // Phase 0: resolve the OIDC config from platform discovery (GET /v1/platform)
-  // before anything else — it decides whether Sign in redirects anywhere.
+// useConsoleSession owns the sign-in → config-fetch lifecycle: resolve OIDC
+// config, resolve a bearer token, then load the tenant config. loadConfig is
+// also the refresh a write surface (register/deploy) triggers on completion,
+// so a newly registered env or a settled deploy's status shows up here too.
+function useConsoleSession(): {
+  state: LoadState;
+  oidc: OidcConfig | undefined;
+  oidcFallbackReason: string | undefined;
+  reload: () => void;
+  signOutAndReset: () => void;
+} {
   const [oidc, setOidc] = React.useState<OidcConfig | undefined>(undefined);
   const [oidcFallbackReason, setOidcFallbackReason] = React.useState<string | undefined>(undefined);
   const [oidcResolved, setOidcResolved] = React.useState(false);
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
-  // The bearer token, resolved once oidc is known: an OIDC callback exchange, a
-  // token held this session, or the dev-token fallback. It gates both the
-  // config fetch and the action panels (only shown when a token is present).
   const [token, setToken] = React.useState<string | undefined>(undefined);
 
   const mountedRef = React.useRef(true);
@@ -216,15 +98,12 @@ export function App(): React.ReactElement {
         setOidcResolved(true);
       })
       .catch(() => {
-        // resolveOidcConfig never rejects (its own fetch is caught internally);
-        // the handler exists only so a floating promise cannot slip through.
         if (mountedRef.current) {
           setOidcResolved(true);
         }
       });
   }, []);
 
-  // Phase 1: resolve the bearer token. No token resolved → signed out.
   React.useEffect(() => {
     if (!oidcResolved) {
       return;
@@ -242,21 +121,16 @@ export function App(): React.ReactElement {
       })
       .catch((error: unknown) => {
         if (mountedRef.current) {
-          // No token has been resolved yet on this path, so a 401 here is a
-          // genuine signed-out.
           setState(loadStateFromError(error, undefined));
         }
       });
   }, [oidcResolved, oidc]);
 
-  // Phase 2: once a token is resolved, load the tenant config. loadConfig is
-  // also the refresh a write surface (register/deploy) triggers on completion,
-  // so a newly registered env or a settled deploy's status shows up here too.
   const loadConfig = React.useCallback((forToken: string) => {
     fetchConfig(forToken)
       .then((config) => {
         if (mountedRef.current) {
-          setState({ status: 'ready', config });
+          setState({ status: 'ready', config, token: forToken });
         }
       })
       .catch((error: unknown) => {
@@ -272,26 +146,76 @@ export function App(): React.ReactElement {
     }
   }, [token, loadConfig]);
 
-  return (
-    <main className="app">
-      <LoadStateView state={state} oidc={oidc} fallbackReason={oidcFallbackReason} />
-      {state.status === 'ready' && token !== undefined && (
-        <ActionPanels
-          token={token}
+  return {
+    state,
+    oidc,
+    oidcFallbackReason,
+    reload: () => {
+      if (token !== undefined) {
+        loadConfig(token);
+      }
+    },
+    signOutAndReset: () => {
+      signOut();
+      setToken(undefined);
+      setState({ status: 'signed-out' });
+    },
+  };
+}
+
+function AppContent({
+  brand,
+  state,
+  oidc,
+  oidcFallbackReason,
+  reload,
+  signOutAndReset,
+}: {
+  brand: string | undefined;
+  state: LoadState;
+  oidc: OidcConfig | undefined;
+  oidcFallbackReason: string | undefined;
+  reload: () => void;
+  signOutAndReset: () => void;
+}): React.ReactElement {
+  switch (state.status) {
+    case 'loading':
+      return <LoadingScreen brand={brand} />;
+    case 'signed-out':
+      return <SignInScreen brand={brand} oidc={oidc} fallbackReason={oidcFallbackReason} />;
+    case 'not-enrolled':
+      return <NotEnrolledScreen brand={brand} token={state.token} />;
+    case 'error':
+      return <ErrorScreen brand={brand} message={state.message} />;
+    case 'ready':
+      return (
+        <AppShell
+          brand={brand}
+          token={state.token}
           config={state.config}
-          onChanged={() => {
-            loadConfig(token);
-          }}
+          onChanged={reload}
+          onSignOut={signOutAndReset}
         />
-      )}
-      {oidc !== undefined && token !== undefined && (
-        <SignOutButton
-          onSignedOut={() => {
-            setToken(undefined);
-            setState({ status: 'signed-out' });
-          }}
-        />
-      )}
-    </main>
+      );
+  }
+}
+
+export function App(): React.ReactElement {
+  const brand = useBrand();
+  const { state, oidc, oidcFallbackReason, reload, signOutAndReset } = useConsoleSession();
+
+  // IconTooltip (used by the theme toggle and, once panels adopt it, elsewhere)
+  // requires a TooltipProvider ancestor, same as the desktop's App.tsx.
+  return (
+    <TooltipProvider>
+      <AppContent
+        brand={brand}
+        state={state}
+        oidc={oidc}
+        oidcFallbackReason={oidcFallbackReason}
+        reload={reload}
+        signOutAndReset={signOutAndReset}
+      />
+    </TooltipProvider>
   );
 }

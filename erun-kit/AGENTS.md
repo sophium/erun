@@ -13,12 +13,12 @@ Module-specific guidance for `erun-kit`. Follow the repository root `AGENTS.md` 
 - **Tier 1 — tokens and primitives.** `src/styles/theme.css` (the shadcn/Tailwind 4 token scale, light and dark) and `src/lib/utils.ts` (`cn`), plus the shadcn primitives under `src/components/ui/`.
 - **Tier 2 — generic widgets.** App-agnostic components with zero app-state imports: `StatusBadge` (+ helpers), `EmptyState`, `IconTooltip`, `FieldLabel`, `SelectField`, `EditableComboField` (+ helpers), `ErrorBoundary`, `ResizeHandle`, `FileIcon`.
 - **Tier 3 — erun-domain widgets**, moved as the console actually needs them rather than speculatively: `VersionField`, `KubernetesContextSelect`, `ContainerRegistriesField`. These encode erun concepts, so a second implementation would be a second opinion about erun, not just a duplicated control. None have moved yet — the console has no caller for them.
-- Shared, transport-neutral models and slices (tenants, environments, selection, notifications, request counters, collaboration state) belong here too, once the console adopts Redux. Not yet moved — see the module's tracking issue for the follow-up that carries phases 5–8 of erun#1211 (Redux + `httpBaseQuery` in the console, shared models/slices, the console app shell, and adding the kit + console to `make check`).
+- Shared, transport-neutral models and slices (tenants, environments, selection, notifications, request counters, collaboration state) belong here too, once the console adopts Redux. Not yet moved — the console's data layer (Redux + `httpBaseQuery`) is tracked separately from #1207, which delivered the console's app shell, its design-system adoption, and the kit + console gates in `make check` (see root `AGENTS.md`'s `check` target) without touching the console's store or API client.
 
 ## What does not belong here
 
 - Anything desktop-only: `TerminalPane`, `TerminalTabStrip`, `Titlebar.*`, `ReviewPanel.*`, `DiffList`, `ManageDialog*`, `OrchestratorDialog`, `DebugPanel`, `ReconnectDialog`, and their slices/thunks. These depend on Wails, a PTY, or a pod.
-- Anything console-only: `ConfigView`, `ProvisionPanel`, `MCPAccessPanel`, `EnvironmentsPanel`.
+- Anything console-only: `ConfigView`, `ProvisionPanel`, `MCPAccessPanel`, `EnvironmentsPanel`, `UsersPanel`, `OrgSettingsPanel`, and the app shell (`shell/AppShell`, `ConsoleSidebar`, `ConsoleHeader`, `PreShellScreens`, `CenteredCard`, `BrandMark`, `sections.ts`, `theme.ts`) — the shell composes kit primitives with console-specific navigation and IA, it is not itself a generic widget.
 - A base query, a `fetch` call, or a store. If a widget needs one, it isn't a widget — it's app wiring, and it stays in the app.
 
 ## Adding a widget

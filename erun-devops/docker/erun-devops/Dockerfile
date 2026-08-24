@@ -1,3 +1,9 @@
+# Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
+# of — see the node COPY below. No RUN of its own, so it needs no emulation
+# even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
+# stage's reasoning further down).
+FROM node:22.14-bookworm AS node
+
 # Run the repository test gate inside the build, per the delivery-pipeline
 # convention (docs /pipeline, "How you set it up — and where tests run"):
 # a failing test fails the build and no image is tagged, so a green build
@@ -20,7 +26,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     GOBIN=/usr/local/bin go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
+# Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
+# the pinned `node` stage above rather than apt/curl-installed, same pattern
+# as `golangci-lint`/`goroot`: a pinned upstream image is the reproducible
+# source, not a floating NodeSource script. `yarn@1.22.22` matches the
+# `packageManager` field both workspace members pin.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    npm install -g yarn@1.22.22
+
 COPY Makefile /src/Makefile
+COPY package.json yarn.lock /src/
 COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
@@ -32,17 +50,26 @@ COPY erun-integration /src/erun-integration
 # because a stamp corrected only in build.sh still leaves every installed
 # desktop unstamped; it reads them with os.ReadFile and treats a missing file as
 # fatal, so omitting them here fails the gate inside the build while a full
-# checkout passes.
+# checkout passes. `erun-ui` also carries the `frontend/` Yarn-workspace
+# member `test-frontend`'s `yarn install` needs to resolve (see root
+# AGENTS.md's Makefile comment for why that member's own gate still doesn't
+# run here).
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 COPY erun-ui /src/erun-ui
+COPY erun-kit /src/erun-kit
+COPY erun-console /src/erun-console
 COPY Formula /src/Formula
 COPY bucket /src/bucket
 
-# `make check` runs golangci-lint across the Go modules then the integration
-# suite + coverage gate. A failing lint or test fails the build, the builder
-# stage's COPY --from=test /test-ok fails, and no image is tagged.
+# `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
+# the frontend kit + console gates, then the integration suite + coverage
+# gate. A failing step fails the build, the builder stage's
+# COPY --from=test /test-ok fails, and no image is tagged. The Yarn cache
+# mount lets `yarn install` reuse fetched packages across builds the same way
+# the Go module/build caches do.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/usr/local/share/.cache/yarn \
     make check && touch /test-ok
 
 # Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit

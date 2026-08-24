@@ -83,7 +83,9 @@ describe('ConfigView via App', () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
     render(<App />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
+    // The shell's own h1 carries the active section title ("Overview"); the
+    // tenant name is a section-level h2 within it.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
 
     expect(screen.getByRole('cell', { name: 'prod' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'dev' })).toBeInTheDocument();
@@ -131,7 +133,7 @@ describe('ConfigView via App', () => {
 
     expect(await screen.findByText('No environments yet.')).toBeInTheDocument();
     expect(screen.getByText('No cloud contexts yet.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
   });
 
   // A 401 *with* a token held is not a signed-out caller: the identity provider
@@ -151,7 +153,7 @@ describe('ConfigView via App', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/An operator has to enrol you/)).toBeInTheDocument();
     // Offering Sign in here is the loop this fix removes.
-    expect(screen.queryByText('Sign in to view your environments.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sign in to your console')).not.toBeInTheDocument();
   });
 
   it('renders the sign-in prompt when there is no dev token', async () => {
@@ -159,7 +161,7 @@ describe('ConfigView via App', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Sign in to view your environments.')).toBeInTheDocument();
+      expect(screen.getByText('Sign in to your console')).toBeInTheDocument();
     });
   });
 });

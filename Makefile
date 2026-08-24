@@ -1,4 +1,4 @@
-.PHONY: integration-test lint test-erun-ui check
+.PHONY: integration-test lint test-erun-ui test-frontend check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -22,11 +22,14 @@
 # own go.work only unions itself with erun-common (deliberately — it must not
 # import erun-cli), so its tests are never reachable from erun-integration's
 # `go test ./...`, and a contributor's habitual "run the tests" from erun-cli
-# or erun-common misses erun-ui for the same reason. The frontend
-# (`yarn typecheck && yarn lint && yarn test`) still runs only in
-# erun-ui/build.sh: it needs node/yarn, which the test stage does not carry,
-# and the Playwright suite (needs a built app) stays out of the per-commit
-# gate entirely, run on its own schedule instead.
+# or erun-common misses erun-ui for the same reason. The test stage now
+# carries node/yarn (added for test-frontend below), but erun-ui/frontend's
+# own frontend gate (`yarn typecheck && yarn lint && yarn test`) deliberately
+# stays out of `make check` and still runs only in erun-ui/build.sh:
+# test-frontend's `yarn install` resolves it too (it is a workspace member),
+# but does not run its gate, since that is `erun-ui/build.sh`'s job. The
+# Playwright suite (needs a built app) stays out of the per-commit gate
+# entirely either way, run on its own schedule instead.
 #
 # erun-backend-db has no Go module at all (Atlas migrations + SQL only), so
 # there is nothing here for golangci-lint to run against.
@@ -58,6 +61,27 @@ test-erun-ui:
 	@echo ">> go test erun-ui"
 	@(cd erun-ui && go test -count=1 ./...)
 
+# The shared frontend kit (erun-kit) and the hosted console (erun-console) —
+# the two Yarn-workspace members outside erun-ui/frontend (in the workspace,
+# so `yarn install` here resolves all three, but its own gate stays in
+# erun-ui/build.sh; see that target's comment for why). This is what erun#1207
+# added to close the gap the issue named: the console's own gates
+# (`erun-console/AGENTS.md`) previously ran "by hand or not at all", so the
+# module drifted from the desktop's design system by default.
+#
+# `yarn shadcn:check` (erun-kit) is deliberately excluded here: it fetches
+# component definitions from ui.shadcn.com on every invocation, a third-party
+# dependency `yarn install`'s package-registry fetch does not already impose
+# on this gate. Run it locally before a PR that touches a shadcn primitive
+# (see erun-kit/AGENTS.md); it is not re-verified on every image build.
+test-frontend:
+	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
+	@yarn install --frozen-lockfile
+	@echo ">> erun-kit gates"
+	@(cd erun-kit && yarn typecheck && yarn lint && yarn format:check && yarn build)
+	@echo ">> erun-console gates"
+	@(cd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test)
+
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
 # erun-integration/scripts/integration-test.sh; override with
@@ -66,7 +90,7 @@ test-erun-ui:
 integration-test:
 	./erun-integration/scripts/integration-test.sh
 
-# The full in-build gate: golangci-lint, erun-ui's own Go tests, then the
-# integration suite + coverage. The erun-devops image test stage runs this;
-# a failure tags no image.
-check: lint test-erun-ui integration-test
+# The full in-build gate: golangci-lint, erun-ui's own Go tests, the frontend
+# kit + console gates, then the integration suite + coverage. The erun-devops
+# image test stage runs this; a failure tags no image.
+check: lint test-erun-ui test-frontend integration-test

@@ -61,8 +61,8 @@ describe('OrgSettingsPanel', () => {
     expect(await screen.findByText('erun.example.com')).toBeInTheDocument();
     expect(screen.getByLabelText<HTMLInputElement>('Minimum password length').value).toBe('8');
     expect(
-      screen.getByLabelText<HTMLInputElement>('Require multi-factor authentication').checked,
-    ).toBe(false);
+      screen.getByRole('checkbox', { name: 'Require multi-factor authentication' }),
+    ).toHaveAttribute('aria-checked', 'false');
   });
 
   it('PATCHes only the changed field and re-renders the saved settings', async () => {
@@ -84,7 +84,7 @@ describe('OrgSettingsPanel', () => {
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('/v1/identity/org-settings');
     expect(patch?.body).toMatchObject({ forceMfa: true });
-    await screen.findByLabelText<HTMLInputElement>('Require multi-factor authentication');
+    await screen.findByRole('checkbox', { name: 'Require multi-factor authentication' });
   });
 
   it('surfaces a load error', async () => {

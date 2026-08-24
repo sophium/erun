@@ -89,7 +89,8 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend Styling
 
 - Use Tailwind utilities as the default for component-owned layout, spacing, color, typography, hover/focus/disabled state, and responsive behavior.
-- The shadcn-generated primitives, `lib/utils.ts` (`cn`), and `styles/theme.css` live in `erun-kit` (see `erun-kit/AGENTS.md`) and are imported from there (`erun-kit`, `erun-kit/theme.css`). Do not hand-edit them from this module; change them in `erun-kit` and run `yarn shadcn:check` there.
+- The shadcn-generated primitives, `lib/utils.ts` (`cn`), and `styles/theme.css` live in `erun-kit` (see `erun-kit/AGENTS.md`) and are imported from there (`erun-kit`, `erun-kit/theme.css`) — `erun-kit`'s token scale, light and dark, is the single source both this module and `erun-console` build from. Do not hand-edit them from this module; change them in `erun-kit` and run `yarn shadcn:check` there.
+- The desktop ships the `.dark` token scale but has no toggle wired to it yet. `erun-console`'s `shell/theme.ts`/`shell/useTheme.ts` (issue #1207) is the reference implementation to reuse when the desktop grows one — same class-based mechanism, so it needs no changes to the shared theme.
 - Put app-owned Tailwind theme extensions in separate app CSS files, then import them from `src/styles/index.css` alongside the `erun-kit/theme.css` import.
 - Keep global CSS small and reserved for true globals: root sizing/reset rules, xterm internals, Wails drag or resize state hooks, pseudo-elements that would be awkward in markup, and runtime CSS variables that are set from controller state.
 - Prefer shadcn primitives and variants for buttons, inputs, dialogs, tabs, popovers, tooltips, labels, and checkboxes before adding custom local controls.

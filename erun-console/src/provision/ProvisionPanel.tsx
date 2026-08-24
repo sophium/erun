@@ -1,3 +1,13 @@
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  FieldLabel,
+  Input,
+  Textarea,
+} from 'erun-kit';
 import * as React from 'react';
 
 import type { AliasState, ProvisionState } from './controller';
@@ -8,14 +18,14 @@ const DEFAULT_PROVIDER = 'aws';
 function AliasFeedback({ alias }: { alias: AliasState }): React.ReactElement | null {
   if (alias.status === 'saved') {
     return (
-      <p className="provision-feedback provision-feedback--ok" role="status">
+      <p className="text-sm text-muted-foreground" role="status">
         Credentials saved (encrypted server-side).
       </p>
     );
   }
   if (alias.status === 'error') {
     return (
-      <p className="provision-feedback provision-feedback--error" role="alert">
+      <p className="text-sm text-destructive" role="alert">
         Could not save credentials: {alias.message}
       </p>
     );
@@ -41,41 +51,51 @@ function AliasForm({
   };
 
   return (
-    <form className="provision-form" onSubmit={submit} aria-labelledby="alias-form-heading">
-      <h3 id="alias-form-heading">Register cloud credentials</h3>
-      <label htmlFor="alias-name">Alias name</label>
-      <input
-        id="alias-name"
-        value={name}
-        onChange={(e) => {
-          setName(e.target.value);
-        }}
-        required
-      />
-      <label htmlFor="alias-provider">Provider</label>
-      <input
-        id="alias-provider"
-        value={provider}
-        onChange={(e) => {
-          setProvider(e.target.value);
-        }}
-      />
-      <label htmlFor="alias-credentials">
-        BYO-cloud credentials JSON (stored encrypted server-side)
-      </label>
-      <textarea
-        id="alias-credentials"
-        value={credentials}
-        onChange={(e) => {
-          setCredentials(e.target.value);
-        }}
-        rows={4}
-        placeholder={'{"accessKeyId":"…","secretAccessKey":"…"}'}
-        required
-      />
-      <button type="submit" disabled={saving}>
+    <form className="grid max-w-md gap-3" onSubmit={submit} aria-labelledby="alias-form-heading">
+      <h3 id="alias-form-heading" className="text-sm font-semibold text-foreground">
+        Register cloud credentials
+      </h3>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="alias-name" required>
+          Alias name
+        </FieldLabel>
+        <Input
+          id="alias-name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="alias-provider">Provider</FieldLabel>
+        <Input
+          id="alias-provider"
+          value={provider}
+          onChange={(e) => {
+            setProvider(e.target.value);
+          }}
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="alias-credentials" required>
+          BYO-cloud credentials JSON (stored encrypted server-side)
+        </FieldLabel>
+        <Textarea
+          id="alias-credentials"
+          value={credentials}
+          onChange={(e) => {
+            setCredentials(e.target.value);
+          }}
+          rows={4}
+          placeholder={'{"accessKeyId":"…","secretAccessKey":"…"}'}
+          required
+        />
+      </div>
+      <Button type="submit" disabled={saving} className="justify-self-start">
         {saving ? 'Saving…' : 'Save credentials'}
-      </button>
+      </Button>
       <AliasFeedback alias={alias} />
     </form>
   );
@@ -109,9 +129,13 @@ function ProvisionStatus({ provision }: { provision: ProvisionState }): React.Re
   const failureReason =
     provision.status === 'failed' ? provision.context.provisionError : undefined;
   return (
-    <div className="provision-status" role={feedbackRole(provision)} aria-live="polite">
+    <div
+      className="text-sm text-muted-foreground"
+      role={feedbackRole(provision)}
+      aria-live="polite"
+    >
       <p>{statusLine(provision)}</p>
-      {failureReason !== undefined && <p className="context-error">{failureReason}</p>}
+      {failureReason !== undefined && <p className="text-xs text-destructive">{failureReason}</p>}
     </div>
   );
 }
@@ -138,38 +162,52 @@ function CreateContextForm({
   };
 
   return (
-    <form className="provision-form" onSubmit={submit} aria-labelledby="context-form-heading">
-      <h3 id="context-form-heading">Provision a cloud context</h3>
-      <label htmlFor="context-name">Context name</label>
-      <input
-        id="context-name"
-        value={name}
-        onChange={(e) => {
-          setName(e.target.value);
-        }}
-        required
-      />
-      <label htmlFor="context-alias">Cloud provider alias</label>
-      <input
-        id="context-alias"
-        value={cloudProviderAlias}
-        onChange={(e) => {
-          setAlias(e.target.value);
-        }}
-        required
-      />
-      <label htmlFor="context-region">Region</label>
-      <input
-        id="context-region"
-        value={region}
-        onChange={(e) => {
-          setRegion(e.target.value);
-        }}
-        required
-      />
-      <button type="submit" disabled={busy}>
+    <form className="grid max-w-md gap-3" onSubmit={submit} aria-labelledby="context-form-heading">
+      <h3 id="context-form-heading" className="text-sm font-semibold text-foreground">
+        Provision a cloud context
+      </h3>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="context-name" required>
+          Context name
+        </FieldLabel>
+        <Input
+          id="context-name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="context-alias" required>
+          Cloud provider alias
+        </FieldLabel>
+        <Input
+          id="context-alias"
+          value={cloudProviderAlias}
+          onChange={(e) => {
+            setAlias(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="context-region" required>
+          Region
+        </FieldLabel>
+        <Input
+          id="context-region"
+          value={region}
+          onChange={(e) => {
+            setRegion(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <Button type="submit" disabled={busy} className="justify-self-start">
         {busy ? 'Provisioning…' : 'Provision context'}
-      </button>
+      </Button>
       <ProvisionStatus provision={provision} />
     </form>
   );
@@ -178,10 +216,14 @@ function CreateContextForm({
 export function ProvisionPanel({ token }: { token: string }): React.ReactElement {
   const { alias, provision, saveAlias, provisionContext } = useProvisionController(token);
   return (
-    <section className="provision-panel" aria-labelledby="provision-heading">
-      <h2 id="provision-heading">Provision a cloud context</h2>
-      <AliasForm alias={alias} onSave={saveAlias} />
-      <CreateContextForm provision={provision} onProvision={provisionContext} />
-    </section>
+    <Card aria-labelledby="provision-heading">
+      <CardHeader>
+        <CardTitle id="provision-heading">Provision a cloud context</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-6">
+        <AliasForm alias={alias} onSave={saveAlias} />
+        <CreateContextForm provision={provision} onProvision={provisionContext} />
+      </CardContent>
+    </Card>
   );
 }

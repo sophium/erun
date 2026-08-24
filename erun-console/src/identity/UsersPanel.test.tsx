@@ -88,8 +88,12 @@ describe('UsersPanel', () => {
     render(<UsersPanel token="dev-token" />);
     await screen.findByText('No users enrolled yet.');
 
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'bob' } });
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'bob@example.com' } });
+    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+      target: { value: 'bob' },
+    });
+    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+      target: { value: 'bob@example.com' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/Enrolled bob/)).toBeInTheDocument();
@@ -109,8 +113,12 @@ describe('UsersPanel', () => {
     render(<UsersPanel token="dev-token" />);
     await screen.findByText('No users enrolled yet.');
 
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'carol' } });
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'carol@example.com' } });
+    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+      target: { value: 'carol' },
+    });
+    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+      target: { value: 'carol@example.com' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/could not be enrolled as an erun user/)).toBeInTheDocument();

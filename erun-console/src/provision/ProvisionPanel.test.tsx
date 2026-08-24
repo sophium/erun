@@ -73,9 +73,13 @@ describe('ProvisionPanel alias form', () => {
     const calls = mockFetch(() => noContentResponse());
     render(<ProvisionPanel token="dev-token" />);
 
-    fireEvent.change(screen.getByLabelText('Alias name'), { target: { value: 'aws-acme' } });
+    fireEvent.change(screen.getByLabelText('Alias name', { exact: false }), {
+      target: { value: 'aws-acme' },
+    });
     fireEvent.change(
-      screen.getByLabelText('BYO-cloud credentials JSON (stored encrypted server-side)'),
+      screen.getByLabelText('BYO-cloud credentials JSON (stored encrypted server-side)', {
+        exact: false,
+      }),
       { target: { value: '{"accessKeyId":"AK","secretAccessKey":"SK"}' } },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Save credentials' }));
@@ -97,9 +101,13 @@ describe('ProvisionPanel alias form', () => {
     mockFetch(() => jsonResponse('credentials empty', 400));
     render(<ProvisionPanel token="dev-token" />);
 
-    fireEvent.change(screen.getByLabelText('Alias name'), { target: { value: 'aws-acme' } });
+    fireEvent.change(screen.getByLabelText('Alias name', { exact: false }), {
+      target: { value: 'aws-acme' },
+    });
     fireEvent.change(
-      screen.getByLabelText('BYO-cloud credentials JSON (stored encrypted server-side)'),
+      screen.getByLabelText('BYO-cloud credentials JSON (stored encrypted server-side)', {
+        exact: false,
+      }),
       { target: { value: 'x' } },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Save credentials' }));
@@ -124,11 +132,15 @@ describe('ProvisionPanel create-context flow', () => {
     });
     render(<ProvisionPanel token="dev-token" />);
 
-    fireEvent.change(screen.getByLabelText('Context name'), { target: { value: 'primary' } });
-    fireEvent.change(screen.getByLabelText('Cloud provider alias'), {
+    fireEvent.change(screen.getByLabelText('Context name', { exact: false }), {
+      target: { value: 'primary' },
+    });
+    fireEvent.change(screen.getByLabelText('Cloud provider alias', { exact: false }), {
       target: { value: 'aws-acme' },
     });
-    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-2' } });
+    fireEvent.change(screen.getByLabelText('Region', { exact: false }), {
+      target: { value: 'eu-west-2' },
+    });
 
     // Flush the POST + first poll's promise resolutions inside act so React
     // applies the state updates before we assert.
@@ -167,11 +179,15 @@ describe('ProvisionPanel create-context flow', () => {
     );
     render(<ProvisionPanel token="dev-token" />);
 
-    fireEvent.change(screen.getByLabelText('Context name'), { target: { value: 'primary' } });
-    fireEvent.change(screen.getByLabelText('Cloud provider alias'), {
+    fireEvent.change(screen.getByLabelText('Context name', { exact: false }), {
+      target: { value: 'primary' },
+    });
+    fireEvent.change(screen.getByLabelText('Cloud provider alias', { exact: false }), {
       target: { value: 'aws-acme' },
     });
-    fireEvent.change(screen.getByLabelText('Region'), { target: { value: 'eu-west-2' } });
+    fireEvent.change(screen.getByLabelText('Region', { exact: false }), {
+      target: { value: 'eu-west-2' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Provision context' }));
 
     // The 202 already carries `failed`, so the terminal state renders without polling.
