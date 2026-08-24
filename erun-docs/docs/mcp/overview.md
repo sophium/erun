@@ -198,6 +198,10 @@ The job tools remove all five:
 
 A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
 
+#### The alive contract {#alive-contract}
+
+`state` alone can only be as fresh as the last read that reconciled it, so a job carries three more fields — `lastAliveAt`, `aliveSeq`, `aliveAgeMs` — written by erun's supervisor on a fixed ~1 second cadence, independent of whether the work itself is producing output. **The caller rule: once `aliveAgeMs` exceeds 5000, stop waiting and treat the job as failed — an `unknown` outcome, never a success and never the tool having errored** — even if `state` has not caught up to say so yet. A silent-but-healthy command (an image pull, a slow test) never trips this, because the beat has nothing to do with the work's own output. Field-by-field semantics and the reasoning behind the 5-second bound: [Agent reference · The alive contract](/agent-reference/cli-flags#alive-contract).
+
 #### Running an agent as a job {#agent-jobs}
 
 An AI tool run non-interactively prints nothing until it exits, so starting one through `job_start`'s `command` reports `outputBytes: 0` for the whole run while the agent is actively editing files — `job_status` can only say `running`, and there is no supported way to report progress. Pass `agent` plus `prompt` instead of `command` and erun invokes the tool in its streaming mode:
@@ -522,7 +526,10 @@ The job record is the shared shape every job tool returns. It is deliberately ex
     "logPath": "/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",
     "outputBytes": 0,
     "outputLimitBytes": 4194304,
-    "leaseId": "job-suite"         // the activity lease held for the job's lifetime
+    "leaseId": "job-suite",        // the activity lease held for the job's lifetime
+    "lastAliveAt": "2026-08-07T09:14:03Z",
+    "aliveSeq": 1,
+    "aliveAgeMs": 210               // see [The alive contract](#alive-contract), above
   }
 }
 ```
@@ -531,7 +538,7 @@ The job record is the shared shape every job tool returns. It is deliberately ex
 
 ```jsonc
 // job_await {"id": "suite", "timeoutSeconds": 30} — still running
-{ "job": { "id": "suite", "state": "running", "exitCode": null, … },
+{ "job": { "id": "suite", "state": "running", "exitCode": null, "aliveAgeMs": 340, … },
   "timedOut": true, "waitedSeconds": 30, "timeoutSeconds": 30 }
 
 // job_await {"id": "suite", "timeoutSeconds": 30} — finished, and it failed
@@ -539,8 +546,10 @@ The job record is the shared shape every job tool returns. It is deliberately ex
            "endedAt": "2026-08-07T09:18:41Z", "outputBytes": 81204, … },
   "timedOut": false, "waitedSeconds": 4, "timeoutSeconds": 30 }
 
-// a job whose supervisor vanished — never reported as success
-{ "job": { "id": "suite", "state": "unknown", "exitCode": null,
+// a job whose supervisor vanished — never reported as success, and as
+// terminal as the exited case above: never re-wait on this expecting a
+// different answer
+{ "job": { "id": "suite", "state": "unknown", "exitCode": null, "aliveAgeMs": 6120,
            "reason": "job supervisor 4242 is gone without recording an exit status; the runtime pod was most likely replaced" },
   "timedOut": false, … }
 ```
@@ -562,6 +571,7 @@ An [agent job](#agent-jobs) carries three more fields on the same record. `progr
 { "job": {
     "id": "sweep", "state": "running",
     "kind": "agent", "agentTool": "claude",
+    "aliveAgeMs": 450,
     "progress": {
       "tool": "claude",
       "activity": "editing erun-common/mcp_client.go",

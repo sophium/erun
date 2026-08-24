@@ -92,6 +92,20 @@ const (
 	// so a caller starting many short jobs cannot grow the store without limit.
 	EnvironmentJobHistoryCap = 50
 
+	// EnvironmentJobAliveHeartbeatInterval is the fixed cadence the supervisor
+	// stamps LastAliveAt/AliveSeq at, independent of the activity lease's much
+	// coarser renewal interval (300s at the default TTL) and of an agent job's
+	// 2s progress fold. It does not depend on the work producing output, which
+	// is what lets it answer "is the supervisor still there" for a command job
+	// that is legitimately silent for minutes (an image pull, a slow test).
+	EnvironmentJobAliveHeartbeatInterval = 1 * time.Second
+	// EnvironmentJobAliveStaleMs is the documented caller rule: once AliveAgeMs
+	// exceeds this, stop waiting and treat the job as failed with an unknown
+	// outcome. It is 5x EnvironmentJobAliveHeartbeatInterval — headroom for poll
+	// jitter and scheduling delay, not for the beat itself ever being late by
+	// design.
+	EnvironmentJobAliveStaleMs int64 = 5000
+
 	// DefaultEnvironmentJobOutputReadBytes bounds one output read so a poll
 	// returns a page rather than the whole log.
 	DefaultEnvironmentJobOutputReadBytes int64 = 64 << 10
@@ -162,6 +176,25 @@ type EnvironmentJob struct {
 	// LeaseID is the activity lease the job holds for its lifetime, which is why
 	// starting one also makes the environment read as busy.
 	LeaseID string `json:"leaseId,omitempty"`
+
+	// LastAliveAt is the pod-clock timestamp of the supervisor's last alive
+	// beat, stamped on a fixed cadence independent of the work's own output
+	// (see EnvironmentJobAliveHeartbeatInterval). It is never compared against
+	// a caller's own clock — the two clocks are not the same clock — which is
+	// why every reader derives AliveAgeMs from it instead of exposing it raw
+	// for a caller to subtract against.
+	LastAliveAt time.Time `json:"lastAliveAt,omitempty"`
+	// AliveSeq is a monotonic counter bumped on every beat, so a caller can
+	// tell "still beating" from "the same timestamp read twice".
+	AliveSeq int64 `json:"aliveSeq,omitempty"`
+	// AliveAgeMs is computed fresh on every read as now-LastAliveAt, in the
+	// pod's own clock, and is nil only when the job has never beaten (an
+	// attached job, or one whose supervisor has not registered yet). A caller
+	// that sees this exceed EnvironmentJobAliveStaleMs treats the job as
+	// failed — reported as an unknown outcome, never as success and never as
+	// a tool error — rather than waiting on a beat a dead supervisor can no
+	// longer produce.
+	AliveAgeMs *int64 `json:"aliveAgeMs,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.
@@ -243,6 +276,10 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 // the job is demoted to unknown and that demotion is persisted, so every later
 // read gives the same definite answer.
 func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, alive func(int) bool, hostname string) EnvironmentJob {
+	// Computed fresh on every read, in the reader's own now, and never
+	// persisted: a stale value on disk would be meaningless without the read
+	// time that produced it, exactly like OutputBytes below.
+	job.AliveAgeMs = environmentJobAliveAgeMs(job.LastAliveAt, now)
 	if job.State != EnvironmentJobStateRunning {
 		return job
 	}
@@ -271,6 +308,20 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
 	_ = writeEnvironmentJob(dir, job)
 	return job
+}
+
+// environmentJobAliveAgeMs is nil only when the job has never beaten, so a
+// caller never mistakes "no signal yet" for "beating zero milliseconds ago".
+func environmentJobAliveAgeMs(lastAliveAt, now time.Time) *int64 {
+	if lastAliveAt.IsZero() {
+		return nil
+	}
+	age := now.Sub(lastAliveAt)
+	if age < 0 {
+		age = 0
+	}
+	ms := age.Milliseconds()
+	return &ms
 }
 
 // currentJobHostname is the pod hostname a job supervisor stamps at start and

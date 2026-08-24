@@ -275,9 +275,16 @@ func newJobStatusCmd(resolveOpen OpenResolver) *cobra.Command {
 		Short: "Report one job's state and outcome, or every retained job",
 		Long: "Answers running, exited, or unknown — never a partial answer. A job whose\n" +
 			"supervisor is gone without an outcome reads as unknown rather than as\n" +
-			"success, which is what makes it safe to act on. Finished jobs stay readable\n" +
-			"for 24 hours so a caller that reconnects after the work ended can still\n" +
-			"learn what happened.",
+			"success, which is what makes it safe to act on: unknown is exactly as\n" +
+			"terminal as exited, never a reason to keep waiting. Finished jobs stay\n" +
+			"readable for 24 hours so a caller that reconnects after the work ended can\n" +
+			"still learn what happened.\n\n" +
+			"aliveAgeMs is the milliseconds since the supervisor's last ~1s beat,\n" +
+			"computed in erun's own clock so nothing subtracts a pod timestamp from a\n" +
+			"caller's clock. Once it exceeds 5000, treat the job as failed (an unknown\n" +
+			"outcome, never a success, never a tool error) even if state has not caught\n" +
+			"up yet; a silent-but-healthy command never trips this, since the beat does\n" +
+			"not depend on the work's own output.",
 		Example: "  erun job status --tenant team --environment dev\n" +
 			"  erun job status --tenant team --environment dev --id suite --output json",
 		Args: cobra.NoArgs,
@@ -392,7 +399,7 @@ func jobStatusLine(job common.EnvironmentJob) string {
 		} else if job.PID > 0 {
 			line += fmt.Sprintf(", pid %d", job.PID)
 		}
-		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+		return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobOutputSuffix(job)
 	case common.EnvironmentJobStateExited:
 		line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
 		if strings.TrimSpace(job.Signal) != "" {
@@ -406,6 +413,17 @@ func jobStatusLine(job common.EnvironmentJob) string {
 		}
 		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 	}
+}
+
+// jobAliveSuffix surfaces the supervisor's alive beat for a running job, so an
+// operator watching `job status` sees the same signal the 5s caller rule acts
+// on rather than only the frozen activity string a stalled beat would
+// otherwise leave on screen.
+func jobAliveSuffix(job common.EnvironmentJob) string {
+	if job.AliveAgeMs == nil {
+		return ""
+	}
+	return fmt.Sprintf(", last beat %dms ago", *job.AliveAgeMs)
 }
 
 // jobAgentSuffix reports what an agent run is doing right now. An agent job that
@@ -451,7 +469,13 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 		Long: "The wait is bounded and the call returns either an outcome or \"still\n" +
 			"running\" — it never holds a connection open for the work's lifetime, which\n" +
 			"is what drops under load and leaves a caller unable to tell a dead stream\n" +
-			"from a dead job.\n\n" +
+			"from a dead job. A job whose supervisor died reads back as unknown with\n" +
+			"timedOut false, its own third case distinct from both success and \"still\n" +
+			"running\" — never re-await it expecting a different answer.\n\n" +
+			"The reported job's aliveAgeMs is the faster of the two signals: it crosses\n" +
+			"the 5000ms caller threshold before state necessarily catches up, so a\n" +
+			"caller in a hurry can act on it directly instead of waiting for the next\n" +
+			"reconcile (see `erun job status --help`).\n\n" +
 			"Exit codes are the contract: 0 when the job exited 0, 124 when the timeout\n" +
 			"elapsed with the job still running, 125 when the outcome is unknown, and 1\n" +
 			"when the job exited non-zero (its real code is in the reported result).",
@@ -513,7 +537,7 @@ func awaitJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenRe
 
 func jobAwaitLine(result common.AwaitEnvironmentJobResult) string {
 	if result.TimedOut {
-		return fmt.Sprintf("still running after %ds: %s", result.TimeoutSeconds, result.Job.Name)
+		return fmt.Sprintf("still running after %ds: %s", result.TimeoutSeconds, result.Job.Name) + jobAliveSuffix(result.Job)
 	}
 	return jobStatusLine(result.Job)
 }
@@ -545,7 +569,10 @@ func newJobOutputCmd(resolveOpen OpenResolver) *cobra.Command {
 		Short: "Read a job's captured output, including while it is still running",
 		Long: "Output is served from the job's log as it stands, so progress is visible long\n" +
 			"before the work exits. Read a page at a time and pass the reported next\n" +
-			"offset back to continue where you left off.",
+			"offset back to continue where you left off. A silent-but-healthy command\n" +
+			"(an image pull, a slow test) never advances outputBytes for minutes at a\n" +
+			"time, so use the reported job's aliveAgeMs (see `erun job status --help`),\n" +
+			"not output growth, to tell quiet-but-alive apart from actually dead.",
 		Example: "  erun job output --tenant team --environment dev --id suite --offset 4096",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

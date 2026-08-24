@@ -35,6 +35,10 @@ var defaultRules = []Replacement{
 	// at print time, so they land a second either side of the ttl depending on
 	// how long the subprocess took to start.
 	{regexp.MustCompile(`expires in \d+s`), "expires in <REMAINING>"},
+	// A job's alive-beat age is milliseconds since the supervisor's last ~1s
+	// heartbeat, measured against the wall clock at print time — inherently as
+	// variable as the remaining-lease seconds above.
+	{regexp.MustCompile(`last beat \d+ms ago`), "last beat <ALIVE_AGE>ms ago"},
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
 	// The Terraform durable work dir (local-backend state + TF_DATA_DIR) lives
 	// under the test HOME temp dir. Collapse just its temp-path prefix to a stable

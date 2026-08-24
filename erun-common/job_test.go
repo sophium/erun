@@ -58,3 +58,50 @@ func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *te
 		}
 	})
 }
+
+func TestReconcileEnvironmentJobComputesAliveAgeMsOnEveryRead(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
+
+	t.Run("never beaten reports nil, not zero", func(t *testing.T) {
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning}
+		resolved := reconcileEnvironmentJob(dir, job, now, alwaysAlive, "")
+		if resolved.AliveAgeMs != nil {
+			t.Fatalf("AliveAgeMs = %v, want nil for a job that never beat", resolved.AliveAgeMs)
+		}
+	})
+
+	t.Run("a healthy running job reports the elapsed time since its last beat", func(t *testing.T) {
+		lastBeat := now.Add(-3 * time.Second)
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, LastAliveAt: lastBeat}
+		resolved := reconcileEnvironmentJob(dir, job, now, alwaysAlive, "")
+		if resolved.AliveAgeMs == nil || *resolved.AliveAgeMs != 3000 {
+			t.Fatalf("AliveAgeMs = %v, want 3000", resolved.AliveAgeMs)
+		}
+	})
+
+	t.Run("a finished job still reports its frozen alive age rather than dropping it", func(t *testing.T) {
+		lastBeat := now.Add(-1 * time.Second)
+		code := 0
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateExited, LastAliveAt: lastBeat, ExitCode: &code}
+		resolved := reconcileEnvironmentJob(dir, job, now, alwaysAlive, "")
+		if resolved.AliveAgeMs == nil || *resolved.AliveAgeMs != 1000 {
+			t.Fatalf("AliveAgeMs = %v, want 1000", resolved.AliveAgeMs)
+		}
+	})
+
+	t.Run("a stale beat on an otherwise-alive pid still surfaces as a large age for the caller to act on", func(t *testing.T) {
+		lastBeat := now.Add(-30 * time.Second)
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, LastAliveAt: lastBeat}
+		resolved := reconcileEnvironmentJob(dir, job, now, alwaysAlive, "")
+		if resolved.State != EnvironmentJobStateRunning {
+			t.Fatalf("State = %q, want running (reconcile does not act on staleness itself)", resolved.State)
+		}
+		if resolved.AliveAgeMs == nil || *resolved.AliveAgeMs != 30000 {
+			t.Fatalf("AliveAgeMs = %v, want 30000", resolved.AliveAgeMs)
+		}
+		if *resolved.AliveAgeMs <= EnvironmentJobAliveStaleMs {
+			t.Fatalf("AliveAgeMs = %d, want > EnvironmentJobAliveStaleMs (%d)", *resolved.AliveAgeMs, EnvironmentJobAliveStaleMs)
+		}
+	})
+}

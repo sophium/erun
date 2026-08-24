@@ -1,3 +1,3 @@
-still running after <ELAPSED>: slow
+still running after <ELAPSED>: slow, last beat <ALIVE_AGE>ms ago
 audit: erun job await --environment dev --id slow --tenant team --timeout 1s
 job "slow" is still running after <ELAPSED>

@@ -36,6 +36,11 @@ func TestMain(m *testing.M) {
 	if os.Getenv(workspaceSyncSSHStubEnv) != "" {
 		os.Exit(runWorkspaceSyncSSHStub(os.Args))
 	}
+	// Only one TestMain is allowed per test binary, so the job-alive-contract
+	// test's re-entered supervisor helper (job_alive_test.go) hooks in here too.
+	if os.Getenv(jobAliveSupervisorHelperEnv) != "" {
+		os.Exit(runJobAliveSupervisorHelper())
+	}
 	os.Exit(m.Run())
 }
 
