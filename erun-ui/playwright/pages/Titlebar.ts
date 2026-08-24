@@ -107,8 +107,12 @@ export class Titlebar {
     return banners.some((banner) => banner.includes(expected));
   }
 
-  // The pill only mounts after the first idle-status poll completes for the selected env, so callers must wait for visibility before driving it.
+  // The pill only mounts after the first idle-status poll completes for the
+  // selected env, so callers must wait for visibility before driving it. The
+  // accessible name normally starts with "Idle timeout", but a reading the
+  // pod never confirmed leads with a provenance caveat instead — match
+  // "Idle timeout" anywhere in the name so both cases resolve the same badge.
   idleStatusBadge(): Locator {
-    return this.page.getByRole('button', { name: /^Idle timeout/ });
+    return this.page.getByRole('button', { name: /Idle timeout/ });
   }
 }
