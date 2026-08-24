@@ -845,6 +845,71 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	}
 }
 
+// newComponentBuildFixture writes a project with a root build.sh (so the
+// environment's build script is not disabled) plus one component docker
+// context, for TestBuildToolBuildsComponentWithMultiPlatformSpec.
+func newComponentBuildFixture(t *testing.T) string {
+	t.Helper()
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	return projectRoot
+}
+
+// TestBuildToolBuildsComponentWithMultiPlatformSpec locks erun#1248: a
+// component build on an environment whose build script is not disabled must
+// still resolve a real, buildable docker spec (matching what the no-component
+// path resolves via newDockerBuildSpec) rather than a spec with no platforms,
+// which builds and pushes nothing while still reporting success.
+func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
+	projectRoot := newComponentBuildFixture(t)
+
+	var captured *eruncommon.DockerBuildSpec
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: "dev",
+			RepoPath:    projectRoot,
+		},
+		BuildScriptRunner: func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+			t.Fatal("unexpected build script call: --component must resolve the docker context directly")
+			return nil
+		},
+		BuildDockerImage: func(spec eruncommon.DockerBuildSpec, stdout, stderr io.Writer) error {
+			captured = &spec
+			return nil
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, BuildInput{Component: "web", NoIncremental: true})
+	if err != nil {
+		t.Fatalf("buildTool failed: %v", err)
+	}
+	if !output.Executed {
+		t.Fatalf("expected execution output, got %+v", output)
+	}
+	if captured == nil {
+		t.Fatal("expected the docker image builder to be invoked")
+	}
+	wantPlatforms := []string{"linux/amd64", "linux/arm64"}
+	if !slices.Equal(captured.Platforms, wantPlatforms) {
+		t.Fatalf("resolved component build spec has the wrong platforms, so it builds nothing real: got %v want %v", captured.Platforms, wantPlatforms)
+	}
+	if captured.DockerfilePath == "" {
+		t.Fatalf("expected a resolved Dockerfile path, got %+v", captured)
+	}
+}
+
 // TestBuildToolSurfacesInvalidDockerContext locks that a misconfigured
 // paths.dockercontext fails the MCP build tool loudly for a component build,
 // rather than being swallowed — the erun-common resolver's error must propagate

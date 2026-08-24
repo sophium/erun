@@ -95,26 +95,14 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 			return eruncommon.BuildExecutionSpec{}, err
 		}
 
-		buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
+		build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
-		if !ok {
+		if build == nil {
 			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		imageRef, err := eruncommon.ResolveDockerImageReference(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
-		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
-		}
-		contextDir, err := eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
-		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
-		}
-		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
-			ContextDir:     contextDir,
-			DockerfilePath: buildContext.DockerfilePath,
-			Image:          imageRef,
-		}})
+		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
