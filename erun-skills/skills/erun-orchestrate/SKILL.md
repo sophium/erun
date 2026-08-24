@@ -73,11 +73,12 @@ Read what you control from erun's config store — never infer it from what happ
   substituted, and say which of the above you tried. A gap that names no
   attempted mechanism is a stop wearing an honest face.
 - **Bound your waits.** Every gate, build, and e2e gets an explicit timeout so a hang fails fast.
-- **Pace yourself: come back roughly every five minutes and check nothing has gone stale.** A long
-  single wait is not patience, it is blindness — while you block, the work you are waiting on
-  settles, a channel drops, a pod is replaced, and another actor moves a branch or a HEAD you were
-  reasoning about. Everything you believed at the start of the wait is a claim about a world that
-  has since changed, and the longer the wait the more of it is wrong.
+- **Pace yourself: come back roughly every five minutes and check nothing has gone stale, on
+  connection errors wait and resume, and do not exit this loop.** A long single wait is not
+  patience, it is blindness — while you block, the work you are waiting on settles, a channel
+  drops, a pod is replaced, and another actor moves a branch or a HEAD you were reasoning about.
+  Everything you believed at the start of the wait is a claim about a world that has since
+  changed, and the longer the wait the more of it is wrong.
   On each pass re-read the things that go stale rather than the thing you are waiting for: the
   job's own state, the channel, the tree's HEAD and cleanliness, whether anything you were told
   earlier is still true, and the environment's own resource usage (`erun usage`) — the one entry on
@@ -85,6 +86,12 @@ Read what you control from erun's config store — never infer it from what happ
   pass that re-reads job state, not a separate thing to remember. Two failures come specifically from not doing this — declaring work stalled
   that had already finished, and acting on a branch someone else had moved — and both read, at the
   time, like careful diagnosis.
+  A dropped connection is staleness of the same kind, not a stopping condition: wait it out and
+  resume rather than ending the turn or the loop over it. The desktop backs this up structurally —
+  if a running session's own activity report goes quiet for about ten minutes it retypes this exact
+  contract into the pane, and if the process dies outright it relaunches the same conversation and
+  tells it to carry on — but that is the recovery for a session that already stopped keeping the
+  contract, not a reason to lean on it instead of pacing yourself.
   Short repeated checks also keep the operator informed, which a single silent block does not.
 - **On completion, list the assumptions you took** in place of asking. This is what keeps "don't ask" accountable.
 

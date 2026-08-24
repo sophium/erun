@@ -20,7 +20,7 @@ The starting point. The Operator opens a chat tool in a browser, describes a tas
 
 The Agent (Claude Code, Codex, …) runs **inside the same environment as the Operator** — same files, same shell, same build tools. Diffs land in the workspace directly; the Agent can `ls`, `cat`, `git diff` actual project state. Limitation: one env per Agent. Two Agents step on each other's files. Integration tests still mean tearing down what you were doing.
 
-### Level 3 — Many Agents in many environments
+### Level 3 — Many Agents in many environments {#level-3}
 
 The Operator orchestrates **multiple Agents, each in its own ERun environment**. Every Agent gets a full Kubernetes namespace with backend, database, queues, everything the feature needs to run end-to-end. Parallel work without crosstalk; integration tests on every build; one Operator running team-scale throughput (within Brooks's Law).
 
@@ -38,6 +38,11 @@ Where that review directory lives follows the environment's type, and you don't 
 An orchestrator never writes into a review directory whichever type it is: the Agent in the pod owns the worktree, and the orchestrator delegates, reviews, and verifies. For a `local-agent` env that rule matters more, not less — an edit there really would reach the pod, and land in the middle of the Agent's work.
 
 An orchestrator also does not stop to ask you. Its contract is to resolve ambiguity from the code, tests and sensible defaults and carry the task to a verified end, so a question is a defect rather than caution — one asked while you are away stalls the work until you come back. That is enforced, not merely instructed: the session is launched without the harness's question tool, and a turn that tries to end by handing you a decision anyway ("say the word and I will…") is refused and told to decide. An irreversible or cross-environment action still gets a heads-up, but it arrives as a notification while the orchestrator proceeds, never as a prompt waiting on you.
+
+The desktop also keeps that contract in front of a session that has gone quiet, and brings one back if it dies outright:
+
+- **Pacing.** If a running orchestrator's session hasn't reported any activity for about ten minutes, the desktop types the pacing reminder straight into its pane — the same "keep going, don't stop to ask, wait out a connection error and resume" contract, plus a line telling it to say so and stop if the task is genuinely done. You'll see it as a dim marker line, so it's never a silent, invisible poke. A session that keeps going dark gets nudged again every ten minutes, up to six times over about an hour; past that the desktop stops and tells you, since nudging a session that never answers isn't recovery. Typing into the pane yourself, or the session reporting real activity again, resets the count.
+- **Auto-resume after a crash.** If the session's process dies outright rather than ending cleanly, the desktop relaunches it into the exact same conversation and tells it to pick back up where it left off — you don't have to notice and restart it yourself. This never happens for a session you stopped or quit yourself: your Stop is never second-guessed.
 
 ## First principles
 

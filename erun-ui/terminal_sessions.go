@@ -751,6 +751,12 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	}
 	a.clearAwaitingPostRespawnInput(managed)
 	a.recordTerminalActivity(managed.selection)
+	if id, ok := orchestratorIDFromSessionKey(managed.key); ok {
+		// Real operator input into the pane is the other rearm the pacing
+		// nudge cap names: the operator is plainly at the keyboard, whatever
+		// the last report said.
+		a.rearmOrchestratorPacing(id)
+	}
 	return nil
 }
 
@@ -1353,7 +1359,16 @@ func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
 // guard is a terminal condition — handover, stopped cloud context, deploy
 // failure, fast-exit loop — where an automatic respawn would fight another
 // actor or storm a broken env; the recovery affordance is named in the marker.
-func (a *App) reconnectRefused(managed *managedTerminal) bool {
+func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool {
+	// An orchestrator has no env selection, so every guard below that keys on
+	// managed.selection would silently pass it through. It gets its own check
+	// instead: refuse a clean exit (the operator quit the TUI, not a crash)
+	// and refuse whenever the operator's Stop already removed this
+	// orchestrator's registration, so Stop refuses its own respawn.
+	if managed.kind == sessionKindOrchestrator && a.orchestratorReconnectRefused(managed, exitReason) {
+		return true
+	}
+
 	// Another ERun window re-attached this persistent session — a
 	// deliberate handover, not a transient drop. Respawning would run
 	// `erun open` again, whose attach takes the session straight back,
@@ -1439,6 +1454,27 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	return false
 }
 
+// orchestratorReconnectRefused is reconnectRefused's orchestrator-specific
+// guard. terminalSessionExitReason returns "" for a clean exit (Wait()
+// reported no error) — the operator quitting the TUI from inside, not a
+// failure — and a clean exit must never trigger the auto-resume this bound
+// exists for. stopOrchestratorSession deletes both a.orchestrators[id] and
+// a.sessions[key] under the same lock a Stop takes, so checking they are
+// still exactly this registration is what makes Stop refuse its own respawn
+// even if it raced tryReconnect's own managed.closed check.
+func (a *App) orchestratorReconnectRefused(managed *managedTerminal, exitReason string) bool {
+	if strings.TrimSpace(exitReason) == "" {
+		return true
+	}
+	id, ok := orchestratorIDFromSessionKey(managed.key)
+	if !ok {
+		return true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.orchestrators[id] == nil || a.sessions[managed.key] != managed
+}
+
 func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	a.mu.Lock()
 	if managed == nil || managed.closed || managed.respawn == nil {
@@ -1448,7 +1484,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	respawn := managed.respawn
 	a.mu.Unlock()
 
-	if a.reconnectRefused(managed) {
+	if a.reconnectRefused(managed, exitReason) {
 		return false
 	}
 
@@ -1457,8 +1493,9 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// shared thin reconnect (TTL-deduped) so a replaced pod's forwarders are
 	// rebound without every tab repeating it. If the pod is gone
 	// for good the reconnect surfaces a recoverable failure rather than
-	// silently redeploying — deploy stays the caller's explicit action.
-	if managed.kind != sessionKindLocal {
+	// silently redeploying — deploy stays the caller's explicit action. An
+	// orchestrator has no env runtime to rebind at all.
+	if managed.kind != sessionKindLocal && managed.kind != sessionKindOrchestrator {
 		a.ensureEnvRuntimeOnce(managed.selection)
 	}
 	next, err := respawn()
@@ -1482,8 +1519,11 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	a.mu.Unlock()
 	// The respawn went through — whatever stopped/failed condition the row
 	// was flagged with is being retried, so clear it (the refusal paths
-	// above re-flag on the next failure).
-	a.emitEnvStatus(managed.selection, "")
+	// above re-flag on the next failure). An orchestrator has no env row to
+	// clear a status on.
+	if managed.kind != sessionKindOrchestrator {
+		a.emitEnvStatus(managed.selection, "")
+	}
 	return true
 }
 

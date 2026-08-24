@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -1249,6 +1252,70 @@ func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
 	}
 }
 
+// posixFallback splits a POSIX `primary || fallback` chain and returns the
+// fallback half, failing the (sub)test if the chain shape is not there.
+func posixFallback(t *testing.T, cmd string) string {
+	t.Helper()
+	parts := strings.SplitN(cmd, " || ", 2)
+	if len(parts) != 2 {
+		t.Fatalf("expected a primary || fallback chain, got %q", cmd)
+	}
+	return parts[1]
+}
+
+// TestBuildOrchestratorLaunchFallbackKeepsThePin locks down the crash-fallback
+// fix: a pinned orchestrator whose primary launch fails must fall back to
+// retrying its OWN conversation, never to a bare unpinned `claude`. An unpinned
+// fallback is what the live-session hook then records as this orchestrator's
+// conversation, silently swapping it onto an amnesiac session on every crash.
+func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
+	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000003"
+	const prompt = "carry on"
+
+	t.Run("existing session fallback retries resume", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", sid, true, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, "--resume "+sid) {
+			t.Fatalf("fallback for an existing session must retry --resume, got %q", fallback)
+		}
+	})
+
+	t.Run("first open fallback retries the same create", func(t *testing.T) {
+		// No conversation on disk yet: the fallback must retry the same
+		// --session-id create rather than dropping to unpinned fresh.
+		_, launch := buildOrchestratorLaunch("linux", sid, false, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, "--session-id "+sid) {
+			t.Fatalf("first-open fallback must keep the pinned session id, got %q", fallback)
+		}
+	})
+
+	t.Run("resume prompt chains through the pinned fallback", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", sid, true, "", prompt, "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, sid) || !strings.Contains(fallback, prompt) {
+			t.Fatalf("resume-prompt fallback must keep both the pin and the prompt, got %q", fallback)
+		}
+	})
+
+	t.Run("windows uses the LASTEXITCODE chain", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("windows", sid, true, "", "", "")
+		cmd := launch[len(launch)-1]
+		parts := strings.SplitN(cmd, "$LASTEXITCODE -ne 0", 2)
+		if len(parts) != 2 || !strings.Contains(parts[1], sid) {
+			t.Fatalf("windows fallback must keep the pinned session id, got %q", cmd)
+		}
+	})
+
+	t.Run("transient launch keeps the unpinned fresh fallback", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", "", false, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.HasPrefix(fallback, "claude"+orchestratorUltracodeFlag) {
+			t.Fatalf("transient fallback should remain unpinned fresh, got %q", fallback)
+		}
+	})
+}
+
 // Per-orchestrator session ids are deterministic and unique so each orchestrator
 // resumes its own conversation, while a transient (empty-id) orchestrator has no
 // pinned session.
@@ -1412,5 +1479,200 @@ func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T)
 	}
 	if launchedConversation != orchestratorSessionID(created.ID) {
 		t.Fatalf("expected the pinned conversation without a hand-off, got %q", launchedConversation)
+	}
+}
+
+// TestOrchestratorReconnectRefusedGuards is the standalone unit test for the
+// two bounds tryReconnect's orchestrator-specific guard exists to enforce: a
+// clean exit (no reason — the operator quit the TUI, not a crash) is always
+// refused, and a torn-down registration is refused even carrying a real crash
+// reason — which is what makes an operator's Stop refuse its own respawn.
+func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
+	app := NewApp(erunUIDeps{})
+	id := "agent"
+	key := orchestratorSessionKey(id)
+	managed := &managedTerminal{key: key, kind: sessionKindOrchestrator}
+	app.orchestrators[id] = &orchestratorSession{id: id}
+	app.sessions[key] = managed
+
+	if !app.orchestratorReconnectRefused(managed, "") {
+		t.Fatal("a clean exit (empty reason) must refuse respawn")
+	}
+	if app.orchestratorReconnectRefused(managed, "exit status 1") {
+		t.Fatal("a crash with an intact registration must not be refused")
+	}
+
+	delete(app.orchestrators, id)
+	delete(app.sessions, key)
+	if !app.orchestratorReconnectRefused(managed, "exit status 1") {
+		t.Fatal("a torn-down registration must refuse respawn, so Stop cannot be undone")
+	}
+}
+
+// TestOrchestratorRespawnsAfterCrashIntoTheSameConversation is the end-to-end
+// path for the crash-recovery half of #1260: a session that exits non-zero is
+// relaunched automatically, into the SAME conversation, carrying a prompt that
+// tells it to carry on rather than idling.
+func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	var conversations, prompts []string
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+			mu.Lock()
+			conversations = append(conversations, sessionID)
+			prompts = append(prompts, resumePrompt)
+			mu.Unlock()
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	mu.Lock()
+	first := sessions[0]
+	first.waitErr = errors.New("exit status 1")
+	mu.Unlock()
+	_ = first.Close()
+
+	waitForSessionCount(t, &mu, &sessions, 2, 2*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(conversations) != 2 {
+		t.Fatalf("expected two launches (initial + respawn), got %d: %v", len(conversations), conversations)
+	}
+	if conversations[0] != conversations[1] {
+		t.Fatalf("respawn must resume the SAME conversation, got %q then %q", conversations[0], conversations[1])
+	}
+	if prompts[1] == "" || !strings.Contains(prompts[1], "carry") {
+		t.Fatalf("respawn must carry a prompt telling it to continue, got %q", prompts[1])
+	}
+}
+
+// TestOrchestratorCleanExitDoesNotRespawn is the counterpart: an exit with no
+// reason (Wait returned nil — the operator quit the TUI from inside) must end
+// the session rather than relaunch it.
+func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	mu.Lock()
+	first := sessions[0]
+	mu.Unlock()
+	_ = first.Close() // waitErr is nil: a clean exit
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(emits.events(terminalExitEvent)) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(emits.events(terminalExitEvent)) == 0 {
+		t.Fatal("expected the clean exit to finalize the session")
+	}
+	mu.Lock()
+	got := len(sessions)
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("a clean exit must not respawn, got %d sessions", got)
+	}
+}
+
+// TestStopOrchestratorRefusesItsOwnRespawn locks the bound end to end: an
+// operator's Stop must never be undone by an in-flight crash respawn.
+func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	if err := app.StopOrchestrator(created.ID); err != nil {
+		t.Fatalf("StopOrchestrator failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	got := len(sessions)
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("Stop must not be undone by a respawn, got %d sessions", got)
+	}
+	if info, ok := app.runningOrchestratorInfo(created.ID); ok {
+		t.Fatalf("expected no running session after Stop, got %+v", info)
 	}
 }
