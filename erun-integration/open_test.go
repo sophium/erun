@@ -350,6 +350,11 @@ func TestOpen(t *testing.T) {
 		// Real-run --no-shell still emits the setup preamble on stdout; pin
 		// DetectHost so its dialect stays POSIX. See openHostOSOverride.
 		envVars = append(envVars, openHostOSOverride)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry
+		// read. Both the persisted 1.0.0 (the deploy-decision phase) and the
+		// requested 9.9.9 (the actual deploy) are resolved along the way.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0,erun-devops:9.9.9")
 		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
 			Cwd: setup.Cwd,
 			Env: envVars,
@@ -617,6 +622,9 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry read.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -694,6 +702,9 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlRunState(t, setup, 0, 0)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry read.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1783,6 +1794,10 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinary(t, stubsDir, "helm", "")
 		fixture.StubBinary(t, stubsDir, "docker", "")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "helm", "docker")...)
+		// The reattach handoff's managed deploy resolves the runtime chart ladder;
+		// the seam confirms erun-devops published so it installs it instead of
+		// refusing.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

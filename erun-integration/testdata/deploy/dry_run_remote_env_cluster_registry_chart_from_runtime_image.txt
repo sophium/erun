@@ -4,8 +4,7 @@ deploy: tenant=team environment=dev version-override=<VERSION> components=[] for
 deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
-deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart)
-deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in ghcr.io/sophium
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
 deploy: runtime image override ghcr.io/sophium/erun-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: resolved 1 spec(s)

@@ -65,7 +65,10 @@ func TestUpgrade(t *testing.T) {
 		seedUpgradeEnv(t, setup, "team", "dev",
 			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// The upgrade's own deploy resolves the runtime chart ladder; the seam
+		// confirms erun-devops published so it upgrades instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_version_override_lagging", normalize.Apply(result.Combined))
 	})
 
@@ -111,7 +114,12 @@ func TestUpgrade(t *testing.T) {
 		seedUpgradeEnv(t, setup, "team", "dev",
 			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: runtime\nautoupgrade: true\nupgradechannel: snapshot\n")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000")
+		// The upgrade's own deploy resolves the runtime chart ladder; the seam
+		// confirms erun-devops published at the superseding stable so it
+		// upgrades instead of refusing.
+		envVars := append(setup.Env(),
+			"ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000",
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		// Normalization collapses both the stable and the snapshot tag to
 		// <VERSION>, so the golden alone cannot prove the stable was chosen
@@ -169,7 +177,12 @@ func TestUpgrade(t *testing.T) {
 		seedUpgradeTenant(t, setup, "team", "agent")
 		seedUpgradeEnv(t, setup, "team", "agent",
 			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: remote-agent\nautoupgrade: true\n")
-		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,ignored")
+		// The upgrade's own deploy resolves the runtime chart ladder; the seam
+		// confirms erun-devops published at whichever version this member
+		// resolves to so it upgrades instead of refusing.
+		envVars := append(setup.Env(),
+			"ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,ignored",
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0,erun-devops:2.0.0-snapshot-20260101000000")
 		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_snapshot_channel_without_published_snapshot", normalize.Apply(result.Combined))
 	})
@@ -258,7 +271,10 @@ func TestUpgrade(t *testing.T) {
 		seedUpgradeEnv(t, setup, "team", "dev",
 			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"upgrade", "--tenant", "team", "--environment", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// The upgrade's own deploy resolves the runtime chart ladder; the seam
+		// confirms erun-devops published so it upgrades instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		result := erun.Run(t, []string{"upgrade", "--tenant", "team", "--environment", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_scoped_flags_lagging", normalize.Apply(result.Combined))
 	})
 }

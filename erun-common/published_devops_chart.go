@@ -81,55 +81,82 @@ type resolvedRuntimeChart struct {
 }
 
 // resolvePublishedRuntimeChartReference walks the candidate ladder and installs
-// the first coordinate that publishes the deploy version, probed against the
-// chart repo (authenticated like every registry read). Every candidate tried and
-// passed over is traced, so a dry-run reader sees the whole search rather than
-// only its answer. When nothing answers — an offline resolve, an unreadable
-// registry, or a genuinely unpublished version — it falls back to the shared
-// chart in the env's own chart registry, which is what resolution always
-// produced, and returns the probed coordinates so the chart pull's failure can
-// name where erun looked instead of blaming the version.
-func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string) resolvedRuntimeChart {
+// the first coordinate confirmed to publish the deploy version, probed against
+// the chart repo (authenticated like every registry read). Every candidate
+// tried and passed over is traced, so a dry-run reader sees the whole search
+// rather than only its answer. It never substitutes an unconfirmed coordinate:
+// when no candidate is confirmed published, it refuses rather than guessing --
+// the shared erun-devops chart is versioned on erun's own release line, so
+// installing it at a tenant's own version is a coordinate that can never
+// exist. A registry read that fails outright (auth, network, an unreachable
+// registry) is reported as "could not determine", never folded into "not
+// found": a blind probe is not evidence of absence.
+//
+// deferToOverride is true when the caller already knows this search's answer
+// is about to be replaced by an operator-stated --runtime-chart: refusing here
+// would block a deploy the operator has already resolved themselves, so the
+// search reports what it found (or didn't) without failing the deploy, and the
+// caller installs a placeholder coordinate that the override immediately
+// supersedes.
+func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	probed := runtimeChartCandidates(target, chartRegistry)
 	candidates := make([]string, 0, len(probed))
 	for _, candidate := range probed {
 		candidates = append(candidates, candidate.describe())
 	}
+	outcomes := make([]string, 0, len(probed))
+	inconclusive := false
 	for _, candidate := range probed {
-		if publishedChartHasVersion(context.Background(), candidate.registry, candidate.chart, version) {
+		found, err := probeChartVersion(context.Background(), candidate.registry, candidate.chart, version)
+		if err != nil {
+			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " could not be confirmed in " + candidate.registry + " (" + candidate.why + "): " + err.Error())
+			outcomes = append(outcomes, candidate.describe()+": could not determine: "+err.Error())
+			inconclusive = true
+			continue
+		}
+		if found {
 			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " found in " + candidate.registry + " (" + candidate.why + ")")
-			return resolvedRuntimeChart{reference: candidate.reference(), name: candidate.chart, registry: candidate.registry, candidates: candidates}
+			return resolvedRuntimeChart{reference: candidate.reference(), name: candidate.chart, registry: candidate.registry, candidates: candidates}, nil
 		}
 		ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " not found in " + candidate.registry + " (" + candidate.why + ")")
+		outcomes = append(outcomes, candidate.describe()+": confirmed absent")
 	}
-	fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
-	ctx.Trace("deploy: no runtime chart candidate published " + version + "; falling back to " + fallback.chart + " in " + fallback.registry)
-	return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates}
+	if deferToOverride {
+		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
+		ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; --runtime-chart names the coordinate to install instead")
+		return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates}, nil
+	}
+	ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; refusing to guess")
+	return resolvedRuntimeChart{}, &RuntimeChartConfirmationError{Version: version, Candidates: outcomes, Inconclusive: inconclusive}
 }
 
 // resolveRuntimeChartCoordinate answers which runtime chart to install, at which
 // version. An env that states its chart (EnvConfig.RuntimeChart) is taken at its
 // word -- that is the coordinate, and its version, when it carries one, is the
 // chart's own rather than the deploy version. Otherwise the chart is looked up
-// along the candidate ladder, at the deploy version.
+// along the candidate ladder, at the deploy version. deferToOverride is
+// forwarded to resolvePublishedRuntimeChartReference -- see its doc comment.
 //
 // The returned chart version is empty for the looked-up case, meaning "the deploy
 // version", so nothing changes for the envs whose chart and image were published
 // as a pair.
-func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string) resolvedRuntimeChart {
+func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion := splitChartReferenceVersion(named)
 		chart := resolvedRuntimeChart{reference: reference, name: chartNameFromReference(reference), version: chartVersion}
 		if chartVersion == "" {
 			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
-			return chart
+			return chart, nil
 		}
 		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
-		return chart
+		return chart, nil
 	}
-	chart := resolvePublishedRuntimeChartReference(ctx, target, registry, version)
+	chart, err := resolvePublishedRuntimeChartReference(ctx, target, registry, version, deferToOverride)
+	if err != nil {
+		return resolvedRuntimeChart{}, err
+	}
 	ctx.Trace("deploy: " + reason + "; using published chart " + chart.reference + " version " + version)
-	return chart
+	return chart, nil
 }
 
 // traceRuntimeRegistryMemo surfaces what this deploy does to the env's
@@ -212,11 +239,29 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 
 	ctx.Trace("deploy: deploying tenant artifacts; verifying charts published at " + version + " in " + registry + ": " + strings.Join(required, ", "))
 
+	return reportUnconfirmedTenantCharts(required, registry, version)
+}
+
+// reportUnconfirmedTenantCharts probes each chart in required and returns an
+// error naming whichever charts could not be confirmed published at version --
+// distinguishing "could not determine" (a probe error, which must never be read
+// as "not published") from "confirmed absent" (missing). A probe that could not
+// answer takes priority: it is not evidence the chart is missing, so refusing on
+// it takes precedence over refusing on a genuine miss.
+func reportUnconfirmedTenantCharts(required []string, registry, version string) error {
 	missing := make([]string, 0, len(required))
+	unresolved := make([]string, 0, len(required))
 	for _, chart := range required {
-		if !publishedChartHasVersion(context.Background(), registry, chart, version) {
+		found, err := probeChartVersion(context.Background(), registry, chart, version)
+		switch {
+		case err != nil:
+			unresolved = append(unresolved, chart+": could not determine: "+err.Error())
+		case !found:
 			missing = append(missing, chart)
 		}
+	}
+	if len(unresolved) > 0 {
+		return fmt.Errorf("deploy could not confirm whether these tenant charts are published at version %s in %s: %s; deploy refuses to guess rather than treat an unanswered probe as published -- check registry access and retry", version, registry, strings.Join(unresolved, "; "))
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
@@ -224,15 +269,20 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 	return nil
 }
 
-func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName, version string) bool {
+// probeChartVersion answers whether chartName publishes version in
+// containerRegistry. A non-nil error means the registry read itself failed --
+// credentials, network, or an unreachable registry -- and must never be read as
+// "not found": a blind probe is not evidence of absence, only a definitive read
+// that excludes the version is.
+func probeChartVersion(ctx context.Context, containerRegistry, chartName, version string) (bool, error) {
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
-		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version)
+		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version), nil
 	}
 	versions, err := ResolveRuntimeImageRegistryVersions(ctx, containerRegistry, "charts/"+chartName)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return versions.HasVersion(version)
+	return versions.HasVersion(version), nil
 }
 
 // publishedChartProbeOverrideEnv is a test-only seam that answers the "does
@@ -243,14 +293,17 @@ func publishedChartHasVersion(ctx context.Context, containerRegistry, chartName,
 // "<chart>:<version>" entries treated as published in every registry, or
 // "<registry>/<chart>:<version>" to publish one only in that registry — which is
 // what lets a scenario put the same chart name in one registry and not another,
-// the shape the runtime chart ladder walks. Anything absent (including an empty
-// value) is treated as unpublished.
+// the shape the runtime chart ladder walks. "*" in place of the version marks a
+// chart published at every version, for a scenario that only cares that the
+// chart resolves rather than pinning to one version. Anything absent (including
+// an empty value) is treated as unpublished.
 const publishedChartProbeOverrideEnv = "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE"
 
 func publishedChartOverrideHasVersion(override, containerRegistry, chartName, version string) bool {
 	for _, entry := range strings.Split(override, ",") {
 		coordinate, ver, ok := cutLast(strings.TrimSpace(entry), ":")
-		if !ok || strings.TrimSpace(ver) != version {
+		ver = strings.TrimSpace(ver)
+		if !ok || (ver != "*" && ver != version) {
 			continue
 		}
 		registry, name, qualified := cutLast(strings.TrimSpace(coordinate), "/")
@@ -288,9 +341,10 @@ func IsOCIChartReference(chartPath string) bool {
 
 // ResolvePublishedDevopsDeploySpec rebuilds the runtime deploy spec against
 // the published chart for transport flows that override inputs after the
-// initial resolution (e.g. `erun open --runtime-image`).
+// initial resolution (e.g. `erun open --runtime-image`). Callers on this path
+// never carry a --runtime-chart override of their own.
 func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
-	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride)
+	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride, "")
 }
 
 // resolvePublishedDevopsDeploySpec builds the deploy spec for an environment
@@ -298,12 +352,14 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 // the env's runtime version (one version covers both chart and image, published
 // together at release). The published chart is the single contract, replacing
 // the per-tenant embedded chart copy init once scaffolded, which had drifted
-// from canonical.
-func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
-	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart")
+// from canonical. runtimeChartOverride is the operator's --runtime-chart value
+// when one is coming (applyRuntimeChartOverride applies it after this spec is
+// built) -- see resolvePublishedRuntimeChartReference's deferToOverride doc.
+func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride, runtimeChartOverride string) (DeploySpec, error) {
+	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride)
 }
 
-func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason string) (DeploySpec, error) {
+func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string) (DeploySpec, error) {
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -316,7 +372,10 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", DevopsComponentName)
 	}
 
-	chart := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason)
+	chart, err := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason, strings.TrimSpace(runtimeChartOverride) != "")
+	if err != nil {
+		return DeploySpec{}, err
+	}
 	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
 	deployContext := KubernetesDeployContext{
@@ -506,6 +565,38 @@ func resolveRuntimeRegistry(target OpenResult) string {
 func isClusterRegistryEnv(target OpenResult) bool {
 	return target.EnvConfig.ContainerRegistries.HasClusterEntry() ||
 		strings.TrimSpace(target.ClusterPullRegistry) != ""
+}
+
+// RuntimeChartConfirmationError reports that a by-reference deploy's runtime
+// chart search ended with no candidate confirmed published at the requested
+// version -- never a reason to substitute an unconfirmed coordinate, because
+// the shared erun-devops chart is versioned on erun's own release line and a
+// tenant's own version can never be a valid coordinate for it. Candidates
+// names each coordinate the ladder probed and its answer: "confirmed absent"
+// for a registry read that succeeded and excluded the version, or "could not
+// determine: <err>" for a read that failed outright (auth, network, an
+// unreachable registry) -- an answer that must never be read as absence.
+type RuntimeChartConfirmationError struct {
+	Version    string
+	Candidates []string
+	// Inconclusive is true when at least one candidate's registry read failed
+	// outright, so the search cannot say the chart is genuinely unpublished --
+	// only that it could not confirm one.
+	Inconclusive bool
+}
+
+func (e *RuntimeChartConfirmationError) Error() string {
+	version := strings.TrimSpace(e.Version)
+	if e.Inconclusive {
+		return "deploy could not confirm a runtime chart at version " + version + " at any coordinate probed — " +
+			strings.Join(e.Candidates, "; ") + ". At least one registry read did not return a definitive answer, " +
+			"so deploy refuses to guess rather than install a coordinate it has not confirmed; " +
+			"check registry credentials/connectivity and retry."
+	}
+	return "no runtime chart is published at version " + version + " at any coordinate deploy probed — " +
+		strings.Join(e.Candidates, "; ") + ". `erun push --version " + version + "` (or `erun release`) publishes a " +
+		"version's runtime chart, so deploy is refusing rather than installing a coordinate that cannot exist; " +
+		"publish the version, or name a chart explicitly with `runtimechart` in the env config (or `--runtime-chart <ref>` for one deploy)."
 }
 
 // PublishedChartNotFoundError reports that the chart a by-reference deploy

@@ -81,13 +81,18 @@ func (s Setup) Env() []string {
 		// row append their own ERUN_SKILLS_DIR after Env() (the later
 		// duplicate wins).
 		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
-		// Answer the published-runtime-chart existence probe from a static
-		// (empty) list so deploy never reaches a real registry and drifts a
-		// golden by whatever charts happen to be published there. Scenarios
-		// that exercise the tenant-preferred branch append their own
-		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later duplicate
-		// wins).
-		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=",
+		// Answer the published-runtime-chart existence probe from a static list
+		// so deploy never reaches a real registry and drifts a golden by whatever
+		// charts happen to be published there. The default marks only the shared
+		// erun-devops chart published, at any version -- the realistic baseline,
+		// since a real deploy only ever runs against a version erun has already
+		// released -- while a tenant's own umbrella (e.g. team-devops) stays
+		// unpublished by default, which is what most scenarios want to
+		// distinguish. Scenarios that exercise a narrower shape (a specific
+		// registry, a specific version, "nothing is published at all") append
+		// their own ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later
+		// duplicate wins).
+		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
 		// Answer the "does the live release already have MCP auth enabled?" probe
 		// as unknown, so a deploy that resolves no MCP auth never reads helm and
 		// no scenario depends on a real release (or consumes a helm stub call).

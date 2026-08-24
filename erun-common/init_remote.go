@@ -176,7 +176,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 	// localhost port-forward the pod cannot reach, so a later deploy that renders
 	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
 	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
-	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
+	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion, "")
 	if err != nil {
 		return err
 	}

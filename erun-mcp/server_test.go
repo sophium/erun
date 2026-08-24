@@ -939,6 +939,12 @@ func stubKubectlAlwaysSucceeds(t *testing.T) {
 
 func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
+	// The remote init flow deploys the runtime chart, which now refuses rather
+	// than guess when no candidate is confirmed published; this test cares
+	// about the returned repository interaction, not registry resolution, so
+	// the seam confirms erun-devops published at every version instead of
+	// reaching a live registry.
+	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},
 		Store:   initInteractionStore{},
@@ -980,6 +986,12 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 
 func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
+	// The remote init flow deploys the runtime chart, which now refuses rather
+	// than guess when no candidate is confirmed published; this test cares
+	// about the deployed version, not registry resolution, so the seam
+	// confirms erun-devops published at every version instead of reaching a
+	// live registry.
+	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	var deployedVersion string
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},

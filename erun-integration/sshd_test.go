@@ -275,6 +275,7 @@ func TestSSHD(t *testing.T) {
 		fixture.StubBinary(t, stubs, "kubectl", "")
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -306,7 +307,8 @@ func TestSSHD(t *testing.T) {
 			t.Fatalf("write public key: %v", err)
 		}
 		args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022", "--dry-run"}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -335,7 +337,8 @@ func TestSSHD(t *testing.T) {
 			t.Fatalf("write public key: %v", err)
 		}
 		args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022", "--dry-run"}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -364,6 +367,10 @@ func TestSSHD(t *testing.T) {
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		// The exec failure must be what fails this run, not an unconfirmed runtime
+		// chart; the seam confirms erun-devops published so the deploy the init
+		// flow drives succeeds and the exec stub's Forbidden is what surfaces.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
@@ -400,6 +407,7 @@ func TestSSHD(t *testing.T) {
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
