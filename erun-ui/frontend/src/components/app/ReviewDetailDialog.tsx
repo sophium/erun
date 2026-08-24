@@ -1,0 +1,164 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  EmptyState,
+  StatusBadge,
+} from 'erun-kit';
+import { LoaderCircle } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { closeReviewDetail } from '@/app/reviewDetailThunks';
+import type { ReviewDetailState } from '@/app/state';
+import { formatDashboardDate, reviewStatusTone } from '@/app/tenantDashboardPanels';
+import type { UITenantDashboardBuild } from '@/types';
+
+import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
+
+// ReviewDetailDialog is the review object's own detail surface, opened from a
+// row in the tenant dashboard's Reviews tab (#1199). Named "review detail" —
+// not "review panel" — because that name already belongs to the local diff
+// panel (ReviewPanel.tsx); this dialog shows the hosted platform review.
+export function ReviewDetailDialog(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const detail = useAppSelector((state) => state.reviewDetail);
+  return (
+    <Dialog
+      open={detail.open}
+      onOpenChange={(next) => {
+        if (!next) {
+          dispatch(closeReviewDetail());
+        }
+      }}
+    >
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
+        <ReviewDetailBody detail={detail} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.ReactElement {
+  if (detail.loading) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+        Loading review…
+      </div>
+    );
+  }
+  if (detail.error) {
+    return (
+      <div role="alert" className="py-4 text-sm text-destructive">
+        {detail.error}
+      </div>
+    );
+  }
+  const data = detail.data;
+  if (!data) {
+    return <EmptyState heading="Review not found" />;
+  }
+  if (data.apiError) {
+    return (
+      <div role="alert" className="py-4 text-sm text-destructive">
+        {data.apiError}
+      </div>
+    );
+  }
+  if (data.restricted) {
+    return (
+      <EmptyState
+        heading="You do not have access to this review"
+        body={`It needs ${data.restricted}. Ask an administrator for access.`}
+      />
+    );
+  }
+  if (data.error || !data.review) {
+    return (
+      <div role="alert" className="py-4 text-sm text-destructive">
+        {data.error ?? 'This review could not be loaded.'}
+      </div>
+    );
+  }
+  return <ReviewDetailLoaded review={data.review} data={data} detail={detail} />;
+}
+
+function ReviewDetailLoaded({
+  review,
+  data,
+  detail,
+}: {
+  review: NonNullable<NonNullable<ReviewDetailState['data']>['review']>;
+  data: NonNullable<ReviewDetailState['data']>;
+  detail: ReviewDetailState;
+}): React.ReactElement {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          {review.name || review.reviewId}
+          <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
+        </DialogTitle>
+        <DialogDescription>
+          {review.sourceBranch} → {review.targetBranch}
+          {data.queuePosition ? ` · queue position ${String(data.queuePosition)}` : ''}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <ReviewDetailBuilds data={data} />
+        <ReviewDetailComments detail={detail} />
+      </div>
+    </>
+  );
+}
+
+function ReviewDetailBuilds({
+  data,
+}: {
+  data: NonNullable<ReviewDetailState['data']>;
+}): React.ReactElement {
+  if (data.buildsRestricted) {
+    return (
+      <EmptyState
+        heading="You do not have access to this review's builds"
+        body={`It needs ${data.buildsRestricted}. Ask an administrator for access.`}
+      />
+    );
+  }
+  if (data.buildsError) {
+    return <p className="text-sm text-destructive">{data.buildsError}</p>;
+  }
+  const builds = data.builds ?? [];
+  if (builds.length === 0) {
+    return (
+      <EmptyState
+        heading="OPEN — no build yet"
+        body="Nothing has recorded a build for this review yet."
+      />
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-1.5 text-[13px]">
+      {builds.map((build) => (
+        <ReviewDetailBuildRow key={build.buildId} build={build} />
+      ))}
+    </ul>
+  );
+}
+
+function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): React.ReactElement {
+  return (
+    <li className="flex items-center gap-2">
+      <StatusBadge
+        tone={build.successful ? 'success' : 'destructive'}
+        label={build.successful ? 'Successful' : 'Failed'}
+      />
+      <span className="text-muted-foreground">{build.commitId}</span>
+      {build.version && <span className="text-muted-foreground">v{build.version}</span>}
+      <span className="ml-auto text-muted-foreground">{formatDashboardDate(build.createdAt)}</span>
+    </li>
+  );
+}

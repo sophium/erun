@@ -5,6 +5,7 @@ import './api/tenantApi';
 import './api/kubernetesApi';
 import './api/cloudApi';
 import './api/reviewApi';
+import './api/reviewDetailApi';
 import './api/idleApi';
 import './api/sessionApi';
 import './api/deployApi';
@@ -37,6 +38,7 @@ import orchestratorsReducer from './slices/orchestratorsSlice';
 import outputsDialogReducer from './slices/outputsDialogSlice';
 import pinVersionReducer from './slices/pinVersionSlice';
 import requestCountersReducer from './slices/requestCountersSlice';
+import reviewDetailReducer from './slices/reviewDetailSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
 import sessionsReducer from './slices/sessionsSlice';
@@ -57,6 +59,7 @@ export const store = configureStore({
     terminal: terminalReducer,
     terminalStatus: terminalStatusReducer,
     review: reviewReducer,
+    reviewDetail: reviewDetailReducer,
     notification: notificationReducer,
     requestCounters: requestCountersReducer,
     sessions: sessionsReducer,

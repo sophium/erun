@@ -280,6 +280,68 @@ type uiTenantDashboardAudit struct {
 	CreatedAt string `json:"createdAt,omitempty"`
 }
 
+type uiReviewDetailInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	ReviewID           string `json:"reviewId"`
+}
+
+// uiReviewDetail is the Reviews tab's per-row detail: the review itself, its
+// comment threads, its recorded builds, and its position in its target
+// branch's merge queue. Each sub-read degrades independently — the same
+// restricted-vs-failed-vs-empty distinction the dashboard's own panels make —
+// so one forbidden or failing read never blanks the rest of the detail.
+type uiReviewDetail struct {
+	ReviewID string `json:"reviewId"`
+	// APIError is a whole-detail failure: identity could not be read, so no
+	// capability set exists to gate the reads below honestly.
+	APIError           string                   `json:"apiError,omitempty"`
+	Restricted         string                   `json:"restricted,omitempty"`
+	Error              string                   `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview `json:"review,omitempty"`
+	Comments           []uiReviewComment        `json:"comments,omitempty"`
+	CommentsRestricted string                   `json:"commentsRestricted,omitempty"`
+	CommentsError      string                   `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild `json:"builds,omitempty"`
+	BuildsRestricted   string                   `json:"buildsRestricted,omitempty"`
+	BuildsError        string                   `json:"buildsError,omitempty"`
+	// QueuePosition is 1-based; 0 means the review is not in its target
+	// branch's merge queue right now.
+	QueuePosition int `json:"queuePosition,omitempty"`
+	// CanComment reports whether the signed-in user may reply at all, so the
+	// composer can be hidden rather than rendered to fail on submit.
+	CanComment bool `json:"canComment"`
+}
+
+type uiReviewComment struct {
+	CommentID       string `json:"commentId"`
+	CreatorUserID   string `json:"creatorUserId,omitempty"`
+	Status          string `json:"status"`
+	ParentCommentID string `json:"parentCommentId,omitempty"`
+	CommitID        string `json:"commitId"`
+	FilePath        string `json:"filePath"`
+	Line            int    `json:"line"`
+	Body            string `json:"body"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+}
+
+// uiCreateReviewReplyInput replies to an existing comment thread. CommitID,
+// FilePath, and Line are copied from the parent comment the frontend already
+// holds — a reply must anchor to the same line as the thread it joins — so
+// Body is the only field the operator actually authors.
+type uiCreateReviewReplyInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	ReviewID           string `json:"reviewId"`
+	ParentCommentID    string `json:"parentCommentId"`
+	CommitID           string `json:"commitId"`
+	FilePath           string `json:"filePath"`
+	Line               int    `json:"line"`
+	Body               string `json:"body"`
+}
+
 type uiSSHDConfig struct {
 	Enabled                    bool   `json:"enabled"`
 	LocalPort                  int    `json:"localPort"`

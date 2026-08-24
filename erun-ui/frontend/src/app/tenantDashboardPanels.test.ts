@@ -19,13 +19,14 @@ function dashboard(panels: UITenantDashboardPanel[]): UITenantDashboard {
 test('a tab the user may not open does not render', () => {
   const data = dashboard([
     { tab: 'users' },
+    { tab: 'reviews' },
     { tab: 'queue', restricted: 'GET /v1/reviews/merge-queue' },
     { tab: 'builds' },
     { tab: 'audit', restricted: 'GET /v1/audit-events' },
   ]);
   assert.deepEqual(
     visibleTenantDashboardTabs(data).map((descriptor) => descriptor.tab),
-    ['users', 'builds', 'api-log'],
+    ['users', 'reviews', 'builds', 'api-log'],
   );
 });
 
@@ -37,8 +38,8 @@ test('a panel that failed still renders its tab, so the failure is visible', () 
 test('a dashboard that reported no panels keeps every tab', () => {
   // An unknown permission is not a denied one: before the load answers, nothing
   // may be hidden.
-  assert.equal(visibleTenantDashboardTabs(null).length, 5);
-  assert.equal(visibleTenantDashboardTabs({ tenant: 'frs' }).length, 5);
+  assert.equal(visibleTenantDashboardTabs(null).length, 6);
+  assert.equal(visibleTenantDashboardTabs({ tenant: 'frs' }).length, 6);
 });
 
 test('the missing access is named rather than left to be guessed', () => {
@@ -54,7 +55,11 @@ test('the missing access is named rather than left to be guessed', () => {
 });
 
 test('a selected tab the user may not open falls back to one they can', () => {
-  const data = dashboard([{ tab: 'users', restricted: 'GET /v1/whoami' }, { tab: 'queue' }]);
+  const data = dashboard([
+    { tab: 'users', restricted: 'GET /v1/whoami' },
+    { tab: 'reviews', restricted: 'GET /v1/reviews' },
+    { tab: 'queue' },
+  ]);
   assert.equal(activeTenantDashboardTab(data, 'users'), 'queue');
 });
 

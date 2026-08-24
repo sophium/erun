@@ -184,18 +184,27 @@ type App struct {
 	workingIssueMu    sync.Mutex
 	workingIssueCache map[string]workingIssueCacheEntry
 
+	// emitMu guards emitFn: NewApp starts the activity queue's notify loop
+	// before a caller gets a chance to call SetEmitter, so emit() can race
+	// SetEmitter from that background goroutine without it.
+	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
 }
 
 // SetEmitter overrides how the App emits frontend events; the headless server
 // uses it to redirect events to SSE subscribers instead of the Wails runtime.
 func (a *App) SetEmitter(emit func(name string, args ...any)) {
+	a.emitMu.Lock()
 	a.emitFn = emit
+	a.emitMu.Unlock()
 }
 
 func (a *App) emit(name string, args ...any) {
-	if a.emitFn != nil {
-		a.emitFn(name, args...)
+	a.emitMu.RLock()
+	emitFn := a.emitFn
+	a.emitMu.RUnlock()
+	if emitFn != nil {
+		emitFn(name, args...)
 		return
 	}
 	if a.ctx == nil {

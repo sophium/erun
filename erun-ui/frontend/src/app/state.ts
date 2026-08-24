@@ -9,6 +9,7 @@ import type {
   UIEnvironmentLease,
   UIERunConfig,
   UIIdleStatus,
+  UIReviewDetail,
   UIRuntimeResourceStatus,
   UISelection,
   UITenant,
@@ -136,7 +137,7 @@ export interface TenantDialogState {
   error: string;
 }
 
-export type TenantDashboardTab = 'users' | 'queue' | 'builds' | 'audit' | 'api-log';
+export type TenantDashboardTab = 'users' | 'reviews' | 'queue' | 'builds' | 'audit' | 'api-log';
 
 export interface TenantDashboardState {
   tenant: string;
@@ -144,6 +145,21 @@ export interface TenantDashboardState {
   loading: boolean;
   error: string;
   data: UITenantDashboard | null;
+}
+
+// ReviewDetailState backs the dialog a Reviews-tab row opens. draftBody
+// survives a failed reply submit (Nielsen #3, user control) — a submit error
+// clears submitError but never the text the operator already typed.
+export interface ReviewDetailState {
+  open: boolean;
+  reviewId: string;
+  loading: boolean;
+  error: string;
+  data: UIReviewDetail | null;
+  replyingTo: string;
+  draftBody: string;
+  submitting: boolean;
+  submitError: string;
 }
 
 export interface GlobalConfigDialogState {
@@ -375,6 +391,18 @@ export const defaultTenantDashboard = (): TenantDashboardState => ({
   loading: false,
   error: '',
   data: null,
+});
+
+export const defaultReviewDetail = (): ReviewDetailState => ({
+  open: false,
+  reviewId: '',
+  loading: false,
+  error: '',
+  data: null,
+  replyingTo: '',
+  draftBody: '',
+  submitting: false,
+  submitError: '',
 });
 
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({

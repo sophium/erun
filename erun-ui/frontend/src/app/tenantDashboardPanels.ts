@@ -1,3 +1,5 @@
+import type { StatusBadgeTone } from 'erun-kit';
+
 import type { UITenantDashboard, UITenantDashboardPanel } from '@/types';
 
 import type { TenantDashboardTab } from './state';
@@ -11,6 +13,7 @@ export interface TenantDashboardTabDescriptor {
 // API, so it carries no permission of its own.
 export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'users', label: 'Users' },
+  { tab: 'reviews', label: 'Reviews' },
   { tab: 'queue', label: 'Merge queue' },
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
@@ -62,6 +65,22 @@ export function activeTenantDashboardTab(
     return selected;
   }
   return visible[0]?.tab ?? selected;
+}
+
+// reviewStatusTones maps the collaboration API's review status vocabulary to
+// a StatusBadge tone. WCAG 1.4.1 requires status not be conveyed by colour
+// alone, so every tone still carries the status word as its label.
+const reviewStatusTones: Record<string, StatusBadgeTone> = {
+  OPEN: 'muted',
+  READY: 'success',
+  MERGE: 'in-progress',
+  MERGED: 'success',
+  FAILED: 'destructive',
+  CLOSED: 'muted',
+};
+
+export function reviewStatusTone(status: string): StatusBadgeTone {
+  return reviewStatusTones[status.trim().toUpperCase()] ?? 'warning';
 }
 
 // formatDashboardDate renders a timestamp in the operator's own locale, and

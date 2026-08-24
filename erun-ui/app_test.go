@@ -1873,7 +1873,7 @@ func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	assertPrimaryCloudDashboardAuditEvents(t, dashboard.AuditEvents)
-	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews/merge-queue,/v1/reviews,/v1/reviews/review-1/builds,/v1/audit-events" {
+	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/audit-events" {
 		t.Fatalf("unexpected API requests: %+v", requests)
 	}
 }

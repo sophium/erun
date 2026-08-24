@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -41,35 +42,47 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	if alias == "" {
 		return uiTenantDashboard{}, fmt.Errorf("tenant primary cloud alias is required")
 	}
-	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
+	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
 	if err != nil {
-		dashboard.APIError = fmt.Sprintf("get cloud bearer token: %v", err)
+		dashboard.APIError = err.Error()
 		return dashboard, nil
 	}
-	bearer := strings.TrimSpace(token.Token)
-	if bearer == "" {
-		dashboard.APIError = "get cloud bearer token: empty token"
-		return dashboard, nil
-	}
-	// The dashboard reaches the hosted platform through the shared client every
-	// other transport uses, so its wire shapes, error mapping, and header
-	// handling cannot drift from the CLI's.
-	client := eruncommon.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
-		WithUsernameHint(a.tenantDashboardUsernameHint(token.Alias))
-	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 	loadTenantDashboardData(requestCtx, client, &dashboard)
 	return dashboard, nil
+}
+
+// tenantDashboardBearerClient mints a bearer token for cloudProviderAlias and
+// wraps it in the shared platform client every dashboard-backed read or write
+// uses, so wire shapes, error mapping, and header handling cannot drift from
+// the CLI's. cloudProviderAlias must already be validated non-empty by the
+// caller; a failure here is a runtime condition (bad or expired credentials),
+// not a caller wiring error, so every caller surfaces it as its own error
+// field rather than treating it as a Wails-level failure.
+func (a *App) tenantDashboardBearerClient(ctx context.Context, apiURL, cloudProviderAlias string) (*eruncommon.PlatformClient, context.Context, context.CancelFunc, error) {
+	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: cloudProviderAlias}, a.deps.cloudDeps)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("get cloud bearer token: %w", err)
+	}
+	bearer := strings.TrimSpace(token.Token)
+	if bearer == "" {
+		return nil, nil, nil, fmt.Errorf("get cloud bearer token: empty token")
+	}
+	client := eruncommon.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
+		WithUsernameHint(a.tenantDashboardUsernameHint(token.Alias))
+	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
+	return client, requestCtx, cancel, nil
 }
 
 const tenantDashboardTimeout = 10 * time.Second
 
 // Panel tab ids, shared with the frontend's tab strip.
 const (
-	tenantDashboardTabUsers  = "users"
-	tenantDashboardTabQueue  = "queue"
-	tenantDashboardTabBuilds = "builds"
-	tenantDashboardTabAudit  = "audit"
+	tenantDashboardTabUsers   = "users"
+	tenantDashboardTabReviews = "reviews"
+	tenantDashboardTabQueue   = "queue"
+	tenantDashboardTabBuilds  = "builds"
+	tenantDashboardTabAudit   = "audit"
 )
 
 // The API reads each panel is made of, in canonical route-template form — the
@@ -77,8 +90,11 @@ const (
 const (
 	tenantDashboardReadWhoami      = "GET /v1/whoami"
 	tenantDashboardReadReviews     = "GET /v1/reviews"
+	tenantDashboardReadReview      = "GET /v1/reviews/{review_id}"
 	tenantDashboardReadMergeQueue  = "GET /v1/reviews/merge-queue"
 	tenantDashboardReadBuilds      = "GET /v1/reviews/{review_id}/builds"
+	tenantDashboardReadComments    = "GET /v1/reviews/{review_id}/comments"
+	tenantDashboardWriteComment    = "POST /v1/reviews/{review_id}/comments"
 	tenantDashboardReadAuditEvents = "GET /v1/audit-events"
 )
 
@@ -103,9 +119,38 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	}
 	dashboard.Panels = []uiTenantDashboardPanel{{Tab: tenantDashboardTabUsers}}
 	capabilities := whoami.Capabilities
+	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard)
 	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard)
-	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard)
+	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard, reviewsOutcome)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
+}
+
+// reviewsLoadOutcome carries the Reviews panel's own result forward to the
+// Builds panel, which needs the same review list but must not blank on a
+// restriction or failure the Reviews panel already reported for a different
+// reason than its own.
+type reviewsLoadOutcome struct {
+	reviews    []eruncommon.PlatformReview
+	err        error
+	restricted string
+}
+
+func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) reviewsLoadOutcome {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
+		panel.Restricted = restricted
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return reviewsLoadOutcome{restricted: restricted}
+	}
+	reviews, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{})
+	if err != nil {
+		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return reviewsLoadOutcome{err: err}
+	}
+	dashboard.Reviews = tenantDashboardReviews(reviews)
+	dashboard.Panels = append(dashboard.Panels, panel)
+	return reviewsLoadOutcome{reviews: reviews}
 }
 
 func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
@@ -126,35 +171,80 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.Platf
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+// loadTenantDashboardBuilds reuses the review list the Reviews panel already
+// fetched rather than re-listing it, and reads each review's builds
+// concurrently: a tenant with many reviews used to pay one round trip per
+// review under this panel's own share of the whole dashboard's single
+// request timeout, so a big tenant read out as a timed-out API error instead
+// of a slow-but-successful load.
+func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
-	// Builds are read per review, so the panel needs both reads.
-	for _, read := range []string{tenantDashboardReadReviews, tenantDashboardReadBuilds} {
-		if restricted := restrictedTenantDashboardRead(capabilities, read); restricted != "" {
+	switch {
+	case reviewsOutcome.restricted != "":
+		// Builds are read per review, so this panel needs the review list too.
+		panel.Restricted = reviewsOutcome.restricted
+	case reviewsOutcome.err != nil:
+		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, reviewsOutcome.err)
+	default:
+		if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
 			panel.Restricted = restricted
-			dashboard.Panels = append(dashboard.Panels, panel)
-			return
+		} else {
+			builds, err := fetchReviewBuildsConcurrently(ctx, client, reviewsOutcome.reviews)
+			if err != nil {
+				panel.Error = tenantDashboardReadError(tenantDashboardReadBuilds, err)
+			}
+			dashboard.Builds = builds
 		}
 	}
-	reviews, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{})
-	if err != nil {
-		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
-		dashboard.Panels = append(dashboard.Panels, panel)
-		return
-	}
-	dashboard.Reviews = tenantDashboardReviews(reviews)
-	builds := make([]uiTenantDashboardBuild, 0)
-	for _, review := range reviews {
+	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+// maxConcurrentReviewBuildReads bounds how many /builds requests run at once,
+// so a tenant with many reviews still fits comfortably inside one request's
+// share of tenantDashboardTimeout instead of paying N sequential round trips.
+const maxConcurrentReviewBuildReads = 8
+
+// fetchReviewBuildsConcurrently reads every review's builds in parallel,
+// bounded by maxConcurrentReviewBuildReads, and flattens the results in the
+// same review order the old serial loop used to produce. Every read runs to
+// completion regardless of another review's failure — the old serial loop
+// dropped every review's builds *after* the point it broke on an error, an
+// order-dependent partial result. This keeps every review that did succeed
+// and still reports the first failure, which is both more complete and no
+// longer dependent on where in the list the failure happened to land.
+func fetchReviewBuildsConcurrently(ctx context.Context, client *eruncommon.PlatformClient, reviews []eruncommon.PlatformReview) ([]uiTenantDashboardBuild, error) {
+	perReview := make([][]eruncommon.PlatformBuild, len(reviews))
+	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for i, review := range reviews {
 		reviewID := strings.TrimSpace(review.ReviewID)
 		if reviewID == "" {
 			continue
 		}
-		reviewBuilds, err := client.ListBuilds(ctx, reviewID)
-		if err != nil {
-			panel.Error = tenantDashboardReadError(tenantDashboardReadBuilds, err)
-			break
-		}
-		for _, build := range reviewBuilds {
+		wg.Add(1)
+		semaphore <- struct{}{}
+		go func(index int, reviewID string) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+			reviewBuilds, err := client.ListBuilds(ctx, reviewID)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			perReview[index] = reviewBuilds
+		}(i, reviewID)
+	}
+	wg.Wait()
+
+	builds := make([]uiTenantDashboardBuild, 0, len(reviews))
+	for i, review := range reviews {
+		for _, build := range perReview[i] {
 			builds = append(builds, uiTenantDashboardBuild{
 				BuildID:    build.BuildID,
 				TenantID:   build.TenantID,
@@ -168,8 +258,7 @@ func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformC
 			})
 		}
 	}
-	dashboard.Builds = builds
-	dashboard.Panels = append(dashboard.Panels, panel)
+	return builds, firstErr
 }
 
 func loadTenantDashboardAuditEvents(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
@@ -225,21 +314,25 @@ func tenantDashboardIdentityError(err error) string {
 func tenantDashboardReviews(reviews []eruncommon.PlatformReview) []uiTenantDashboardReview {
 	converted := make([]uiTenantDashboardReview, 0, len(reviews))
 	for _, review := range reviews {
-		converted = append(converted, uiTenantDashboardReview{
-			ReviewID:          review.ReviewID,
-			TenantID:          review.TenantID,
-			Name:              review.Name,
-			TargetBranch:      review.TargetBranch,
-			SourceBranch:      review.SourceBranch,
-			Status:            review.Status,
-			LastFailedBuildID: review.LastFailedBuildID,
-			LastReadyBuildID:  review.LastReadyBuildID,
-			LastMergedBuildID: review.LastMergedBuildID,
-			CreatedAt:         tenantDashboardTime(review.CreatedAt),
-			UpdatedAt:         tenantDashboardTime(review.UpdatedAt),
-		})
+		converted = append(converted, tenantDashboardReview(review))
 	}
 	return converted
+}
+
+func tenantDashboardReview(review eruncommon.PlatformReview) uiTenantDashboardReview {
+	return uiTenantDashboardReview{
+		ReviewID:          review.ReviewID,
+		TenantID:          review.TenantID,
+		Name:              review.Name,
+		TargetBranch:      review.TargetBranch,
+		SourceBranch:      review.SourceBranch,
+		Status:            review.Status,
+		LastFailedBuildID: review.LastFailedBuildID,
+		LastReadyBuildID:  review.LastReadyBuildID,
+		LastMergedBuildID: review.LastMergedBuildID,
+		CreatedAt:         tenantDashboardTime(review.CreatedAt),
+		UpdatedAt:         tenantDashboardTime(review.UpdatedAt),
+	}
 }
 
 func tenantDashboardAuditEvents(events []eruncommon.PlatformAuditEvent) []uiTenantDashboardAudit {

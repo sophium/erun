@@ -19,6 +19,7 @@ import { OutputsDialog } from '@/components/app/OutputsDialog';
 import { PinVersionDialog } from '@/components/app/PinVersionDialog';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
+import { ReviewDetailDialog } from '@/components/app/ReviewDetailDialog';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
@@ -116,6 +117,7 @@ export function App(): React.ReactElement {
         <AutoStartPromptDialog />
         <CloseConfirmDialog />
         <AIOccupancyPromptDialog />
+        <ReviewDetailDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}
