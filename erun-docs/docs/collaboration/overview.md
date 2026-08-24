@@ -21,6 +21,7 @@ Every actor — Agent or Operator — talks to the same API and signs in the sam
 | [Builds](/collaboration/builds) | Per-review build results: commit, version, success/failure. Drives review status transitions. |
 | Merge queue | A shared queue of `READY` reviews targeting the same branch. `POST /v1/reviews/merge-queue/advance` promotes the next one. |
 | Whoami | `GET /v1/whoami` returns the resolved identity for the calling token. |
+| [Identity administration](/collaboration/identity-administration) | Enroll, list, deactivate, and reactivate identities in the platform's own IdP, and read/update its login and password policy. Restricted to an `OPERATIONS` tenant. |
 
 All paths sit under `/v1/`.
 

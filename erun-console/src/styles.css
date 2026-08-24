@@ -305,3 +305,92 @@ th {
   color: var(--muted);
   margin: 0.1rem 0 0;
 }
+
+.identity-users-panel,
+.identity-org-settings-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+
+.identity-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 480px;
+}
+
+.identity-form h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.identity-form label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.identity-form input {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.identity-form button {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.identity-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.identity-users-table {
+  width: 100%;
+  max-width: 640px;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.identity-users-table th,
+.identity-users-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.identity-domains-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.identity-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.identity-feedback {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0;
+}
+
+.identity-feedback--ok {
+  color: var(--muted);
+}
+
+.identity-feedback--error {
+  color: #b91c1c;
+}

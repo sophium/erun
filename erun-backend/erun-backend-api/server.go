@@ -19,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
 type HandlerOptions struct {
@@ -81,6 +82,12 @@ type HandlerOptions struct {
 	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols
 	// instead of a generic placeholder. Empty falls back to that placeholder.
 	BootstrapTenantName string
+	// IdentityAdmin drives Zitadel's Management API for identity
+	// administration (issue #1209): the org-owner PAT the erun-zitadel chart
+	// already provisions, read from a mounted file. Nil when unconfigured —
+	// the /v1/identity/* routes are then not registered at all, rather than
+	// present and always failing.
+	IdentityAdmin *zitadel.Client
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
@@ -295,6 +302,19 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterConfigRoute(register, tenants, environments, contexts)
 	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
+	registerIdentityAdminRoutes(register, options, txManager)
+}
+
+// registerIdentityAdminRoutes wires /v1/identity/* (issue #1209) when a
+// Zitadel Management API client is configured; nil leaves the routes
+// unregistered entirely, matching every other optional dependency's
+// convention in this file.
+func registerIdentityAdminRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
+	if options.IdentityAdmin == nil {
+		return
+	}
+	identityService := service.NewIdentityService(options.IdentityAdmin, repository.NewUserRepository(txManager))
+	routes.RegisterIdentityRoutes(register, options.IdentityAdmin, identityService)
 }
 
 // newEnvironmentProvisioner wires live env provisioning, which needs durable

@@ -78,6 +78,7 @@ const sidebars: SidebarsConfig = {
         'collaboration/workflow',
         'collaboration/overview',
         'collaboration/hosted-environments',
+        'collaboration/identity-administration',
         'collaboration/skills',
         'collaboration/operator-in-the-loop',
       ],
@@ -133,6 +134,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'agent-reference/api-protocol',
             'agent-reference/audit-log',
+            'agent-reference/identity-administration',
             'collaboration/reviews',
             'collaboration/comments',
             'collaboration/builds',

@@ -89,6 +89,29 @@
 {{- $mcpSigningSecretName := default "" $mcpSigning.secretName -}}
 {{- $mcpSigningSecretKey := default "signing.key" $mcpSigning.secretKey -}}
 {{- $mcpSigningMountDir := "/etc/erun/mcp-signing" -}}
+{{- /* Identity administration (issue #1209): the org-owner Zitadel
+       Management API PAT the erun-zitadel chart already provisions and
+       persists to <tenant>-zitadel-pats. Defaults follow that chart's own
+       naming so a platform deploying both components needs no extra
+       wiring beyond having platform.authHost set. The volume is mounted
+       `optional: true` -- an env with no zitadel component, or one that
+       hasn't finished first-instance bootstrap yet, still renders and
+       starts; server.go's optionalIdentityAdmin treats an absent or empty
+       PAT file the same as unconfigured and simply does not register the
+       /v1/identity/* routes. externalDomain defaults to the same
+       platform.authHost the OIDC issuer above already uses, because
+       Zitadel resolves which instance a Management API call targets from
+       that same externally-reachable host (see erun-zitadel chart
+       header) -- not from the cluster-internal address the call is
+       actually addressed to. */ -}}
+{{- $identity := default dict $api.identity -}}
+{{- $identityZitadel := default dict $identity.zitadel -}}
+{{- $identityZitadelManagementAPIURL := default (printf "http://%s-zitadel:8080" $tenant) $identityZitadel.managementApiUrl -}}
+{{- $identityZitadelExternalDomain := default $platformAuthHost $identityZitadel.externalDomain -}}
+{{- $identityZitadelPatSecretName := default (printf "%s-zitadel-pats" $tenant) $identityZitadel.patSecretName -}}
+{{- $identityZitadelPatSecretKey := default "admin-sa.pat" $identityZitadel.patSecretKey -}}
+{{- $identityZitadelMountDir := "/etc/erun/zitadel-management" -}}
+{{- $identityZitadelEnabled := ne $identityZitadelExternalDomain "" -}}
 {{- /* Opt-in DNS-01 broker write path: the services zone + the PowerDNS
        :53 endpoint and its TSIG key. TSIG defaults match the erun-powerdns
        chart, so enabling the broker only needs enabled + servicesZone. */ -}}
@@ -624,6 +647,14 @@ spec:
             - name: ERUN_API_MCP_SIGNING_KEY_PATH
               value: {{ printf "%s/%s" $mcpSigningMountDir $mcpSigningSecretKey | quote }}
             {{- end }}
+            {{- if $identityZitadelEnabled }}
+            - name: ERUN_ZITADEL_MANAGEMENT_API_URL
+              value: {{ $identityZitadelManagementAPIURL | quote }}
+            - name: ERUN_ZITADEL_EXTERNAL_DOMAIN
+              value: {{ $identityZitadelExternalDomain | quote }}
+            - name: ERUN_ZITADEL_MANAGEMENT_PAT_PATH
+              value: {{ printf "%s/%s" $identityZitadelMountDir $identityZitadelPatSecretKey | quote }}
+            {{- end }}
             {{- if $dns01Enabled }}
             - name: ERUN_DNS01_SERVICES_ZONE
               value: {{ required "api.dns01.servicesZone is required when dns01.enabled" $dns01ServicesZone | quote }}
@@ -651,18 +682,33 @@ spec:
               value: {{ $dns01WebhookGroupName | quote }}
             {{- end }}
             {{- end }}
-          {{- if $mcpSigningSecretName }}
+          {{- if or $mcpSigningSecretName $identityZitadelEnabled }}
           volumeMounts:
+            {{- if $mcpSigningSecretName }}
             - name: mcp-signing-key
               mountPath: {{ $mcpSigningMountDir | quote }}
               readOnly: true
+            {{- end }}
+            {{- if $identityZitadelEnabled }}
+            - name: zitadel-management-pat
+              mountPath: {{ $identityZitadelMountDir | quote }}
+              readOnly: true
+            {{- end }}
           {{- end }}
           ports:
             - containerPort: {{ $apiPort }}
               name: api
-      {{- if $mcpSigningSecretName }}
+      {{- if or $mcpSigningSecretName $identityZitadelEnabled }}
       volumes:
+        {{- if $mcpSigningSecretName }}
         - name: mcp-signing-key
           secret:
             secretName: {{ $mcpSigningSecretName }}
+        {{- end }}
+        {{- if $identityZitadelEnabled }}
+        - name: zitadel-management-pat
+          secret:
+            secretName: {{ $identityZitadelPatSecretName }}
+            optional: true
+        {{- end }}
       {{- end }}
