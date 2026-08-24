@@ -1,7 +1,6 @@
+import { Button } from 'erun-kit';
 import { CheckCircle2, Copy, RefreshCw, Trash2 } from 'lucide-react';
 import * as React from 'react';
-
-import { Button } from '@/components/ui/button';
 
 import { useCopyAction } from './DebugPanel.hooks';
 

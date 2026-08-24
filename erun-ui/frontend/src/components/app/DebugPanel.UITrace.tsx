@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { Trash2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -8,7 +9,6 @@ import {
   type UITraceEntry,
   uiTraceGeneration,
 } from '@/app/uiTraceBuffer';
-import { Button } from '@/components/ui/button';
 
 import { useCopyAction, useStickToBottom } from './DebugPanel.hooks';
 import { CopyButton } from './DebugPanel.shared';

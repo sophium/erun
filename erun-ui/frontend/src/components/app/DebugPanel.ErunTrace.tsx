@@ -1,7 +1,7 @@
+import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import { useErunTraceBaseline } from '@/app/erunTraceBaseline';
-import { cn } from '@/lib/utils';
 import type { UIEnvTrace } from '@/types';
 
 import { LoadEnvTrace } from '../../../wailsjs/go/main/App';

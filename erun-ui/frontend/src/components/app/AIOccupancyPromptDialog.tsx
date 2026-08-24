@@ -1,17 +1,17 @@
-import { LoaderCircle, UserRound } from 'lucide-react';
-import * as React from 'react';
-
-import { cancelAIOccupancyPrompt, confirmAIOccupancyPrompt } from '@/app/aiOccupancyThunks';
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { LoaderCircle, UserRound } from 'lucide-react';
+import * as React from 'react';
+
+import { cancelAIOccupancyPrompt, confirmAIOccupancyPrompt } from '@/app/aiOccupancyThunks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 
 // heldSince renders a lease's age in the coarsest unit that stays readable —
 // "started just now" reads better than "started 0m ago" for a fresh lease.
