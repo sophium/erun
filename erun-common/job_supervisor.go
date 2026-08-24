@@ -430,10 +430,13 @@ func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) Env
 
 // environmentJobSupervisorArgs is the one place the two halves of a job agree on
 // how the supervisor is invoked. It lives beside the supervisor body so a change
-// to either is a change to both.
+// to either is a change to both. The path is `exec job supervise` (#1246,
+// following #1186's already-decided `job` -> `exec job` move) regardless of
+// which entry point started the job -- `erun job start` and its deprecated
+// top-level alias both resolve to the same canonical re-exec path.
 func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	args := []string{
-		"job", "supervise",
+		"exec", "job", "supervise",
 		"--tenant", params.Tenant,
 		"--environment", params.Environment,
 		"--id", params.ID,

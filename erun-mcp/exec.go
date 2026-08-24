@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -23,11 +24,13 @@ type RawInput struct {
 	Env     map[string]string `json:"env,omitempty" jsonschema:"additional KEY=VALUE environment for the command, on top of what it inherits from the runtime pod; only valid with wait false, since a foreground call already runs in this process's own environment with nothing to extend it with. Values land in the job supervisor's argv, visible to anything that can list processes in this environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a few other names that could redirect what the job executes are refused, as is any ERUN_ name"`
 	// Name/ID address a backgrounded command the way job_start's did; ignored
 	// in the foreground, where there is no handle to address.
-	Name      string `json:"name,omitempty" jsonschema:"what the backgrounded command is, shown wherever the environment reports as busy; only used with wait false. Defaults to exec_raw"`
-	ID        string `json:"id,omitempty" jsonschema:"handle to address the backgrounded command by; only used with wait false. Defaults to name, so re-running the same named command keeps one stable handle"`
-	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, trace the command (or, with wait false, the job that would start) without executing it"`
-	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait      *bool  `json:"wait,omitempty" jsonschema:"when true (the default), run in the foreground and return once the command exits, with its captured stdout/stderr inline -- today's behaviour. Set false to detach the command as a background job instead and get back {jobId, state: running} immediately: erun gives it its own session, captures merged stdout/stderr to the job's log, and records the exit status by waiting on the process, so nothing has to be wrapped in setsid/nohup/a redirect. Poll exec_job_status/exec_job_await/exec_job_output for the outcome. This is the replacement for the removed job_start tool's command mode; reach for exec_agent instead when the work is an AI tool rather than a plain command"`
+	Name            string `json:"name,omitempty" jsonschema:"what the backgrounded command is, shown wherever the environment reports as busy; only used with wait false. Defaults to exec_raw"`
+	ID              string `json:"id,omitempty" jsonschema:"handle to address the backgrounded command by; only used with wait false. Defaults to name, so re-running the same named command keeps one stable handle"`
+	MaxOutputBytes  int64  `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes for a backgrounded command; past it output is dropped and the job reports outputTruncated. Only used with wait false. Defaults to 16777216"`
+	LeaseTTLSeconds int64  `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL a backgrounded command renews inside while it runs; only used with wait false. Defaults to 900"`
+	Preview         bool   `json:"preview,omitempty" jsonschema:"when true, trace the command (or, with wait false, the job that would start) without executing it"`
+	Verbosity       int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait            *bool  `json:"wait,omitempty" jsonschema:"when true (the default), run in the foreground and return once the command exits, with its captured stdout/stderr inline -- today's behaviour. Set false to detach the command as a background job instead and get back {jobId, state: running} immediately: erun gives it its own session, captures merged stdout/stderr to the job's log, and records the exit status by waiting on the process, so nothing has to be wrapped in setsid/nohup/a redirect. Poll exec_job_status/exec_job_await/exec_job_output for the outcome. This is the replacement for the removed job_start tool's command mode; reach for exec_agent instead when the work is an AI tool rather than a plain command"`
 }
 
 func rawTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, RawInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -87,6 +90,8 @@ func execRawBackground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		Command:        input.Command,
 		Dir:            dir,
 		Env:            input.Env,
+		MaxOutputBytes: input.MaxOutputBytes,
+		LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
 		SupervisorPath: supervisor,
 	})
 	if err != nil {

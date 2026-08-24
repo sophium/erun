@@ -31,6 +31,12 @@ const (
 	jobAwaitUnknownExitCode = 125
 )
 
+// newJobCmd builds the job verb tree, shared by its canonical mount point
+// (`erun exec job`, alongside newJobSuperviseCmd) and its deprecated
+// top-level alias (`erun job`, kept for one release). supervise is not
+// included here: it is Hidden and only ever re-exec'd by StartEnvironmentJob
+// at the argv erun-common's environmentJobSupervisorArgs builds, which always
+// names the canonical path -- so the alias mount never needs its own copy.
 func newJobCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job",
@@ -53,8 +59,17 @@ func newJobCmd(resolveOpen OpenResolver) *cobra.Command {
 		newJobAwaitCmd(resolveOpen),
 		newJobOutputCmd(resolveOpen),
 		newJobCancelCmd(resolveOpen),
-		newJobSuperviseCmd(),
 	)
+	return cmd
+}
+
+// deprecatedTopLevelJobCmd mounts the same verb tree at the top level for one
+// release (#1246, following #1186's `job` -> `exec job` move): `erun job
+// <verb>` keeps working, with Cobra's own deprecation notice pointing callers
+// at `erun exec job <verb>` before this alias is removed.
+func deprecatedTopLevelJobCmd(resolveOpen OpenResolver) *cobra.Command {
+	cmd := newJobCmd(resolveOpen)
+	cmd.Deprecated = "use `erun exec job` instead; this command will be removed in a future release"
 	return cmd
 }
 
@@ -91,13 +106,13 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
 			"few other names that could redirect what the job executes are refused.",
 		Example: "  # Start a test suite and come back for the result.\n" +
-			"  erun job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
-			"  erun job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
+			"  erun exec job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
+			"  erun exec job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
 			"  # Start an agent and watch what it is doing.\n" +
-			"  erun job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'\n" +
-			"  erun job status --tenant team --environment dev --id sweep\n\n" +
+			"  erun exec job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'\n" +
+			"  erun exec job status --tenant team --environment dev --id sweep\n\n" +
 			"  # Raise an agent's output-token cap for this run only.\n" +
-			"  erun job start --tenant team --environment dev --name sweep --agent claude \\\n" +
+			"  erun exec job start --tenant team --environment dev --name sweep --agent claude \\\n" +
 			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -211,7 +226,7 @@ func newJobAttachCmd(resolveOpen OpenResolver) *cobra.Command {
 			"gone — it can never report an exit status, because nothing erun ran was\n" +
 			"waiting on the process to observe one. Re-running attach with the same id\n" +
 			"renews the lease.",
-		Example: "  erun job attach --tenant team --environment dev --name overnight-index --pid 4242",
+		Example: "  erun exec job attach --tenant team --environment dev --name overnight-index --pid 4242",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobAttach(cmd, resolveOpen, common.AttachEnvironmentJobParams{
@@ -285,8 +300,8 @@ func newJobStatusCmd(resolveOpen OpenResolver) *cobra.Command {
 			"outcome, never a success, never a tool error) even if state has not caught\n" +
 			"up yet; a silent-but-healthy command never trips this, since the beat does\n" +
 			"not depend on the work's own output.",
-		Example: "  erun job status --tenant team --environment dev\n" +
-			"  erun job status --tenant team --environment dev --id suite --output json",
+		Example: "  erun exec job status --tenant team --environment dev\n" +
+			"  erun exec job status --tenant team --environment dev --id suite --output json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobStatus(cmd, resolveOpen, tenant, environment, id)
@@ -475,11 +490,11 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"The reported job's aliveAgeMs is the faster of the two signals: it crosses\n" +
 			"the 5000ms caller threshold before state necessarily catches up, so a\n" +
 			"caller in a hurry can act on it directly instead of waiting for the next\n" +
-			"reconcile (see `erun job status --help`).\n\n" +
+			"reconcile (see `erun exec job status --help`).\n\n" +
 			"Exit codes are the contract: 0 when the job exited 0, 124 when the timeout\n" +
 			"elapsed with the job still running, 125 when the outcome is unknown, and 1\n" +
 			"when the job exited non-zero (its real code is in the reported result).",
-		Example: "  erun job await --tenant team --environment dev --id suite --timeout 2m",
+		Example: "  erun exec job await --tenant team --environment dev --id suite --timeout 2m",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobAwait(cmd, resolveOpen, common.AwaitEnvironmentJobParams{
@@ -571,9 +586,9 @@ func newJobOutputCmd(resolveOpen OpenResolver) *cobra.Command {
 			"before the work exits. Read a page at a time and pass the reported next\n" +
 			"offset back to continue where you left off. A silent-but-healthy command\n" +
 			"(an image pull, a slow test) never advances outputBytes for minutes at a\n" +
-			"time, so use the reported job's aliveAgeMs (see `erun job status --help`),\n" +
+			"time, so use the reported job's aliveAgeMs (see `erun exec job status --help`),\n" +
 			"not output growth, to tell quiet-but-alive apart from actually dead.",
-		Example: "  erun job output --tenant team --environment dev --id suite --offset 4096",
+		Example: "  erun exec job output --tenant team --environment dev --id suite --offset 4096",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobOutput(cmd, resolveOpen, common.ReadEnvironmentJobOutputParams{
@@ -646,8 +661,8 @@ func newJobCancelCmd(resolveOpen OpenResolver) *cobra.Command {
 			"issuing the cancel. The job's supervisor is deliberately left alone so it\n" +
 			"survives to record the outcome the cancel produced, which then reads back\n" +
 			"as a normal exited job carrying the signal.",
-		Example: "  erun job cancel --tenant team --environment dev --id suite\n" +
-			"  erun job cancel --tenant team --environment dev --id suite --signal KILL",
+		Example: "  erun exec job cancel --tenant team --environment dev --id suite\n" +
+			"  erun exec job cancel --tenant team --environment dev --id suite --signal KILL",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobCancel(cmd, resolveOpen, common.CancelEnvironmentJobParams{
@@ -704,7 +719,9 @@ func cancelJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenR
 // only writer of a job record, because it is the only thing waiting on the work
 // and therefore the only thing that can observe an exit status first-hand. It
 // always runs where the work runs, so it never reaches for an environment's edge.
-// Hidden: nothing calls it but `job start`.
+// Hidden: nothing invokes it directly. It is only ever re-exec'd by
+// StartEnvironmentJob (erun-common/job_supervisor.go), which always re-execs it
+// at `exec job supervise` regardless of which entry point started the job.
 func newJobSuperviseCmd() *cobra.Command {
 	var tenant string
 	var environment string

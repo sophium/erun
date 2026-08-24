@@ -380,7 +380,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_write` | `erun exec write` | Work |
 | exec | `exec_commit` | `erun exec commit` | Work |
 | exec | `exec_push` | `erun exec push` | Work |
-| exec | `exec_agent` | `erun exec agent` | Work |
+| exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
 | exec | `exec_job_attach` | `erun exec job attach` | Work |
 | exec | `exec_job_status` | `erun exec job status` | Read |
 | exec | `exec_job_await` | `erun exec job await` | Read |
