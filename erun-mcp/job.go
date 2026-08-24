@@ -3,7 +3,6 @@ package erunmcp
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -19,8 +18,8 @@ import (
 
 // JobStartInput is the work to detach in the environment.
 type JobStartInput struct {
-	Tenant          string            `json:"tenant,omitempty" jsonschema:"tenant whose environment runs the job; defaults to the server tenant context"`
-	Environment     string            `json:"environment,omitempty" jsonschema:"environment to run the job in; defaults to the server environment context"`
+	Tenant          string            `json:"tenant,omitempty" jsonschema:"tenant whose environment runs the job; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment     string            `json:"environment,omitempty" jsonschema:"environment to run the job in; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	Name            string            `json:"name" jsonschema:"what the work is; shown wherever the environment reports as busy"`
 	ID              string            `json:"id,omitempty" jsonschema:"handle to address the job by; defaults to the name, so re-running the same named work keeps one stable handle"`
 	Command         []string          `json:"command,omitempty" jsonschema:"command and arguments to run, as an argv array; pass [\"sh\",\"-c\",\"...\"] only when shell features are genuinely needed. Omit when running an agent"`
@@ -44,7 +43,7 @@ type JobResult struct {
 
 func jobStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobStartInput) (*mcp.CallToolResult, JobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobStartInput) (*mcp.CallToolResult, JobResult, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobResult{}, err
 		}
@@ -92,8 +91,8 @@ func jobStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 
 // JobAttachInput registers work the caller started another way.
 type JobAttachInput struct {
-	Tenant          string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the work; defaults to the server tenant context"`
-	Environment     string `json:"environment,omitempty" jsonschema:"environment holding the work; defaults to the server environment context"`
+	Tenant          string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the work; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment     string `json:"environment,omitempty" jsonschema:"environment holding the work; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	Name            string `json:"name" jsonschema:"what the work is; shown wherever the environment reports as busy"`
 	ID              string `json:"id,omitempty" jsonschema:"handle to address the job by; defaults to the name. Re-attaching the same id renews the lease"`
 	PID             int    `json:"pid" jsonschema:"process to track; the job resolves against this pid and nothing else, and reports unknown once it is gone because erun never waited on it to observe an exit status"`
@@ -104,7 +103,7 @@ type JobAttachInput struct {
 
 func jobAttachTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAttachInput) (*mcp.CallToolResult, JobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAttachInput) (*mcp.CallToolResult, JobResult, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobResult{}, err
 		}
@@ -134,8 +133,8 @@ func jobAttachTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 
 // JobStatusInput selects one job or every retained job.
 type JobStatusInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to query; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to query; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to query; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to query; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID          string `json:"id,omitempty" jsonschema:"job to report; omit to return every retained job, newest first"`
 }
 
@@ -151,7 +150,7 @@ type JobStatusResult struct {
 
 func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobStatusResult{}, err
 		}
@@ -179,15 +178,15 @@ func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 
 // JobAwaitInput bounds one wait.
 type JobAwaitInput struct {
-	Tenant         string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context"`
-	Environment    string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context"`
+	Tenant         string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment    string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID             string `json:"id" jsonschema:"job to wait for"`
 	TimeoutSeconds int64  `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning still-running; defaults to 30 and may not exceed 600, so no call is ever held open for the work's lifetime"`
 }
 
 func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, eruncommon.AwaitEnvironmentJobResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAwaitInput) (*mcp.CallToolResult, eruncommon.AwaitEnvironmentJobResult, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, eruncommon.AwaitEnvironmentJobResult{}, err
 		}
@@ -206,8 +205,8 @@ func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 
 // JobOutputInput pages through a job's captured output.
 type JobOutputInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID          string `json:"id" jsonschema:"job whose output to read"`
 	Offset      int64  `json:"offset,omitempty" jsonschema:"byte offset to read from; pass back the previous read's nextOffset so a poll continues rather than repeats"`
 	MaxBytes    int64  `json:"maxBytes,omitempty" jsonschema:"most bytes to return in this read; defaults to 65536"`
@@ -215,7 +214,7 @@ type JobOutputInput struct {
 
 func jobOutputTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobOutputInput) (*mcp.CallToolResult, eruncommon.EnvironmentJobOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobOutputInput) (*mcp.CallToolResult, eruncommon.EnvironmentJobOutput, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, eruncommon.EnvironmentJobOutput{}, err
 		}
@@ -235,8 +234,8 @@ func jobOutputTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 
 // JobCancelInput selects the job to signal.
 type JobCancelInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID          string `json:"id" jsonschema:"job to cancel"`
 	Signal      string `json:"signal,omitempty" jsonschema:"signal to send: TERM (default), INT, HUP, or KILL"`
 	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the target without signalling it"`
@@ -252,7 +251,7 @@ type JobCancelResult struct {
 
 func jobCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
-		tenant, environment, err := resolveJobTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, JobCancelResult{}, err
 		}
@@ -274,13 +273,4 @@ func jobCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			Trace:       normalizeTraceLines(trace.String()),
 		}, nil
 	}
-}
-
-func resolveJobTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
-	resolvedTenant := firstNonEmpty(tenant, runtime.Context.Tenant)
-	resolvedEnvironment := firstNonEmpty(environment, runtime.Context.Environment)
-	if strings.TrimSpace(resolvedTenant) == "" || strings.TrimSpace(resolvedEnvironment) == "" {
-		return "", "", fmt.Errorf("tenant and environment are required")
-	}
-	return resolvedTenant, resolvedEnvironment, nil
 }

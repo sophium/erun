@@ -2,7 +2,6 @@ package erunmcp
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -12,8 +11,8 @@ import (
 
 // IdleStopCancelInput selects the env whose armed idle-stop should be cancelled.
 type IdleStopCancelInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have its pending stop cancelled; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to cancel; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have its pending stop cancelled; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to cancel; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
 // IdleStopCancelResult reports the cancel outcome. Cleared is true even when
@@ -26,10 +25,9 @@ type IdleStopCancelResult struct {
 
 func idleStopCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
-		tenant := firstNonEmpty(input.Tenant, runtime.Context.Tenant)
-		environment := firstNonEmpty(input.Environment, runtime.Context.Environment)
-		if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-			return nil, IdleStopCancelResult{}, fmt.Errorf("tenant and environment are required")
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, IdleStopCancelResult{}, err
 		}
 		if err := eruncommon.ClearEnvironmentStopPending(tenant, environment); err != nil {
 			return nil, IdleStopCancelResult{}, err
@@ -44,8 +42,8 @@ func idleStopCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 
 // IdleStopHistoryInput selects the env whose stop history to return.
 type IdleStopHistoryInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should be queried; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to query; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should be queried; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to query; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
 // IdleStopHistoryResult wraps the entries so the MCP schema stays a stable
@@ -58,10 +56,9 @@ type IdleStopHistoryResult struct {
 
 func idleStopHistoryTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
-		tenant := firstNonEmpty(input.Tenant, runtime.Context.Tenant)
-		environment := firstNonEmpty(input.Environment, runtime.Context.Environment)
-		if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-			return nil, IdleStopHistoryResult{}, fmt.Errorf("tenant and environment are required")
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, IdleStopHistoryResult{}, err
 		}
 		entries, err := eruncommon.LoadEnvironmentStopHistory(tenant, environment)
 		if err != nil {
@@ -80,8 +77,8 @@ func idleStopHistoryTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 // in-pod monitor's auto-stop records, keeping manual and automatic stops in
 // one history.
 type IdleStopRecordInput struct {
-	Tenant           string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have a stop entry recorded; defaults to the server tenant context"`
-	Environment      string `json:"environment,omitempty" jsonschema:"environment to record against; defaults to the server environment context"`
+	Tenant           string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have a stop entry recorded; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment      string `json:"environment,omitempty" jsonschema:"environment to record against; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	Reason           string `json:"reason,omitempty" jsonschema:"reason text rendered on the History row; empty falls back to a generic 'Manual stop'"`
 	CloudContextName string `json:"cloudContextName,omitempty" jsonschema:"cloud context name the stop targeted; informational"`
 }
@@ -96,10 +93,9 @@ type IdleStopRecordResult struct {
 
 func idleStopRecordTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
-		tenant := firstNonEmpty(input.Tenant, runtime.Context.Tenant)
-		environment := firstNonEmpty(input.Environment, runtime.Context.Environment)
-		if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-			return nil, IdleStopRecordResult{}, fmt.Errorf("tenant and environment are required")
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, IdleStopRecordResult{}, err
 		}
 		reason := strings.TrimSpace(input.Reason)
 		if reason == "" {

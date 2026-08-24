@@ -2,6 +2,7 @@ package erunmcp
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -177,6 +178,35 @@ func runtimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 		return firstNonEmpty(strings.TrimSpace(runtime.Tenant), filepath.Base(repoPath)), filepath.Clean(repoPath), nil
 	}
 	return eruncommon.FindProjectRootFromDir(workDir)
+}
+
+// resolveLocalTarget resolves the tenant/environment a tool acts on, and refuses
+// a target this server cannot reach. An MCP server serves exactly one
+// environment: its tools run in this pod, against this pod's repo and this pod's
+// erun binary, so an explicit tenant/environment naming a DIFFERENT environment
+// can never be honoured. Accepting one and acting locally anyway is worse than
+// refusing it, because the result then asserts a target the work never reached
+// and the caller is left holding written evidence that it worked (#1195).
+func resolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
+	serverTenant := strings.TrimSpace(runtime.Context.Tenant)
+	serverEnvironment := strings.TrimSpace(runtime.Context.Environment)
+	requestedTenant := strings.TrimSpace(tenant)
+	requestedEnvironment := strings.TrimSpace(environment)
+	tenantMismatch := requestedTenant != "" && serverTenant != "" && requestedTenant != serverTenant
+	environmentMismatch := requestedEnvironment != "" && serverEnvironment != "" && requestedEnvironment != serverEnvironment
+	if tenantMismatch || environmentMismatch {
+		return "", "", fmt.Errorf(
+			"this MCP server serves %s/%s and runs every tool there, so it cannot act on %s/%s: call that environment's own MCP edge instead",
+			serverTenant, serverEnvironment,
+			firstNonEmpty(requestedTenant, serverTenant), firstNonEmpty(requestedEnvironment, serverEnvironment),
+		)
+	}
+	resolvedTenant := firstNonEmpty(requestedTenant, serverTenant)
+	resolvedEnvironment := firstNonEmpty(requestedEnvironment, serverEnvironment)
+	if resolvedTenant == "" || resolvedEnvironment == "" {
+		return "", "", fmt.Errorf("tenant and environment are required")
+	}
+	return resolvedTenant, resolvedEnvironment, nil
 }
 
 func firstNonEmpty(values ...string) string {

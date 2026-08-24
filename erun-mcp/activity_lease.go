@@ -16,8 +16,8 @@ import (
 
 // ActivityLeaseTakeInput names the work the lease is being held for.
 type ActivityLeaseTakeInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment the lease is held on; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to hold; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment the lease is held on; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to hold; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	Name        string `json:"name" jsonschema:"what the lease is holding the environment for; shown to the operator as the reason it reads as busy"`
 	ID          string `json:"id,omitempty" jsonschema:"lease id to take or renew; defaults to the name, so re-taking the same name renews rather than stacking"`
 	PID         int    `json:"pid,omitempty" jsonschema:"process id of the detached job; the lease is reclaimed once that process exits, so an abandoned lease cannot pin the environment awake"`
@@ -34,7 +34,7 @@ type ActivityLeaseResult struct {
 
 func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := resolveActivityLeaseTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
@@ -55,14 +55,14 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 
 // ActivityLeaseReleaseInput selects the lease to drop.
 type ActivityLeaseReleaseInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the lease; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to release; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the lease; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to release; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID          string `json:"id" jsonschema:"lease id to release; the name passed to activity_lease_take when no explicit id was given"`
 }
 
 func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseReleaseInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseReleaseInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := resolveActivityLeaseTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
@@ -74,15 +74,6 @@ func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		}
 		return activityLeaseResult(tenant, environment, nil)
 	}
-}
-
-func resolveActivityLeaseTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
-	resolvedTenant := firstNonEmpty(tenant, runtime.Context.Tenant)
-	resolvedEnvironment := firstNonEmpty(environment, runtime.Context.Environment)
-	if strings.TrimSpace(resolvedTenant) == "" || strings.TrimSpace(resolvedEnvironment) == "" {
-		return "", "", fmt.Errorf("tenant and environment are required")
-	}
-	return resolvedTenant, resolvedEnvironment, nil
 }
 
 // activityLeaseResult always returns what is still held, so a caller sees the
@@ -100,13 +91,13 @@ func activityLeaseResult(tenant, environment string, lease *eruncommon.Environme
 
 // ActivityLeaseListInput selects the environment to read.
 type ActivityLeaseListInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to read; defaults to the server tenant context"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment to read; defaults to the server environment context"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to read; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to read; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
 func activityLeaseListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ActivityLeaseListInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
-		tenant, environment, err := resolveActivityLeaseTarget(runtime, input.Tenant, input.Environment)
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
