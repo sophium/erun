@@ -1,7 +1,7 @@
+import { Popover, PopoverAnchor, PopoverContent } from 'erun-kit';
 import * as React from 'react';
 
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import type { UISelection, UIWorkingIssue } from '@/types';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';

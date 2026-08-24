@@ -1,3 +1,17 @@
+import {
+  Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconTooltip,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from 'erun-kit';
 import { LoaderCircle, Lock, Play, Power, Unlock, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -12,7 +26,6 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import { cancelPendingIdleStop } from '@/app/idleThunks';
 import { showNotification } from '@/app/notificationThunks';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import {
   formatGraceCountdown,
   idleCloudAction,
@@ -22,17 +35,6 @@ import {
   idleStatusTooltipLines,
   idleStopPending,
 } from '@/components/app/Titlebar.helpers';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 function useIdleWidgetState(): {
   idleStatus: IdleStatus | null;

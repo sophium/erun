@@ -1,3 +1,4 @@
+import { Button, EmptyState, Label, SelectField } from 'erun-kit';
 import * as React from 'react';
 
 import { refreshKubernetesContexts } from '@/app/dialogContextsThunks';
@@ -5,11 +6,6 @@ import { updateEnvironmentDialog } from '@/app/environmentDialogThunks';
 import { useAppDispatch } from '@/app/hooks';
 import { isMacPlatform, isWindowsPlatform } from '@/app/platform';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-
-import { EmptyState } from './EmptyState';
-import { SelectField } from './SelectField';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 

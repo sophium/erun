@@ -1,3 +1,4 @@
+import { Button, IconTooltip, Label } from 'erun-kit';
 import { Blocks, Code2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,9 +6,6 @@ import { useAppDispatch } from '@/app/hooks';
 import type { OrchestratorGuidanceLayer } from '@/app/model';
 import { revealOrchestratorGuidance } from '@/app/orchestratorThunks';
 import { ideLabel } from '@/app/terminalStatus';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 
 import { OrchestratorGuidancePaths } from '../../../wailsjs/go/main/App';
 

@@ -1,3 +1,4 @@
+import { cn, ResizeHandle } from 'erun-kit';
 import * as React from 'react';
 
 import { useTerminalActivityLockState } from '@/app/activityQueueState';
@@ -7,11 +8,9 @@ import { selectActiveTabIsAI } from '@/app/selectors';
 import { clearHiddenLockOverlay, hideLockOverlay } from '@/app/slices/terminalStatusSlice';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { AIOccupancyBanner } from '@/components/app/AIOccupancyBanner';
-import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { TerminalBusyOverlay } from '@/components/app/TerminalBusyOverlay';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
-import { cn } from '@/lib/utils';
 
 const reviewSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-review_&]:before:bg-border';

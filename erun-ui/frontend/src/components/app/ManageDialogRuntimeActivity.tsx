@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,7 +7,6 @@ import {
   useReclaimRuntimeResourcesMutation,
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
-import { Button } from '@/components/ui/button';
 import type { UISelection } from '@/types';
 import type { UIRuntimeProcessGroup } from '@/uiRuntimeTypes';
 

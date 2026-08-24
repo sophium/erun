@@ -1,3 +1,17 @@
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from 'erun-kit';
 import { ArrowRight, ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,22 +19,6 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setUpgradeAllChoice } from '@/app/slices/upgradeAllSlice';
 import { closeUpgradeAllDialog, confirmUpgradeAll } from '@/app/upgradeThunks';
 import { selectionKey } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import type { UIUpgradePlanItem } from '@/types';
 
 // Must match the key confirmUpgradeAll resolves the picked version under.

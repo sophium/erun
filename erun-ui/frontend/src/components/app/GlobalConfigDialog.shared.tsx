@@ -1,10 +1,8 @@
+import { Button, cloudProviderStatusTone, StatusBadge } from 'erun-kit';
 import { CheckCircle2, LoaderCircle, LogIn, Play, Power } from 'lucide-react';
 import * as React from 'react';
 
 import { dialogErrorClassName, statusLabel } from '@/components/app/GlobalConfigDialog.helpers';
-import { StatusBadge } from '@/components/app/StatusBadge';
-import { cloudProviderStatusTone } from '@/components/app/StatusBadge.helpers';
-import { Button } from '@/components/ui/button';
 
 export function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? (

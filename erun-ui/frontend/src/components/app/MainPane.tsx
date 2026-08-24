@@ -1,10 +1,10 @@
+import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import { useAppSelector } from '@/app/hooks';
 import { DebugPanel } from '@/components/app/DebugPanel';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TerminalPane } from '@/components/app/TerminalPane';
-import { cn } from '@/lib/utils';
 
 export function MainPane({
   terminalPaneRef,

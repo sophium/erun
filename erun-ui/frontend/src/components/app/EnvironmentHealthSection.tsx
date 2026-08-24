@@ -1,3 +1,4 @@
+import { Button, cn } from 'erun-kit';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,8 +18,6 @@ import {
 } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UIEnvironmentHealthCheck } from '@/uiDiagnosticsTypes';
 
 type ManageDialog = AppState['manageDialog'];

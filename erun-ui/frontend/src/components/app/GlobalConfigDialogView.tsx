@@ -1,3 +1,14 @@
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  SelectField,
+  type SelectFieldOption,
+} from 'erun-kit';
 import { LoaderCircle, Save } from 'lucide-react';
 import * as React from 'react';
 
@@ -15,16 +26,6 @@ import { CloudAliasesSection } from '@/components/app/GlobalConfigDialog.CloudAl
 import { CloudContextsSection } from '@/components/app/GlobalConfigDialog.CloudContexts';
 import { NOT_CONFIGURED_VALUE, optionValues } from '@/components/app/GlobalConfigDialog.helpers';
 import { DialogError } from '@/components/app/GlobalConfigDialog.shared';
-import { SelectField, type SelectFieldOption } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 

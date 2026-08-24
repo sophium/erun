@@ -19,7 +19,8 @@
     "noUncheckedIndexedAccess": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@kit/*": ["../../erun-kit/src/*"]
     }
   },
   "include": ["src", "wailsjs", "vite-env.d.ts"]

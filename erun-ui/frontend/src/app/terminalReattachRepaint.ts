@@ -1,7 +1,6 @@
 import type { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from '@xterm/xterm';
-
-import { noop } from '@/lib/utils';
+import { noop } from 'erun-kit';
 
 import { ResizeSession } from '../../wailsjs/go/main/App';
 

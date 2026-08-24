@@ -1,18 +1,18 @@
-import { Play, RefreshCw } from 'lucide-react';
-import * as React from 'react';
-
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { reachabilityCopy, reconnectCopy } from '@/app/reconnectCopy';
-import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { Play, RefreshCw } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { reachabilityCopy, reconnectCopy } from '@/app/reconnectCopy';
+import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
 
 // Confirmation only; in-flight and failure states live in the non-modal
 // ReconnectStatusPanel so other environments stay interactive while one reconnects.

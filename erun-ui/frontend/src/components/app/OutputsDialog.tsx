@@ -1,18 +1,18 @@
-import { Download, FileText, Folder, LoaderCircle, Play } from 'lucide-react';
-import * as React from 'react';
-
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { downloadOutput, runOutputOnHost } from '@/app/outputsThunks';
-import { closeOutputsDialog } from '@/app/slices/outputsDialogSlice';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { Download, FileText, Folder, LoaderCircle, Play } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { downloadOutput, runOutputOnHost } from '@/app/outputsThunks';
+import { closeOutputsDialog } from '@/app/slices/outputsDialogSlice';
 import type { AgentOutputEntry } from '@/types';
 
 // OutputsDialog is the deliverables counterpart to the activity queue (which

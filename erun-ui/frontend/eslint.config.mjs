@@ -14,7 +14,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', 'wailsjs', 'src/components/ui/**', '*.config.{js,mjs,ts}'],
+    ignores: ['dist', 'node_modules', 'wailsjs', '*.config.{js,mjs,ts}'],
   },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,

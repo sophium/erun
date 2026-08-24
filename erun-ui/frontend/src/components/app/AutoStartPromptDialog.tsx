@@ -1,17 +1,17 @@
-import { LoaderCircle, Play, ShieldOff } from 'lucide-react';
-import * as React from 'react';
-
-import { cancelAutoStartPrompt, confirmAutoStartPrompt } from '@/app/autoStartThunks';
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { LoaderCircle, Play, ShieldOff } from 'lucide-react';
+import * as React from 'react';
+
+import { cancelAutoStartPrompt, confirmAutoStartPrompt } from '@/app/autoStartThunks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 
 // Asks once per remote environment whether opening it should auto-start its
 // stopped EC2 instance, and persists the answer so the prompt does not

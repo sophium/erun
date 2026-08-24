@@ -1,7 +1,6 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
-
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export function TerminalBusyOverlay({ message }: { message: string }): React.ReactElement | null {
   if (!message) {

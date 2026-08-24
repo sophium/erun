@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
 import { Folder, FolderOpen, LayoutDashboard, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,11 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { selectSidebarFocus } from '@/app/selectors';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
 import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvironmentRow, PendingEnvironmentRow } from '@/components/app/Sidebar.EnvironmentRow';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import type { UISelection, UITenant } from '@/types';
 
 export function TenantGroup({

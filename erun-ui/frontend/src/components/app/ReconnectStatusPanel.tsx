@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { AlertCircle, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,7 +6,6 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { confirmReconnect, dismissReconnect } from '@/app/reviewThunks';
 import { setSelected } from '@/app/slices/selectionSlice';
-import { Button } from '@/components/ui/button';
 
 // Fudge factor so a layout that settles a pixel or two short of perfect
 // alignment still counts as "at the bottom" for auto-scroll.

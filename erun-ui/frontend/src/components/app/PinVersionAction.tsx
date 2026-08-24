@@ -1,8 +1,8 @@
+import { Button } from 'erun-kit';
 import * as React from 'react';
 
 import { useAppDispatch } from '@/app/hooks';
 import { openPinVersion } from '@/app/pinVersionThunks';
-import { Button } from '@/components/ui/button';
 import type { UISelection } from '@/types';
 
 // Deploying a version and pinning one are different motions: deploy rolls the

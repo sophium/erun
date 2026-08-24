@@ -1,3 +1,4 @@
+import { Button, Checkbox, cn, Input, Label, SelectField } from 'erun-kit';
 import * as React from 'react';
 
 import { useAppDispatch } from '@/app/hooks';
@@ -5,12 +6,6 @@ import { updateManageClaudeConfig } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
 import { isClaudeOverridden, isValidClaudeTokens } from '@/components/app/ManageDialog.helpers';
-import { SelectField } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
 import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];

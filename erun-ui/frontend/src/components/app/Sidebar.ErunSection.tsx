@@ -1,3 +1,4 @@
+import { Button, cn, EmptyState, IconTooltip } from 'erun-kit';
 import {
   BookOpen,
   Bot,
@@ -26,12 +27,8 @@ import { selectSidebarFocus } from '@/app/selectors';
 import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellActivitySlice';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
-import { EmptyState } from '@/components/app/EmptyState';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 // ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
 // operator's host-side control plane. Its headline is the cross-env AI

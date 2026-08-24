@@ -1,8 +1,7 @@
 import { AlertCircle, AlertTriangle, CheckCircle2, Circle, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
-import { cn } from '@/lib/utils';
-
+import { cn } from '../lib/utils';
 import type { StatusBadgeTone } from './StatusBadge.helpers';
 
 const toneClassName: Record<StatusBadgeTone, string> = {

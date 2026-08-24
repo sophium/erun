@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip, Input, Label, ResizeHandle } from 'erun-kit';
 import {
   ChevronDown,
   FileDiff,
@@ -22,15 +23,9 @@ import { selectReviewEnvTargets } from '@/app/selectors';
 import { contributeEnvKey, type DiffSource } from '@/app/slices/contributeSlice';
 import { useController } from '@/app/useController';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
 import type { DiffCommit } from '@/types';
 
 import { DiffList } from './DiffList';
-import { IconTooltip } from './IconTooltip';
-import { ResizeHandle } from './ResizeHandle';
 import { ChangedFileTree } from './ReviewPanel.ChangedFiles';
 
 const filesSplitterClassName =

@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip } from 'erun-kit';
 import { Download, LoaderCircle, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
@@ -10,7 +11,6 @@ import { selectSidebarFocus } from '@/app/selectors';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import {
@@ -20,8 +20,6 @@ import {
   type EnvironmentRowDerived,
 } from '@/components/app/Sidebar.helpers';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
 function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement {

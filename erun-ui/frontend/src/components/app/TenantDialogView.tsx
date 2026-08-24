@@ -1,3 +1,18 @@
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconTooltip,
+  Input,
+  Label,
+  SelectField,
+  type SelectFieldOption,
+} from 'erun-kit';
 import { Cloud, Link, LoaderCircle, RefreshCw, Save } from 'lucide-react';
 import * as React from 'react';
 
@@ -13,21 +28,6 @@ import {
   updateTenantConfig,
 } from '@/app/tenantDialogThunks';
 import { useController } from '@/app/useController';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-
-import { IconTooltip } from './IconTooltip';
-import { SelectField, type SelectFieldOption } from './SelectField';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
