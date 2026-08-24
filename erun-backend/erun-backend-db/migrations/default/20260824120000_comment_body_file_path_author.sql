@@ -1,4 +1,29 @@
-CREATE FUNCTION erun_validate_comments()
+-- Comments had no body, no file path, and could not attribute a reply to its
+-- author. Adding file_path NOT NULL, body NOT NULL, and creator_user_id NOT
+-- NULL without a DEFAULT means this migration refuses outright on any
+-- existing row that lacks a value it cannot backfill (no shipped client has
+-- ever written a comment, so the table is expected to be empty).
+ALTER TABLE comments
+  ADD COLUMN file_path TEXT NOT NULL,
+  ADD COLUMN body TEXT NOT NULL;
+
+ALTER TABLE comments
+  ALTER COLUMN creator_user_id SET NOT NULL;
+
+ALTER TABLE comments
+  ADD CONSTRAINT comments_file_path_check CHECK (file_path <> ''),
+  ADD CONSTRAINT comments_body_check CHECK (btrim(body) <> '' AND octet_length(body) <= 8192);
+
+ALTER TABLE comments
+  DROP CONSTRAINT comments_root_creator_check,
+  DROP CONSTRAINT comments_child_creator_check;
+
+DROP INDEX comments_tenant_review_line_idx;
+
+CREATE INDEX comments_tenant_review_line_idx
+  ON comments (tenant_id, review_id, commit_id, file_path, line);
+
+CREATE OR REPLACE FUNCTION erun_validate_comments()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
@@ -64,8 +89,3 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
-CREATE TRIGGER comments_validate
-  BEFORE INSERT OR UPDATE ON comments
-  FOR EACH ROW
-  EXECUTE FUNCTION erun_validate_comments();

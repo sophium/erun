@@ -30,11 +30,7 @@ func (s *CommentService) PrepareCreate(ctx context.Context, comment model.Commen
 	if comment.Status == "" {
 		comment.Status = model.CommentStatusOpen
 	}
-	if comment.ParentCommentID == "" {
-		comment.CreatorUserID = securityContext.ErunUserID
-	} else {
-		comment.CreatorUserID = ""
-	}
+	comment.CreatorUserID = securityContext.ErunUserID
 	return comment, nil
 }
 
