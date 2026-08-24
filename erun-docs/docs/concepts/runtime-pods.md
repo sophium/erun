@@ -97,6 +97,19 @@ Two cases the number alone cannot explain, so the tab spells them out:
   cluster without metrics its real consumption — Testcontainers, the build cache — is invisible to
   the reading and the tab warns that the true usage is higher than shown.
 
+## What the environment thinks it should be sized as
+
+The figures above describe the node. The environment also has an opinion about *itself*: every
+environment accumulates a standing recommendation — raise memory, drop memory, raise CPU, or leave
+it alone — from its own container's cgroup counters, and [`erun list`](/cli/list#the-sizing-recommendation)
+prints it under `runtime-pod:`. Nothing is applied automatically; resizing means a deploy, and that
+is your call to time.
+
+It matters because sizing is otherwise set once and never revisited, and both ways of being wrong
+are live. Under-provisioning shows up as a killed agent. Over-provisioning shows up as nothing at
+all — it just quietly holds capacity that the free figure above then reports as unavailable to
+everyone else on the node.
+
 ## What is holding the environment's resources
 
 A build leaves things running. Gradle keeps its daemons alive for the next build, Testcontainers

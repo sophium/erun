@@ -294,28 +294,32 @@ func formatLeaseRemaining(lease common.EnvironmentActivityLease, now time.Time) 
 
 // newActivitySampleCmd is the uninstrumented-work half. The environment monitor
 // calls it on its tick; work that took no lease still registers because the
-// processes doing it burned CPU since the previous tick.
+// processes doing it burned CPU since the previous tick. The same tick retains a
+// resource-usage reading, so an environment accumulates the history its sizing
+// recommendation is derived from without a second scheduled job.
 func newActivitySampleCmd() *cobra.Command {
 	var tenant string
 	var environment string
 	var procRoot string
+	var cgroupRoot string
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "sample",
-		Short: "Sample resident build and agent processes and record activity when they are working",
-		Long:  "Records activity only when a matched process burned CPU since the previous\nsample, so an agent parked at a prompt does not keep the environment awake.",
+		Short: "Sample resident build and agent processes and record activity and resource usage",
+		Long:  "Records activity only when a matched process burned CPU since the previous\nsample, so an agent parked at a prompt does not keep the environment awake.\nAlso retains the container's own cgroup CPU and memory counters, which is what\nlets erun recommend a size for this environment from what it has actually done.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivitySample(cmd, tenant, environment, procRoot, jsonOutput)
+			return runActivitySample(cmd, tenant, environment, procRoot, cgroupRoot, jsonOutput)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&procRoot, "proc-root", common.DefaultProcRoot, "Process filesystem to sample")
+	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON")
 	return cmd
 }
 
-func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot string, jsonOutput bool) error {
+func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroupRoot string, jsonOutput bool) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
@@ -328,6 +332,9 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot string,
 		return err
 	}
 	if err := common.SaveResidentActivitySample(tenant, environment, result.Sample); err != nil {
+		return err
+	}
+	if err := retainRuntimeUsage(tenant, environment, cgroupRoot); err != nil {
 		return err
 	}
 	if result.Busy {
@@ -349,6 +356,22 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot string,
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "working: %s\n", strings.Join(result.Processes, ", "))
 	return err
+}
+
+// retainRuntimeUsage folds this tick's cgroup reading into the environment's
+// retained history. A host that supplies no counters records nothing: a history
+// of empty samples would only ever support "no evidence", and this runs on a
+// laptop as readily as in a container.
+func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
+	sample := common.ReadLocalRuntimeUsage(cgroupRoot)
+	if !sample.HasCounters() {
+		return nil
+	}
+	history, err := common.LoadRuntimeUsageHistory(tenant, environment)
+	if err != nil {
+		return err
+	}
+	return common.SaveRuntimeUsageHistory(tenant, environment, common.AppendRuntimeUsageSample(history, sample, time.Now()))
 }
 
 func validateActivityTarget(tenant, environment string) error {

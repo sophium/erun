@@ -428,7 +428,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-74 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+75 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 

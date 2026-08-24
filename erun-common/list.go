@@ -59,29 +59,35 @@ type ListTenantResult struct {
 }
 
 type ListEnvironmentResult struct {
-	Name                string                  `json:"name"`
-	Type                EnvironmentType         `json:"type,omitempty"`
-	APIURL              string                  `json:"apiUrl,omitempty"`
-	KubernetesContext   string                  `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias  string                  `json:"cloudProviderAlias,omitempty"`
-	RepoPath            string                  `json:"repoPath,omitempty"`
-	LocalRepoPath       string                  `json:"localRepoPath,omitempty"`
-	ContainerRegistries ContainerRegistries     `json:"containerRegistries,omitempty"`
-	RuntimeVersion      string                  `json:"runtimeVersion,omitempty"`
-	RuntimePod          RuntimePodResources     `json:"runtimePod,omitempty"`
-	ManagedCloud        bool                    `json:"managedCloud,omitempty"`
-	DisableBuildScript  bool                    `json:"disableBuildScript,omitempty"`
-	PlatformAccount     bool                    `json:"platformAccount,omitempty"`
-	AITool              string                  `json:"aiTool,omitempty"`
-	Claude              EnvironmentClaudeConfig `json:"claude,omitempty"`
-	Idle                EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Deploy              EnvironmentDeployConfig `json:"deploy,omitempty"`
-	IsActive            bool                    `json:"isActive,omitempty"`
-	LocalPorts          EnvironmentLocalPorts   `json:"localPorts,omitempty"`
-	IsDefault           bool                    `json:"isDefault,omitempty"`
-	IsEffective         bool                    `json:"isEffective,omitempty"`
-	SSH                 ListSSHResult           `json:"ssh,omitempty"`
-	AutoStart           *bool                   `json:"autoStart,omitempty"`
+	Name                string              `json:"name"`
+	Type                EnvironmentType     `json:"type,omitempty"`
+	APIURL              string              `json:"apiUrl,omitempty"`
+	KubernetesContext   string              `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias  string              `json:"cloudProviderAlias,omitempty"`
+	RepoPath            string              `json:"repoPath,omitempty"`
+	LocalRepoPath       string              `json:"localRepoPath,omitempty"`
+	ContainerRegistries ContainerRegistries `json:"containerRegistries,omitempty"`
+	RuntimeVersion      string              `json:"runtimeVersion,omitempty"`
+	RuntimePod          RuntimePodResources `json:"runtimePod,omitempty"`
+	// Sizing is the environment's standing recommendation, derived from the usage
+	// history the in-pod monitor retains. Nil where erun has never observed this
+	// environment — which is every environment seen from a host other than its
+	// own runtime container, since the history is written by the container that
+	// produced it.
+	Sizing             *RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	ManagedCloud       bool                         `json:"managedCloud,omitempty"`
+	DisableBuildScript bool                         `json:"disableBuildScript,omitempty"`
+	PlatformAccount    bool                         `json:"platformAccount,omitempty"`
+	AITool             string                       `json:"aiTool,omitempty"`
+	Claude             EnvironmentClaudeConfig      `json:"claude,omitempty"`
+	Idle               EnvironmentIdleConfig        `json:"idle,omitempty"`
+	Deploy             EnvironmentDeployConfig      `json:"deploy,omitempty"`
+	IsActive           bool                         `json:"isActive,omitempty"`
+	LocalPorts         EnvironmentLocalPorts        `json:"localPorts,omitempty"`
+	IsDefault          bool                         `json:"isDefault,omitempty"`
+	IsEffective        bool                         `json:"isEffective,omitempty"`
+	SSH                ListSSHResult                `json:"ssh,omitempty"`
+	AutoStart          *bool                        `json:"autoStart,omitempty"`
 }
 
 type ListSSHResult struct {
@@ -209,6 +215,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		ContainerRegistries: EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
 		RuntimePod:          env.RuntimePod,
+		Sizing:              listEnvironmentSizing(tenant.Name, env),
 		ManagedCloud:        env.ManagedCloud,
 		DisableBuildScript:  env.DisableBuildScript,
 		PlatformAccount:     env.PlatformAccount,
@@ -223,6 +230,21 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		SSH:                 listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
 		AutoStart:           copyAutoStartPtr(env.AutoStart),
 	}
+}
+
+// listEnvironmentSizing attaches the standing recommendation when there is one.
+// A read failure is silence rather than an error: `erun list` is the fleet's
+// orientation command and must not fail over an advisory line.
+func listEnvironmentSizing(tenant string, env EnvConfig) *RuntimeSizingRecommendation {
+	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
+	if err != nil {
+		return nil
+	}
+	recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
+	if !ok {
+		return nil
+	}
+	return &recommendation
 }
 
 func copyAutoStartPtr(value *bool) *bool {

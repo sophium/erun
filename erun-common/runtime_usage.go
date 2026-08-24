@@ -2,6 +2,8 @@ package eruncommon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,31 @@ import (
 // are all normal, matching the fail-soft posture runtime_resources.go already
 // takes for kubectl-top-less clusters. Only a kubectl/exec failure to reach
 // the pod at all is a hard error.
+//
+// Two limits of this data are load-bearing enough to state here, because a
+// consumer that does not know them will draw the wrong conclusion:
+//
+//  1. memory.peak resets when the container restarts, so a single reading is a
+//     high-water mark for the current container lifetime, not for the
+//     environment. RuntimeUsageHistory (runtime_usage_history.go) retains the
+//     true peak across restarts; nothing may treat one reading as a lifetime
+//     maximum.
+//  2. PSI is absent on some kernels -- memory.pressure and cpu.pressure simply
+//     do not exist in every runtime container's cgroup, so nothing here or
+//     downstream may depend on pressure stall information. nr_throttled over
+//     nr_periods (RuntimeCPUUsage.ThrottledPeriods / .Periods) is the
+//     CPU-starvation signal that is actually available wherever cgroup v2 is.
+//
+// RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
+// script below into the container over kubectl, for an on-demand `erun usage`
+// report from any namespace the caller's kubeconfig reaches; or
+// ReadLocalRuntimeUsage reading the same cgroup files directly, for the in-pod
+// monitor tick that already runs inside the container being measured, where
+// kubectl-exec'ing into itself every 30s would trade a local file read for a
+// Kubernetes API round trip to reach data already on its own filesystem. Both
+// acquisition paths feed the same parsing and threshold logic below, so a
+// remote read and a local read of the same container agree on what the
+// numbers mean.
 
 const (
 	// runtimeUsageContainer is the pod's main container -- the one whose
@@ -49,6 +76,11 @@ const (
 	// v2 host; anything else (a v1 hierarchy, or the path missing) means the
 	// files this reader depends on do not exist.
 	cgroupV2FSType = "cgroup2fs"
+
+	// DefaultCgroupRoot is the container's own cgroup v2 directory, read
+	// directly by ReadLocalRuntimeUsage. Overridable so a test can point the
+	// reader at a fixture tree.
+	DefaultCgroupRoot = "/sys/fs/cgroup"
 
 	// Thresholds below are the values #1233 measured and fixed as named
 	// constants with the reasoning attached, per the issue's own ask.
@@ -91,6 +123,13 @@ type RuntimeUsage struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
+// HasCounters reports whether the read found anything worth retaining. A host
+// without cgroup v2 yields a reading of nothing, and recording that would
+// build a history that can only ever answer "no evidence".
+func (u RuntimeUsage) HasCounters() bool {
+	return u.Memory.LimitBytes > 0 || u.Memory.PeakBytes > 0 || u.CPU.QuotaCores > 0 || u.CPU.Periods > 0
+}
+
 // RuntimeCPUUsage reports quota-relative utilisation. Unavailable is set,
 // and every other field left zero, when cgroup v2 is absent or cpu.max
 // reports no quota to divide by (an unlimited container has no ceiling to be
@@ -99,7 +138,16 @@ type RuntimeCPUUsage struct {
 	QuotaCores         float64 `json:"quotaCores,omitempty"`
 	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
 	IntervalSeconds    float64 `json:"intervalSeconds,omitempty"`
-	Unavailable        string  `json:"unavailable,omitempty"`
+	// UsageUsec, Periods and ThrottledPeriods are cpu.stat's cumulative
+	// counters for the current container lifetime (usage_usec, nr_periods,
+	// nr_throttled), carried alongside the interval-based UtilizationPercent
+	// above so a consumer that retains readings over time -- RuntimeUsageHistory
+	// -- can derive its own rates and throttle ratio from the deltas between
+	// two readings, without a second reader.
+	UsageUsec        int64  `json:"usageUsec,omitempty"`
+	Periods          int64  `json:"periods,omitempty"`
+	ThrottledPeriods int64  `json:"throttledPeriods,omitempty"`
+	Unavailable      string `json:"unavailable,omitempty"`
 }
 
 // RuntimeMemoryUsage mirrors what erun-common/ai_launch.go's post-mortem OOM
@@ -180,6 +228,8 @@ printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
 printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
 printf 'cpu_time_before_ns=%s\n' "$time_before"
 printf 'cpu_time_after_ns=%s\n' "$time_after"
+printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
+printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
 printf 'disk_workspace=%s\n' "$(df -Pk ` + runtimeUsageWatchedMount + ` 2>/dev/null | tail -n1 || true)"
 `
 
@@ -249,18 +299,52 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 	return m
 }
 
+// runtimeCPUCounters is cpu.max/cpu.stat's cumulative counters, shared by the
+// interval-based reading below and ReadLocalRuntimeUsage's point-in-time
+// local reading -- both need the same quota and the same raw cpu.stat fields,
+// and reading them once keeps a remote read and a local read of the same
+// container agreeing on what the numbers mean.
+type runtimeCPUCounters struct {
+	QuotaCores       float64
+	UsageUsec        int64
+	Periods          int64
+	ThrottledPeriods int64
+}
+
+func runtimeCPUCountersFromValues(v map[string]string) (runtimeCPUCounters, bool) {
+	var counters runtimeCPUCounters
+	if usage, ok := parseRuntimeInt64(v["cpu_usage_after"]); ok {
+		counters.UsageUsec = usage
+	}
+	if periods, ok := parseRuntimeInt64(v["cpu_periods"]); ok {
+		counters.Periods = periods
+	}
+	if throttled, ok := parseRuntimeInt64(v["cpu_throttled_periods"]); ok {
+		counters.ThrottledPeriods = throttled
+	}
+	quotaUsec, periodUsec, ok := parseRuntimeCPUMax(v["cpu_max"])
+	if !ok {
+		return counters, false
+	}
+	counters.QuotaCores = float64(quotaUsec) / float64(periodUsec)
+	return counters, true
+}
+
 func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) RuntimeCPUUsage {
 	c := RuntimeCPUUsage{IntervalSeconds: interval.Seconds()}
 	if !runtimeCgroupV2Available(v) {
 		c.Unavailable = "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
 		return c
 	}
-	quotaUsec, periodUsec, ok := parseRuntimeCPUMax(v["cpu_max"])
+	counters, ok := runtimeCPUCountersFromValues(v)
+	c.UsageUsec = counters.UsageUsec
+	c.Periods = counters.Periods
+	c.ThrottledPeriods = counters.ThrottledPeriods
 	if !ok {
 		c.Unavailable = "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"
 		return c
 	}
-	c.QuotaCores = float64(quotaUsec) / float64(periodUsec)
+	c.QuotaCores = counters.QuotaCores
 
 	before, beforeOk := parseRuntimeInt64(v["cpu_usage_before"])
 	after, afterOk := parseRuntimeInt64(v["cpu_usage_after"])
@@ -375,4 +459,92 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 
 func formatMebibytes(bytes int64) string {
 	return fmt.Sprintf("%.0fMi", float64(bytes)/(1<<20))
+}
+
+// ReadLocalRuntimeUsage reads the container's own cgroup v2 files directly,
+// for the in-pod monitor tick that already runs inside the container being
+// measured -- see the file-level comment for why that tick does not kubectl-exec
+// into itself. It shares runtimeMemoryUsageFromValues and the cumulative CPU
+// counters with RunRuntimeUsage's script-based parser, so this is a second
+// acquisition path for the same reader, not a second reader: a local read and
+// a kubectl-exec'd read of the same container agree on what the numbers mean.
+// It never fails -- an absent or unparseable file reports its field as
+// unavailable, because cgroup v1 and a missing mount are ordinary states and a
+// caller on the monitor's tick must not be broken by either.
+func ReadLocalRuntimeUsage(cgroupRoot string) RuntimeUsage {
+	root := strings.TrimSpace(cgroupRoot)
+	if root == "" {
+		root = DefaultCgroupRoot
+	}
+	values := readLocalCgroupValues(root)
+	return RuntimeUsage{
+		CPU:    localRuntimeCPUUsage(values),
+		Memory: runtimeMemoryUsageFromValues(values),
+	}
+}
+
+// readLocalCgroupValues builds a values map matching the shape the
+// kubectl-exec'd script prints, so both acquisition paths run through the
+// exact same parser. A file that cannot be read yields an empty value, which
+// the parser already treats as unavailable.
+func readLocalCgroupValues(root string) map[string]string {
+	return map[string]string{
+		"cgroup_type":           cgroupV2FSType,
+		"memory_current":        readLocalCgroupFile(filepath.Join(root, "memory.current")),
+		"memory_max":            readLocalCgroupFile(filepath.Join(root, "memory.max")),
+		"memory_peak":           readLocalCgroupFile(filepath.Join(root, "memory.peak")),
+		"memory_oom_kill":       localCgroupStatValue(filepath.Join(root, "memory.events"), "oom_kill"),
+		"cpu_max":               readLocalCgroupFile(filepath.Join(root, "cpu.max")),
+		"cpu_usage_after":       localCgroupStatValue(filepath.Join(root, "cpu.stat"), "usage_usec"),
+		"cpu_periods":           localCgroupStatValue(filepath.Join(root, "cpu.stat"), "nr_periods"),
+		"cpu_throttled_periods": localCgroupStatValue(filepath.Join(root, "cpu.stat"), "nr_throttled"),
+	}
+}
+
+func readLocalCgroupFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// localCgroupStatValue reads one "<key> <value>" line out of a cgroup keyed
+// file (cpu.stat, memory.events), mirroring the awk lookups the exec'd script
+// runs against the same files.
+func localCgroupStatValue(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == key {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+// localRuntimeCPUUsage is runtimeCPUUsageFromValues without the interval-rate
+// half: a local read is a single point in time, so there is no before/after
+// pair to diff into a utilisation rate. It still reports the same cumulative
+// counters (quota, usage_usec, periods, throttled periods) that
+// RuntimeUsageHistory needs to derive its own rates from consecutive ticks.
+func localRuntimeCPUUsage(v map[string]string) RuntimeCPUUsage {
+	c := RuntimeCPUUsage{}
+	if !runtimeCgroupV2Available(v) {
+		c.Unavailable = "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
+		return c
+	}
+	counters, ok := runtimeCPUCountersFromValues(v)
+	c.UsageUsec = counters.UsageUsec
+	c.Periods = counters.Periods
+	c.ThrottledPeriods = counters.ThrottledPeriods
+	if !ok {
+		c.Unavailable = "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"
+		return c
+	}
+	c.QuotaCores = counters.QuotaCores
+	return c
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -256,11 +257,14 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		indent + "container-registries: " + containerRegistriesLabel(env.ContainerRegistries),
 		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
+	}
+	lines = append(lines, runtimeSizingLines(env.Sizing, indent)...)
+	lines = append(lines, []string{
 		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
 		indent + "ai-tool: " + valueOrNone(env.AITool),
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
-	}
+	}...)
 	if env.DisableBuildScript {
 		lines = append(lines, indent+"disable-build-script: enabled")
 	}
@@ -286,6 +290,44 @@ func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string
 		indent + "ssh-workspace-sync: " + enabledDisabledLabel(ssh.WorkspaceSyncEnabled),
 		indent + "ssh-workspace-sync-local-path: " + valueOrNone(ssh.WorkspaceSyncLocalPath),
 	}
+}
+
+// runtimeSizingLines render the standing recommendation under `runtime-pod:`,
+// which is the setting an operator would change to act on it. Two lines: the
+// verdicts, then the evidence they rest on. The evidence line is not optional
+// detail — a recommendation whose window and counters are invisible cannot be
+// argued with, and this one has to be argued with before anyone shrinks an
+// environment.
+func runtimeSizingLines(sizing *common.RuntimeSizingRecommendation, indent string) []string {
+	if sizing == nil {
+		return nil
+	}
+	verdicts := make([]string, 0, len(sizing.Verdicts))
+	for _, verdict := range sizing.Verdicts {
+		verdicts = append(verdicts, runtimeSizingVerdictLabel(verdict))
+	}
+	evidence := sizing.Evidence
+	return []string{
+		indent + "sizing: " + strings.Join(verdicts, "; "),
+		indent + fmt.Sprintf("sizing-evidence: %s observed, %d samples, %d restarts, knob=%s, from %s (not loadavg)",
+			common.FormatObservedWindow(time.Duration(evidence.ObservedSeconds)*time.Second),
+			evidence.Samples, evidence.Restarts, sizing.Knob, strings.Join(evidence.Signals, ", ")),
+	}
+}
+
+func runtimeSizingVerdictLabel(verdict common.RuntimeSizingVerdict) string {
+	label := verdict.Resource + " " + string(verdict.Action)
+	if suggested := strings.TrimSpace(verdict.Suggested); suggested != "" {
+		label += " to " + suggested
+	}
+	if current := strings.TrimSpace(verdict.Current); current != "" {
+		label += " from " + current
+	}
+	label += " (" + verdict.Reason
+	if verdict.Confidence != "" {
+		label += ", " + string(verdict.Confidence) + " confidence"
+	}
+	return label + ")"
 }
 
 func runtimePodLabel(pod common.RuntimePodResources) string {

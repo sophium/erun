@@ -21,4 +21,6 @@ usage:
   printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
   printf 'cpu_time_before_ns=%s\n' "$time_before"
   printf 'cpu_time_after_ns=%s\n' "$time_after"
+  printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
+  printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"

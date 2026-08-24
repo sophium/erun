@@ -112,6 +112,50 @@ func writeSampleProcess(t *testing.T, root string, pid int, comm string, cpuTick
 	}
 }
 
+// writeCgroupFixture lays down a cgroup v2 tree so the usage reader's verdict
+// comes from the fixture. The real /sys/fs/cgroup says something different on
+// every machine, and on a cgroup v1 host it says nothing at all.
+func writeCgroupFixture(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s/%s: %v", root, name, err)
+		}
+	}
+}
+
+// cgroupV2Fixture is the shape measured in a live runtime container: a 12-core
+// quota, a 23552Mi limit, and a high-water mark at roughly half of it.
+func cgroupV2Fixture(usageUsec, periods, throttled, peakBytes, oomKills int64) map[string]string {
+	return map[string]string{
+		"cpu.max":        "1200000 100000\n",
+		"cpu.stat":       fmt.Sprintf("usage_usec %d\nnr_periods %d\nnr_throttled %d\nthrottled_usec 0\n", usageUsec, periods, throttled),
+		"memory.max":     "24696061952\n",
+		"memory.current": "4773695488\n",
+		"memory.peak":    fmt.Sprintf("%d\n", peakBytes),
+		"memory.events":  fmt.Sprintf("low 0\nhigh 0\nmax 0\noom 0\noom_kill %d\n", oomKills),
+	}
+}
+
+// readUsageHistory reads the retained usage store. It is a side effect outside
+// the captured streams, so a golden cannot assert it.
+func readUsageHistory(t *testing.T, cacheHome, tenant, environment string) map[string]any {
+	t.Helper()
+	path := filepath.Join(cacheHome, "erun", "activity", tenant, environment, "usage-history.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var history map[string]any
+	if err := json.Unmarshal(body, &history); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return history
+}
+
 func TestActivity(t *testing.T) {
 	t.Run("touch_records_cli_activity", func(t *testing.T) {
 		setup := env.New(t)
@@ -905,7 +949,10 @@ func TestActivity(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		procRoot := filepath.Join(setup.Cwd, "proc")
 		writeSampleProcess(t, procRoot, 101, "java", 500, 900)
-		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot}
+		// The same tick also retains a usage reading. Point it at an absent
+		// cgroup root so this scenario stays about the process sampler and reads
+		// nothing ambient from the host that ran it.
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}
 
 		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		writeSampleProcess(t, procRoot, 101, "java", 900, 900)
@@ -918,6 +965,84 @@ func TestActivity(t *testing.T) {
 		// lives outside the captured streams.
 		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "process.json")); err != nil {
 			t.Errorf("expected the working sample to record process activity: %v", err)
+		}
+	})
+
+	t.Run("sample_retains_runtime_usage_from_cgroup_counters", func(t *testing.T) {
+		// The collection half of the sizing recommendation. The monitor's tick
+		// already runs this command, so the history accumulates with no second
+		// scheduled job.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		cgroupRoot := filepath.Join(setup.Cwd, "cgroup")
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(27551234478, 376556, 0, 12742377472, 0))
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", cgroupRoot}
+
+		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(28551234478, 386556, 0, 12742377472, 0))
+		second := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		golden.Equal(t, "activity/sample_retains_runtime_usage_from_cgroup_counters", normalize.Apply(first.Combined+second.Combined))
+
+		history := readUsageHistory(t, setup.CacheHome, "team", "dev")
+		if got := history["observedPeakMemoryBytes"]; got != float64(12742377472) {
+			t.Errorf("observedPeakMemoryBytes = %v, want the cgroup high-water 12742377472", got)
+		}
+		if got := history["observedPeriods"]; got != float64(386556) {
+			t.Errorf("observedPeriods = %v, want the first lifetime's total plus the delta", got)
+		}
+		if samples, ok := history["samples"].([]any); !ok || len(samples) != 2 {
+			t.Errorf("samples = %v, want both ticks retained", history["samples"])
+		}
+	})
+
+	t.Run("sample_retains_the_peak_across_a_container_restart", func(t *testing.T) {
+		// memory.peak resets when the container restarts, which is exactly why
+		// this is a store and not a live read: without retention the pre-restart
+		// high-water is simply gone, and an environment gets sized from whatever
+		// it happens to have done since.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		cgroupRoot := filepath.Join(setup.Cwd, "cgroup")
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", cgroupRoot}
+
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(27551234478, 376556, 12, 22000000000, 1))
+		erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		// Every cumulative counter starts over, and the fresh peak is far below
+		// the one already observed.
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(4000, 40, 0, 900000000, 0))
+		erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+
+		history := readUsageHistory(t, setup.CacheHome, "team", "dev")
+		if got := history["restarts"]; got != float64(1) {
+			t.Errorf("restarts = %v, want 1 inferred from the counters going backwards", got)
+		}
+		if got := history["observedPeakMemoryBytes"]; got != float64(22000000000) {
+			t.Errorf("observedPeakMemoryBytes = %v, want the pre-restart high-water 22000000000", got)
+		}
+		if got := history["observedOomKills"]; got != float64(1) {
+			t.Errorf("observedOomKills = %v, want the pre-restart kill retained", got)
+		}
+		if got := history["observedThrottledPeriods"]; got != float64(12) {
+			t.Errorf("observedThrottledPeriods = %v, want the pre-restart throttling retained", got)
+		}
+	})
+
+	t.Run("sample_records_no_usage_when_the_host_supplies_no_counters", func(t *testing.T) {
+		// cgroup v1, or a laptop. A history of empty samples could only ever
+		// support "no evidence", so nothing is written at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "absent")},
+			erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("an absent cgroup must not fail the monitor tick: exit %d\n%s", result.ExitCode, result.Combined)
+		}
+		path := filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "usage-history.json")
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expected no usage history without counters, stat err = %v", err)
 		}
 	})
 

@@ -4,7 +4,10 @@
   "cpu": {
     "quotaCores": 1,
     "utilizationPercent": 10,
-    "intervalSeconds": 1
+    "intervalSeconds": 1,
+    "usageUsec": 581611501,
+    "periods": 376556,
+    "throttledPeriods": 425
   },
   "memory": {
     "currentBytes": 413589504,

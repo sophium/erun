@@ -1,9 +1,12 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
@@ -230,6 +233,187 @@ func TestList(t *testing.T) {
 		}
 		golden.Equal(t, "list/with_claude_config", normalize.Apply(result.Combined))
 	})
+
+	// The sizing recommendation's four directions, driven from a retained
+	// history rather than from a live container. The history is the recommender's
+	// whole input, so seeding it is what makes each direction reachable — a real
+	// 26-hour observation window is not something a scenario can wait for, and
+	// the shrink gate exists precisely to require one.
+	//
+	// Each seeds an env whose declared runtimepod is deliberately absent, which
+	// is the in-pod reality: the chart injects the container's limits and the
+	// pod's own config never learns them. The lines must therefore score against
+	// the cgroup limit in the history, not against the defaults an empty
+	// runtimepod normalizes to.
+
+	t.Run("runtime_sizing_lowers_memory_on_a_long_quiet_window", func(t *testing.T) {
+		// erun/build's measured shape: a 23552Mi limit whose high-water sat at
+		// roughly half, with no kills and not one throttled period.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 31, samples: 240,
+			peakMemoryBytes: 12742377472, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 376556, throttled: 0, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_lowers_memory_on_a_long_quiet_window", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_raises_memory_on_an_oom_kill", func(t *testing.T) {
+		// One kill outranks a comfortable-looking peak and needs no window: this
+		// history has watched a single minute.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 0, samples: 2,
+			peakMemoryBytes: 1073741824, limitBytes: 2147483648, oomKills: 1,
+			quotaMilli: 1000, periods: 5000, throttled: 0, peakCPUMilli: 300,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_raises_memory_on_an_oom_kill", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_raises_cpu_on_sustained_throttling", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 31, samples: 240,
+			peakMemoryBytes: 1073741824, limitBytes: 8589934592,
+			quotaMilli: 2000, periods: 100000, throttled: 12000, peakCPUMilli: 1900,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_raises_cpu_on_sustained_throttling", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_raises_memory_when_the_peak_nears_the_limit", func(t *testing.T) {
+		// No kill yet, but the high-water is inside the raise margin. Sampling
+		// means the true peak is at least this, so the raise is high confidence
+		// without waiting for the environment to be killed first.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 5, samples: 30,
+			peakMemoryBytes: 2040109465, limitBytes: 2147483648,
+			quotaMilli: 1000, periods: 50000, throttled: 0, peakCPUMilli: 600,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_raises_memory_when_the_peak_nears_the_limit", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_bounds_a_raise_by_the_namespace_quota", func(t *testing.T) {
+		// A namespace ResourceQuota counts every container in the pod, so a raise
+		// past the quota less the dind sidecar's own limit is a size nothing
+		// would schedule. The verdict says it clamped rather than quietly
+		// recommending a quota change too.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"namespacequota:\n  cpu: \"8\"\n  memory: 32Gi\n  storage: 80Gi\n")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 5, samples: 30,
+			peakMemoryBytes: 21474836480, limitBytes: 21474836480, oomKills: 3,
+			quotaMilli: 4000, periods: 50000, throttled: 0, peakCPUMilli: 1000,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_bounds_a_raise_by_the_namespace_quota", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_holds_cpu_on_tolerable_throttling", func(t *testing.T) {
+		// frs/local's measured 425 of 308631 periods. Sub-threshold throttling is
+		// tolerable, not unused: it must neither grow the environment nor license
+		// a shrink. This is the false-positive check.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 31, samples: 240,
+			peakMemoryBytes: 1027301376, limitBytes: 2147483648,
+			quotaMilli: 4000, periods: 308631, throttled: 425, peakCPUMilli: 300,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_holds_cpu_on_tolerable_throttling", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_sizing_withholds_a_shrink_on_a_short_window", func(t *testing.T) {
+		// The same comfortable peak as the shrink scenario, watched for an hour.
+		// The verdict must be `insufficient-evidence` naming the shortfall, not a
+		// shrink and not a silent hold.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 1, samples: 120,
+			peakMemoryBytes: 12742377472, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 376556, throttled: 0, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_sizing_withholds_a_shrink_on_a_short_window", normalize.Apply(result.Combined))
+	})
+}
+
+type usageHistorySpec struct {
+	windowHours     int
+	samples         int
+	peakMemoryBytes int64
+	limitBytes      int64
+	oomKills        int64
+	quotaMilli      int64
+	periods         int64
+	throttled       int64
+	peakCPUMilli    int64
+}
+
+// seedUsageHistory writes the retained usage store directly. The on-disk shape
+// is the contract between the in-pod monitor that writes it and every reader, so
+// spelling the JSON out here pins that shape rather than round-tripping through
+// the same structs it is meant to check.
+func seedUsageHistory(t testing.TB, setup env.Setup, tenant, environment string, spec usageHistorySpec) {
+	t.Helper()
+	dir := filepath.Join(setup.CacheHome, "erun", "activity", tenant, environment)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	// Fixed instants, so the observed window is a property of the fixture rather
+	// than of when the suite happened to run.
+	first := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	last := first.Add(time.Duration(spec.windowHours)*time.Hour + 12*time.Minute)
+	sample := fmt.Sprintf(
+		`{"cpu":{"quotaCores":%g,"usageUsec":%d,"periods":%d,"throttledPeriods":%d},"memory":{"limitBytes":%d,"currentBytes":%d,"peakBytes":%d,"oomKills":%d}}`,
+		float64(spec.quotaMilli)/1000, spec.periods*100, spec.periods, spec.throttled,
+		spec.limitBytes, spec.peakMemoryBytes/2, spec.peakMemoryBytes, spec.oomKills)
+	samples := make([]string, 0, spec.samples)
+	for i := 0; i < spec.samples; i++ {
+		samples = append(samples, sample)
+	}
+	body := fmt.Sprintf(
+		`{"firstObservedAt":%q,"lastObservedAt":%q,"observedPeakMemoryBytes":%d,"observedOomKills":%d,"observedPeakCpuMilli":%d,"observedPeriods":%d,"observedThrottledPeriods":%d,"samples":[%s]}`,
+		first.Format(time.RFC3339Nano), last.Format(time.RFC3339Nano), spec.peakMemoryBytes,
+		spec.oomKills, spec.peakCPUMilli, spec.periods, spec.throttled, strings.Join(samples, ","))
+	mustWrite(t, filepath.Join(dir, "usage-history.json"), body+"\n")
 }
 
 // seedExplicitTypeEnv is shared by list and delete scenarios that assert the resolver honors an explicit `type:`.
