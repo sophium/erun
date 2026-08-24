@@ -54,6 +54,7 @@ const sidebars: SidebarsConfig = {
         'cli/inputs',
         'cli/idle',
         'cli/observe',
+        'cli/usage',
         'cli/doctor',
         'cli/version',
         'cli/mcp',

@@ -79,8 +79,10 @@ Read what you control from erun's config store — never infer it from what happ
   reasoning about. Everything you believed at the start of the wait is a claim about a world that
   has since changed, and the longer the wait the more of it is wrong.
   On each pass re-read the things that go stale rather than the thing you are waiting for: the
-  job's own state, the channel, the tree's HEAD and cleanliness, and whether anything you were told
-  earlier is still true. Two failures come specifically from not doing this — declaring work stalled
+  job's own state, the channel, the tree's HEAD and cleanliness, whether anything you were told
+  earlier is still true, and the environment's own resource usage (`erun usage`) — the one entry on
+  this list that ends the run outright rather than merely misinforming it, so it belongs on the same
+  pass that re-reads job state, not a separate thing to remember. Two failures come specifically from not doing this — declaring work stalled
   that had already finished, and acting on a branch someone else had moved — and both read, at the
   time, like careful diagnosis.
   Short repeated checks also keep the operator informed, which a single silent block does not.
@@ -118,6 +120,7 @@ Read what you control from erun's config store — never infer it from what happ
   idle-looking tree may be a running job's, and a release in flight owns its build host until it
   exits.
 - **Check capacity before launching heavy work.** Limits cap, they do not reserve, and a process killed inside a container may leave no trace on the container.
+- **Read `erun usage` before and during long work, and act on what it says.** Raising Memory in the environment's Runtime settings or stopping a run before an OOM kill is the point; a reading nobody acts on only turns a mystery into a documented mystery. This pairs with the lease guidance above: an agent holding a lease for long work is exactly the one that runs long enough to hit the limit.
 - **A tree you did not look for is not a tree that does not exist.** "No tree is free" is a claim
   about the world, not a memory of one, and it is cheap to check: a leftover clone from an earlier
   task, a mirror sitting idle in another environment, both count as capacity and neither shows up if
