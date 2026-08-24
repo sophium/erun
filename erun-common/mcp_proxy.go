@@ -48,7 +48,10 @@ func RunMCPStdioProxy(ctx context.Context, params MCPStdioProxyParams) error {
 	if params.In == nil || params.Out == nil {
 		return fmt.Errorf("MCP stdio proxy requires an input and an output stream")
 	}
-	session, err := newMCPSession(params.Endpoint, params.MintToken, params.ClientVersion)
+	// Never an idle probe: an MCP client relayed through this proxy is actively
+	// driving the environment (an agent, an operator's tool call), not asking a
+	// diagnostic question, so its calls must register as activity like any other.
+	session, err := newMCPSession(params.Endpoint, params.MintToken, params.ClientVersion, false)
 	if err != nil {
 		return err
 	}

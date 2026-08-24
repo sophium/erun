@@ -23,6 +23,13 @@ const (
 	// MCPServerPath is the HTTP path the per-env erun-mcp edge serves MCP on.
 	MCPServerPath = "/mcp"
 
+	// MCPIdleProbeHeader marks a request as a diagnostic read that must not reset
+	// the environment's idle timer. The erun-mcp edge's activity middleware skips
+	// activity recording for any request carrying it (set to "true"); every other
+	// client of this header (this package, erun-mcp, erun-ui) shares the same
+	// name so the two sides of the contract cannot drift apart.
+	MCPIdleProbeHeader = "X-Erun-Idle-Probe"
+
 	// The edge rejects a POST naming a protocol revision it does not support, so
 	// this is pinned rather than negotiated downward.
 	mcpClientProtocolVersion = "2025-06-18"
@@ -65,6 +72,11 @@ type MCPToolCallParams struct {
 	ClientVersion string
 	Tool          string
 	Arguments     map[string]any
+	// IdleProbe marks this call as a diagnostic read that must not reset the
+	// environment's idle timer. Set it only when the caller knows the tool is
+	// read-only; a tool that can mutate the environment must never be probed,
+	// since the probe header exempts the whole request from activity recording.
+	IdleProbe bool
 }
 
 type MCPToolCallResult struct {
@@ -78,6 +90,10 @@ type MCPToolListParams struct {
 	Endpoint      string
 	MintToken     MCPTokenMinter
 	ClientVersion string
+	// IdleProbe marks this call as a diagnostic read that must not reset the
+	// environment's idle timer. Listing tools is always read-only, so callers
+	// should normally set this.
+	IdleProbe bool
 }
 
 type MCPTool struct {
@@ -98,7 +114,7 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 	if tool == "" {
 		return MCPToolCallResult{}, fmt.Errorf("MCP tool name is required")
 	}
-	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion)
+	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion, params.IdleProbe)
 	if err != nil {
 		return MCPToolCallResult{}, err
 	}
@@ -133,7 +149,7 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 // ListMCPTools returns the tools an environment's MCP edge exposes, with their
 // input schemas.
 func ListMCPTools(ctx context.Context, params MCPToolListParams) (MCPToolListResult, error) {
-	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion)
+	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion, params.IdleProbe)
 	if err != nil {
 		return MCPToolListResult{}, err
 	}
@@ -155,6 +171,9 @@ type mcpSession struct {
 	client        *http.Client
 	sessionID     string
 	nextID        int
+	// idleProbe marks every request this session sends as a diagnostic read that
+	// must not reset the environment's idle timer.
+	idleProbe bool
 	// localPort is the loopback port the endpoint names, or 0 when the endpoint
 	// is not a local port-forward (e.g. a hosted platform edge). Only a local
 	// port-forward can go stale in the way ensureTunnelLive checks for.
@@ -170,7 +189,7 @@ type mcpSession struct {
 // newMCPSession prepares the transport without performing the handshake, so a
 // relay that forwards a client's own initialize can share the header, session,
 // and framing rules with the typed callers.
-func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
+func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("MCP endpoint is required")
@@ -188,6 +207,7 @@ func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion stri
 		mintToken:     mintToken,
 		clientVersion: clientVersion,
 		client:        &http.Client{},
+		idleProbe:     idleProbe,
 		localPort:     localMCPEndpointPort(endpoint),
 	}, nil
 }
@@ -211,8 +231,8 @@ func localMCPEndpointPort(endpoint string) int {
 	return port
 }
 
-func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string) (*mcpSession, error) {
-	session, err := newMCPSession(endpoint, mintToken, clientVersion)
+func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
+	session, err := newMCPSession(endpoint, mintToken, clientVersion, idleProbe)
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +400,9 @@ func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) 
 	req.Header.Set("User-Agent", mcpClientName+"/"+s.clientVersion)
 	if s.sessionID != "" {
 		req.Header.Set(mcpSessionHeader, s.sessionID)
+	}
+	if s.idleProbe {
+		req.Header.Set(MCPIdleProbeHeader, "true")
 	}
 	return req, nil
 }

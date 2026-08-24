@@ -241,7 +241,7 @@ func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest failed: %v", err)
 	}
-	req.Header.Set("X-Erun-Idle-Probe", "true")
+	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)

@@ -69,7 +69,7 @@ func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx common.Context
 		status, err := common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 		return status, err == nil, err
 	}
-	return callEnvironmentTool[common.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil)
+	return callEnvironmentTool[common.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
 }
 
 func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) error {
