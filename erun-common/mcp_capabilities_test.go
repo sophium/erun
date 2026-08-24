@@ -13,6 +13,7 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 		"version", "list", "idle", "idle_stop_history", "context_list",
 		"cloud_list", "diff", "outputs_list", "outputs_download",
 		"job_status", "job_output", "job_await",
+		"exec_job_status", "exec_job_output", "exec_job_await",
 	} {
 		if got := MCPToolCapability(tool); got != MCPCapabilityRead {
 			t.Fatalf("%s should be readable, got %s", tool, got)
@@ -26,7 +27,7 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 		"expose", "terraform", "publish", "pin", "doctor", "contribute_clone",
 		"context_init", "context_start", "context_stop",
 		"cloud_login", "cloud_set", "cloud_init_aws", "cloud_inject_aws_credentials",
-		"job_start", "job_cancel", "job_attach",
+		"job_cancel", "job_attach", "exec_job_cancel", "exec_job_attach", "exec_agent",
 		"activity_lease_take", "activity_lease_release",
 		"idle_stop_cancel", "idle_stop_record",
 	} {

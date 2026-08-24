@@ -206,51 +206,85 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, idleStopRecordTool(runtime))
 }
 
+// registerJobTools registers the exec_job_* family (#1246, following the
+// rename #1186 already decided: `job` becomes a sub-family of `exec`) plus
+// exec_agent, the job-starting tool that belongs beside them for the same
+// reason #1186 gave -- the tool that starts a job and the tools that query it
+// should live in one family. job_start itself is gone rather than aliased:
+// its command mode and agent mode had incompatible schemas, so a single
+// compatibility shim would have meant shipping a tool whose input shape lied
+// about what it accepted. Its command mode is exec_raw's wait:false path and
+// its agent mode is exec_agent, both already registered elsewhere.
 func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 	addTool(reg, &mcp.Tool{
-		Name: "job_start",
-		Description: "Run a long command in this env as a detached job and return its handle. " +
-			"Reach for this instead of `raw` for anything you will need to come back to — a build, a test suite, an agent run. " +
-			"erun detaches the work, captures its merged stdout and stderr, and records the exit status by waiting on the process inside the env, so nothing has to be wrapped in setsid/nohup/a redirect and no sentinel token or shell expansion sits between the work and its result. " +
+		Name: "exec_agent",
+		Description: "Run an AI tool (claude or codex) as a detached job and return its handle. " +
+			"erun invokes it in its streaming mode, so exec_job_output returns events while it works and exec_job_status reports its current activity rather than only running -- running the tool through exec_raw instead would report nothing at all until it exits. " +
 			"The job also holds an activity lease for its lifetime, so the env reports as busy and idle-stop leaves it alone. " +
-			"Then use job_await (bounded) and job_output (incremental) rather than holding this call open. " +
+			"Then use exec_job_await (bounded) and exec_job_output (incremental) rather than holding this call open. " +
 			"The id defaults to the name; re-using the id of a job that is still running is refused, while re-using a finished one replaces it. " +
-			"For an agent run pass agent (claude or codex) plus prompt instead of command: erun invokes the tool in its streaming mode, so job_output returns events while the agent works and job_status reports what it is doing. Running the tool yourself through command would report nothing at all until it exits. " +
-			"env sets additional environment for just this job's process (e.g. raising CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run that will write large files) — see the env parameter description for what it refuses and why it is not for secrets.",
-	}, jobStartTool(runtime))
+			"env sets additional environment for just this run (e.g. raising CLAUDE_CODE_MAX_OUTPUT_TOKENS for a run that will write large files) — see the env parameter description for what it refuses and why it is not for secrets.",
+	}, agentTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name: "job_attach",
+		Name: "exec_job_attach",
 		Description: "Give work you started another way a job handle and an activity lease, so it is visible and protected from idle-stop. " +
 			"erun tracks the pid you name and nothing else: the job reads as running while that process lives and as unknown once it is gone. " +
-			"It can never report an exit status, because nothing erun ran was waiting on that process to observe one — start work through job_start when you need the outcome.",
+			"It can never report an exit status, because nothing erun ran was waiting on that process to observe one — start work through exec_raw or exec_agent when you need the outcome.",
 	}, jobAttachTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name: "job_status",
+		Name: "exec_job_status",
 		Description: "Return one job's state and outcome, or every retained job newest-first. " +
 			"The answer is always definite: running, exited with a captured exit code, or explicitly unknown with the reason (its supervisor is gone without an outcome, most often because the runtime pod was replaced). " +
 			"It is never a truncated or partial answer, so it is safe to act on: unknown is exactly as terminal as exited — never a reason to keep waiting, and never inferred as 'not finished yet' just because it is not a success. Finished jobs stay readable for 24 hours, so an orchestrator reconnecting after the work ended can still learn what happened. " +
 			"aliveAgeMs is the milliseconds since the supervisor's last ~1s beat, computed by erun in its own clock so a caller never subtracts a pod timestamp from its own — the two clocks are not the same clock. Once it exceeds 5000, treat the job as failed (an unknown outcome, never a success, never a tool error) even if state has not caught up to say so yet; a silent-but-healthy command never trips this, because the beat has nothing to do with the work's own output. " +
-			"An agent job also carries progress — current activity (the last tool and its target), turns, tools run, and the last thing the agent said — normalized by erun from the tool's own event stream, so the shape is the same across AI tools. Poll this to report an in-pod agent's progress; do not scrape the agent's private transcript.",
+			"An agent job also carries progress — current activity (the last tool and its target), turns, tools run, and the last thing the agent said — normalized by erun from the tool's own event stream, so the shape is the same across AI tools. Poll this to report an in-pod agent's progress; do not scrape the agent's private transcript. " +
+			"A job started as a background task (build, deploy, doctor, and the rest of the job-envelope tools called with wait: false) carries its typed result on this record's result field once exited, in the same shape the tool would have returned synchronously.",
 	}, jobStatusTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name: "job_await",
+		Name: "exec_job_await",
 		Description: "Wait a bounded time (default 30s, max 600s) for a job to finish. " +
 			"The call always returns inside the timeout — either the outcome or timedOut=true with the job still running — so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. " +
 			"timedOut is reported separately from every outcome, so 'not finished yet' can never be read as a failure — but it is not the only non-outcome case: a job whose supervisor died reads back as state=unknown with timedOut=false, its own third case, distinct from both success and 'still running'. Never re-await a job already reporting unknown expecting a different answer. Call it again only while the job is genuinely still running. " +
-			"The returned job's aliveAgeMs (see job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile.",
+			"The returned job's aliveAgeMs (see exec_job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile.",
 	}, jobAwaitTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name: "job_output",
+		Name: "exec_job_output",
 		Description: "Read a page of a job's captured output, including while it is still running, so progress is visible before the work exits. " +
 			"Pass the previous read's nextOffset back as offset to continue where you left off. " +
 			"complete is true only when the job has finished and you have read to the end; the job's own outputTruncated says whether output was dropped at the cap. " +
-			"The returned job also carries aliveAgeMs (see job_status) — a silent-but-healthy command never advances outputBytes for minutes at a time, so use aliveAgeMs, not output growth, to tell quiet-but-alive apart from actually dead.",
+			"The returned job also carries aliveAgeMs (see exec_job_status) — a silent-but-healthy command never advances outputBytes for minutes at a time, so use aliveAgeMs, not output growth, to tell quiet-but-alive apart from actually dead. " +
+			"A background task job (see exec_job_status) has no output log of its own; read its typed result off the returned job instead.",
 	}, jobOutputTool(runtime))
 	addTool(reg, &mcp.Tool{
-		Name: "job_cancel",
+		Name: "exec_job_cancel",
 		Description: "Signal a running job's work (TERM by default, or INT/HUP/KILL). " +
 			"The target comes from the job record, never from a command-line pattern, so a cancel can only reach the work it names and never a process that merely looks like it. " +
-			"The job's supervisor is deliberately left alone, so it survives to record the outcome; the cancelled job then reads back as a normal exited job carrying the signal.",
+			"The job's supervisor is deliberately left alone, so it survives to record the outcome; the cancelled job then reads back as a normal exited job carrying the signal. " +
+			"A background task job (build, deploy, doctor, and the rest) has no subprocess of its own to signal and is refused; wait for it or let it finish.",
+	}, jobCancelTool(runtime))
+
+	// Deprecated aliases for the five renamed job tools, kept callable for one
+	// release (the same window #1186 used for the exec_* renames). job_start
+	// has no equivalent alias: see the function comment above for why.
+	addTool(reg, &mcp.Tool{
+		Name:        "job_attach",
+		Description: "Deprecated: use exec_job_attach. Retained for one release; this name will be removed.",
+	}, jobAttachTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "job_status",
+		Description: "Deprecated: use exec_job_status. Retained for one release; this name will be removed.",
+	}, jobStatusTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "job_await",
+		Description: "Deprecated: use exec_job_await. Retained for one release; this name will be removed.",
+	}, jobAwaitTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "job_output",
+		Description: "Deprecated: use exec_job_output. Retained for one release; this name will be removed.",
+	}, jobOutputTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "job_cancel",
+		Description: "Deprecated: use exec_job_cancel. Retained for one release; this name will be removed.",
 	}, jobCancelTool(runtime))
 }
 

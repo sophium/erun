@@ -61,12 +61,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"exec_write":                   {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false},
 	"exec_commit":                  {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
 	"exec_push":                    {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"job_start":                    {Family: "job", CLIPath: []string{"job", "start"}, Title: "Start a detached job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
-	"job_attach":                   {Family: "job", CLIPath: []string{"job", "attach"}, Title: "Attach to a running job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
-	"job_status":                   {Family: "job", CLIPath: []string{"job", "status"}, Title: "Report a job's state and outcome", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"job_await":                    {Family: "job", CLIPath: []string{"job", "await"}, Title: "Wait for a job to reach a terminal state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"job_output":                   {Family: "job", CLIPath: []string{"job", "output"}, Title: "Read a job's captured output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"job_cancel":                   {Family: "job", CLIPath: []string{"job", "cancel"}, Title: "Cancel a running job", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: false},
+	"exec_agent":                   {Family: "exec", CLIPath: []string{"exec", "agent"}, Title: "Run an AI tool as a detached job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"exec_job_attach":              {Family: "exec", CLIPath: []string{"exec", "job", "attach"}, Title: "Attach to a running job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_job_status":              {Family: "exec", CLIPath: []string{"exec", "job", "status"}, Title: "Report a job's state and outcome", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_job_await":               {Family: "exec", CLIPath: []string{"exec", "job", "await"}, Title: "Wait for a job to reach a terminal state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_job_output":              {Family: "exec", CLIPath: []string{"exec", "job", "output"}, Title: "Read a job's captured output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"exec_job_cancel":              {Family: "exec", CLIPath: []string{"exec", "job", "cancel"}, Title: "Cancel a running job", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: false},
 	"cloud_list":                   {Family: "cloud", CLIPath: nil, Title: "List configured cloud provider aliases", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"cloud_init_aws":               {Family: "cloud", CLIPath: []string{"cloud", "init", "aws"}, Title: "Register an AWS provider alias", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"cloud_init_cloudflare":        {Family: "cloud", CLIPath: []string{"cloud", "init", "cloudflare"}, Title: "Register a Cloudflare provider alias", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
@@ -163,17 +163,25 @@ func MCPToolNames() []string {
 
 // mcpToolRenames maps a retired tool name to its replacement. The rule across
 // the surface is that a tool's name equals its CLI path with "_" for spaces.
-// These five broke it: `erun exec` was the only command group whose members
-// dropped their prefix, and it is the group whose members differ most in blast
-// radius -- exec_diff only reads while exec_raw runs arbitrary argv. The old
-// names stay callable for one release so an upgrade does not break a pinned
-// client, then go.
+// The first five broke it because `erun exec` was the only command group
+// whose members dropped their prefix, and it is the group whose members
+// differ most in blast radius -- exec_diff only reads while exec_raw runs
+// arbitrary argv. The job_* five are #1246's rename of the same shape:
+// `job` becomes a sub-family of `exec` (#1186), so its CLI path moves from
+// `erun job <verb>` to `erun exec job <verb>` and the tool names move with
+// it. The old names stay callable for one release so an upgrade does not
+// break a pinned client, then go.
 var mcpToolRenames = map[string]string{
 	"diff":           "exec_diff",
 	"raw":            "exec_raw",
 	"write":          "exec_write",
 	"commit":         "exec_commit",
 	"workspace_sync": "sshd_sync",
+	"job_attach":     "exec_job_attach",
+	"job_status":     "exec_job_status",
+	"job_await":      "exec_job_await",
+	"job_output":     "exec_job_output",
+	"job_cancel":     "exec_job_cancel",
 }
 
 // MCPToolRenames returns the retired-to-current mapping, so a transport can

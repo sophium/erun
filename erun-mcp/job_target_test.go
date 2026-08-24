@@ -21,10 +21,7 @@ func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	// job, an unresolvable repo -- so a bare err != nil passes even against the
 	// unfixed code and proves nothing. The error has to be the one that names both
 	// scopes.
-	_, _, err := jobStartTool(runtime)(ctx, nil, JobStartInput{Tenant: "tenant-b", Environment: "prod", Name: "x"})
-	assertRefusedForeignTarget(t, "job_start", err)
-
-	_, _, err = jobStatusTool(runtime)(ctx, nil, JobStatusInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
+	_, _, err := jobStatusTool(runtime)(ctx, nil, JobStatusInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
 	assertRefusedForeignTarget(t, "job_status", err)
 
 	_, _, err = jobAwaitTool(runtime)(ctx, nil, JobAwaitInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
