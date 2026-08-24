@@ -61,6 +61,16 @@ Error: UPGRADE FAILED: timed out waiting for the condition`
 // path, for the assertions that care where that env is reviewed.
 func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 	t.Helper()
+	return orchestratorTestAppWithReachability(t, orchestratorTestAlwaysReachable)
+}
+
+// orchestratorTestAppWithReachability is orchestratorTestAppWithLocalRepo with
+// an injectable MCP-edge reachability probe, so a test about the unreachable-
+// edge notice can simulate a down edge without a real port-forward,
+// while every other orchestrator test gets a deterministic "always reachable"
+// default instead of depending on a real network dial.
+func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool) (*App, string) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
@@ -78,6 +88,7 @@ func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
+		canReachMCPEndpoint: reachable,
 	})
 	// Stage failure reports inside the test's own directory. Left at the default
 	// they land in the shared host temp dir, which is how a suite that spawns

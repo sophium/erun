@@ -669,10 +669,16 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// tool-call events in particular are somewhere they are likely to have hooks
 	// of their own, which an assignment would silently delete.
 	busyHook, idleHook := orchestratorActivityHooks()
+	// The live-session recorder rides the same turn-boundary events as the
+	// busy/idle reports: whichever fires next after a compaction forks the
+	// transcript picks up the new session_id from its own stdin.
+	liveSessionHook := orchestratorLiveSessionHookBlock()
 	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
 		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], busyHook, isOrchestratorActivityHookBlock)
+		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], liveSessionHook, isOrchestratorLiveSessionHookBlock)
 	}
 	stop := mergeOrchestratorHookBlocks(hooks["Stop"], idleHook, isOrchestratorActivityHookBlock)
+	stop = mergeOrchestratorHookBlocks(stop, liveSessionHook, isOrchestratorLiveSessionHookBlock)
 	hooks["Stop"] = mergeOrchestratorHookBlocks(stop, orchestratorNoAskStopGuardBlock(), isOrchestratorNoAskStopGuardBlock)
 	// A background shell's start and its completion are both only visible in a
 	// tool call's own result, which PreToolUse never carries — so unlike the
@@ -758,8 +764,13 @@ func orchestratorSessionStartHook(dir string) []any {
 	// would inherit the previous run's "working" and spin on arrival with nothing
 	// running. Clearing it here is what makes that guarantee real.
 	idle := map[string]any{"type": "command", "command": orchestratorActivityHookCommand(false)}
+	// An orchestrator id is mutable and reusable, so a live-session record left
+	// over from a previous run under this id must not survive into this one.
+	// Resetting it here to whatever id this launch actually starts with is what
+	// keeps a stale record from outliving the run that wrote it.
+	liveSession := map[string]any{"type": "command", "command": orchestratorSessionRecordHookCommand()}
 	matcher := func(source string) map[string]any {
-		return map[string]any{"matcher": source, "hooks": []any{command, idle}}
+		return map[string]any{"matcher": source, "hooks": []any{command, idle, liveSession}}
 	}
 	return []any{matcher("startup"), matcher("resume")}
 }
@@ -1372,7 +1383,7 @@ type orchestratorSpawn struct {
 // environment that is not there, which an agent reads as "not linked" rather
 // than "failed to wire" (#1185).
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
-	path, skipped, err := a.writeOrchestratorMCPConfig(id, envs)
+	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
 	for _, skip := range skipped {
 		log.Printf("erun-app: orchestrator %s: no MCP tools for %s: %s", id, skip.Label, skip.Reason)
 	}
@@ -1383,6 +1394,14 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 	}
 	if len(skipped) > 0 {
 		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), skipped))
+	}
+	// An unreachable edge is wired anyway: the proxy already recovers a
+	// transient outage per call, so this is reported, never treated as a skip.
+	for _, env := range unreachable {
+		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
+	}
+	if len(unreachable) > 0 {
+		a.emitAppNotification("warning", orchestratorMCPUnreachableNotice(name, unreachable))
 	}
 	return path
 }

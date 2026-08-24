@@ -507,13 +507,20 @@ func (a *App) RestartApp(returnToOrchestratorID string) error {
 // with the scope it is wired to: without those, a restart has nothing it can
 // safely tell to carry on, so the launch reopens the orchestrator idle rather
 // than handing a task to whichever conversation its id happens to resolve to.
+//
+// The conversation id itself is not simply the one the session was spawned
+// with: Claude Code forks the transcript to a new session id when a resumed
+// conversation compacts, so the spawn-time id can name a conversation that has
+// stopped growing. preferLiveOrchestratorSessionID prefers whatever id the
+// orchestrator's own hooks last saw live, validated against disk, over that
+// stale spawn-time id.
 func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	state := orchestratorRestoreState{OrchestratorID: strings.TrimSpace(orchestratorID)}
 	conversationID, scope := a.runningOrchestratorConversation(state.OrchestratorID)
 	if conversationID == "" {
 		return state
 	}
-	state.ConversationID = conversationID
+	state.ConversationID = preferLiveOrchestratorSessionID(state.OrchestratorID, conversationID)
 	state.Environments = scope
 	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
 	return state

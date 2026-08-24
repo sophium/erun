@@ -85,7 +85,7 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 }
 
 // countStopHookBlocks tallies the Stop event by owner.
-func countStopHookBlocks(t *testing.T, path string) (guards, idles, foreign int) {
+func countStopHookBlocks(t *testing.T, path string) (guards, idles, liveSessions, foreign int) {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -105,11 +105,13 @@ func countStopHookBlocks(t *testing.T, path string) (guards, idles, foreign int)
 			guards++
 		case isOrchestratorActivityHookBlock(block):
 			idles++
+		case isOrchestratorLiveSessionHookBlock(block):
+			liveSessions++
 		default:
 			foreign++
 		}
 	}
-	return guards, idles, foreign
+	return guards, idles, liveSessions, foreign
 }
 
 func seedOperatorStopHook(t *testing.T, dir string) string {
@@ -141,9 +143,10 @@ func TestOrchestratorSettingsKeepTheStopGuardBesideTheIdleReport(t *testing.T) {
 		}
 	}
 
-	guards, idles, foreign := countStopHookBlocks(t, settingsPath)
+	guards, idles, liveSessions, foreign := countStopHookBlocks(t, settingsPath)
 	// The settings file is shared with the operator, so theirs has to survive.
-	if guards != 1 || idles != 1 || foreign != 1 {
-		t.Fatalf("Stop must carry one guard, one idle report and the operator's hook, got guards=%d idles=%d foreign=%d", guards, idles, foreign)
+	if guards != 1 || idles != 1 || liveSessions != 1 || foreign != 1 {
+		t.Fatalf("Stop must carry one guard, one idle report, one live-session recorder and the operator's hook, got guards=%d idles=%d liveSessions=%d foreign=%d",
+			guards, idles, liveSessions, foreign)
 	}
 }
