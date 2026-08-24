@@ -35,7 +35,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
-	apiDeployment := common.TenantResourcePrefix(result.Tenant) + "-api"
+	apiDeployment := common.APIDeploymentName(result.Tenant)
 	checkArgs := kubectlAPIDeploymentCheckArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
 	ctx.TraceCommand("", "kubectl", checkArgs...)
 
@@ -86,7 +86,7 @@ func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, lo
 	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
 		return port, nil
 	}
-	apiDeployment := common.TenantResourcePrefix(result.Tenant) + "-api"
+	apiDeployment := common.APIDeploymentName(result.Tenant)
 	ctx.Trace(fmt.Sprintf("open: port-forwarding service/%s if the check above finds the deployment present", apiDeployment))
 	return localPort, nil
 }
@@ -197,7 +197,7 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	}
 	args = append(args,
 		"port-forward",
-		fmt.Sprintf("service/%s-api", common.TenantResourcePrefix(result.Tenant)),
+		fmt.Sprintf("service/%s", common.APIDeploymentName(result.Tenant)),
 		// The API service is a standalone component chart, published on the
 		// canonical APIServicePort in every namespace; only the local side is
 		// per-env, so concurrent forwards for different environments don't collide
