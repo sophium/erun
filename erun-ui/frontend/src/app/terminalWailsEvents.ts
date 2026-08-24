@@ -11,6 +11,7 @@ import type {
   EnvironmentInitializedPayload,
   EnvStatusPayload,
   OrchestratorShellActivityPayload,
+  SSHDInitCompletedPayload,
 } from './model';
 import { store } from './store';
 import {
@@ -25,6 +26,7 @@ import {
   handleEnvStatus,
   handleOrchestratorShellActivity,
   handleReconnectLine,
+  handleSSHDInitCompleted,
   handleTerminalExit,
 } from './wailsEventThunks';
 
@@ -38,7 +40,7 @@ export class TerminalWailsEvents {
     this.offs = [
       EventsOn('terminal-output', onTerminalOutput),
       EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
-        void store.dispatch(handleTerminalExit(payload));
+        store.dispatch(handleTerminalExit(payload));
       }),
       EventsOn('app-status', (payload: AppStatusPayload) => {
         store.dispatch(handleAppStatus(payload));
@@ -66,6 +68,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('doctor-completed', (payload: DoctorCompletedPayload) => {
         store.dispatch(handleDoctorCompleted(payload));
+      }),
+      EventsOn('sshd-init-completed', (payload: SSHDInitCompletedPayload) => {
+        store.dispatch(handleSSHDInitCompleted(payload));
       }),
       ...this.environmentLifecycleSubscriptions(),
     ];

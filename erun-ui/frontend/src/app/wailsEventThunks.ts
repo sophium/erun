@@ -12,6 +12,7 @@ import type {
   EnvironmentInitializedPayload,
   EnvStatusPayload,
   OrchestratorShellActivityPayload,
+  SSHDInitCompletedPayload,
   TerminalExitSelections,
 } from './model';
 import {
@@ -39,6 +40,7 @@ import {
   setSelected,
 } from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
+import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
 import { removeTab } from './tabsThunks';
 import { failedTerminalOutput } from './terminalBuffers';
@@ -365,6 +367,27 @@ export const handleDoctorCompleted =
     );
   };
 
+// handleSSHDInitCompleted records `erun sshd init`'s last-run outcome for the
+// Manage dialog's SSH access section. Like doctor, sshd init runs piped into
+// the shared Local shell and never produces a PTY exit, so the
+// `sshd-init-completed` Wails event — fired from the CLI's `==> SSHD init
+// done` / `==> SSHD init failed` trace lines (see handleSSHDInitTraceLine in
+// erun-ui/activity_queue_app.go) — is its only completion signal.
+export const handleSSHDInitCompleted =
+  (payload: SSHDInitCompletedPayload): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      recordSSHDInitOutcome({
+        key: selectionKey({ tenant: payload.tenant, environment: payload.environment }),
+        outcome: {
+          ranAt: Date.now(),
+          success: payload.success,
+          message: (payload.message ?? '').trim(),
+        },
+      }),
+    );
+  };
+
 const dropExitedSessionFromTabs =
   (sessionId: number, openExitSelection: UISelection | undefined): AppThunk =>
   (dispatch, getState) => {
@@ -393,8 +416,8 @@ const computeTerminalExitReason = (
 };
 
 export const handleTerminalExit =
-  (payload: TerminalExitPayload): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  (payload: TerminalExitPayload): AppThunk =>
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
     // takeExitSelections both reads the per-session metadata AND clears it
     // in one atomic dispatch — pull the values out first.
@@ -404,9 +427,6 @@ export const handleTerminalExit =
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
 
-    if (selections.sshdInitSelection) {
-      await dispatch(reloadStateAfterEnvironmentChange());
-    }
     if (payload.sessionId !== getState().terminal.sessionId) {
       return;
     }
@@ -438,10 +458,6 @@ function dispatchTerminalExitFeedback(
   reason: string,
   failedOutput: string,
 ): void {
-  if (!payload.reason && selections.sshdInitSelection) {
-    dispatch(showTerminalMessage(reason));
-    return;
-  }
   if (payload.reason && terminalExitHasTrackedSelection(selections)) {
     const failure = classifiedTerminalFailure(
       payload.reason,

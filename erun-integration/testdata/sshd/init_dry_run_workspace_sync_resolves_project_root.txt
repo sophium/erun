@@ -5,6 +5,7 @@ SSHD enabled for team/dev
   local port: 64022
   workspace: <HOME>/git/team
 audit: erun sshd init --dry-run --local-port 64022 --public-key <TMP> team dev
+==> SSHD init team/dev
 save SSHD config for team/dev
 enable SSHD workspace sync for team/dev to <TMP>
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
@@ -38,3 +39,4 @@ remote-ssh-authorized-keys:
   rm -f "$tmp_new"
   chmod 600 "$key_file"
 write ssh config host erun-team-dev for team/dev
+==> SSHD init done team/dev

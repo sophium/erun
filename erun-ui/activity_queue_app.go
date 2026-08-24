@@ -333,6 +333,20 @@ var activityDoctorDoneLineRe = regexp.MustCompile(`^==> Doctor done ([^/\s]+)/([
 // reason` trace emitted when any step of the target-scoped run errors.
 var activityDoctorFailedLineRe = regexp.MustCompile(`^==> Doctor failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
 
+// activitySSHDInitLineRe matches the `==> SSHD init tenant/env` trace emitted
+// at the start of `erun sshd init`.
+var activitySSHDInitLineRe = regexp.MustCompile(`^==> SSHD init ([^/\s]+)/([^/\s]+)\s*$`)
+
+// activitySSHDInitDoneLineRe matches the `==> SSHD init done tenant/env`
+// trace. This line, not PTY exit, is sshd init's completion signal: like
+// `erun doctor`, `erun sshd init` runs piped into the shared Local shell (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring").
+var activitySSHDInitDoneLineRe = regexp.MustCompile(`^==> SSHD init done ([^/\s]+)/([^/\s]+)\b`)
+
+// activitySSHDInitFailedLineRe matches the `==> SSHD init failed tenant/env:
+// reason` trace emitted when any step of the run errors.
+var activitySSHDInitFailedLineRe = regexp.MustCompile(`^==> SSHD init failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
+
 // activityBuildingLineRe matches the umbrella `==> Building` trace
 // emitted by RunBuildExecution at the top of the build pipeline.
 // Unlike deploy/init the line carries no tenant/env — build has no
@@ -441,6 +455,7 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 		case initTraceHonored && app.handleInitTraceLine(selection, line):
 		case app.handleCommandTraceLine(selection, line):
 		case app.handleDoctorTraceLine(selection, line):
+		case app.handleSSHDInitTraceLine(selection, line):
 		case failedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusFailed, cleanActivityFailureLine(line))
 		case errorRe.MatchString(line):
@@ -508,6 +523,24 @@ func (a *App) handleDoctorTraceLine(selection uiSelection, line string) bool {
 	}
 	if match := activityDoctorFailedLineRe.FindStringSubmatch(line); match != nil {
 		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		return true
+	}
+	return false
+}
+
+// handleSSHDInitTraceLine dispatches the `erun sshd init` lifecycle trace
+// lines, returning true on a match so the caller stops.
+func (a *App) handleSSHDInitTraceLine(selection uiSelection, line string) bool {
+	if match := activitySSHDInitLineRe.FindStringSubmatch(line); match != nil {
+		a.startSSHDInitFromTrace(selection, match[1], match[2])
+		return true
+	}
+	if match := activitySSHDInitDoneLineRe.FindStringSubmatch(line); match != nil {
+		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		return true
+	}
+	if match := activitySSHDInitFailedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
 		return true
 	}
 	return false
@@ -714,6 +747,60 @@ func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activit
 		}
 	}
 	a.emitDoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
+}
+
+// startSSHDInitFromTrace registers an activity entry for `erun sshd init`,
+// giving it a persistent, glanceable presence in the activity drawer/sidebar
+// spinner regardless of which surface started it. Unlike doctor, sshd init
+// runs no interactive recovery prompts of its own — it is a one-shot
+// provisioning action like init/deploy — so it locks terminals the same way
+// those do.
+func (a *App) startSSHDInitFromTrace(selection uiSelection, tenant, environment string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("sshd-init", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	entry, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "sshd-init",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "sshd init " + tenant + "/" + environment,
+	})
+	if !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+	a.lockTerminalsForActivity(entry)
+}
+
+// finishSSHDInitByTenantEnv finalizes the activity entry and records the
+// persisted last-run outcome the Manage dialog's SSH access section reads —
+// the answer "did enabling SSHD work?" that otherwise vanished the moment the
+// terminal scrolled past it.
+func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if a.activityQueue != nil {
+		if entry, ok := a.activityQueue.findActiveByCommand("sshd-init", tenant, environment); ok {
+			if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
+				a.unlockTerminalsForActivity(final)
+			}
+		}
+	}
+	a.emitSSHDInitCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
 // startDeployFromTrace registers a deploy entry from a `==> Deploying` trace.

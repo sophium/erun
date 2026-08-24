@@ -106,3 +106,28 @@ func (a *App) emitDoctorCompleted(tenant, environment string, success bool, mess
 		Message:     message,
 	})
 }
+
+type uiSSHDInitCompletedPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message,omitempty"`
+}
+
+// emitSSHDInitCompleted is `erun sshd init`'s only completion signal (see
+// handleSSHDInitTraceLine): it runs piped into the shared Local shell like
+// doctor, so the Manage dialog's SSH tab records this event as the persisted
+// last-run outcome instead of relying on a PTY exit that never fires.
+func (a *App) emitSSHDInitCompleted(tenant, environment string, success bool, message string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	a.emitEvent(sshdInitCompletedEvent, uiSSHDInitCompletedPayload{
+		Tenant:      tenant,
+		Environment: environment,
+		Success:     success,
+		Message:     message,
+	})
+}

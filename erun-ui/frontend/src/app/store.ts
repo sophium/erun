@@ -41,6 +41,7 @@ import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
 import sessionsReducer from './slices/sessionsSlice';
 import sidebarReducer from './slices/sidebarSlice';
+import sshdInitReducer from './slices/sshdInitSlice';
 import tenantDashboardReducer from './slices/tenantDashboardSlice';
 import tenantDialogReducer from './slices/tenantDialogSlice';
 import tenantsReducer from './slices/tenantsSlice';
@@ -61,6 +62,7 @@ export const store = configureStore({
     requestCounters: requestCountersReducer,
     sessions: sessionsReducer,
     doctor: doctorReducer,
+    sshdInit: sshdInitReducer,
     idle: idleReducer,
     activity: activityReducer,
     aiActivity: aiActivityReducer,

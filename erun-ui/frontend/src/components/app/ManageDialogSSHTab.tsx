@@ -19,11 +19,20 @@ import { relativeTimeFromNow } from '@/components/app/ManageDialog.helpers';
 
 type ManageDialog = AppState['manageDialog'];
 
+function useLastSSHDInitOutcome(
+  selection: ManageDialog['selection'],
+): AppState['lastSSHDInitBySelection'][string] | undefined {
+  const lastSSHDInitBySelection = useAppSelector((state) => state.sshdInit.lastSSHDInitBySelection);
+  return selection ? lastSSHDInitBySelection[selectionKey(selection)] : undefined;
+}
+
 export function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const config = dialog.config;
+  const lastSSHDInit = useLastSSHDInitOutcome(dialog.selection);
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <SSHAccessHeader dialog={dialog} />
+      {lastSSHDInit && <SSHDInitLastRun outcome={lastSSHDInit} />}
       <ReadonlyField
         id="environment-config-sshd-enabled"
         label="SSHD"
@@ -193,6 +202,39 @@ function WorkspaceSyncStatus({
         )}
       >
         {message || status.replace(/_/g, ' ')}
+      </span>
+    </div>
+  );
+}
+
+function SSHDInitLastRun({
+  outcome,
+}: {
+  outcome: AppState['lastSSHDInitBySelection'][string];
+}): React.ReactElement {
+  const ago = relativeTimeFromNow(outcome.ranAt);
+  const tone: 'success' | 'destructive' = outcome.success ? 'success' : 'destructive';
+  const summary = outcome.success ? 'SSHD enabled' : outcome.message || 'enabling SSHD failed';
+  return (
+    <div
+      role={outcome.success ? 'status' : 'alert'}
+      className={cn(
+        'grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius)] border px-3 py-2 text-[13px] leading-[1.4]',
+        tone === 'success'
+          ? 'border-green-600/35 bg-green-600/10 text-foreground'
+          : 'border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-foreground',
+      )}
+    >
+      <span
+        className={cn(
+          'mt-px size-1.5 rounded-full',
+          tone === 'success' ? 'bg-green-600' : 'bg-destructive',
+        )}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        <span className="font-medium">Last run {ago}</span>
+        <span className="text-muted-foreground"> — {summary}</span>
       </span>
     </div>
   );

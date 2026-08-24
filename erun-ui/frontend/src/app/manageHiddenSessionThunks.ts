@@ -6,8 +6,6 @@ import { showTerminalMessage } from './notificationThunks';
 import { activateLocalAfterCommand } from './sessionThunks';
 import { setManageDialog } from './slices/manageDialogSlice';
 import { setSelected } from './slices/selectionSlice';
-import { trackSSHDInitSession } from './slices/sessionsSlice';
-import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import { defaultManageDialog } from './state';
 import type { AppThunk } from './store';
@@ -41,6 +39,17 @@ export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch,
   await dispatch(startHiddenSession('doctor', selection, StartDoctorSession));
 };
 
+// Both HiddenSessionMode starters (StartSSHDInitSession, StartDoctorSession)
+// pipe their command into the shared Local shell and always come back as a
+// 'local' session, never a dedicated PTY with its own exit event (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring"). Each
+// command reports its own completion through a trace-line-driven Wails event
+// instead (doctor-completed, sshd-init-completed) — that tracking was
+// unreachable dead code for both commands until each was wired up in turn
+// (erun#1268, erun#1276), because this thunk kept a second, PTY-exit-shaped
+// tracking path alive for a kind that never arrives. Refusing a kind other
+// than 'local' here closes that seam: a future starter that returns a
+// different kind cannot silently repeat the same mistake a third time.
 const startHiddenSession =
   (
     mode: HiddenSessionMode,
@@ -58,21 +67,8 @@ const startHiddenSession =
     controller.fitTerminal();
     const size = controller.terminalSize();
     const result = (await starter(runSelection, size.cols, size.rows)) as StartSessionResult;
-    if (result.kind === 'local') {
-      await dispatch(activateLocalAfterCommand(selection, result));
-      return;
+    if (result.kind !== 'local') {
+      throw new Error(`hidden session '${mode}' returned unexpected kind '${result.kind ?? ''}'`);
     }
-    dispatch(trackHiddenSession(mode, result.sessionId, runSelection));
-    dispatch(setSessionId(result.sessionId));
-    controller.resetTerminal();
-    controller.focusTerminalSoon();
-    controller.queueTerminalResize();
-  };
-
-const trackHiddenSession =
-  (mode: HiddenSessionMode, sessionId: number, selection: UISelection): AppThunk =>
-  (dispatch) => {
-    if (mode === 'sshd-init') {
-      dispatch(trackSSHDInitSession({ sessionId, selection }));
-    }
+    await dispatch(activateLocalAfterCommand(selection, result));
   };

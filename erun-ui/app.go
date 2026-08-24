@@ -22,6 +22,7 @@ const (
 	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
 	doctorCompletedEvent        = "doctor-completed"
+	sshdInitCompletedEvent      = "sshd-init-completed"
 	aiActivityEvent             = "ai-activity"
 	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"

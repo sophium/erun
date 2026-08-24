@@ -6,7 +6,6 @@ import {
   recordExitReason as recordExitReasonAction,
   takeExitSelections as takeExitSelectionsAction,
   trackOpenSession as trackOpenSessionAction,
-  trackSSHDInitSession as trackSSHDInitSessionAction,
 } from './slices/sessionsSlice';
 import { store } from './store';
 import { selectionKey } from './versionSuggestions';
@@ -29,10 +28,6 @@ export class TerminalSessionRegistry {
 
   isOpenSession(sessionId: number): boolean {
     return store.getState().sessions.openSelections[sessionId] !== undefined;
-  }
-
-  trackSSHDInitSession(sessionId: number, selection: UISelection): void {
-    store.dispatch(trackSSHDInitSessionAction({ sessionId, selection }));
   }
 
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
@@ -83,7 +78,6 @@ export class TerminalSessionRegistry {
     const state = store.getState().sessions;
     const openSelection = state.openSelections[sessionId];
     const selections: TerminalExitSelections = {
-      sshdInitSelection: state.sshdInitSelections[sessionId],
       openSelection,
       cloudInit: state.cloudInitSessions[sessionId] ?? null,
     };

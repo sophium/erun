@@ -196,6 +196,12 @@ export interface TerminalTab {
   label: string;
 }
 
+export interface SSHDInitOutcome {
+  ranAt: number;
+  success: boolean;
+  message: string;
+}
+
 export interface DoctorOutcome {
   ranAt: number;
   success: boolean;
@@ -304,6 +310,7 @@ export interface AppState {
   debugOpen: boolean;
   debugHeight: number;
   lastDoctorBySelection: Record<string, DoctorOutcome>;
+  lastSSHDInitBySelection: Record<string, SSHDInitOutcome>;
 }
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
