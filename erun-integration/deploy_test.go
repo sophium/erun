@@ -463,6 +463,47 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_refreshes_image_pull_secret_via_stubbed_kubectl", func(t *testing.T) {
+		// Real-run counterpart of the dry-run image-pull-secret scenarios:
+		// proves the kubectl apply actually executes (Command + stdin
+		// manifest + CombinedOutput), not just that dry-run traces it. The
+		// kubectl stub exits 0 so the apply — and the rollout after it —
+		// both succeed.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refreshes_image_pull_secret_via_stubbed_kubectl", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_new_worktree_volume_announces_the_adoption", func(t *testing.T) {
 		// The regression this exists for: a deploy that first introduces the
 		// dedicated worktree volume to an environment whose checkout still lives
@@ -1084,6 +1125,46 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_image_pull_secret_refreshed_from_host_credential", func(t *testing.T) {
+		// An ECR authorization token expires after twelve hours (#1256), so a
+		// pull secret named once via --image-pull-secret and never refreshed
+		// eventually rots. When the host running `erun deploy` already has a
+		// credential for the deploy registry (docker config, or the AWS CLI
+		// for ECR), deploy re-mints the named Secret from it instead of
+		// leaving whatever it held days ago. DOCKER_CONFIG points the host
+		// resolver at this isolated dir, the same seam the init registry
+		// credential scenario uses; the fixture's containerregistry
+		// (registry.example/test) is deliberately addressed here.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secret_refreshed_from_host_credential", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", func(t *testing.T) {

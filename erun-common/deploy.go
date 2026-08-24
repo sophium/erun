@@ -871,6 +871,9 @@ func applyPreRolloutResources(ctx Context, deployInput HelmDeploySpec) error {
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
 		return err
 	}
+	if err := refreshImagePullSecrets(ctx, deployInput); err != nil {
+		return err
+	}
 	return recordMCPAuthKeyOnEnv(ctx, deployInput)
 }
 
