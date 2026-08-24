@@ -16,6 +16,10 @@ export class TenantDashboard {
     await this.page.getByRole('tab', { name }).click();
   }
 
+  async clickRefresh(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  }
+
   activePanel(): Locator {
     return this.page.getByRole('tabpanel');
   }
