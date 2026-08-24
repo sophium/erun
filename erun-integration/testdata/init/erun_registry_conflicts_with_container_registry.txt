@@ -1,0 +1,2 @@
+audit: erun init --container-registry registry.example/test --dry-run --erun-registry --kubernetes-context test-context --type remote-agent --version <VERSION> team dev
+--erun-registry conflicts with --container-registry; pick one

@@ -134,6 +134,7 @@ A non-trivial concept gets a *pair* of pages: an Operator-facing summary and an 
 | OIDC sign-in | `collaboration/overview` (one-paragraph summary + diagram) | `agent-reference/api-protocol` (tenant-issuer schema, errors, rate limits) |
 | Idle stop | `concepts/cloud-contexts` (one paragraph) | `agent-reference/idle-policy` (predicate, working-hours semantics) |
 | Conventions | `concepts/conventions` (the layout + diagrams) | `agent-reference/conventions-spec` (resolution algorithms) |
+| Hosted registry | `deployment/registries#hosted-registry` (how to use it) + `deployment/deploy-platform#hosted-registry-admin` (how to stand it up) | `agent-reference/api-protocol#registry-token-endpoint` (the token endpoint's request/response shape, scope-clamping rule, errors) |
 
 The Operator page is short and links out; the Agent reference is comprehensive. Don't merge them.
 

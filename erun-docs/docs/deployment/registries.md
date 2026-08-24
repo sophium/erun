@@ -74,6 +74,24 @@ ERun resolves the entry into two concrete hosts, matching the `build`/`deploy` s
 
 `insecure: true` marks the registry as plain HTTP, so `erun deploy` passes `--insecure-registry <ClusterIP>:5000` to the in-pod dind daemon (which otherwise only trusts loopback). The fields default to the `erun-registry`/`kube-system`/`5000` convention, so a bare `cluster: {}` resolves for the standard local setup. The `erun-setup-k3s-cluster` skill provisions the ClusterIP Service and the node mirror.
 
+## Hosted registry {#hosted-registry}
+
+**(Planned.)** ERun also offers its own hosted registry, `registry.erunpaas.com`, as a build+deploy registry with no setup: authenticate with your tenant's own API token instead of managing a separate registry account, and push/pull under your own tenant namespace.
+
+```
+docker login registry.erunpaas.com
+Username: erun
+Password: <your tenant API token>
+
+docker push registry.erunpaas.com/<tenant>/hello:1
+```
+
+`erun init --erun-registry` fills this in for you — a single `registry.erunpaas.com/<tenant>` entry marked **build + deploy**, in place of `--container-registry` or `--cluster-registry` (the three are mutually exclusive; pick one). Because the hosted registry then holds only *your* project's images, pair it with `--runtime-registry ghcr.io/sophium` so ERun still resolves its own runtime chart from erun's registry rather than yours.
+
+**Images older than a retention window are deleted automatically.** The default window is **30 days** since an image was last pulled; the platform operator can configure it per deployment. There is no separate "list what's about to expire" step today — if an image you rely on has not been pulled in that window, it is gone. Re-push it (or pull it periodically) to keep it alive.
+
+The DNS, TLS certificate, and the platform's registry deployment for `registry.erunpaas.com` are not live yet, so this is aspirational until then — `erun init --erun-registry` records the config today, but pushing to the host will not work until the platform side is stood up. For the token protocol and its security model, see the [Agent reference](/agent-reference/api-protocol#registry-token-endpoint).
+
 ## Discovering versions to deploy
 
 When the desktop offers versions to deploy or upgrade, it asks only the environment's listed registries — not a global default — and labels each offered version with the registry it came from. If two registries publish different newer versions, the deploy picker and the Upgrade-all dialog let you pick which one; `erun upgrade` on the command line skips such an environment as ambiguous until you pass `--version`. See [`erun upgrade`](/cli/upgrade).

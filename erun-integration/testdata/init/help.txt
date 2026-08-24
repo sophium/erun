@@ -12,6 +12,7 @@ Flags:
       --disable-build-script           Ignore any project build.sh for this env; erun build resolves docker/release contexts directly
       --dry-run                        Resolve and trace mutating actions without executing them.
       --environment string             Environment name
+      --erun-registry                  Use erun's hosted container registry (registry.erunpaas.com/<tenant>), authenticated by this tenant's own API token, instead of --container-registry; mutually exclusive with it and with --cluster-registry
   -h, --help                           help for init
       --image-pull-secret strings      Kubernetes dockerconfigjson secret the runtime pod pulls its image with; repeat or comma-separate for several. Required when the runtime image is in a private registry
       --kubernetes-context string      Kubernetes context to associate with the environment

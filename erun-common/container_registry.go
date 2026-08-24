@@ -401,6 +401,20 @@ func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
 	}}
 }
 
+// HostedRegistryHost is erun's own hosted container registry, offered as an
+// out-of-the-box registry choice (`erun init --erun-registry`) alongside the
+// local in-cluster erun-registry convention. It is authenticated by the
+// tenant's own API token rather than a manually-run `docker login`.
+const HostedRegistryHost = "registry.erunpaas.com"
+
+// HostedRegistryReference builds the tenant-namespaced reference under the
+// hosted registry, e.g. "registry.erunpaas.com/frs" for tenant "frs". Every
+// tenant pushes under its own namespace; the registry's token service clamps
+// pull/push scope to it (see RegistryTokenAudience).
+func HostedRegistryReference(tenant string) string {
+	return HostedRegistryHost + "/" + strings.TrimSpace(tenant)
+}
+
 // migrateLegacyContainerRegistry folds a legacy `containerregistry` scalar into
 // the marked list. The key is dropped on the next save, so the migration is
 // one-way.

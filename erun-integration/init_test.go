@@ -372,6 +372,73 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/cluster_registry_conflicts_with_container_registry", normalize.Apply(result.Combined))
 	})
 
+	t.Run("erun_registry_dry_run", func(t *testing.T) {
+		// --erun-registry seeds erun's hosted registry, namespaced under the
+		// tenant, as the env's container registry instead of a static
+		// --container-registry or the in-cluster --cluster-registry.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("erun_registry_conflicts_with_container_registry", func(t *testing.T) {
+		// --erun-registry and --container-registry are mutually exclusive; supplying
+		// both fails fast before any resolution.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--container-registry", "registry.example/test",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting flags, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_conflicts_with_container_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("erun_registry_conflicts_with_cluster_registry", func(t *testing.T) {
+		// --erun-registry and --cluster-registry are mutually exclusive; supplying
+		// both fails fast before any resolution.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--cluster-registry",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting flags, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_conflicts_with_cluster_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
 		// --mcp-auth-public-key folds the desktop's MCP-auth key into init's single
 		// runtime deploy: the runtime (team-devops) chart carries mcpAuth.* helm

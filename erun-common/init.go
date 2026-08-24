@@ -96,6 +96,11 @@ type BootstrapInitParams struct {
 	// registry entry (addresses resolved from the env's kube-context) instead of
 	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
 	ClusterRegistry *ClusterRegistry
+	// ErunRegistry, when true, seeds the new env with erun's hosted registry
+	// (HostedRegistryReference(tenant)) instead of the static ContainerRegistry
+	// string. Set by `erun init --erun-registry`; mutually exclusive with
+	// ContainerRegistry and ClusterRegistry.
+	ErunRegistry bool
 	// MCPAuthPublicKeyPath, when set, points at a PEM public key the init-time
 	// runtime deploy trusts so the env's erun-mcp edge requires a bearer signed by
 	// it — mirrors `erun deploy --mcp-auth-public-key`. The desktop sets it so
@@ -1497,6 +1502,9 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 	// string, so short-circuit the string resolution/prompt entirely.
 	if params.ClusterRegistry != nil {
 		return "", nil
+	}
+	if params.ErunRegistry {
+		return HostedRegistryReference(tenant), nil
 	}
 	if params.ContainerRegistry != "" {
 		return params.ContainerRegistry, nil

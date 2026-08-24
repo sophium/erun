@@ -30,6 +30,7 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | 11 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. For a runtime environment created through the hosted provisioning API instead of `erun init`, this step runs automatically — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). | Ready |
 | 12 | `<tenant>-local` | Use an **erun API token** against the running platform | Set up this local env's own DNS zone + TLS certs through the deployed erun API. | Planned |
 | 13 | `<tenant>-prod` | skill **`erun-deploy-platform`** | One-shot orchestration of steps 6–11. | Planned |
+| 14 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-oci-registry` | Deploy the **hosted container registry** at `registry.<base-domain>`. See [Hosted registry](#hosted-registry-admin) — it needs a signing-key Secret, a token realm, and its own apex DNS record + certificate first. | Planned |
 
 ## Hosted IdP {#hosted-idp}
 
@@ -102,6 +103,44 @@ Running your apex for something else already (a marketing site)? Set `console.ap
 | The apex/www redirect is enabled but no apex host resolves | `erun deploy` aborts at the chart render with `console.apexRedirectEnabled is true but no apex host could be resolved`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.apexHost`/`console.wwwHost`, or `console.apexRedirectEnabled=false` |
 | The apex/www hosts don't resolve at all | The Helm chart's Ingress/Middleware are only half the picture — DNS is separate. Confirm the `terraform-erun-cloudflare-apex` module has actually been applied for this env | Apply it via your `terraform-<tenant>/` tree, pointed at the cluster's ingress IP |
 | Visiting the apex redirects to a `404`/wrong host | `platform.consoleUrl` names a different console than this chart's own `console.externalDomain` | Align `platform.consoleUrl` with the deployed console's host, or leave it unset so the redirect falls back to `console.externalDomain` |
+
+## Hosted registry {#hosted-registry-admin}
+
+**(Planned.)** The hosted container registry (`registry.erunpaas.com`, `erun-oci-registry` component, wrapping [zot](https://zotregistry.dev)) is the platform singleton whoever is paged for it will read this section for. Deploy it like any other component, after the erun API is up (it delegates all auth to the API's [registry token endpoint](/agent-reference/api-protocol#registry-token-endpoint)):
+
+```bash
+erun deploy --version <version> --components <tenant>-oci-registry
+```
+
+Three things are yours to supply; the chart does the rest.
+
+**1. The token realm.** Point it at the erun API's own token endpoint — the address the registry challenges every client to call:
+
+```bash
+--set-string registry.tokenRealm=https://api.<base-domain>/v2/token
+```
+
+**2. The signing-key Secret.** The registry trusts exactly the public half of the erun API's own registry-signing key (the same key that also signs mcp-token and dns01-token — distinct audiences, one key). Copy that key out of the API's signing-key Secret and into a Secret named for the registry, once, in the platform env's namespace:
+
+```bash
+kubectl -n <tenant>-prod get secret <tenant>-api-mcp-signing-key -o jsonpath='{.data.public\.pem}' | base64 -d \
+  | kubectl -n <tenant>-prod create secret generic <tenant>-oci-registry-signing-key --from-file=public.pem=/dev/stdin
+```
+
+Name it to the component as `registry.signingKeySecretName`. The deploy fails loudly, before it changes anything, if either this or the token realm is unset — the chart never generates or fetches either value itself.
+
+**3. DNS and the certificate.** `registry.erunpaas.com` is an **apex** host, not a `services.<base-domain>` one, so `erun expose` alone does not cover it: it needs its own CNAME/A record and its own certificate naming exactly that host (the services-zone wildcard certificate does not cover an apex name). This wiring is not yet automated — treat it the same way as the Hosted IdP's `auth.<base-domain>` DNS record above, but with a certificate issued for the apex name specifically.
+
+**Retention.** Images untouched (by push or pull) for `registry.retentionDays` (default **30**) are deleted automatically. This is destructive, so the value is visible here rather than buried in a default: set `--set-string registry.retentionDays=<days>` at deploy time to change it for this environment.
+
+### Error behaviour
+
+| Failure mode | What happens | Recovery |
+|---|---|---|
+| No token realm named | `erun deploy` aborts at the chart render with `registry.tokenRealm is required`; exit code 1, nothing applied | Set `registry.tokenRealm` to the API's `/v2/token` URL |
+| No signing-key Secret named | Aborts with `registry.signingKeySecretName is required`; exit code 1, nothing applied | Create the Secret (copied from the API's own signing key) and set the value |
+| Registry pod cannot verify tokens | Every push/pull `401`s even with a valid tenant API token | Confirm the Secret holds the **current** public half of the API's registry-signing key — a rotated key on one side with no matching update on the other looks exactly like this |
+| Push/pull to `registry.erunpaas.com` fails on TLS/hostname | The apex DNS record or its dedicated certificate is missing (see "DNS and the certificate" above) | Confirm both exist and name the apex host exactly, not a services-zone name |
 
 ## Which skills, and where
 

@@ -1,0 +1,7 @@
+---
+# Local-environment overlay for erun-oci-registry. Empty by default: the hosted
+# registry is a platform singleton, so the values that matter (the token
+# realm, the operator-supplied signing-key Secret) come from the platform
+# environment's config at deploy time, not from this overlay. A local deploy
+# still needs registry.tokenRealm and registry.signingKeySecretName, and the
+# render fails loudly without them.
