@@ -91,14 +91,34 @@ test('an unhealthy environment reads failed, never busy', () => {
   assert.equal(indicator.activity, 'Deploy failed — recover from Activities');
 });
 
-test('a sticky condition does not outlive the session that produced it', () => {
+test('a stopped sticky condition does not outlive the session that produced it', () => {
   // Closing an environment can leave a last-known condition behind. With no
   // tabs there is no session for it to describe and no way to act on it, so the
-  // row goes quiet rather than flying a stale stopped ring or failure triangle.
-  for (const envState of ['stopped', 'runtime-stopped', 'failed']) {
+  // row goes quiet rather than flying a stale stopped ring. A failed deploy is
+  // the exception — see the next test.
+  for (const envState of ['stopped', 'runtime-stopped']) {
     const indicator = environmentIndicator({ ...base, envState });
     assert.equal(indicator.visible, false, envState);
   }
+});
+
+test('a failed deploy stays visible after its session closes, unless the environment is reachable again', () => {
+  // Unlike stopped/runtime-stopped, a failed deploy describes the environment
+  // itself (its runtime is broken), not the session that watched it fail —
+  // closing the tabs that observed the failure does not fix it. Before this,
+  // the row went silently blank, indistinguishable from one nobody had ever
+  // opened.
+  const stillBroken = environmentIndicator({ ...base, envState: 'failed' });
+  assert.equal(stillBroken.visible, true);
+  assert.equal(stillBroken.dot, 'failed');
+  assert.equal(stillBroken.opened, false);
+  assert.match(stillBroken.condition, /deploy failed — /);
+  assert.equal(stillBroken.activity, 'Deploy failed — recover from Activities');
+
+  // Once the environment answers again, the stale flag no longer wins — see
+  // 'a reachable environment is reported on its own terms' below.
+  const recovered = environmentIndicator({ ...base, envState: 'failed', reachable: true });
+  assert.equal(recovered.dot, 'running');
 });
 
 test('a bound-but-dead forward is reported as an outage, not as a quiet row', () => {

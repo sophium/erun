@@ -11,7 +11,7 @@ import {
   saveManageDeployComponents,
   toggleManageDeployComponent,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
 
@@ -72,7 +72,7 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
           }
           onClick={() =>
             void dispatch(saveManageDeployComponents()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >

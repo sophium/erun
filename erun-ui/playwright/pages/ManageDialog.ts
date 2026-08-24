@@ -14,10 +14,13 @@ export class ManageDialog {
       return this.page.getByRole('dialog', { name: this.expectedTitle });
     }
     // Disambiguate from other open dialogs (e.g. the activity drawer) by the
-    // General tab that only the manage surface has.
+    // description text unique to the manage surface. The General tab used to
+    // serve this purpose, but it — along with every other tab — is replaced
+    // by the delete-confirmation view while dialog.tab === 'delete', which
+    // made every locator scoped under this one resolve to nothing mid-delete.
     return this.page
       .getByRole('dialog')
-      .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
+      .filter({ hasText: 'Edit environment configuration' })
       .first();
   }
 
@@ -278,7 +281,7 @@ export class ManageDialog {
   async confirmDelete(expected: string): Promise<void> {
     await this.page.locator('#manage-confirmation').fill(expected);
     await this.locator()
-      .getByRole('button', { name: /^Delete/ })
+      .getByRole('button', { name: /^Confirm delete/ })
       .click();
   }
 

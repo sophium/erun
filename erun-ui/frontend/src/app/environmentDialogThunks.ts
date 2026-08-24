@@ -8,7 +8,7 @@ import {
   rememberEnvironmentDialogSelection,
 } from './environmentDialogState';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import {
   runtimePodConfigToKubernetes,
   runtimeResourceLimitMessage,
@@ -175,7 +175,7 @@ export const submitEnvironmentDialog =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };
 

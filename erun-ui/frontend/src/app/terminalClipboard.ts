@@ -13,7 +13,7 @@ import {
   terminalCopyOutcome,
 } from './clipboard';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { store } from './store';
 
 export interface TerminalClipboardDeps {
@@ -181,6 +181,6 @@ export class TerminalClipboard {
   }
 
   private reportError(error: unknown): void {
-    store.dispatch(showTerminalMessage(readError(error)));
+    store.dispatch(showTerminalError(readError(error)));
   }
 }

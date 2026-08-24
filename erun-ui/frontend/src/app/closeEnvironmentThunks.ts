@@ -2,7 +2,7 @@ import type { UISelection } from '@/types';
 
 import { CloseEnvironmentSessions } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setSelected } from './slices/selectionSlice';
 import { clearEnvOpening } from './slices/sessionsSlice';
@@ -27,7 +27,7 @@ export const closeEnvironment =
     try {
       await CloseEnvironmentSessions({ tenant, environment });
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
       return;
     }
     const key = selectionKey({ tenant, environment });

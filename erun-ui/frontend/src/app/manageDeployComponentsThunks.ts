@@ -8,7 +8,7 @@ import {
   toggleDeployComponentName,
 } from './deployComponentsSelection';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { runtimePodConfigToKubernetes } from './runtimeResources';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppState } from './state';
@@ -172,6 +172,6 @@ export const saveManageDeployComponents =
     } catch (error) {
       const message = readError(error);
       dispatch(patchManageDialog({ busy: false, busyAction: '', busyTarget: '', error: message }));
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };

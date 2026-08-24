@@ -17,6 +17,7 @@ import type {
 import {
   hideTerminalMessage,
   showNotification,
+  showTerminalError,
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
@@ -234,7 +235,7 @@ export const handleEnvironmentInitialized =
       try {
         await dispatch(openSelection({ tenant, environment }));
       } catch (error) {
-        dispatch(showTerminalMessage(readError(error)));
+        dispatch(showTerminalError(readError(error)));
       }
       return;
     }
@@ -245,7 +246,7 @@ export const handleEnvironmentInitialized =
       await dispatch(startInitialDeploySelection({ tenant, environment }));
     } catch (error) {
       dispatch(clearPendingOpenAfterDeploy());
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
 
@@ -269,7 +270,7 @@ export const handleEnvironmentDeployed =
     try {
       await dispatch(openSelection({ tenant, environment }));
     } catch (error) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
 

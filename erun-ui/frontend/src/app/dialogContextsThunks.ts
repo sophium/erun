@@ -95,11 +95,17 @@ export const refreshDialogClusterRegistry =
           useClusterRegistry: deployed,
         }),
       );
-    } catch {
+    } catch (error) {
       if (!getState().environmentDialog.open) {
         return;
       }
-      dispatch(patchEnvironmentDialog({ clusterRegistry: null, useClusterRegistry: false }));
+      dispatch(
+        patchEnvironmentDialog({
+          clusterRegistry: null,
+          useClusterRegistry: false,
+          error: readError(error),
+        }),
+      );
     }
   };
 

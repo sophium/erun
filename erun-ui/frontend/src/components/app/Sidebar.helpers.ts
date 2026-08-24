@@ -377,12 +377,23 @@ export function environmentIndicator(raw: EnvironmentIndicatorInputs): Environme
   // The sticky condition describes a desktop session. Once the desktop holds no
   // tabs for the environment it no longer describes anything current, so it is
   // dropped rather than left to outlive the session that produced it — a closed
-  // row must not keep flying a failure triangle for a session that is gone.
-  const input = raw.isOpen ? raw : { ...raw, envState: '' };
+  // row must not keep flying a stale stopped ring for a session that is gone.
+  //
+  // A failed deploy is the one exception: it is not a property of the session
+  // that observed it, it is a property of the environment (its runtime is
+  // broken), and closing the tabs that watched it fail does not fix it. As long
+  // as the environment stays unreachable, the row must keep naming the failure
+  // — the alternative is a closed, failed environment going silently blank,
+  // indistinguishable from one nobody has ever opened. Reachability still wins
+  // once it comes back: an environment that answers again is reported on its
+  // own terms (below), not by a stale flag from before it recovered.
+  const keepFailedWhenClosed = raw.envState === ENV_STATE_FAILED && !raw.reachable;
+  const input = raw.isOpen || keepFailedWhenClosed ? raw : { ...raw, envState: '' };
   const dot = environmentStatusDot(input.envState, input.busy, input.outage);
   // What keeps a closed row visible is the environment itself: its edge
-  // answering, work in flight, or an outage it cannot report any other way.
-  const visible = input.isOpen || input.reachable || input.busy || input.outage;
+  // answering, work in flight, a failure it cannot report any other way once
+  // its session is gone, or an outage.
+  const visible = input.isOpen || input.reachable || input.busy || input.outage || dot === 'failed';
   return {
     visible,
     dot,

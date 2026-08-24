@@ -4,7 +4,7 @@ import { cloudApi } from './api/cloudApi';
 import { tenantApi } from './api/tenantApi';
 import { replaceCloudProvider } from './cloudContextState';
 import { readError } from './errors';
-import { showNotification, showTerminalMessage } from './notificationThunks';
+import { showNotification, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { setIdleStatus } from './slices/idleSlice';
 import { setReviewOpen } from './slices/layoutSlice';
 import { setSelected } from './slices/selectionSlice';
@@ -151,7 +151,7 @@ export const submitTenantConfig = (): AppThunk<Promise<void>> => async (dispatch
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -198,7 +198,7 @@ export const setupTenantCloudProviderOIDC =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
       dispatch(showNotification('error', message));
     }
   };

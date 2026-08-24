@@ -18,7 +18,7 @@ import * as React from 'react';
 
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
 import {
@@ -63,7 +63,7 @@ export function TenantDialogView(): React.ReactElement {
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitTenantConfig()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             });
           }}
         >
@@ -286,7 +286,7 @@ function CloudAliasOIDCButton({
         disabled={busy || !alias}
         onClick={() => {
           void dispatch(setupTenantCloudProviderOIDC(alias)).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           });
         }}
       >

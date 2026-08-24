@@ -103,11 +103,19 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 	return activityQueueEntry{}
 }
 
+// finishActivityTracking finalizes the active "deploy" entry for the
+// selection. Both callers observe a deploy-failure trace line that carries no
+// tenant/env (a bare "==> Deploy failed after <elapsed>", or a
+// "==> Deployed"/"==> Deploy failed" line finishDeployByTenantEnv could not
+// parse tenant/env out of), so the command is always "deploy" here — keyed by
+// command, like finishCommandBySelection, rather than plain findActive, whose
+// Go map iteration order picks an arbitrary entry when a build and a deploy
+// are both active for the same tenant/env — the wrong card finalizing.
 func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
 	}
-	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	entry, ok := a.activityQueue.findActiveByCommand("deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	if !ok {
 		return
 	}
@@ -364,6 +372,22 @@ var (
 	activityPushFailedLineRe = regexp.MustCompile(`^==> Push failed\b`)
 )
 
+// activityFailureElapsedClauseRe strips the trailing " after <duration>"
+// clause the build/push/release/deploy failure traces carry (e.g. "after
+// 3m12s"). It is timing information for the log, not part of what failed.
+var activityFailureElapsedClauseRe = regexp.MustCompile(`\s+after\s+\S+\s*$`)
+
+// cleanActivityFailureLine turns a raw `==> ... failed [after <elapsed>]`
+// trace line into a short human label for entry.Error — e.g. "==> Build
+// failed after 3m12s" becomes "Build failed". The raw marker is still fully
+// captured in entry.Detail via recordOutputLine; this only cleans the
+// one-line summary the activity card headlines.
+func cleanActivityFailureLine(line string) string {
+	cleaned := strings.TrimPrefix(strings.TrimSpace(line), "==> ")
+	cleaned = activityFailureElapsedClauseRe.ReplaceAllString(cleaned, "")
+	return strings.TrimSpace(cleaned)
+}
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -401,13 +425,24 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	initTraceHonored := kind == sessionKindLocal
 	return func(line string) {
 		line = strings.TrimSpace(line)
+		// Buffer every line for the active entry before dispatching it, so the
+		// "==> Deploy failed"/"==> Build failed" line that finalizes the entry
+		// (and the tool output preceding it) is already captured when finish()
+		// snapshots the buffer into entry.Detail. This must run for every caller
+		// of this handler, not just the PTY reader — a subprocess-captured
+		// orchestration (no PTY involved) has no other path into Detail, and
+		// without it the failed card shows only the raw "==> Build failed after
+		// 3m12s" marker with the actual compiler/tool error nowhere to be found.
+		if app.activityQueue != nil {
+			app.activityQueue.recordOutputLine(selection.Tenant, selection.Environment, line)
+		}
 		switch {
 		case app.handleDeployTraceLine(selection, line):
 		case initTraceHonored && app.handleInitTraceLine(selection, line):
 		case app.handleCommandTraceLine(selection, line):
 		case app.handleDoctorTraceLine(selection, line):
 		case failedRe.MatchString(line):
-			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
+			app.finishActivityTracking(selection, activityQueueStatusFailed, cleanActivityFailureLine(line))
 		case errorRe.MatchString(line):
 			app.captureActivityErrorIfRunning(selection, line)
 		}
@@ -489,7 +524,7 @@ func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
+		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, cleanActivityFailureLine(line))
 		a.emitEnvironmentInitFailed(match[1], match[2])
 		return true
 	}
@@ -509,7 +544,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityBuildFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityReleasingLineRe.MatchString(line) {
@@ -521,7 +556,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityReleaseFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityPushingLineRe.MatchString(line) {
@@ -533,7 +568,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityPushFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	return false
@@ -818,12 +853,33 @@ func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environm
 	return strings.TrimSpace(envConfig.KubernetesContext)
 }
 
+// activityCommandErrorPriority orders the commands captureActivityErrorIfRunning
+// tries when attaching a bare "Error: ..." line to the entry it belongs to. A
+// generic error line carries no command of its own, so when more than one
+// entry is active for the same tenant/env (e.g. a lingering build entry
+// beside a just-started deploy) the choice must be deterministic — not
+// plain findActive's Go map iteration order, which let a helm failure land on
+// the build card instead of the deploy card roughly half the time. Deploy is
+// checked first because it is the longest-running step and the one most
+// likely still active when a generic tool error line (e.g. "Error: UPGRADE
+// FAILED: ...") appears.
+var activityCommandErrorPriority = []string{"deploy", "push", "build", "release", "init"}
+
 func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
 	if a.activityQueue == nil {
 		return
 	}
-	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
-	if !ok {
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	var entry activityQueueEntry
+	found := false
+	for _, command := range activityCommandErrorPriority {
+		if e, ok := a.activityQueue.findActiveByCommand(command, tenant, environment); ok {
+			entry, found = e, true
+			break
+		}
+	}
+	if !found {
 		return
 	}
 	if strings.TrimSpace(entry.Error) != "" {
@@ -1026,11 +1082,9 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
-		// Buffer the line for the active entry before dispatching it, so the
-		// "==> Deploy failed" line that finalizes the entry (and the error
-		// output preceding it) is already captured when finish() snapshots
-		// the buffer into entry.Detail.
-		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
+		// newActivityTraceLineHandler itself buffers the line into entry.Detail
+		// before dispatching, so every caller (this PTY reader and the
+		// subprocess-captured orchestration path) gets the same Detail capture.
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 		// The CLI's taken-over notice is a public contract line (see

@@ -2119,6 +2119,40 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_failure_shows_deploy_failed_header_at_default_verbosity", func(t *testing.T) {
+		// A report claimed the "==> Deploy failed tenant/env: reason" header
+		// (activityDeployFailedLineRe's contract in the desktop) went through
+		// ctx.Trace and was invisible below -vv, making the parser dead code.
+		// That does not hold against this codebase: common.Context.Trace
+		// has aliased Logger.Info (visible at default verbosity; only
+		// TraceCommand's raw argv is gated to -vv) since the primitives split in
+		// #559, well before this issue was filed. This scenario locks that
+		// contract in — the header must appear at default verbosity (no
+		// --dry-run, no -v/-vv) on a real helm failure — as a regression guard,
+		// not a fix. A whole-output golden is deliberately not used here: the
+		// helm stub's stderr capture through cmd.Run()'s buffer is not always
+		// flushed by the time the process exits, so the detail after "reason:"
+		// is not reliably reproducible; the header itself is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   "Error: UPGRADE FAILED: post-upgrade hooks failed: timed out waiting for the condition",
+			ExitCode: 1,
+		})
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a failing helm upgrade, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Deploy failed team/dev:") {
+			t.Fatalf("expected the header at default verbosity (no -vv), got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_persists_runtime_version_and_registry_to_env_config", func(t *testing.T) {
 		// Regression: `erun deploy --version X` updates helm's release
 		// appVersion but used to leave EnvConfig.RuntimeVersion at the

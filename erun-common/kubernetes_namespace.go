@@ -368,7 +368,7 @@ func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	}
 
 	message := strings.TrimSpace(string(output))
-	if kubernetesResourceNotFound(message) {
+	if KubernetesResourceNotFound(message) {
 		return false, nil
 	}
 	if message == "" {
@@ -377,9 +377,12 @@ func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
 }
 
-// kubernetesResourceNotFound matches kubectl's absent-resource message for any
-// kind, so a caller can tell "not there" apart from "could not ask".
-func kubernetesResourceNotFound(message string) bool {
+// KubernetesResourceNotFound matches kubectl's absent-resource message for any
+// kind, so a caller can tell "not there" apart from "could not ask". Exported
+// so callers outside this package (erun-ui's out-of-pod health probes) can
+// make the same distinction instead of collapsing every kubectl failure to a
+// plain negative.
+func KubernetesResourceNotFound(message string) bool {
 	message = strings.ToLower(strings.TrimSpace(message))
 	return strings.Contains(message, "notfound") || strings.Contains(message, "not found")
 }

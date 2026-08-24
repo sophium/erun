@@ -9,7 +9,7 @@ import {
 } from '../../wailsjs/go/main/App';
 import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { readError } from './errors';
-import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
+import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { selectEnvHasFailedDeploy } from './selectors';
 import { trackOpenSession } from './slices/sessionsSlice';
 import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
@@ -111,7 +111,7 @@ const respawnDefaultTab =
         result = await startSessionForKind(runSelection, tab, cols, rows);
       }
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
       return;
     }
     if (!result) {
@@ -192,7 +192,7 @@ export const relaunchAISessionsForLaunchChange =
         controller.queueTerminalResize();
       }
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
 

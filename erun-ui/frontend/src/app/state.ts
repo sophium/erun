@@ -166,6 +166,10 @@ export interface GlobalConfigDialogState {
 }
 
 export interface AppNotification {
+  // Unique per queued entry so a specific one can be dismissed (auto-dismiss
+  // timer, explicit dismiss click) without disturbing sibling entries queued
+  // before or after it.
+  id: string;
   kind: 'success' | 'warning' | 'error' | 'info';
   message: string;
   // Optional tags so a notification can be dismissed later by the state that raised it.

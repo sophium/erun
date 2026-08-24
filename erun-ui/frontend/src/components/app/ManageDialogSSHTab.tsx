@@ -11,7 +11,7 @@ import {
   startManageDoctor,
   updateManageSSHDConfig,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { selectionKey } from '@/app/versionSuggestions';
 import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
@@ -102,7 +102,7 @@ function SSHAccessHeader({ dialog }: { dialog: ManageDialog }): React.ReactEleme
           }
           onClick={() =>
             void dispatch(enableManageSSHD()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
@@ -150,7 +150,7 @@ function LocalSyncFolderField({
           disabled={disabled}
           onClick={() =>
             void dispatch(chooseWorkspaceSyncLocalFolder()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
@@ -219,7 +219,7 @@ export function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.
           disabled={dialog.busy || dialog.configLoading}
           onClick={() =>
             void dispatch(startManageDoctor()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
