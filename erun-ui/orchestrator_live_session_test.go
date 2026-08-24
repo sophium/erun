@@ -147,9 +147,9 @@ func TestPreferLiveOrchestratorSessionIDFallsBackAppropriately(t *testing.T) {
 	}
 }
 
-// The settings file must carry the recorder on SessionStart (both matchers)
-// and every turn-boundary event the activity reports already ride, so a fork
-// is caught whichever fires next.
+// The settings file must carry the recorder on every SessionStart matcher
+// group and every turn-boundary event the activity reports already ride, so a
+// fork is caught whichever fires next.
 func TestOrchestratorSessionRecordHookIsWiredOnSessionStart(t *testing.T) {
 	hooks, data := orchestratorSettingsHooks(t)
 

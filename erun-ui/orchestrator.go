@@ -602,8 +602,9 @@ const orchestratorRoleFileSeed = `<!--
 This file is yours. erun creates it once and never overwrites it, unlike the
 shared CLAUDE.md in this directory, which erun rewrites on every launch.
 
-It is injected on every session start and resume, immediately AFTER the shared
-contract -- so anything here can add to that contract or override a line of it.
+It is injected on every session boundary -- start, resume, clear, and compact --
+immediately AFTER the shared contract, so anything here can add to that
+contract or override a line of it.
 
 Put this orchestrator's standing role here: what it owns, what it must not do,
 how it should report. A role is standing, so it belongs here rather than in
@@ -642,8 +643,9 @@ func ensureOrchestratorRoleFile(dir, id string) error {
 // orchestrators root's .claude/settings.json, merging so it never clobbers other
 // keys, hook events, or hook blocks already there -- including a SessionStart
 // block the operator added themselves. SessionStart fires on a new session
-// (startup) and a reopened one (resume), so every orchestrator has its contract
-// injected both on start and on reopen.
+// (startup), a reopened one (resume), a cleared one (clear), and a compacted
+// one (compact), so every orchestrator has its contract re-injected on every
+// session boundary rather than only the first two.
 func ensureOrchestratorSessionStartHook(dir string) error {
 	claudeDir := filepath.Join(dir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -758,17 +760,25 @@ func isOrchestratorNoAskStopGuardBlock(block any) bool {
 	return false
 }
 
-// orchestratorSessionStartMatcher is a single pattern matching both sources
-// this hook cares about, rather than two separate matcher blocks carrying the
-// same three commands: SessionStart's matcher is tested as a regex against the
+// orchestratorSessionStartMatcher is a single pattern matching every source
+// this hook cares about, rather than separate matcher blocks carrying the same
+// three commands: SessionStart's matcher is tested as a regex against the
 // event's source, and alternation is already how this file scopes a matcher to
 // more than one value (see orchestratorShellActivityHookBlocks' "TaskOutput|
-// TaskStop"). Two blocks with identical hooks would mean every SessionStart
-// command is stored twice on disk for no behavioral gain.
-const orchestratorSessionStartMatcher = "startup|resume"
+// TaskStop"). Several blocks with identical hooks would mean every SessionStart
+// command is stored multiple times on disk for no behavioral gain.
+//
+// clear and compact both fire SessionStart, and both were missing here (#1232):
+// a /clear drops the injected CLAUDE.<id>.md role layer from context even
+// though the file survives on disk, and a compaction forks the transcript to a
+// new session id that the live-session record then never picks up. Printing
+// the contract again on either is harmless (plain stdout, not a file append);
+// omitting it is not.
+const orchestratorSessionStartMatcher = "startup|resume|clear|compact"
 
 // orchestratorSessionStartHook is the SessionStart hook block: the contract-
-// injecting command runs on both new starts (startup) and reopens (resume).
+// injecting command runs on new starts (startup), reopens (resume), and every
+// session boundary that can otherwise drop it from context (clear, compact).
 func orchestratorSessionStartHook(dir string) []any {
 	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand(dir)}
 	// A session killed mid-turn never writes its end, so a new or reopened one

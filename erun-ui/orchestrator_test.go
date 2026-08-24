@@ -953,7 +953,7 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 		}
 	}
 	assertSessionStartCommandsUnique(t, groups, data)
-	assertSessionStartMatchersCover(t, groups, data, "startup", "resume")
+	assertSessionStartMatchersCover(t, groups, data, "startup", "resume", "clear", "compact")
 }
 
 // TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks
@@ -1036,6 +1036,119 @@ func assertSessionStartContractCommandPrunedToOne(t *testing.T, groups []session
 		if strings.Contains(cmd, orchestratorContractFallback) && count != 1 {
 			t.Fatalf("expected the earlier duplicate contract-injection blocks pruned to one, found %d:\n%s", count, data)
 		}
+	}
+}
+
+// runOrchestratorSessionStartGroup runs every command in the SessionStart
+// group whose matcher regex matches source, the same way Claude Code itself
+// dispatches a SessionStart event, and returns their combined stdout. Fails
+// the test if no group's matcher covers source at all.
+func runOrchestratorSessionStartGroup(t *testing.T, shell string, groups []sessionStartGroup, data []byte, orchestratorID, source string) string {
+	t.Helper()
+	var out strings.Builder
+	matched := false
+	for _, group := range groups {
+		re, err := regexp.Compile(group.Matcher)
+		if err != nil {
+			t.Fatalf("SessionStart matcher %q does not compile as a regex: %v", group.Matcher, err)
+		}
+		if !re.MatchString(source) {
+			continue
+		}
+		matched = true
+		for _, hook := range group.Hooks {
+			cmd := exec.Command(shell, "-c", hook.Command)
+			cmd.Stdin = strings.NewReader(`{"session_id":"post-` + source + `-session","hook_event_name":"SessionStart","source":"` + source + `"}`)
+			cmd.Env = append(os.Environ(), "ERUN_ORCHESTRATOR_ID="+orchestratorID)
+			stdout, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("run SessionStart hook for source %q: %v", source, err)
+			}
+			out.Write(stdout)
+		}
+	}
+	if !matched {
+		t.Fatalf("no SessionStart matcher covers source %q:\n%s", source, data)
+	}
+	return out.String()
+}
+
+// assertRoleFilePreservedOnDisk fails unless rolePath still contains marker --
+// the operator's own content must never be rewritten.
+func assertRoleFilePreservedOnDisk(t *testing.T, rolePath, marker string) {
+	t.Helper()
+	got, err := os.ReadFile(rolePath)
+	if err != nil {
+		t.Fatalf("read role file: %v", err)
+	}
+	if !strings.Contains(string(got), marker) {
+		t.Fatalf("expected the role file preserved on disk, got %q", got)
+	}
+}
+
+// assertSessionStartReinjectsRoleAndContract runs the installed SessionStart
+// hooks for each of sources against a real shell, the way Claude Code would
+// dispatch them, and fails unless every one re-injects both the role marker
+// and the shared contract into stdout.
+func assertSessionStartReinjectsRoleAndContract(t *testing.T, shell, orchestratorID, roleMarker string, groups []sessionStartGroup, data []byte, sources ...string) {
+	t.Helper()
+	for _, source := range sources {
+		injected := runOrchestratorSessionStartGroup(t, shell, groups, data, orchestratorID, source)
+		if !strings.Contains(injected, roleMarker) {
+			t.Fatalf("source %q did not re-inject the role file into context; got stdout:\n%s", source, injected)
+		}
+		if !strings.Contains(injected, "# Orchestrator working directory") {
+			t.Fatalf("source %q did not re-inject the shared contract into context; got stdout:\n%s", source, injected)
+		}
+	}
+}
+
+// TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact is the
+// end-to-end reproduction from #1232: an orchestrator's standing role
+// (CLAUDE.<id>.md) survives on disk across a /clear or a compaction, but
+// nothing re-injected it into context because SessionStart's "clear" and
+// "compact" sources were not registered alongside "startup"/"resume". This
+// runs the actual installed hook commands, the way Claude Code would dispatch
+// them for each source, and checks the role text is really printed to stdout
+// rather than merely asserting the matcher string covers the source.
+func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testing.T) {
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no POSIX shell on this host")
+	}
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	const orchestratorID = "erun-issues"
+	const roleMarker = "STANDING ROLE MARKER: triage erun issues, never close without a reproduction"
+
+	dir, err := app.ensureOrchestratorWorkspace()
+	if err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	// Seed a non-empty, operator-authored role file BEFORE the per-id ensure
+	// call, matching the real sequence (the file is written once and never
+	// rewritten): the operator's own content, not the placeholder seed, is
+	// what must survive and be re-injected.
+	rolePath := filepath.Join(dir, "CLAUDE."+orchestratorID+".md")
+	if err := os.WriteFile(rolePath, []byte(roleMarker+"\n"), 0o644); err != nil {
+		t.Fatalf("seed role file: %v", err)
+	}
+	if _, err := app.ensureOrchestratorWorkspaceFor(orchestratorID); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspaceFor: %v", err)
+	}
+	assertRoleFilePreservedOnDisk(t, rolePath, roleMarker)
+
+	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
+	assertSessionStartReinjectsRoleAndContract(t, shell, orchestratorID, roleMarker, groups, data, "clear", "compact")
+
+	// The live-session record is the other half of #1232: a compaction forks
+	// the transcript to a new session id, and the record must pick that id up
+	// immediately from this same SessionStart firing rather than waiting for
+	// the next turn-boundary hook.
+	got, ok := readOrchestratorLiveSessionID(orchestratorID)
+	if !ok || got != "post-compact-session" {
+		t.Fatalf("expected the live-session record updated to the post-compact id, got %q ok=%v", got, ok)
 	}
 }
 
