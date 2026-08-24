@@ -52,3 +52,6 @@ __debug_bin*
 
 # Compiled DNS-01 webhook binary from a local `go build` in the module dir.
 /erun-devops/dns01-webhook/dns01-webhook
+
+# Yarn workspaces hoist shared frontend deps into the repo-root node_modules.
+/node_modules/
