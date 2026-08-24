@@ -193,13 +193,15 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 ## Review Comments
 
 - Comments belong to reviews through `(tenant_id, review_id)`.
-- Comments must include `commit_id` and positive `line`.
+- Comments must include `commit_id`, non-empty `file_path`, and positive `line`. A comment's address is the full `(commit_id, file_path, line)` tuple, not `(commit_id, line)` alone — two files can share a line number in the same commit.
+- Comments must include non-empty, non-whitespace-only `body`, bounded to 8 KiB (`octet_length(body) <= 8192`).
 - `comments.status` must be one of `OPEN` or `CLOSED`.
-- Root comments have `parent_comment_id IS NULL` and must have `creator_user_id`.
-- Child comments have `parent_comment_id` and must not set `creator_user_id`; the root parent carries the creator for the discussion.
+- Every comment, root or child, must have `creator_user_id`. Every reply records its own author; the root's creator does not stand in for a reply's author.
+- Root comments have `parent_comment_id IS NULL`.
 - Comments must not reference themselves as parents.
-- Comment thread identity fields are immutable after insert: `comment_id`, `tenant_id`, `review_id`, `creator_user_id`, `parent_comment_id`, `commit_id`, and `line`.
-- There can be only one root comment per tenant, review, commit, and line.
-- Child comments must reference the root comment for the same tenant, review, commit, and line.
-- PostgreSQL must enforce that only the root comment creator can update comment status by comparing `creator_user_id` to transaction setting `erun.user_id`.
-- Do not calculate comment-thread validity in API code as the primary guard. Keep the review/commit/line and parent-child invariants in database triggers.
+- Comment thread identity fields are immutable after insert: `comment_id`, `tenant_id`, `review_id`, `creator_user_id`, `parent_comment_id`, `commit_id`, `file_path`, `line`, and `body` (there is no edit endpoint in this increment).
+- There can be only one root comment per tenant, review, commit, file_path, and line.
+- Child comments must reference the root comment for the same tenant, review, commit, file_path, and line; a reply whose file disagrees with its parent's is refused.
+- Only a thread's root comment may have its `status` updated; a reply's own status is not separately settable.
+- PostgreSQL must enforce that only the root comment's own creator can update that root's status by comparing `creator_user_id` to transaction setting `erun.user_id`. There is no per-review "any write-access actor" exception at the database layer — the database cannot see role-based write permissions, so that documented allowance was narrowed to "the root author" to match what the trigger can actually enforce.
+- Do not calculate comment-thread validity in API code as the primary guard. Keep the review/commit/file_path/line and parent-child invariants in database triggers.

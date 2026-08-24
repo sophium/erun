@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
 )
@@ -19,14 +20,17 @@ func NewCommentRepository(txs *TxManager) *CommentRepository {
 	return &CommentRepository{txs: txs}
 }
 
+const commentColumns = `comment_id, tenant_id, review_id, creator_user_id, status, parent_comment_id, commit_id, file_path, line, body, created_at, updated_at`
+
 func (r *CommentRepository) Create(ctx context.Context, comment model.Comment) (model.Comment, error) {
 	created := comment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		return tx.NewInsert().
+		err := tx.NewInsert().
 			Model(&created).
-			Column("review_id", "creator_user_id", "status", "parent_comment_id", "commit_id", "line").
+			Column("review_id", "creator_user_id", "status", "parent_comment_id", "commit_id", "file_path", "line", "body").
 			Returning("*").
 			Scan(ctx)
+		return classifyCommentError(err)
 	})
 	return created, err
 }
@@ -35,7 +39,7 @@ func (r *CommentRepository) Get(ctx context.Context, commentID string) (model.Co
 	var comment model.Comment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
-			SELECT comment_id, tenant_id, review_id, creator_user_id, status, parent_comment_id, commit_id, line, created_at, updated_at
+			SELECT `+commentColumns+`
 			  FROM comments
 			 WHERE comment_id = ?
 		`, commentID).Scan(ctx, &comment)
@@ -48,7 +52,7 @@ func (r *CommentRepository) List(ctx context.Context, filter CommentFilter) ([]m
 	var comments []model.Comment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		query := `
-			SELECT comment_id, tenant_id, review_id, creator_user_id, status, parent_comment_id, commit_id, line, created_at, updated_at
+			SELECT ` + commentColumns + `
 			  FROM comments
 		`
 		var args []any
@@ -56,7 +60,7 @@ func (r *CommentRepository) List(ctx context.Context, filter CommentFilter) ([]m
 			query += ` WHERE review_id = ?`
 			args = append(args, filter.ReviewID)
 		}
-		query += ` ORDER BY commit_id, line, created_at, comment_id`
+		query += ` ORDER BY commit_id, file_path, line, created_at, comment_id`
 		return tx.NewRaw(query, args...).Scan(ctx, &comments)
 	})
 	return comments, err
@@ -69,9 +73,29 @@ func (r *CommentRepository) Update(ctx context.Context, comment model.Comment) (
 			UPDATE comments
 			   SET status = ?
 			 WHERE comment_id = ?
-			RETURNING comment_id, tenant_id, review_id, creator_user_id, status, parent_comment_id, commit_id, line, created_at, updated_at
+			RETURNING `+commentColumns+`
 		`, updated.Status, updated.CommentID).Scan(ctx, &updated)
-		return normalizeNoRows(err)
+		return classifyCommentError(normalizeNoRows(err))
 	})
 	return updated, err
+}
+
+// classifyCommentError maps the comments table's CHECK constraints and the
+// erun_validate_comments trigger's RAISE EXCEPTIONs onto the repository's
+// sentinel errors so callers see a 4xx instead of a bare 500.
+func classifyCommentError(err error) error {
+	code, ok := pgErrorCode(err)
+	if !ok {
+		return err
+	}
+	switch code {
+	case pgerrcode.NotNullViolation, pgerrcode.CheckViolation:
+		return ErrInvalidInput
+	case pgerrcode.UniqueViolation:
+		return ErrConflict
+	case pgerrcode.InsufficientPrivilege:
+		return ErrForbidden
+	default:
+		return err
+	}
 }

@@ -31,3 +31,12 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
+
+// pgErrorCode returns the PostgreSQL SQLSTATE of err, if err wraps one.
+func pgErrorCode(err error) (string, bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return "", false
+	}
+	return pgErr.Code, true
+}

@@ -22,7 +22,9 @@ type Comment struct {
 	Status          CommentStatus `json:"status" bun:"status"`
 	ParentCommentID string        `json:"parentCommentId,omitempty" bun:"parent_comment_id,nullzero"`
 	CommitID        string        `json:"commitId" bun:"commit_id"`
+	FilePath        string        `json:"filePath" bun:"file_path"`
 	Line            int           `json:"line" bun:"line"`
+	Body            string        `json:"body" bun:"body"`
 	CreatedAt       time.Time     `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt       time.Time     `json:"updatedAt" bun:"updated_at,scanonly"`
 }
