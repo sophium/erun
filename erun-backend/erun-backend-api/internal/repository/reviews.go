@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
@@ -12,9 +13,20 @@ type ReviewRepository struct {
 }
 
 const (
-	reviewColumns          = `review_id, tenant_id, name, target_branch, source_branch, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
-	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.name, r.target_branch, r.source_branch, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
+	reviewColumns          = `review_id, tenant_id, author_user_id, name, target_branch, source_branch, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
+	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.author_user_id, r.name, r.target_branch, r.source_branch, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
 )
+
+// ReviewFilter composes GET /v1/reviews discovery filters. Every field is
+// optional and AND-ed together; ReviewerUserID is the only one that needs a
+// join, since reviewers live in a separate table.
+type ReviewFilter struct {
+	TargetBranch   string
+	SourceBranch   string
+	Status         model.ReviewStatus
+	AuthorUserID   string
+	ReviewerUserID string
+}
 
 func NewReviewRepository(txs *TxManager) *ReviewRepository {
 	return &ReviewRepository{txs: txs}
@@ -23,11 +35,19 @@ func NewReviewRepository(txs *TxManager) *ReviewRepository {
 func (r *ReviewRepository) Create(ctx context.Context, review model.Review) (model.Review, error) {
 	created := review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		return tx.NewInsert().
+		err := tx.NewInsert().
 			Model(&created).
 			Column("name", "target_branch", "source_branch", "status").
 			Returning("*").
 			Scan(ctx)
+		// Catches both the tenant/name uniqueness contract and the one-live-
+		// review-per-source/target-branch partial unique index: a second live
+		// proposal of the same change is a conflict with the review already
+		// live, not a server error.
+		if isUniqueViolation(err) {
+			return ErrConflict
+		}
+		return err
 	})
 	return created, err
 }
@@ -45,19 +65,41 @@ func (r *ReviewRepository) Get(ctx context.Context, reviewID string) (model.Revi
 	return review, err
 }
 
-func (r *ReviewRepository) List(ctx context.Context, targetBranch string) ([]model.Review, error) {
+func (r *ReviewRepository) List(ctx context.Context, filter ReviewFilter) ([]model.Review, error) {
 	var reviews []model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		query := `
-			SELECT ` + reviewColumns + `
-			  FROM reviews
-		`
+		query := `SELECT ` + qualifiedReviewColumns + ` FROM reviews r`
+		var conditions []string
 		var args []any
-		if targetBranch != "" {
-			query += ` WHERE target_branch = ?`
-			args = append(args, targetBranch)
+		if filter.ReviewerUserID != "" {
+			query += `
+				  JOIN review_reviewers rr
+				    ON rr.tenant_id = r.tenant_id
+				   AND rr.review_id = r.review_id
+			`
+			conditions = append(conditions, "rr.user_id = ?")
+			args = append(args, filter.ReviewerUserID)
 		}
-		query += ` ORDER BY created_at DESC, review_id DESC`
+		if filter.TargetBranch != "" {
+			conditions = append(conditions, "r.target_branch = ?")
+			args = append(args, filter.TargetBranch)
+		}
+		if filter.SourceBranch != "" {
+			conditions = append(conditions, "r.source_branch = ?")
+			args = append(args, filter.SourceBranch)
+		}
+		if filter.Status != "" {
+			conditions = append(conditions, "r.status = ?")
+			args = append(args, filter.Status)
+		}
+		if filter.AuthorUserID != "" {
+			conditions = append(conditions, "r.author_user_id = ?")
+			args = append(args, filter.AuthorUserID)
+		}
+		if len(conditions) > 0 {
+			query += " WHERE " + strings.Join(conditions, " AND ")
+		}
+		query += ` ORDER BY r.created_at DESC, r.review_id DESC`
 		return tx.NewRaw(query, args...).Scan(ctx, &reviews)
 	})
 	return reviews, err
@@ -124,17 +166,7 @@ func (r *ReviewRepository) FindActiveMergeReview(ctx context.Context, targetBran
 	var review model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
-		SELECT review_id
-		     , tenant_id
-		     , name
-		     , target_branch
-		     , source_branch
-		     , status
-		     , last_failed_build_id
-		     , last_ready_build_id
-		     , last_merged_build_id
-		     , created_at
-		     , updated_at
+		SELECT `+reviewColumns+`
 		  FROM reviews
 		 WHERE target_branch = ?
 		   AND status = 'MERGE'

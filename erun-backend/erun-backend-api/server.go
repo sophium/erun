@@ -175,6 +175,7 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 // all of them except the health check and the DNS-01 broker.
 func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
 	reviews := repository.NewReviewRepository(txManager)
+	reviewReviewers := repository.NewReviewReviewerRepository(txManager)
 	builds := repository.NewBuildRepository(txManager)
 	comments := repository.NewCommentRepository(txManager)
 	tenantIssuers := repository.NewTenantIssuerRepository(txManager)
@@ -204,7 +205,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	releaseService := service.NewReleaseService(releases, buildService, newReleaseRunner(options))
 	releaseRoutes := routes.RegisterReleaseRoutes(register, releases, releaseService, newReleaseQueue(options, releaseService), tenants)
 	routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
-	routes.RegisterReviewRoutes(register, reviews, reviewService, builds, releaseRoutes)
+	routes.RegisterReviewRoutes(register, reviews, reviewReviewers, reviewService, builds, releaseRoutes)
 	routes.RegisterBuildRoutes(register, builds, buildService)
 	routes.RegisterCommentRoutes(register, comments, commentService)
 	deleter := newEnvironmentDeleter(options, environments, usageEvents, placementCredentials)

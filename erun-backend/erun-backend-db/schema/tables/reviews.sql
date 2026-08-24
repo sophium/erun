@@ -1,6 +1,7 @@
 CREATE TABLE reviews (
   review_id UUID PRIMARY KEY DEFAULT uuidv7(),
   tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
+  author_user_id UUID NOT NULL DEFAULT erun_current_user_id(),
   name TEXT NOT NULL,
   target_branch TEXT NOT NULL,
   source_branch TEXT NOT NULL,
@@ -11,6 +12,7 @@ CREATE TABLE reviews (
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, author_user_id) REFERENCES users (tenant_id, user_id),
   CONSTRAINT reviews_status_check CHECK (status IN ('OPEN', 'CLOSED', 'FAILED', 'READY', 'MERGE', 'MERGED')),
   CONSTRAINT reviews_target_branch_check CHECK (length(trim(target_branch)) > 0),
   CONSTRAINT reviews_source_branch_check CHECK (length(trim(source_branch)) > 0),

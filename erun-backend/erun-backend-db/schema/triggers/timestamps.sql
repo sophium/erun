@@ -65,6 +65,11 @@ CREATE TRIGGER review_merge_queue_set_timestamps
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
 
+CREATE TRIGGER review_reviewers_set_timestamps
+  BEFORE INSERT OR UPDATE ON review_reviewers
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
 CREATE TRIGGER builds_set_timestamps
   BEFORE INSERT OR UPDATE ON builds
   FOR EACH ROW
