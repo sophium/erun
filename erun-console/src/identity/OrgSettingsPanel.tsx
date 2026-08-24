@@ -169,7 +169,9 @@ function OrgSettingsBody({
       </p>
     );
   }
-  return <SettingsForm settings={state.settings} saving={state.status === 'saving'} onSave={onSave} />;
+  return (
+    <SettingsForm settings={state.settings} saving={state.status === 'saving'} onSave={onSave} />
+  );
 }
 
 // OrgSettingsPanel is the console's view of the platform IdP org settings an
