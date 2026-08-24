@@ -1167,7 +1167,7 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 	if err != nil {
 		return nil, err
 	}
-	specs, err = appendRuntimeFallbackSpecs(ctx, store, resolvedTarget, target.VersionOverride, specs, runtimeSelected, hasLocalRuntime)
+	specs, err = appendRuntimeFallbackSpecs(ctx, store, resolvedTarget, target.VersionOverride, target.RuntimeChartOverride, specs, runtimeSelected, hasLocalRuntime)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,7 +1254,7 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 		specs = append(specs, spec)
 	}
 	if runtimeSelected {
-		runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride)
+		runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride, target.RuntimeChartOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -1270,12 +1270,12 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 // the runtime is selected but the tenant has no repo-local runtime chart — the
 // deploy counterpart of erun open's published fallback, letting a plain deploy
 // bootstrap or heal the runtime from the published ERun image.
-func appendRuntimeFallbackSpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string, specs []DeploySpec, runtimeSelected, hasLocalRuntime bool) ([]DeploySpec, error) {
+func appendRuntimeFallbackSpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride, runtimeChartOverride string, specs []DeploySpec, runtimeSelected, hasLocalRuntime bool) ([]DeploySpec, error) {
 	if !runtimeSelected || hasLocalRuntime {
 		return specs, nil
 	}
 	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + DevopsComponentName + " chart")
-	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride)
+	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride, runtimeChartOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -1297,9 +1297,10 @@ func resolveDeploySpecsForContexts(ctx Context, store DeployStore, findProjectRo
 // resolvePublishedDevopsDeploySpecs resolves the single published-devops deploy
 // spec for a target with no local k8s tree to install — a remote-repo target, or
 // a local env bootstrapping on --runtime-image before its own <tenant>-devops
-// chart exists.
-func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride string) ([]DeploySpec, error) {
-	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride)
+// chart exists. runtimeChartOverride is the operator's --runtime-chart value
+// when one is coming (applyRuntimeChartOverride applies it afterward).
+func resolvePublishedDevopsDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, versionOverride, runtimeChartOverride string) ([]DeploySpec, error) {
+	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride, runtimeChartOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -1396,7 +1397,7 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 	// A runtime-image override lets an operator stand up a new env on the shared
 	// ERun base image before the tenant's own <tenant>-devops image exists.
 	if runtimeImageOverride != "" && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
-		return resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "bypassing the repo-local runtime chart for the runtime image override "+runtimeImageOverride)
+		return resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "bypassing the repo-local runtime chart for the runtime image override "+runtimeImageOverride, "")
 	}
 	return resolveInstallExistingVersionDeploySpec(ctx, store, target, deployContext, version, versionFromPersist)
 }

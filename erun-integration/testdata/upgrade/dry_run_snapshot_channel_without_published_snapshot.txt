@@ -8,8 +8,7 @@ upgrade: team/agent <VERSION> -> <VERSION>
 ==> Upgrading team/agent <VERSION> -> <VERSION> (snapshot)
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
-deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart)
-deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in ghcr.io/sophium
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image ghcr.io/sophium/team-devops:<VERSION> (imageOverrides.erun-devops)
 kubectl --context test-context get namespace team-agent -o name

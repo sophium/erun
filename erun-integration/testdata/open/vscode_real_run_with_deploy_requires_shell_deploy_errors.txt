@@ -3,9 +3,7 @@ config: assigned localportrangestart=17000 to team/dev
 trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=vscode
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
-deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
-deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart in erun's own registry)
-deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 opening VS Code requires updating the runtime deployment for team/dev; run `erun sshd init team dev` or `erun deploy team dev` first, then retry

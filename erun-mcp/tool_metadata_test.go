@@ -60,6 +60,21 @@ func TestNoToolShipsOnTheSpecDefaults(t *testing.T) {
 // explicitly, and they are the tools whose mislabelling was most obviously
 // wrong -- `version` returns a version string and was advertised as capable of
 // destructive updates to an open world.
+func assertToolAdvertisedReadOnly(t *testing.T, byName map[string]*mcp.Tool, name string) {
+	t.Helper()
+	tool, ok := byName[name]
+	if !ok {
+		t.Errorf("%s is not on the surface", name)
+		return
+	}
+	if !tool.Annotations.ReadOnlyHint {
+		t.Errorf("%s: readOnlyHint is false but the tool only observes", name)
+	}
+	if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
+		t.Errorf("%s: still advertised as destructive", name)
+	}
+}
+
 func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
 	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
 	byName := map[string]*mcp.Tool{}
@@ -68,17 +83,7 @@ func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
 	}
 
 	for _, name := range []string{"version", "list", "exec_diff", "platform_env_list", "platform_env_get", "outputs_list"} {
-		tool, ok := byName[name]
-		if !ok {
-			t.Errorf("%s is not on the surface", name)
-			continue
-		}
-		if !tool.Annotations.ReadOnlyHint {
-			t.Errorf("%s: readOnlyHint is false but the tool only observes", name)
-		}
-		if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
-			t.Errorf("%s: still advertised as destructive", name)
-		}
+		assertToolAdvertisedReadOnly(t, byName, name)
 	}
 
 	// And the counterexample, so the test cannot pass by marking everything

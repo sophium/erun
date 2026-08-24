@@ -325,7 +325,11 @@ func TestInit(t *testing.T) {
 			"--confirm-environment=true",
 			"--dry-run",
 		}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -375,7 +379,11 @@ func TestInit(t *testing.T) {
 			"--confirm-environment=true",
 			"--dry-run",
 		}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -974,6 +982,7 @@ func TestInit(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 		args := []string{
 			"init", "team", "dev",
 			"--remote",
@@ -1138,6 +1147,7 @@ func TestInit(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		args := []string{
 			"init", "team", "dev",
 			"--type", "remote-agent",

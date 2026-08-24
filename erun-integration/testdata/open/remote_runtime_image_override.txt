@@ -6,15 +6,11 @@ config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=true ide=shell
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
-deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
-deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/sophium (the shared platform chart in erun's own registry)
-deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
-deploy: runtime chart erun-devops <VERSION> not found in registry.example/test (the shared platform chart)
-deploy: runtime chart erun-devops <VERSION> not found in ghcr.io/example (the shared platform chart in the runtime image's registry)
-deploy: no runtime chart candidate published <VERSION>; falling back to erun-devops in registry.example/test
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: runtime image override ghcr.io/example/custom-runtime:<VERSION> (imageOverrides.erun-devops)
 deploying the devops runtime before opening the shell
