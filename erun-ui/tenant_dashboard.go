@@ -22,10 +22,9 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		return uiTenantDashboard{}, fmt.Errorf("tenant API URL is required")
 	}
 	dashboard := uiTenantDashboard{
-		Tenant:          tenant,
-		Environment:     strings.TrimSpace(input.Environment),
-		APIURL:          apiURL,
-		AuditLogMessage: "Audit log listing is not exposed by the ERun API yet.",
+		Tenant:      tenant,
+		Environment: strings.TrimSpace(input.Environment),
+		APIURL:      apiURL,
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -85,6 +84,56 @@ func loadTenantDashboardData(ctx context.Context, client *http.Client, apiURL, b
 		return
 	}
 	dashboard.Builds = builds
+	auditEvents, err := loadTenantDashboardJSON[uiAuditEventsResponse](ctx, client, apiURL, "/v1/audit-events", bearer, usernameHint)
+	if err != nil {
+		dashboard.APIError = err.Error()
+		return
+	}
+	dashboard.AuditEvents = tenantDashboardAuditEvents(auditEvents.Events)
+}
+
+// uiAuditEventsResponse mirrors the GET /v1/audit-events response shape.
+// cliParameters and mcpToolParameters are deliberately absent: the API never
+// returns them, since a tool such as cloud_inject_aws_credentials takes
+// credentials as arguments.
+type uiAuditEventsResponse struct {
+	Events []uiAuditEvent `json:"events"`
+}
+
+type uiAuditEvent struct {
+	Type           string `json:"type"`
+	ExternalUserID string `json:"externalUserId"`
+	APIMethod      string `json:"apiMethod,omitempty"`
+	APIPath        string `json:"apiPath,omitempty"`
+	CLICommand     string `json:"cliCommand,omitempty"`
+	MCPTool        string `json:"mcpTool,omitempty"`
+	CreatedAt      string `json:"createdAt"`
+}
+
+func tenantDashboardAuditEvents(events []uiAuditEvent) []uiTenantDashboardAudit {
+	converted := make([]uiTenantDashboardAudit, 0, len(events))
+	for _, event := range events {
+		converted = append(converted, uiTenantDashboardAudit{
+			Type:      event.Type,
+			Actor:     event.ExternalUserID,
+			Action:    tenantDashboardAuditAction(event),
+			CreatedAt: event.CreatedAt,
+		})
+	}
+	return converted
+}
+
+func tenantDashboardAuditAction(event uiAuditEvent) string {
+	switch event.Type {
+	case "API":
+		return strings.TrimSpace(event.APIMethod + " " + event.APIPath)
+	case "CLI":
+		return event.CLICommand
+	case "MCP":
+		return event.MCPTool
+	default:
+		return ""
+	}
 }
 
 func (a *App) tenantDashboardUsernameHint(alias string) string {

@@ -1799,6 +1799,8 @@ func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.H
 			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
 		case "/v1/reviews/review-1/builds":
 			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
+		case "/v1/audit-events":
+			_, _ = w.Write([]byte(`{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"https://sts.aws.example","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`))
 		default:
 			http.NotFound(w, req)
 		}
@@ -1811,8 +1813,16 @@ func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
-	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds" {
+	assertPrimaryCloudDashboardAuditEvents(t, dashboard.AuditEvents)
+	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/audit-events" {
 		t.Fatalf("unexpected API requests: %+v", requests)
+	}
+}
+
+func assertPrimaryCloudDashboardAuditEvents(t *testing.T, events []uiTenantDashboardAudit) {
+	t.Helper()
+	if len(events) != 1 || events[0].Actor != "subject-1" || events[0].Action != "GET /v1/reviews" {
+		t.Fatalf("unexpected audit events: %+v", events)
 	}
 }
 

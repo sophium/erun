@@ -40,6 +40,10 @@ export class Sidebar {
     await this.tenantRow(name).first().click();
   }
 
+  async openTenantDashboard(name: string): Promise<void> {
+    await this.page.getByRole('button', { name: `Open ${name} dashboard` }).click();
+  }
+
   async isTenantExpanded(name: string): Promise<boolean> {
     const value = await this.tenantRow(name).first().getAttribute('aria-expanded');
     return value === 'true';

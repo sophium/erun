@@ -4,6 +4,7 @@ export { Titlebar } from './Titlebar';
 export { GlobalConfigDialog } from './GlobalConfigDialog';
 export { EnvironmentInitDialog } from './EnvironmentInitDialog';
 export { ManageDialog, type ManageTab } from './ManageDialog';
+export { TenantDashboard, type TenantDashboardTab } from './TenantDashboard';
 export { TenantDialog } from './TenantDialog';
 export { ReviewPanel } from './ReviewPanel';
 export { DebugPanel } from './DebugPanel';

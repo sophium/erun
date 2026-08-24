@@ -159,7 +159,6 @@ export interface UITenantDashboard {
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
   auditEvents?: UITenantDashboardAudit[];
-  auditLogMessage?: string;
 }
 
 export interface UITenantDashboardUser {
