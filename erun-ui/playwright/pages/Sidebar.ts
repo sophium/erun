@@ -15,12 +15,20 @@ export class Sidebar {
     await this.page.getByRole('button', { name: 'Upgrade all environments' }).click();
   }
 
+  runDoctorButton(): Locator {
+    return this.page.getByRole('button', { name: 'Run doctor' });
+  }
+
+  documentationButton(): Locator {
+    return this.page.getByRole('button', { name: 'Open documentation' });
+  }
+
   upgradeAllDialog(): Locator {
     return this.page.getByRole('dialog', { name: 'Upgrade all environments' });
   }
 
   async openInitDialog(): Promise<void> {
-    const button = this.page.getByRole('button', { name: 'Initialize new remote environment' });
+    const button = this.page.getByRole('button', { name: 'Initialize new environment' });
     if (await button.isVisible().catch(() => false)) {
       await button.click();
       return;

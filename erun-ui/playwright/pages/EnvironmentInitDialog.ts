@@ -32,6 +32,14 @@ export class EnvironmentInitDialog {
     return this.page.locator('#environment-container-registry');
   }
 
+  versionChoicesButton(): Locator {
+    return this.page.getByRole('button', { name: 'Show version choices' });
+  }
+
+  versionNotices(): Locator {
+    return this.page.getByRole('list', { name: 'Version source notices' });
+  }
+
   kubernetesContextTrigger(): Locator {
     return this.page.locator('#environment-kubernetes-context');
   }

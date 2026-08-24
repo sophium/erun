@@ -6,6 +6,7 @@ import type {
   AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
+  DoctorCompletedPayload,
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
@@ -16,6 +17,7 @@ import {
   handleAIActivity,
   handleAppNotification,
   handleAppStatus,
+  handleDoctorCompleted,
   handleEnvActivity,
   handleEnvironmentDeployed,
   handleEnvironmentInitFailed,
@@ -61,6 +63,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('env-activity', (payload: EnvActivityPayload) => {
         store.dispatch(handleEnvActivity(payload));
+      }),
+      EventsOn('doctor-completed', (payload: DoctorCompletedPayload) => {
+        store.dispatch(handleDoctorCompleted(payload));
       }),
       ...this.environmentLifecycleSubscriptions(),
     ];

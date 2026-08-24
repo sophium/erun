@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Bot,
   Download,
   MoreHorizontal,
@@ -9,6 +10,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
+import { openDocumentation } from '@/app/documentationThunks';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startManageDoctor } from '@/app/manageEnvironmentThunks';
@@ -56,6 +58,10 @@ function ErunHeader(): React.ReactElement {
     }
     return state.orchestrators.items.find((o) => o.sessionId === activeSessionId)?.id ?? '';
   });
+  // Doctor diagnoses one environment's runtime and config, so it needs a
+  // target; disable rather than silently no-op when nothing is selected
+  // (Nielsen #5, error prevention).
+  const hasSelectedEnvironment = useAppSelector((state) => state.selection.selected !== null);
   return (
     <div className="flex items-center justify-between gap-2 pr-1.5 pb-1.5 pl-3.5">
       <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
@@ -76,13 +82,16 @@ function ErunHeader(): React.ReactElement {
             <RefreshCw />
           </Button>
         </IconTooltip>
-        <IconTooltip label="Run doctor">
+        <IconTooltip
+          label={hasSelectedEnvironment ? 'Run doctor' : 'Select an environment to run doctor'}
+        >
           <Button
             className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
             type="button"
             variant="ghost"
             size="icon-xs"
             aria-label="Run doctor"
+            disabled={!hasSelectedEnvironment}
             onClick={() => {
               void dispatch(startManageDoctor());
             }}
@@ -102,6 +111,20 @@ function ErunHeader(): React.ReactElement {
             }}
           >
             <Settings />
+          </Button>
+        </IconTooltip>
+        <IconTooltip label="Open documentation">
+          <Button
+            className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Open documentation"
+            onClick={() => {
+              dispatch(openDocumentation());
+            }}
+          >
+            <BookOpen />
           </Button>
         </IconTooltip>
       </div>

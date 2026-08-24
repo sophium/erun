@@ -280,6 +280,12 @@ function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): Reac
     );
   }
 
+  // A fresh install has no cluster registry detected and no past values to
+  // suggest, so the field would otherwise offer nothing to go on — no
+  // placeholder, no helper, no suggestions (Nielsen #6, recognition over
+  // recall). Name the format with an example and the route that detects a
+  // registry automatically instead of typing one.
+  const showRegistryHelp = !clusterAvailable && containerRegistrySuggestions.length === 0;
   return (
     <div className="grid gap-2">
       <EditableComboField
@@ -294,6 +300,14 @@ function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): Reac
         }}
       />
       {clusterToggle}
+      {showRegistryHelp && (
+        <p className="text-[12px] leading-[1.4] text-muted-foreground">
+          Where images push to and pull from, e.g. ghcr.io/your-org or docker.io/your-namespace. If
+          the selected Kubernetes context has an in-cluster erun-registry, ERun detects it
+          automatically and offers it above instead — provision one via Settings → Cloud aliases →
+          Add AWS account → Cloud contexts → Init.
+        </p>
+      )}
     </div>
   );
 }

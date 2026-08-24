@@ -16,12 +16,7 @@ export function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSes
 }
 
 export function terminalExitHasTrackedSelection(selections: TerminalExitSelections): boolean {
-  return Boolean(
-    selections.sshdInitSelection ??
-    selections.doctorSelection ??
-    selections.openSelection ??
-    selections.cloudInit,
-  );
+  return Boolean(selections.sshdInitSelection ?? selections.openSelection ?? selections.cloudInit);
 }
 
 export function failedTerminalExitReason(
@@ -158,9 +153,6 @@ function failedSelectionExitReason(reason: string, selections: TerminalExitSelec
   if (selections.sshdInitSelection) {
     return `Failed to enable SSHD for ${selectionLabel(selections.sshdInitSelection)}: ${reason}`;
   }
-  if (selections.doctorSelection) {
-    return `Doctor failed for ${selectionLabel(selections.doctorSelection)}: ${reason}`;
-  }
   if (selections.openSelection) {
     return `Failed to open ${selectionLabel(selections.openSelection)}: ${reason}`;
   }
@@ -170,9 +162,6 @@ function failedSelectionExitReason(reason: string, selections: TerminalExitSelec
 function successfulSelectionExitReason(selections: TerminalExitSelections): string {
   if (selections.sshdInitSelection) {
     return `Enabled SSHD for ${selectionLabel(selections.sshdInitSelection)}.`;
-  }
-  if (selections.doctorSelection) {
-    return `Doctor finished for ${selectionLabel(selections.doctorSelection)}.`;
   }
   return '';
 }

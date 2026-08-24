@@ -7,6 +7,7 @@ import type {
   AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
+  DoctorCompletedPayload,
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
@@ -27,7 +28,7 @@ import {
 } from './selectors';
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
 import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
-import { setDoctorAll } from './slices/doctorSlice';
+import { recordDoctorOutcome } from './slices/doctorSlice';
 import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
 import { appendReconnectLine } from './slices/reviewSlice';
@@ -341,25 +342,23 @@ export const hideTerminalMessageIfActive =
     }
   };
 
-const recordDoctorOutcome =
-  (payload: TerminalExitPayload, selections: TerminalExitSelections): AppThunk =>
-  (dispatch, getState) => {
-    const selection = selections.doctorSelection;
-    if (!selection) {
-      return;
-    }
-    const key = selectionKey(selection);
-    const reason = (payload.reason ?? '').trim();
-    const lastDoctorBySelection = getState().doctor.lastDoctorBySelection;
+// handleDoctorCompleted records `erun doctor`'s last-run outcome for the
+// Manage dialog's SSH tab. This is doctor's only completion signal — it runs
+// piped into the shared Local shell, which never produces a PTY exit (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring") — so a
+// handler keyed on terminal exit can never fire; the `doctor-completed` Wails
+// event fires from the CLI's `==> Doctor done` / `==> Doctor failed` trace
+// lines instead (see handleDoctorTraceLine in erun-ui/activity_queue_app.go).
+export const handleDoctorCompleted =
+  (payload: DoctorCompletedPayload): AppThunk =>
+  (dispatch) => {
     dispatch(
-      setDoctorAll({
-        lastDoctorBySelection: {
-          ...lastDoctorBySelection,
-          [key]: {
-            ranAt: Date.now(),
-            success: !reason,
-            message: reason,
-          },
+      recordDoctorOutcome({
+        key: selectionKey({ tenant: payload.tenant, environment: payload.environment }),
+        outcome: {
+          ranAt: Date.now(),
+          success: payload.success,
+          message: (payload.message ?? '').trim(),
         },
       }),
     );
@@ -403,7 +402,6 @@ export const handleTerminalExit =
     const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
-    dispatch(recordDoctorOutcome(payload, selections));
 
     if (selections.sshdInitSelection) {
       await dispatch(reloadStateAfterEnvironmentChange());

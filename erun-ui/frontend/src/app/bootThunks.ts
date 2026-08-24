@@ -1,3 +1,5 @@
+import type { UITenant } from '@/types';
+
 import { stateApi } from './api/stateApi';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
@@ -15,6 +17,16 @@ import {
   normalizeVersionSuggestionNotices,
   normalizeVersionSuggestions,
 } from './versionSuggestions';
+
+// "Choose from the left pane" contradicts the sidebar's own "No environments
+// yet" empty state when there is nothing yet to choose — name the actual
+// first action instead.
+function noSelectionBootMessage(tenants: UITenant[]): string {
+  const hasAnyEnvironment = tenants.some((tenant) => tenant.environments.length > 0);
+  return hasAnyEnvironment
+    ? 'Choose an environment from the left pane.'
+    : 'Create your first environment from the left pane.';
+}
 
 // boot deliberately does not seed the env-init dialog's kubectl context
 // list — that dialog owns and refreshes its own.
@@ -53,7 +65,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
       return;
     }
 
-    dispatch(showTerminalMessage('Choose an environment from the left pane.'));
+    dispatch(showTerminalMessage(noSelectionBootMessage(getState().tenants.tenants)));
   } catch (error: unknown) {
     dispatch(showTerminalMessage(readError(error)));
   }
