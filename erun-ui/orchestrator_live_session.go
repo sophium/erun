@@ -18,12 +18,15 @@ import (
 // carries on every invocation.
 //
 // The hooks installed by ensureOrchestratorSessionStartHook keep one file per
-// orchestrator current with that id: reset to the spawn id at SessionStart
-// (startup/resume), then refreshed from every turn-boundary hook afterward, so
-// a fork is reflected the moment the next hook fires. Resetting at
-// SessionStart matters because an orchestrator id is mutable and reusable —
-// without the reset, a leftover record from a previous run under the same id
-// would outlive it.
+// orchestrator current with that id: reset to the live id at SessionStart
+// (startup, resume, clear, and compact), then refreshed from every
+// turn-boundary hook afterward, so a fork is reflected the moment the next
+// hook fires. Resetting at SessionStart matters because an orchestrator id is
+// mutable and reusable — without the reset, a leftover record from a previous
+// run under the same id would outlive it. Including compact here matters
+// doubly: compaction is the one SessionStart source that itself forks the
+// transcript to a new session id, so the reset at that exact boundary is what
+// keeps the record from naming a conversation that already stopped growing.
 
 // orchestratorLiveSessionDirName holds one file per orchestrator recording the
 // session id its own hooks last saw live.
