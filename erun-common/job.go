@@ -195,6 +195,14 @@ type EnvironmentJob struct {
 	// a tool error — rather than waiting on a beat a dead supervisor can no
 	// longer produce.
 	AliveAgeMs *int64 `json:"aliveAgeMs,omitempty"`
+
+	// Result is a task job's typed return value, captured verbatim as JSON once
+	// it exits. It is never flattened into a log a caller has to parse back
+	// into shape: whatever a task returns is what a caller reads back here, in
+	// the same structure it would have gotten from calling the work
+	// synchronously. Nil for every other kind, and for a task that has not
+	// finished yet.
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.

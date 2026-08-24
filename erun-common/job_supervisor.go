@@ -332,7 +332,7 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 	if err != nil {
 		return EnvironmentJob{}, err
 	}
-	if err := reserveEnvironmentJobID(ctx, dir, params); err != nil {
+	if err := reserveEnvironmentJobID(ctx, dir, params.ID); err != nil {
 		return EnvironmentJob{}, err
 	}
 
@@ -376,20 +376,20 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 // writing one record, so it is refused; reusing a finished one replaces it, and
 // says so, because the alternative is an orchestrator unable to re-run named
 // work without inventing ids.
-func reserveEnvironmentJobID(ctx Context, dir string, params StartEnvironmentJobParams) error {
-	existing, err := readEnvironmentJob(filepath.Join(dir, params.ID+".json"))
+func reserveEnvironmentJobID(ctx Context, dir, id string) error {
+	existing, err := readEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		return nil
 	}
 	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), processAlive, currentJobHostname())
 	if !resolved.Finished() {
-		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", params.ID, resolved.PID)
+		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}
-	ctx.Trace(fmt.Sprintf("job: replacing the finished job record %s from %s", params.ID, resolved.StartedAt.UTC().Format(time.RFC3339)))
+	ctx.Trace(fmt.Sprintf("job: replacing the finished job record %s from %s", id, resolved.StartedAt.UTC().Format(time.RFC3339)))
 	if ctx.DryRun {
 		return nil
 	}
-	removeEnvironmentJobFiles(dir, params.ID)
+	removeEnvironmentJobFiles(dir, id)
 	return nil
 }
 
