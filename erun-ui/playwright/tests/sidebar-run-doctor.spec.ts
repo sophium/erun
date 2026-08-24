@@ -67,14 +67,14 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
   // replaces both with the `doctor-completed` Wails event; this drives that
   // event the way the CLI's `==> Doctor done` / `==> Doctor failed` trace
   // lines do (see handleDoctorTraceLine in erun-ui/activity_queue_app.go).
-  test('records the last-run outcome the Manage dialog SSH tab renders', async ({
+  test('records the last-run outcome the Manage dialog Access tab renders', async ({
     app,
     page,
     seededEnv,
   }) => {
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.tab('SSH').click();
+    await app.manageDialog.tab('Access').click();
 
     const lastRun = page.getByRole('status').filter({ hasText: 'all checks passed' });
     const lastRunFailed = page.getByRole('alert').filter({ hasText: 'kubectl not reachable' });
