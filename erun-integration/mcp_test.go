@@ -68,6 +68,12 @@ type fakeMCPEdge struct {
 	AcceptEverything bool
 	// Results maps a JSON-RPC method to the raw JSON result it answers with.
 	Results map[string]string
+	// ToolResults maps a tools/call tool name to the raw JSON result it answers
+	// with, taking precedence over Results["tools/call"] for that tool. Use it
+	// when one scenario's command makes more than one tools/call round trip to
+	// different tools and each needs its own canned answer (e.g. starting a
+	// background job, then reading its status back).
+	ToolResults map[string]string
 	// RPCErrors maps a JSON-RPC method to a raw JSON-RPC error object, the
 	// protocol-level failure a tool-level isError does not cover.
 	RPCErrors map[string]string
@@ -168,7 +174,13 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rpcError, ok := e.RPCErrors[request.Method]; ok {
 		reply = fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"error":%s}`, request.ID, rpcError)
 	} else {
-		result, ok := e.Results[request.Method]
+		result, ok := "", false
+		if request.Method == "tools/call" {
+			result, ok = e.ToolResults[request.Params.Name]
+		}
+		if !ok {
+			result, ok = e.Results[request.Method]
+		}
 		if !ok {
 			result = "{}"
 		}

@@ -38,7 +38,6 @@ Available Commands:
   idle        Show environment idle stop status
   init        Initialize configuration for the current project
   inputs      Place a host file inside the runtime pod
-  job         Start long work in the environment and observe it by handle
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
   observe     Report an environment's Kubernetes state, read-only

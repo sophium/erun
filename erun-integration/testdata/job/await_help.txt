@@ -8,7 +8,7 @@ running" — never re-await it expecting a different answer.
 The reported job's aliveAgeMs is the faster of the two signals: it crosses
 the 5000ms caller threshold before state necessarily catches up, so a
 caller in a hurry can act on it directly instead of waiting for the next
-reconcile (see `erun job status --help`).
+reconcile (see `erun exec job status --help`).
 
 Exit codes are the contract: 0 when the job exited 0, 124 when the timeout
 elapsed with the job still running, 125 when the outcome is unknown, and 1
@@ -18,7 +18,7 @@ Usage:
   erun job await [flags]
 
 Examples:
-  erun job await --tenant team --environment dev --id suite --timeout 2m
+  erun exec job await --tenant team --environment dev --id suite --timeout 2m
 
 Flags:
       --dry-run              Resolve and trace mutating actions without executing them.

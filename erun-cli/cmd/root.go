@@ -151,7 +151,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
 		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
-		newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil),
+		newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil, d.resolveOpen),
 		newCloudCmd(d.configStore, runPrompt, runSelect, cloudDependencies()),
 		newContextCmd(d.configStore, runPrompt, runSelect, common.CloudContextDependencies{}),
 		newPlatformCmd(d.configStore, runPrompt, cloudDependencies()),
@@ -168,7 +168,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newTerraformCmd(d.configStore, common.FindProjectRoot),
 		newContributeCmd(common.GitCommandRunner),
 		newIdleCmd(d.configStore, d.resolveOpen),
-		newJobCmd(d.resolveOpen),
+		deprecatedTopLevelJobCmd(d.resolveOpen),
 		newReleaseCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push),
 		newVersionCmd(func() (versionCommandInfo, error) {
 			return resolveVersionCommandBuildInfo(common.FindProjectRoot)

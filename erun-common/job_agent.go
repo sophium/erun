@@ -24,6 +24,12 @@ const (
 	// EnvironmentJobKindAgent is an AI tool run in streaming mode; its log is the
 	// tool's event stream and its progress is normalized from it.
 	EnvironmentJobKindAgent = "agent"
+	// EnvironmentJobKindTask is Go work run asynchronously in this process
+	// rather than a subprocess a supervisor waits on. There is no log: the
+	// work's typed return value is captured directly onto Result once it
+	// finishes, and liveness is decided by this process's own pid rather than a
+	// supervisor's.
+	EnvironmentJobKindTask = "task"
 
 	agentToolClaude = "claude"
 	agentToolCodex  = "codex"

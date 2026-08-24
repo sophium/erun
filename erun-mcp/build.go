@@ -17,6 +17,7 @@ type BuildInput struct {
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Jobs          int    `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait          *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
 type PushInput struct {
@@ -24,43 +25,48 @@ type PushInput struct {
 	Version   string `json:"version" jsonschema:"required version to publish (produced by the build tool); push publishes this version's images and chart and never mints one"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait      *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
 var errMissingPushVersion = fmt.Errorf("push requires a version: it publishes a built version's images and chart (capture the version from the build tool's result) and never mints one — set the version input")
 
-func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var result *eruncommon.BuildResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			runCtx.BuildJobs = input.Jobs
-			component := strings.TrimSpace(input.Component)
-			version := strings.TrimSpace(input.Version)
-			execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental)
-			if err != nil {
-				return err
+func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+		execute := func(preview bool) (CommandOutput, error) {
+			var result *eruncommon.BuildResult
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+				runCtx.BuildJobs = input.Jobs
+				component := strings.TrimSpace(input.Component)
+				version := strings.TrimSpace(input.Version)
+				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental)
+				if err != nil {
+					return err
+				}
+				// build is a pure primitive that only builds and mints the version;
+				// MCP composes primitives itself rather than exposing a deploy switch.
+				if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime)); err != nil {
+					return err
+				}
+				built := eruncommon.NewBuildResult(execution)
+				result = &built
+				return nil
+			})
+			if err == nil {
+				output.Build = result
 			}
-			// build is a pure primitive that only builds and mints the version;
-			// MCP composes primitives itself rather than exposing a deploy switch.
-			if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime)); err != nil {
-				return err
-			}
-			built := eruncommon.NewBuildResult(execution)
-			result = &built
-			return nil
-		})
-		if err == nil {
-			output.Build = result
+			return output, err
 		}
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "build", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 
-func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, CommandOutput, error) {
+func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		if strings.TrimSpace(input.Version) == "" {
-			return nil, CommandOutput{}, errMissingPushVersion
+			return nil, JobEnvelopeOutput{}, errMissingPushVersion
 		}
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
 			execution, err := resolveRuntimePushExecution(runCtx, runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version))
 			if err != nil {
 				return err
@@ -69,7 +75,8 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "push", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 

@@ -9,7 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw common.RawCommandRunnerFunc) *cobra.Command {
+func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw common.RawCommandRunnerFunc, resolveOpen OpenResolver) *cobra.Command {
+	// job's supervise leaf is mounted only here, under exec, since
+	// environmentJobSupervisorArgs always re-execs `exec job supervise`
+	// regardless of which entry point (this one, or the deprecated top-level
+	// `erun job` alias) actually started the job.
+	jobCmd := newJobCmd(resolveOpen)
+	jobCmd.AddCommand(newJobSuperviseCmd())
+
 	return newCommandGroup(
 		"exec",
 		"Repository execution utilities",
@@ -18,6 +25,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot),
+		jobCmd,
 	)
 }
 

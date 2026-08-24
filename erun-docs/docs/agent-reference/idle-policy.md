@@ -74,7 +74,7 @@ MCP tool shapes:
 
 Errors: a `take` with no `name` returns `lease name is required`; either tool with no resolvable tenant + environment returns `tenant and environment are required`; a `release` with no `id` returns `lease id is required`. All are tool-call errors, not partial writes.
 
-A [job](/agent-reference/cli-flags#erun-job) is a lease plus an outcome, and holds one for its whole lifetime under the id `job-<job id>` with the supervisor's `pid`. Starting long work through `erun job start` (or the `job_start` MCP tool) therefore defers auto-stop with nothing extra to call, and the reconciliation above is what reclaims the claim if the supervisor dies.
+A [job](/agent-reference/cli-flags#erun-job) is a lease plus an outcome, and holds one for its whole lifetime under the id `job-<job id>` with the supervisor's `pid`. Starting long work through `erun exec job start` (or the `exec_raw`/`exec_agent` MCP tools) therefore defers auto-stop with nothing extra to call, and the reconciliation above is what reclaims the claim if the supervisor dies.
 
 ### Exclusive claims {#exclusive-claims}
 

@@ -66,11 +66,12 @@ func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
 
-	// diff and exec_diff both appear during the rename's one-release alias
-	// window (#1186); the retired name authorizes as its replacement, so a
-	// read-only caller keeps it.
+	// diff/exec_diff and the job_*/exec_job_* pairs both appear during their
+	// rename's one-release alias window (#1186, #1246); the retired name
+	// authorizes as its replacement, so a read-only caller keeps it.
 	want := []string{
 		"activity_lease_list", "cloud_list", "context_list", "diff", "exec_diff",
+		"exec_job_await", "exec_job_output", "exec_job_status",
 		"idle", "idle_stop_history",
 		"job_await", "job_output", "job_status", "list", "observe",
 		"outputs_download", "outputs_list", "review_list", "review_queue_list", "review_show", "usage", "version",
@@ -84,7 +85,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 func TestReadCapabilityCannotSeeExecutionOrMutation(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
 
-	for _, forbidden := range []string{"raw", "write", "commit", "deploy", "delete", "build", "push", "release", "context_init", "job_start"} {
+	for _, forbidden := range []string{"raw", "write", "commit", "deploy", "delete", "build", "push", "release", "context_init", "exec_agent", "exec_job_cancel"} {
 		if slices.Contains(got, forbidden) {
 			t.Fatalf("a read-only caller must not be offered %q: %v", forbidden, got)
 		}

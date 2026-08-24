@@ -18,10 +18,11 @@ type TerraformInput struct {
 	ExtraArgs   []string `json:"extraArgs,omitempty" jsonschema:"extra args passed through to terraform plan"`
 	Preview     bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the terraform commands without executing them"`
 	Verbosity   int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait        *bool    `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
-func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, CommandOutput, error) {
+func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
 		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
@@ -41,7 +42,7 @@ func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			return nil
 		}
 
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
 			_, err := eruncommon.RunTerraform(runCtx, eruncommon.TerraformParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -51,6 +52,7 @@ func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			}, terraformStore, confirm)
 			return err
 		})
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "terraform", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }

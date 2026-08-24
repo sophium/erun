@@ -184,25 +184,27 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 
 | Tool | Purpose |
 |---|---|
-| `job_start` | Run a command — or an AI agent — in the env as a detached job; returns the handle. |
-| `job_attach` | Give work you started another way a handle and a lease. |
-| `job_status` | One job's state and outcome, or every retained job newest-first. |
-| `job_await` | Wait a bounded time (default 30s, max 600s) for a job to finish. |
-| `job_output` | Read a page of a job's output, including while it runs. |
-| `job_cancel` | Signal a running job's work by its recorded process. |
+| `exec_agent` | Run an AI agent in the env as a detached job; returns the handle. |
+| `exec_job_attach` | Give work you started another way a handle and a lease. |
+| `exec_job_status` | One job's state and outcome, or every retained job newest-first. |
+| `exec_job_await` | Wait a bounded time (default 30s, max 600s) for a job to finish. |
+| `exec_job_output` | Read a page of a job's output, including while it runs. |
+| `exec_job_cancel` | Signal a running job's work by its recorded process. |
 
-**Reach for these instead of `exec_raw` for anything you will need to come back to.** `exec_raw` is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
+`job`'s five query verbs moved under `exec` (`job_attach`/`job_status`/`job_await`/`job_output`/`job_cancel` are retired aliases, kept callable for one release). The command-starting tool did not move with them: `job_start` is gone outright, split across the two tools that actually start a job now — **`exec_raw` with `wait: false`** for a plain command (see [The escape hatch](#raw--the-escape-hatch)), and **`exec_agent`** for an AI tool. Splitting them means each tool's schema only carries the fields its own mode needs, instead of `job_start`'s single schema carrying both a `command` and an `agent`/`prompt` that excluded each other.
+
+**Reach for a backgrounded job instead of a foreground `exec_raw` call for anything you will need to come back to.** A foreground call is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
 
 The job tools remove all five:
 
-- **`job_start` detaches for you.** The work gets its own session and its merged stdout + stderr captured to the job's log — no `setsid`, no `nohup`, no redirect.
+- **Starting a job detaches for you.** The work gets its own session and its merged stdout + stderr captured to the job's log — no `setsid`, no `nohup`, no redirect.
 - **The exit status is captured in the env**, by the supervisor that waited on the work. No sentinel token, and no exit code re-expanded by an intermediate shell.
-- **`job_await` is bounded.** It always returns inside the timeout, so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. `timedOut` is reported separately from every outcome, so "not finished yet" can never be read as a failure. Call it again to keep waiting.
-- **`job_output` is incremental.** Pass the previous read's `nextOffset` back to continue; progress is visible long before the work exits.
-- **`job_status` is definite or explicitly `unknown`** — never truncated, and never a success nobody recorded.
-- **`job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel.
+- **`exec_job_await` is bounded.** It always returns inside the timeout, so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. `timedOut` is reported separately from every outcome, so "not finished yet" can never be read as a failure. Call it again to keep waiting.
+- **`exec_job_output` is incremental.** Pass the previous read's `nextOffset` back to continue; progress is visible long before the work exits.
+- **`exec_job_status` is definite or explicitly `unknown`** — never truncated, and never a success nobody recorded.
+- **`exec_job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel. It refuses a backgrounded action tool (`build`, `deploy`, `doctor`, and the rest of the [job-envelope tools](#job-envelope) started with `wait: false`): that kind of job runs in-process rather than as a subprocess, so there is nothing to signal.
 
-A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
+A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun exec job`](/agent-reference/cli-flags#erun-job).
 
 #### The alive contract {#alive-contract}
 
@@ -210,18 +212,22 @@ A job also holds an activity lease for its lifetime, so starting one makes the e
 
 #### Running an agent as a job {#agent-jobs}
 
-An AI tool run non-interactively prints nothing until it exits, so starting one through `job_start`'s `command` reports `outputBytes: 0` for the whole run while the agent is actively editing files — `job_status` can only say `running`, and there is no supported way to report progress. Pass `agent` plus `prompt` instead of `command` and erun invokes the tool in its streaming mode:
+An AI tool run non-interactively prints nothing until it exits, so running one as a plain backgrounded command would report `outputBytes: 0` for the whole run while the agent is actively editing files, with `exec_job_status` only ever able to say `running`. `exec_agent` invokes the tool in its streaming mode instead:
 
 ```jsonc
-// job_start {"name": "sweep", "agent": "claude", "prompt": "fix the failing tests"}
+// exec_agent {"name": "sweep", "agent": "claude", "prompt": "fix the failing tests"}
 ```
 
 Two things follow with no change to any other tool's contract:
 
-- **`job_output` returns events while the agent works**, because the job's log is now the tool's event stream.
-- **`job_status` carries a `progress` view** — current activity, turns, tools run, and the last thing the agent said — normalized by erun from the tool's own events, so the shape is identical for `claude` and `codex`.
+- **`exec_job_output` returns events while the agent works**, because the job's log is now the tool's event stream.
+- **`exec_job_status` carries a `progress` view** — current activity, turns, tools run, and the last thing the agent said — normalized by erun from the tool's own events, so the shape is identical for `claude` and `codex`.
 
-`agent` accepts `claude` or `codex`, and excludes `command`. Do **not** scrape the agent's private transcript (`~/.claude/projects/…`) or diff the worktree to report progress: that layout is not erun's contract and can change under you, and it cannot work at all for a remote-agent env whose worktree is not host-mounted. Poll `job_status` instead. The full progress schema, the normalized verb set, and the per-tool event mapping are in [Agent reference · Agent jobs](/agent-reference/cli-flags#agent-jobs).
+`agent` accepts `claude` or `codex`. Do **not** scrape the agent's private transcript (`~/.claude/projects/…`) or diff the worktree to report progress: that layout is not erun's contract and can change under you, and it cannot work at all for a remote-agent env whose worktree is not host-mounted. Poll `exec_job_status` instead. The full progress schema, the normalized verb set, and the per-tool event mapping are in [Agent reference · Agent jobs](/agent-reference/cli-flags#agent-jobs).
+
+#### The job envelope — backgrounding an action tool {#job-envelope}
+
+`build`, `push`, `deploy`, `publish`, `release`, `upgrade`, `terraform`, `pin`, `init`, `delete`, `expose`, `unexpose`, `doctor`, `exec_write`, `exec_commit`, and `contribute_clone` each take a `wait` input alongside their own fields. `wait: true` (the default this release) runs synchronously and returns the full typed result inline, exactly as before this input existed. `wait: false` starts the same call as a background job and returns `{jobId, state: "running"}` immediately instead — poll `exec_job_status`/`exec_job_await`/`exec_job_output` for the outcome, whose `result` field carries the tool's own typed result verbatim (the same shape it would have returned synchronously) rather than a log to re-parse. This default flips to `false` in a future release, with `wait: true` kept callable for one more release as the compatibility switch — watch the release notes.
 
 ### Cloud — provider aliases {#cloud-tools}
 
@@ -339,7 +345,7 @@ In order of preference: **inspection > action > working tree > jobs > `exec_raw`
 
 - If a question is "what's the state of X" — reach for an inspection tool.
 - If you're invoking a known CLI command — reach for the action wrapper, not `exec_raw`.
-- If the work is long-running and you will need to know how it ended — reach for [`job_start`](#job-tools), not `exec_raw`. `exec_raw` returns only when the process exits, so using it for lifecycle observation means re-implementing job bookkeeping in shell.
+- If the work is long-running and you will need to know how it ended — reach for a [backgrounded job](#job-tools) (`exec_raw` with `wait: false`, or `exec_agent`), not a foreground `exec_raw` call. A foreground call returns only when the process exits, so using it for lifecycle observation means re-implementing job bookkeeping in shell.
 - If none of the above apply — use `exec_raw`.
 
 Generating conventional code (a new service, a migration job, an Ingress, …) isn't a tool-call decision — load the relevant [skill](/concepts/skills) and write the files by hand. The skill teaches the convention; the MCP surface stays out of the generation path.
@@ -374,12 +380,12 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_write` | `erun exec write` | Work |
 | exec | `exec_commit` | `erun exec commit` | Work |
 | exec | `exec_push` | `erun exec push` | Work |
-| job | `job_start` | *(MCP-only)* | Work |
-| job | `job_attach` | *(MCP-only)* | Work |
-| job | `job_status` | *(MCP-only)* | Read |
-| job | `job_await` | *(MCP-only)* | Read |
-| job | `job_output` | *(MCP-only)* | Read |
-| job | `job_cancel` | *(MCP-only)* | Work |
+| exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
+| exec | `exec_job_attach` | `erun exec job attach` | Work |
+| exec | `exec_job_status` | `erun exec job status` | Read |
+| exec | `exec_job_await` | `erun exec job await` | Read |
+| exec | `exec_job_output` | `erun exec job output` | Read |
+| exec | `exec_job_cancel` | `erun exec job cancel` | Work |
 | cloud | `cloud_list` | *(MCP-only)* | Read |
 | cloud | `cloud_init_aws` | `erun cloud init aws` | Work |
 | cloud | `cloud_init_cloudflare` | `erun cloud init cloudflare` | Work |
@@ -678,14 +684,22 @@ Install a published version into the env. Same semantics as the CLI `erun deploy
 }
 ```
 
-### `job_start` / `job_await` / `job_output`
+### `exec_raw` (backgrounded) / `exec_job_await` / `exec_job_output`
 
 The job record is the shared shape every job tool returns. It is deliberately explicit about what is *not* known: `exitCode` is `null` in every state but `exited`, so a missing outcome can never be read as a zero one.
 
 ```jsonc
-// job_start {"name": "suite", "command": ["./gradlew", "test"]}
+// exec_raw {"command": ["./gradlew", "test"], "name": "suite", "wait": false}
 {
-  "tenant": "team", "environment": "dev", "executed": true,
+  "executed": true, "jobId": "suite", "state": "running", "wait": false
+}
+```
+
+The immediate response only confirms the job started; `exec_job_status` returns the full record:
+
+```jsonc
+// exec_job_status {"id": "suite"}
+{
   "job": {
     "id": "suite",                 // defaults to name; addresses the job from here on
     "name": "suite",
@@ -693,7 +707,7 @@ The job record is the shared shape every job tool returns. It is deliberately ex
     "command": ["./gradlew", "test"],
     "dir": "/home/erun/git/team",
     "pid": 4242,                   // the supervisor — what liveness is decided by
-    "childPid": 4243,              // the work — what job_cancel signals
+    "childPid": 4243,              // the work — what exec_job_cancel signals
     "startedAt": "2026-08-07T09:14:02Z",
     "exitCode": null,
     "logPath": "/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",
@@ -707,14 +721,14 @@ The job record is the shared shape every job tool returns. It is deliberately ex
 }
 ```
 
-`job_await` wraps it, and separates "not finished yet" from every outcome:
+`exec_job_await` wraps it, and separates "not finished yet" from every outcome:
 
 ```jsonc
-// job_await {"id": "suite", "timeoutSeconds": 30} — still running
+// exec_job_await {"id": "suite", "timeoutSeconds": 30} — still running
 { "job": { "id": "suite", "state": "running", "exitCode": null, "aliveAgeMs": 340, … },
   "timedOut": true, "waitedSeconds": 30, "timeoutSeconds": 30 }
 
-// job_await {"id": "suite", "timeoutSeconds": 30} — finished, and it failed
+// exec_job_await {"id": "suite", "timeoutSeconds": 30} — finished, and it failed
 { "job": { "id": "suite", "state": "exited", "exitCode": 42,
            "endedAt": "2026-08-07T09:18:41Z", "outputBytes": 81204, … },
   "timedOut": false, "waitedSeconds": 4, "timeoutSeconds": 30 }
@@ -727,20 +741,20 @@ The job record is the shared shape every job tool returns. It is deliberately ex
   "timedOut": false, … }
 ```
 
-`job_output` pages through the merged stdout + stderr:
+`exec_job_output` pages through the merged stdout + stderr:
 
 ```jsonc
-// job_output {"id": "suite", "offset": 4096}
+// exec_job_output {"id": "suite", "offset": 4096}
 { "job": { … }, "offset": 4096, "nextOffset": 69632,
   "output": "…", "hasMore": true, "complete": false }
 ```
 
-`hasMore` describes this read; `complete` is true only when the job has finished *and* this page reached the end. Whether output was dropped at the cap is `job.outputTruncated`, not either of those. Field-by-field semantics, the retention window, and error behaviour: [Agent reference · `erun job`](/agent-reference/cli-flags#erun-job).
+`hasMore` describes this read; `complete` is true only when the job has finished *and* this page reached the end. Whether output was dropped at the cap is `job.outputTruncated`, not either of those. A background action-tool job (see [the job envelope](#job-envelope)) has no output log; read its typed result off `job.result` instead. Field-by-field semantics, the retention window, and error behaviour: [Agent reference · `erun exec job`](/agent-reference/cli-flags#erun-job).
 
 An [agent job](#agent-jobs) carries three more fields on the same record. `progress` is absent until the run emits its first event, so an agent that has not started yet is never reported as an idle one:
 
 ```jsonc
-// job_status {"id": "sweep"} — an agent run in flight
+// exec_job_status {"id": "sweep"} — an agent run in flight
 { "job": {
     "id": "sweep", "state": "running",
     "kind": "agent", "agentTool": "claude",

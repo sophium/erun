@@ -148,15 +148,19 @@ func TestEndpointURL(t *testing.T) {
 var wantRegisteredTools = []string{
 	// Sorted. The four exec_* names joined the surface with #1186's rename;
 	// diff/raw/write/commit remain as deprecated aliases for one release.
+	// #1246 moved job's five query verbs to exec_job_* (job_* remain as
+	// deprecated aliases for one release) and added exec_agent; job_start is
+	// gone outright, split between exec_raw's wait:false mode and exec_agent.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
-	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_commit",
-	"exec_diff", "exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
+	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_agent", "exec_commit",
+	"exec_diff", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
+	"exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
-	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
+	"job_cancel", "job_output", "job_status", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
 	"platform_context_get", "platform_context_list", "platform_env_delete",
 	"platform_env_deploy", "platform_env_get", "platform_env_list",
@@ -491,7 +495,7 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 	assertCommitToolOutput(t, output, projectRoot)
 }
 
-func assertCommitToolOutput(t *testing.T, output CommandOutput, projectRoot string) {
+func assertCommitToolOutput(t *testing.T, output JobEnvelopeOutput, projectRoot string) {
 	t.Helper()
 
 	if output.Commit == nil {

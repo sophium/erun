@@ -59,6 +59,11 @@ type CommandOutput struct {
 	Commit *eruncommon.CommitWorkingTreeResult `json:"commit,omitempty"`
 	// Push carries what a `push` call actually pushed.
 	Push *eruncommon.PushWorkingTreeBranchResult `json:"push,omitempty"`
+	// Spec carries the resolved release plan `release` publishes.
+	Spec *eruncommon.ReleaseSpec `json:"spec,omitempty"`
+	// Interaction carries a structured question `init` needs answered in a
+	// follow-up call, when it cannot resolve one from the input given.
+	Interaction *eruncommon.BootstrapInitInteraction `json:"interaction,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
