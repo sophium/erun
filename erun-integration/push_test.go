@@ -47,6 +47,35 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/missing_version_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_refuses_before_build_when_no_registry_credential_configured", func(t *testing.T) {
+		// #1201: a pod that has never authenticated to ghcr.io (no docker config,
+		// no gh session, no GH_TOKEN) used to discover that only at the real push,
+		// after a full multi-arch build. `docker image inspect` is stubbed only
+		// because fingerprint resolution needs an answer before the push plan can
+		// even be built; every other docker verb (build/push/manifest/login) is
+		// deliberately left to print a loud marker and fail, so a regression that
+		// let the flow reach an actual build or push shows up unmistakably in the
+		// golden instead of silently succeeding.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *)`,
+			`    echo "UNEXPECTED DOCKER CALL: $*" >&2`,
+			`    exit 1 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when no ghcr.io credential is configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/real_run_refuses_before_build_when_no_registry_credential_configured", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_auth_failure_retries_after_login_via_auto_login_env", func(t *testing.T) {
 		// push builds from source, so the build's image push is what hits the
 		// auth failure. ERUN_AUTO_LOGIN_ON_PUSH bypasses the interactive login
@@ -74,7 +103,10 @@ func TestPush(t *testing.T) {
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		// #1201: the registry-credential preflight refuses up front when no
+		// ghcr.io credential resolves at all; GH_TOKEN gives it one so this
+		// scenario still reaches the auth-failure-at-push it is about.
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -258,7 +290,10 @@ func TestPush(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: the registry-credential preflight needs a resolvable credential
+		// to let this scenario reach the manifest-assembly behavior it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -293,7 +328,10 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the chart-verify-read retry it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -335,7 +373,10 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the partial-publish report it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a chart that never verifies, got 0:\n%s", result.Combined)
@@ -371,7 +412,10 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the interactive login-retry it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   envVars,
@@ -408,6 +452,10 @@ func TestPush(t *testing.T) {
 		// uses LookPath directly, not the ERUN_<NAME>_BIN override).
 		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		// #1201: GH_TOKEN gives the registry-credential preflight a resolvable
+		// credential without changing the failing gh stub the login-retry
+		// behavior above still depends on.
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when create_package is denied, got 0:\n%s", result.Combined)
@@ -581,7 +629,10 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the step-timing behavior it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

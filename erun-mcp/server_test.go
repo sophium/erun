@@ -937,6 +937,21 @@ func stubKubectlAlwaysSucceeds(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
+// fakeRemoteRepositoryStateRunner fakes RunRemoteCommand for a remote-init
+// flow that reaches the repository-state script, answering the #1201
+// registry-credential-check script (identified by its own content, since
+// every remote-exec call shares this one seam) with "credential configured"
+// so these tests keep exercising repository interaction rather than tripping
+// the new check.
+func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
+	return func(_ eruncommon.ShellLaunchParams, script string) (eruncommon.RemoteCommandResult, error) {
+		if strings.Contains(script, ".docker/config.json") {
+			return eruncommon.RemoteCommandResult{Stdout: "1\n"}, nil
+		}
+		return eruncommon.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
+	}
+}
+
 func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
 	// The remote init flow deploys the runtime chart, which now refuses rather
@@ -957,11 +972,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
 			return nil
 		},
-		RunRemoteCommand: func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
-			return eruncommon.RemoteCommandResult{
-				Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
-			}, nil
-		},
+		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
 	}))
 
 	_, output, err := handler(context.Background(), nil, InitInput{
@@ -1006,11 +1017,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
 			return nil
 		},
-		RunRemoteCommand: func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
-			return eruncommon.RemoteCommandResult{
-				Stdout: "repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
-			}, nil
-		},
+		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
 	}))
 
 	_, output, err := handler(context.Background(), nil, InitInput{

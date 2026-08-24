@@ -764,6 +764,9 @@ func TestBuild(t *testing.T) {
 		// erun's own release git operations (tag/push).
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars = append(envVars, fixture.StubEnv(stubs, "git", "helm")...)
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the manifest-push behavior it is about.
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

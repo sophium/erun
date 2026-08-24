@@ -14,6 +14,7 @@ rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing f
 ==> Pushed in <ELAPSED>
 step timing (ordered by duration):
   push [<ELAPSED>]
+    (unaccounted) [<ELAPSED>]
     api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
       linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — unauthorized: authentication required: denied: requested access to the resource is denied
       linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]

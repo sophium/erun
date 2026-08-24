@@ -90,6 +90,8 @@ Every `erun build`, `erun build --release`, and `erun deploy` produces both `lin
 - **AWS ECR** — the cluster's IRSA role grants the runtime pod permission to push; for local `docker push` you use a profile via `aws ecr get-login-password`. Version listing falls back to that same command when the docker credential is missing or expired, so the version picker keeps working without a fresh `docker login`.
 - **Other registries** — `docker login` once; credentials are persisted at `~/.docker/config.json`.
 
+A **build-capable or deploy-capable environment's pod authenticates for itself** — the credential lives on whichever machine runs `erun build`/`erun push`/`erun deploy`, which for a `local-agent` or `remote-agent` environment is the pod, not your laptop. `erun init` checks this for a ghcr.io registry right after deploying the pod: if none of the three routes above resolves inside it, init refuses rather than reporting success, so a missing credential surfaces immediately instead of after a wasted build at the first `erun release`. Authenticate the pod (`erun open`, then `gh auth login` or `docker login`) and re-run `erun init` to confirm.
+
 ## Where next
 
 - [Build, release, deploy](/pipeline) — where build and deploy sit in the larger flow.
