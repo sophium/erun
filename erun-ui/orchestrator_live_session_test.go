@@ -14,10 +14,20 @@ func runOrchestratorSessionRecordHook(t *testing.T, shell, orchestratorID, input
 	t.Helper()
 	cmd := exec.Command(shell, "-c", orchestratorSessionRecordHookCommand())
 	cmd.Stdin = strings.NewReader(input)
+	// Absence has to be CONSTRUCTED, not assumed. Passing os.Environ() through
+	// unchanged let the ambient ERUN_ORCHESTRATOR_ID leak into the very test that
+	// asserts what happens without one -- and every orchestrator host exports it,
+	// so "no id" silently became "the operator's id" and the no-write assertion
+	// failed on exactly the machines that run this code.
+	cmd.Env = make([]string, 0, len(os.Environ())+1)
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "ERUN_ORCHESTRATOR_ID=") {
+			continue
+		}
+		cmd.Env = append(cmd.Env, kv)
+	}
 	if orchestratorID != "" {
-		cmd.Env = append(os.Environ(), "ERUN_ORCHESTRATOR_ID="+orchestratorID)
-	} else {
-		cmd.Env = os.Environ()
+		cmd.Env = append(cmd.Env, "ERUN_ORCHESTRATOR_ID="+orchestratorID)
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("run session-record hook: %v\n%s", err, out)
