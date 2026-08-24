@@ -170,3 +170,34 @@ func waitForEnvironmentJobFinished(t *testing.T, tenant, environment, id string)
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
+	tenant, environment := "acme", "dev"
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
+		Tenant:      tenant,
+		Environment: environment,
+		Name:        "cancel-me",
+		Run: func() (any, error) {
+			close(started)
+			<-release
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskEnvironmentJob: %v", err)
+	}
+	<-started
+	defer close(release)
+
+	if _, err := CancelEnvironmentJob(Context{}, CancelEnvironmentJobParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          job.ID,
+	}); err == nil {
+		t.Fatal("cancelling a task job must be refused: its PID is this process's own, not a subprocess to signal")
+	}
+}

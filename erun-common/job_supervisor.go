@@ -997,6 +997,12 @@ func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (Cance
 		ctx.Trace(fmt.Sprintf("job: %s already finished (%s), nothing to signal", job.ID, job.State))
 		return result, nil
 	}
+	// A task job's PID is this process's own -- there is no subprocess to fall
+	// back to signalling, and falling back anyway would send the signal to
+	// whatever is running this call instead of refusing outright.
+	if job.Kind == EnvironmentJobKindTask {
+		return CancelEnvironmentJobResult{}, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
+	}
 	target := job.ChildPID
 	if target <= 0 {
 		target = job.PID
