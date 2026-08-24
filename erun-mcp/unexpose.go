@@ -25,10 +25,11 @@ type UnexposeInput struct {
 	// project to resolve.
 	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
 	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
+	Wait              *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
-func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input UnexposeInput) (*mcp.CallToolResult, CommandOutput, error) {
+func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input UnexposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
 		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
@@ -38,7 +39,7 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			exposeStore = eruncommon.ConfigStore{}
 		}
 
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
 			_, err := eruncommon.RunUnexposeService(runCtx, eruncommon.UnexposeParams{
 				Tenant:             tenant,
 				Environment:        environment,
@@ -49,6 +50,7 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			}, exposeStore, nil)
 			return err
 		})
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "unexpose", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }

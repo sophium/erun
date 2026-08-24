@@ -15,6 +15,7 @@ type PinInput struct {
 	Revert    bool   `json:"revert,omitempty" jsonschema:"when true, pin back to the version recorded before the last re-pin"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and return the full plan (every site, old and new) without writing anything"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait      *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
 // PinOutput is the resolved plan, so a caller sees exactly which references
@@ -25,39 +26,46 @@ type PinOutput struct {
 	Applied bool               `json:"applied"`
 }
 
-func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PinInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(callCtx context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var pinned *PinOutput
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			envConfig, _, err := runtime.Store.LoadEnvConfig(runtime.Context.Tenant, runtime.Context.Environment)
-			if err != nil {
-				return err
+func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PinInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+		execute := func(preview bool) (CommandOutput, error) {
+			var pinned *PinOutput
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+				envConfig, _, err := runtime.Store.LoadEnvConfig(runtime.Context.Tenant, runtime.Context.Environment)
+				if err != nil {
+					return err
+				}
+				// Not the MCP call's own context: an async pin runs in a background
+				// task job that outlives this call, so tying the registry lookup to
+				// a context the request already cancelled would fail it every time.
+				target, err := resolvePinToolTarget(context.Background(), input, workDir, runtime.Context.Tenant, runtime.Context.Environment)
+				if err != nil {
+					return err
+				}
+				plan, err := eruncommon.ResolvePinPlan(workDir, runtime.Context.Tenant, runtime.Context.Environment, envConfig, target)
+				if err != nil {
+					return err
+				}
+				for _, site := range plan.Sites {
+					runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
+				}
+				for _, note := range plan.Skipped {
+					runCtx.Trace("pin skipped: " + note)
+				}
+				out, err := applyPinPlanUnlessPreviewing(runCtx, plan, workDir, runtime.Context.Tenant, runtime.Context.Environment)
+				if err != nil {
+					return err
+				}
+				pinned = &out
+				return nil
+			})
+			if err == nil && pinned != nil {
+				output.Pin = pinned
 			}
-			target, err := resolvePinToolTarget(callCtx, input, workDir, runtime.Context.Tenant, runtime.Context.Environment)
-			if err != nil {
-				return err
-			}
-			plan, err := eruncommon.ResolvePinPlan(workDir, runtime.Context.Tenant, runtime.Context.Environment, envConfig, target)
-			if err != nil {
-				return err
-			}
-			for _, site := range plan.Sites {
-				runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
-			}
-			for _, note := range plan.Skipped {
-				runCtx.Trace("pin skipped: " + note)
-			}
-			out, err := applyPinPlanUnlessPreviewing(runCtx, plan, workDir, runtime.Context.Tenant, runtime.Context.Environment)
-			if err != nil {
-				return err
-			}
-			pinned = &out
-			return nil
-		})
-		if err == nil && pinned != nil {
-			output.Pin = pinned
+			return output, err
 		}
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "pin", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 

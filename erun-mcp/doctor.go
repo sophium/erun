@@ -25,6 +25,7 @@ type DoctorInput struct {
 	RestoreEnvConfigFromBackup string                   `json:"restoreEnvConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the target environment's config.yaml from the matching daily backup (requires explicit tenant and environment) before any tenant/env work"`
 	RepairOrphanedAliases      []DoctorRepairAliasInput `json:"repairOrphanedAliases,omitempty" jsonschema:"per-alias AWS init parameters; when present, doctor re-initializes each listed cloud provider alias before tenant/env work"`
 	SyncConfig                 bool                     `json:"syncConfig,omitempty" jsonschema:"when true, reconcile the in-pod erun config with the helm-injected ERUN_* env vars (injected wins). Only meaningful inside a runtime pod, where the projection is rewritten without those values whenever the pod is replaced, which silently changes which registry a build resolves and whether a project build script runs"`
+	Wait                       *bool                    `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
 // DoctorRepairAliasInput is the MCP equivalent of the interactive
@@ -51,18 +52,22 @@ type DoctorRootConfigReport struct {
 	UnresolvedAliases           []string                        `json:"unresolvedAliases,omitempty"`
 }
 
-func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var report *DoctorRootConfigReport
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
-			r, runErr := runDoctorToolCommand(runtime, input, runCtx)
-			report = r
-			return runErr
-		})
-		if report != nil {
-			output.RootConfig = report
+func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+		execute := func(preview bool) (CommandOutput, error) {
+			var report *DoctorRootConfigReport
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+				r, runErr := runDoctorToolCommand(runtime, input, runCtx)
+				report = r
+				return runErr
+			})
+			if report != nil {
+				output.RootConfig = report
+			}
+			return output, err
 		}
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "doctor", input.Wait, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 

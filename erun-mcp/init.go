@@ -39,26 +39,37 @@ type InitInput struct {
 	Components               *[]string `json:"components,omitempty" jsonschema:"optional saved default deploy component selection for this environment — what the deploy tool rolls out with no components override of its own. Omit to leave a saved selection untouched; pass an empty array to clear one and return the environment to its repo k8s.deployments plan"`
 	Preview                  bool      `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity                int       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Wait                     *bool     `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
 }
 
-type InitOutput struct {
-	CommandOutput
-	Interaction *eruncommon.BootstrapInitInteraction `json:"interaction,omitempty"`
+func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, InitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input InitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+		execute, err := initToolExecute(runtime, input)
+		if err != nil {
+			return nil, JobEnvelopeOutput{}, err
+		}
+		envelope, err := runJobEnvelope(runtime, "init", input.Wait, input.Preview, execute)
+		return nil, envelope, err
+	}
 }
 
-func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, InitInput) (*mcp.CallToolResult, InitOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input InitInput) (*mcp.CallToolResult, InitOutput, error) {
-		workDir, err := runtimeRepoPath(runtime.Context)
-		if err != nil {
-			return nil, InitOutput{}, err
-		}
-		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
-		if err != nil {
-			return nil, InitOutput{}, err
-		}
+// initToolExecute resolves the target once (its errors are refusals, not part
+// of the work to job-ify) and returns the closure that does the actual work,
+// so an async init still resolves tenant/environment before the call returns
+// rather than only discovering a bad input once the background job finishes.
+func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool) (CommandOutput, error), error) {
+	workDir, err := runtimeRepoPath(runtime.Context)
+	if err != nil {
+		return nil, err
+	}
+	tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
+	if err != nil {
+		return nil, err
+	}
 
+	return func(preview bool) (CommandOutput, error) {
 		traceOutput := new(bytes.Buffer)
-		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, traceOutput, traceOutput)
+		ctx := runtimeCallContext(preview, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 
 		params := eruncommon.BootstrapInitParams{
@@ -99,7 +110,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		params.CodeCommitSSHKeyID = strings.TrimSpace(input.CodeCommitSSHKeyID)
 		params.ConfirmRemoteKeyImport = input.ConfirmRemoteKeyImport
 
-		_, err = eruncommon.RunBootstrapInitWithDependencies(eruncommon.BootstrapInitDependencies{
+		_, err := eruncommon.RunBootstrapInitWithDependencies(eruncommon.BootstrapInitDependencies{
 			Store: eruncommon.TraceBootstrapStore(ctx, runtime.Store),
 			FindProjectRoot: func() (string, string, error) {
 				return eruncommon.FindProjectRootFromDir(workDir)
@@ -117,25 +128,20 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		}, params)
 		if err != nil {
 			if interaction, ok := eruncommon.AsBootstrapInitInteraction(err); ok {
-				return nil, InitOutput{
-					CommandOutput: CommandOutput{
-						Executed:         false,
-						WorkingDirectory: workDir,
-						Trace:            normalizeTraceLines(traceOutput.String()),
-					},
-					Interaction: &interaction,
+				return CommandOutput{
+					Executed:         false,
+					WorkingDirectory: workDir,
+					Trace:            normalizeTraceLines(traceOutput.String()),
+					Interaction:      &interaction,
 				}, nil
 			}
-			return nil, InitOutput{}, err
+			return CommandOutput{}, err
 		}
 
-		output := InitOutput{
-			CommandOutput: CommandOutput{
-				Executed:         !ctx.DryRun,
-				WorkingDirectory: workDir,
-				Trace:            normalizeTraceLines(traceOutput.String()),
-			},
-		}
-		return nil, output, nil
-	}
+		return CommandOutput{
+			Executed:         !ctx.DryRun,
+			WorkingDirectory: workDir,
+			Trace:            normalizeTraceLines(traceOutput.String()),
+		}, nil
+	}, nil
 }
