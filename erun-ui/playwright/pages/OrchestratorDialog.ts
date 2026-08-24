@@ -63,4 +63,37 @@ export class OrchestratorDialog {
   async cancel(): Promise<void> {
     await this.locator().getByRole('button', { name: 'Cancel' }).click();
   }
+
+  // The two guidance layers (#1231): "role" is this orchestrator's own
+  // CLAUDE.<id>.md, "shared" is the one CLAUDE.md every orchestrator obeys.
+  // Each renders its resolved host path as secondary text and a reveal
+  // button per IDE, labelled with this same title text. Guidance only renders
+  // for a persisted (non-transient) orchestrator, i.e. only in Edit mode.
+  private static readonly guidanceTitle: Record<'role' | 'shared', string> = {
+    role: 'Role: what this orchestrator does',
+    shared: 'Shared contract: rules for every orchestrator',
+  };
+
+  guidanceLabel(layer: 'role' | 'shared'): Locator {
+    return this.locator('Edit orchestrator').getByText(OrchestratorDialog.guidanceTitle[layer], {
+      exact: true,
+    });
+  }
+
+  // The role path is this orchestrator's own CLAUDE.<id>.md; the shared path
+  // is the plain CLAUDE.md every orchestrator obeys — distinguishing substrings
+  // so each resolves to exactly one element without scoping into row markup.
+  guidanceRolePath(id: string): Locator {
+    return this.locator('Edit orchestrator').getByText(`CLAUDE.${id}.md`, { exact: false });
+  }
+
+  guidanceSharedPath(): Locator {
+    return this.locator('Edit orchestrator').getByText('CLAUDE.md', { exact: false });
+  }
+
+  guidanceOpenButton(layer: 'role' | 'shared', ide: 'VS Code' | 'IntelliJ IDEA'): Locator {
+    return this.locator('Edit orchestrator').getByRole('button', {
+      name: `Open ${OrchestratorDialog.guidanceTitle[layer]} in ${ide}`,
+    });
+  }
 }

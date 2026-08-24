@@ -56,6 +56,34 @@ test.describe('ERUN sidebar section', () => {
     await app.page.keyboard.press('Escape');
     await expect(app.sidebar.orchestratorDetailsButton(SEED_ORCHESTRATOR)).toBeVisible();
   });
+
+  // #1231: the manage dialog reveals both guidance layers rather than making
+  // the operator guess the CLAUDE.<id>.md filename convention. This covers the
+  // observable invariant the headless harness can reach — both entries render,
+  // labelled for what they are, each with its resolved host path — without
+  // clicking through to a real IDE launch: the harness stubs kubectl/helm/
+  // docker/aws but not vscode/idea, and actually spawning (or failing to spawn)
+  // a GUI editor from CI is exactly the live-infrastructure case AGENTS.md says
+  // to name rather than reach for. The open-in-IDE branch itself (path
+  // resolution, role-file seeding, unknown id/layer rejection) is covered by
+  // the Go unit tests in erun-ui/orchestrator_guidance_test.go.
+  test('manage dialog reveals both guidance layers with their resolved paths', async ({ app }) => {
+    await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
+    await app.orchestratorDialog.waitForOpen('Edit orchestrator');
+
+    await expect(app.orchestratorDialog.guidanceLabel('role')).toBeVisible();
+    await expect(app.orchestratorDialog.guidanceLabel('shared')).toBeVisible();
+    await expect(app.orchestratorDialog.guidanceRolePath(SEED_ORCHESTRATOR)).toBeVisible();
+    await expect(app.orchestratorDialog.guidanceSharedPath()).toBeVisible();
+
+    for (const layer of ['role', 'shared'] as const) {
+      for (const ide of ['VS Code', 'IntelliJ IDEA'] as const) {
+        await expect(app.orchestratorDialog.guidanceOpenButton(layer, ide)).toBeEnabled();
+      }
+    }
+
+    await app.page.keyboard.press('Escape');
+  });
 });
 
 async function expectRenderedAbove(above: Locator, below: Locator): Promise<void> {

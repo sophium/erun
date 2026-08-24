@@ -11,6 +11,7 @@ export type { IDEKind } from './ideKind';
 export type { IdleCloudContextAction } from './idleCloudContextAction';
 export type { MountElements } from './mountElements';
 export type { NormalizedEnvironmentDialogValues } from './normalizedEnvironmentDialogValues';
+export type { OrchestratorGuidanceLayer } from './orchestratorGuidanceLayer';
 export type { OrchestratorShellActivityPayload } from './orchestratorShellActivityPayload';
 export type { SidebarFocus } from './sidebarFocus';
 export type { TerminalDataDisposable } from './terminalDataDisposable';

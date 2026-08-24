@@ -23,6 +23,17 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 - **Investigate, within limits.** The same failed entry offers **Investigate**, which hands the failure report to an Agent that reads it and either fixes the problem or improves the reporting behind it. That Agent runs on the account every Agent of yours runs on, so investigations are bounded rather than unlimited, and each refusal says which limit applied and when it lifts: a report with nothing to work from — no command, no exit status, no captured output — is refused, and the missing evidence is named as the thing to fix; further reports from a failure already being investigated join that investigation instead of starting another; the same failure is not investigated again for two hours; at most two run at once; and one that has not concluded within thirty minutes is stopped, which you are told about. While it runs, an investigation holds the environment's activity lease and appears as one of its jobs, so the environment reads as busy and you can see what is spending the account.
 - **Settings in one place.** Runtime sizing, AI tooling configuration, port mappings, SSH keys, and cloud bindings — all editable from one screen per environment.
 
+## Orchestrators
+
+Above your environments, the sidebar's **ERUN** section lists your host-side orchestrators — AI sessions that coordinate work across the environments you link to them, reviewing each one's code on your machine and delegating every change to the Agent inside it. Open an orchestrator's **…** menu to manage it: restart, delete, or reveal the guidance it operates under.
+
+Each orchestrator runs under two layers of guidance, and the dialog opens either one in your editor (VS Code or IntelliJ):
+
+- **Role** — what this orchestrator does. Yours to edit; ERun creates it once and never overwrites it.
+- **Shared contract** — the rules every orchestrator follows. ERun-managed and rewritten on every launch, so edits here don't stick.
+
+For the exact files behind these two layers and how they're injected into a session, see [Agent reference · Skills spec](/agent-reference/skills-spec#host-orchestrator-desktop).
+
 ## Diagnostics console {#diagnostics-console}
 
 When something misbehaves, the panel at the bottom of the terminal area gives you two paste-ready diagnostic surfaces — built for handing to whoever (or whatever Agent) is helping you debug:
