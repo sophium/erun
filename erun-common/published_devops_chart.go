@@ -342,9 +342,11 @@ func IsOCIChartReference(chartPath string) bool {
 // ResolvePublishedDevopsDeploySpec rebuilds the runtime deploy spec against
 // the published chart for transport flows that override inputs after the
 // initial resolution (e.g. `erun open --runtime-image`). Callers on this path
-// never carry a --runtime-chart override of their own.
+// never carry a --runtime-chart override of their own, and always carry an
+// operator-stated runtime image (that is the whole point of the call), so it
+// must never be discarded for an inferred one.
 func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
-	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride, "")
+	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride, "", true)
 }
 
 // resolvePublishedDevopsDeploySpec builds the deploy spec for an environment
@@ -355,11 +357,15 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 // from canonical. runtimeChartOverride is the operator's --runtime-chart value
 // when one is coming (applyRuntimeChartOverride applies it after this spec is
 // built) -- see resolvePublishedRuntimeChartReference's deferToOverride doc.
-func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride, runtimeChartOverride string) (DeploySpec, error) {
-	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride)
+// runtimeImageExplicit is true when target.EnvConfig.RuntimeImage was set by an
+// operator's --runtime-image on this very invocation, rather than merely
+// carried over from a previous deploy's persisted memo -- see
+// resolveDeployRuntimeImage.
+func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride, runtimeImageExplicit)
 }
 
-func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string) (DeploySpec, error) {
+func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -399,7 +405,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
 	deployInput.RuntimeChartRegistry = chart.registry
-	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version); image != "" {
+	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit); image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo
@@ -654,19 +660,55 @@ func helmOutputSuffix(helmOutput string) string {
 
 func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 
+// effectiveRuntimeChartCoordinateForImage answers which chart name/version a
+// persisted runtimeimage's staleness check should read: the operator's
+// --runtime-chart when one is coming, never the coordinate
+// resolveRuntimeChartCoordinate found before that override is applied.
+// applyRuntimeChartOverride (deploy.go) still applies the override to the
+// deploy spec itself, later in the same resolve; this lets the staleness
+// check — computed here, earlier — see the coordinate the deploy will
+// actually install rather than the one about to be replaced. Reading the
+// pre-override coordinate for this decision was the ordering bug behind
+// #1249: an env whose recorded runtimechart named an old version made every
+// staleness decision as if that stale version were still current, even on a
+// deploy whose own --runtime-chart said otherwise. Scoped to the staleness
+// check alone: the plain default-image fallback (no runtimeimage at all) has
+// no override to protect and must keep naming the image after the chart as
+// actually resolved, not the one about to replace it.
+func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtimeChartOverride string) (name, version string) {
+	if override := strings.TrimSpace(runtimeChartOverride); override != "" {
+		reference, overrideVersion := splitChartReferenceVersion(override)
+		return chartNameFromReference(reference), overrideVersion
+	}
+	return chart.name, chart.version
+}
+
 // resolveDeployRuntimeImage resolves the image the runtime pod's erun-devops
-// container runs, as the imageOverrides.erun-devops the deploy sets. An explicit
-// runtimeimage (the operator's choice) wins, except where it is stale by
-// construction — see staleRuntimeImageTrace. Otherwise the deploy's own line
-// names the image.
-func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion string) string {
+// container runs, as the imageOverrides.erun-devops the deploy sets. An image
+// the operator named on this very invocation (runtimeImageExplicit) is used
+// verbatim, full stop — an inference this deploy cannot confirm must never
+// override what the operator explicitly stated (#1249). A runtimeimage that is
+// merely a persisted memo from a previous deploy still gets the staleness
+// check below -- keyed off the operator's --runtime-chart when one is coming,
+// never the coordinate resolveRuntimeChartCoordinate found before that override
+// is applied to the deploy spec (the same #1249 ordering fix) -- so an old pin
+// left over from riding a different chart/version line can still be healed
+// automatically. Otherwise the deploy's own line names the image, keyed off
+// chartName/chartVersion exactly as resolved: the operator stated no image at
+// all here, so there is nothing to protect from the override.
+func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) string {
 	chartName = strings.TrimSpace(chartName)
 	version = strings.TrimSpace(version)
 	registry := deployRuntimeImageRegistry(target, chartRegistry)
 	tenant := strings.TrimSpace(target.Tenant)
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
-		defaultImage := defaultDeployRuntimeImageName(registry, version, tenant, chartName)
-		stale := staleRuntimeImageTrace(image, defaultImage, chartName, version, strings.TrimSpace(chartVersion))
+		if runtimeImageExplicit {
+			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
+			return image
+		}
+		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
+		defaultImage := defaultDeployRuntimeImageName(registry, version, tenant, staleChartName)
+		stale := staleRuntimeImageTrace(image, defaultImage, staleChartName, version, strings.TrimSpace(staleChartVersion))
 		if stale == "" {
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 			return image

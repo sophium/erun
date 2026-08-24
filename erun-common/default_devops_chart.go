@@ -62,8 +62,13 @@ func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte
 }
 
 func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+	// This is the baseline resolution before any --runtime-image `erun open`
+	// flag is applied (applyRuntimeDeployImageOverride re-resolves through the
+	// always-explicit ResolvePublishedDevopsDeploySpec when one is passed), so
+	// any RuntimeImage read here is a persisted memo, never this invocation's
+	// own explicit choice.
 	if target.RemoteRepo() {
-		return resolvePublishedDevopsDeploySpec(ctx, target, "", "")
+		return resolvePublishedDevopsDeploySpec(ctx, target, "", "", false)
 	}
 
 	for _, componentName := range runtimeComponentNames(target.Tenant) {
@@ -77,7 +82,7 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 		}
 	}
 
-	return resolvePublishedDevopsDeploySpec(ctx, target, "", "")
+	return resolvePublishedDevopsDeploySpec(ctx, target, "", "", false)
 }
 
 // runtimeComponentNames lists an environment's candidate runtime chart names
