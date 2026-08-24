@@ -707,8 +707,7 @@ func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, ve
 			return image
 		}
 		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
-		defaultImage := defaultDeployRuntimeImageName(registry, version, tenant, staleChartName)
-		stale := staleRuntimeImageTrace(image, defaultImage, staleChartName, version, strings.TrimSpace(staleChartVersion))
+		stale := staleRuntimeImageTrace(image, staleChartName, version, strings.TrimSpace(staleChartVersion))
 		if stale == "" {
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 			return image
@@ -719,42 +718,34 @@ func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, ve
 }
 
 // staleRuntimeImageTrace explains why a saved runtimeimage override cannot be
-// honored on this deploy, or "" when it can be. Two shapes are stale by
-// construction, both a leftover pin rather than a deliberate current choice:
+// honored on this deploy, or "" when it can be. A runtimeimage is stale only
+// when it is provably wrong for the line this deploy is on: it names the
+// stock erun-devops image on a deploy that is not on erun's own release line
+// (a tenant umbrella, which publishes its own image beside its own chart, or
+// a chart stated at its own version, which is the operator saying so
+// outright). Neither line publishes the stock image at its version, so a
+// runtimeimage still naming it is a leftover from when the env rode the
+// shared chart, and honoring it would pin a tag that never existed
+// (ImagePullBackOff).
 //
-//   - It names the stock erun-devops image on a deploy that is not on erun's
-//     own release line: a tenant umbrella, which publishes its own image beside
-//     its own chart, or a chart stated at its own version, which is the operator
-//     saying so outright. Neither line publishes the stock image at its
-//     version, so a runtimeimage still naming it is a leftover from when the env
-//     rode the shared chart, and honoring it would pin a tag that never existed
-//     (ImagePullBackOff).
-//   - It names the very image this deploy's own line already resolves with no
-//     override at all (defaultImage) — just at some other tag. That pin is
-//     provably redundant: defaultDeployRuntimeImage would have named the right
-//     image unaided, so the saved tag can only be stale.
-func staleRuntimeImageTrace(image, defaultImage, chartName, version, chartVersion string) string {
-	if runtimeImageIsStockDevops(image) {
-		switch {
-		case chartName != "" && chartName != DevopsComponentName:
-			return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
-		case chartVersion != "" && chartVersion != version:
-			return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
-		}
+// A recorded image naming a *different tag* than the version this deploy
+// would otherwise guess is never treated as stale on that basis alone: a
+// tenant's own image is versioned on the tenant's own release line, so a tag
+// that disagrees with erun's version is the expected, correct case, not
+// evidence of drift. Guessing that it names "an older tag" and silently
+// substituting the erun-version-tagged guess pins a tag the tenant's registry
+// may never have published at all.
+func staleRuntimeImageTrace(image, chartName, version, chartVersion string) string {
+	if !runtimeImageIsStockDevops(image) {
 		return ""
 	}
-	if defaultImage == "" || image == defaultImage || !sameImageRepository(image, defaultImage) {
-		return ""
+	switch {
+	case chartName != "" && chartName != DevopsComponentName:
+		return "deploy: ignoring stale runtimeimage " + image + " on the " + chartName + " umbrella deploy (the stock " + DevopsComponentName + " image is not published on this version line); defaulting to the umbrella's own image"
+	case chartVersion != "" && chartVersion != version:
+		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
 	}
-	return "deploy: ignoring stale runtimeimage " + image + " (this deploy's own line already publishes " + defaultImage + "; the saved pin just names an older tag); defaulting to " + defaultImage
-}
-
-// sameImageRepository reports whether two tagged image references name the
-// same registry + image, ignoring the tag itself.
-func sameImageRepository(a, b string) bool {
-	registryA, nameA, _, okA := parseDockerImageReference(a)
-	registryB, nameB, _, okB := parseDockerImageReference(b)
-	return okA && okB && registryA == registryB && nameA == nameB
+	return ""
 }
 
 // defaultDeployRuntimeImageName names the image the deploy's own line

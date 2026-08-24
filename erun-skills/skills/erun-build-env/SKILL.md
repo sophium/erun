@@ -247,20 +247,31 @@ maintenance mode; absent → the scaffold flow above.
 - If the Step 6 umbrella is present, backfill a missing per-env
   `values.<env>.yaml`, a committed `Chart.lock`, or the gitignored `charts/*.tgz`.
 
-**Upgrade** to one erun version across every pin — the env's current
-`runtimeversion` (it moves with `erun upgrade`) or an explicit target (Step 1):
+**Upgrade** the module's *erun* pins — the base it extends — to the env's
+current `runtimeversion` (it moves with `erun upgrade`) or an explicit target
+(Step 1). `erun pin` does exactly this and is the preferred way to do it
+(`erun-pin-version` skill); by hand, the two erun pin sites are:
 
 - Re-pin the Dockerfile `FROM ghcr.io/sophium/erun-devops:<version>`.
-- Re-pin the module `VERSION` to that version.
 - If the Step 6 umbrella is present, re-pin its `erun-devops` dependency
   `version:` in `Chart.yaml` to the same version, then `helm dependency update` to
   regenerate `Chart.lock` for the new version (`helm dependency build` errors on a
   stale lock); commit the updated lock.
-- `erun build` to rebuild and push both arches, then confirm the env's
-  `runtimeimage` still points at the module (Step 5).
 
-Bump every pin together — the whole module rides one erun version. Re-running is
-safe: it edits in place and only moves version pins and fills gaps.
+Then `erun build` to rebuild and push both arches, and confirm the env's
+`runtimeimage` still points at the module (Step 5).
+
+**Never re-pin the module `VERSION` to the erun version.** The module's own
+`VERSION` is the tenant's own release line — it identifies *this image's own
+content* (the toolchain choices baked into the Dockerfile), which changes on
+its own schedule and often not at all when erun moves. Only bump it when the
+image's own content changes (Step 3); `erun pin` never touches it, and neither
+should you. Conflating the two is exactly the bug `erun deploy` used to have:
+it invented `<tenant>-devops:<erun-version>` as the image tag instead of using
+what was actually published, so redeploys silently discarded a real,
+tenant-versioned `runtimeimage` in favor of a tag that was never pushed.
+Re-running the erun-pin steps above is safe: they edit in place and only move
+the erun pins.
 
 **Clean up.** If the module was renamed or relocated (a stray `<old>-devops/`, or a
 second `docker/<oldname>/` under it), remove the superseded copy after previewing so
