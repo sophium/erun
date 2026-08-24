@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -53,77 +51,211 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		dashboard.APIError = "get cloud bearer token: empty token"
 		return dashboard, nil
 	}
-	usernameHint := a.tenantDashboardUsernameHint(token.Alias)
-	client := &http.Client{Timeout: 10 * time.Second}
-	loadTenantDashboardData(ctx, client, apiURL, bearer, usernameHint, &dashboard)
+	// The dashboard reaches the hosted platform through the shared client every
+	// other transport uses, so its wire shapes, error mapping, and header
+	// handling cannot drift from the CLI's.
+	client := eruncommon.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
+		WithUsernameHint(a.tenantDashboardUsernameHint(token.Alias))
+	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
+	defer cancel()
+	loadTenantDashboardData(requestCtx, client, &dashboard)
 	return dashboard, nil
 }
 
-func loadTenantDashboardData(ctx context.Context, client *http.Client, apiURL, bearer, usernameHint string, dashboard *uiTenantDashboard) {
-	user, err := loadTenantDashboardJSON[uiTenantDashboardUser](ctx, client, apiURL, "/v1/whoami", bearer, usernameHint)
+const tenantDashboardTimeout = 10 * time.Second
+
+// Panel tab ids, shared with the frontend's tab strip.
+const (
+	tenantDashboardTabUsers  = "users"
+	tenantDashboardTabQueue  = "queue"
+	tenantDashboardTabBuilds = "builds"
+	tenantDashboardTabAudit  = "audit"
+)
+
+// The API reads each panel is made of, in canonical route-template form — the
+// same form the platform reports capabilities in.
+const (
+	tenantDashboardReadWhoami      = "GET /v1/whoami"
+	tenantDashboardReadReviews     = "GET /v1/reviews"
+	tenantDashboardReadMergeQueue  = "GET /v1/reviews/merge-queue"
+	tenantDashboardReadBuilds      = "GET /v1/reviews/{review_id}/builds"
+	tenantDashboardReadAuditEvents = "GET /v1/audit-events"
+)
+
+// loadTenantDashboardData resolves every panel independently. One panel the
+// caller may not read, or one call that fails, must not blank the panels that
+// worked — and a panel the caller may not read must not read as an empty one.
+func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard) {
+	whoami, err := client.Whoami(ctx)
 	if err != nil {
-		dashboard.APIError = err.Error()
+		// Identity is the dashboard's own precondition: without it there is no
+		// capability set to gate the remaining panels honestly.
+		dashboard.APIError = tenantDashboardIdentityError(err)
 		return
 	}
-	dashboard.User = &user
-	reviews, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews", bearer, usernameHint)
-	if err != nil {
-		dashboard.APIError = err.Error()
+	dashboard.User = &uiTenantDashboardUser{
+		TenantID: whoami.TenantID,
+		UserID:   whoami.UserID,
+		Username: whoami.Username,
+		Roles:    whoami.Roles,
+		Issuer:   whoami.Issuer,
+		Subject:  whoami.Subject,
+	}
+	dashboard.Panels = []uiTenantDashboardPanel{{Tab: tenantDashboardTabUsers}}
+	capabilities := whoami.Capabilities
+	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard)
+	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard)
+	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
+}
+
+func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabQueue}
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue); restricted != "" {
+		panel.Restricted = restricted
+		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	dashboard.Reviews = reviews
-	mergeQueue, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews/merge-queue", bearer, usernameHint)
+	// The merge queue is per target branch; the dashboard shows the default one
+	// the API picks for an unspecified branch, as it always has.
+	reviews, err := client.ListMergeQueue(ctx, "")
 	if err != nil {
-		dashboard.APIError = err.Error()
+		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
+	} else {
+		dashboard.MergeQueue = tenantDashboardReviews(reviews)
+	}
+	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
+	// Builds are read per review, so the panel needs both reads.
+	for _, read := range []string{tenantDashboardReadReviews, tenantDashboardReadBuilds} {
+		if restricted := restrictedTenantDashboardRead(capabilities, read); restricted != "" {
+			panel.Restricted = restricted
+			dashboard.Panels = append(dashboard.Panels, panel)
+			return
+		}
+	}
+	reviews, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{})
+	if err != nil {
+		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
+		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	dashboard.MergeQueue = mergeQueue
-	builds, err := loadTenantDashboardBuilds(ctx, client, apiURL, bearer, usernameHint, reviews)
-	if err != nil {
-		dashboard.APIError = err.Error()
-		return
+	dashboard.Reviews = tenantDashboardReviews(reviews)
+	builds := make([]uiTenantDashboardBuild, 0)
+	for _, review := range reviews {
+		reviewID := strings.TrimSpace(review.ReviewID)
+		if reviewID == "" {
+			continue
+		}
+		reviewBuilds, err := client.ListBuilds(ctx, reviewID)
+		if err != nil {
+			panel.Error = tenantDashboardReadError(tenantDashboardReadBuilds, err)
+			break
+		}
+		for _, build := range reviewBuilds {
+			builds = append(builds, uiTenantDashboardBuild{
+				BuildID:    build.BuildID,
+				TenantID:   build.TenantID,
+				ReviewID:   build.ReviewID,
+				ReviewName: strings.TrimSpace(review.Name),
+				Successful: build.Successful,
+				CommitID:   build.CommitID,
+				Version:    build.Version,
+				CreatedAt:  tenantDashboardTime(build.CreatedAt),
+				UpdatedAt:  tenantDashboardTime(build.UpdatedAt),
+			})
+		}
 	}
 	dashboard.Builds = builds
-	auditEvents, err := loadTenantDashboardJSON[uiAuditEventsResponse](ctx, client, apiURL, "/v1/audit-events", bearer, usernameHint)
-	if err != nil {
-		dashboard.APIError = err.Error()
+	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+func loadTenantDashboardAuditEvents(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabAudit}
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAuditEvents); restricted != "" {
+		panel.Restricted = restricted
+		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	dashboard.AuditEvents = tenantDashboardAuditEvents(auditEvents.Events)
+	page, err := client.ListAuditEvents(ctx, eruncommon.PlatformAuditEventFilter{})
+	if err != nil {
+		panel.Error = tenantDashboardReadError(tenantDashboardReadAuditEvents, err)
+	} else {
+		dashboard.AuditEvents = tenantDashboardAuditEvents(page.Events)
+	}
+	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// uiAuditEventsResponse mirrors the GET /v1/audit-events response shape.
-// cliParameters and mcpToolParameters are deliberately absent: the API never
-// returns them, since a tool such as cloud_inject_aws_credentials takes
-// credentials as arguments.
-type uiAuditEventsResponse struct {
-	Events []uiAuditEvent `json:"events"`
+// restrictedTenantDashboardRead reports the read the caller lacks, or "" when
+// the panel may be attempted. A platform that reported no capability set at all
+// leaves every read attemptable: the call then reports its own refusal, which is
+// still better than hiding a surface the caller can use.
+func restrictedTenantDashboardRead(capabilities eruncommon.PlatformCapabilities, read string) string {
+	if !capabilities.Known() {
+		return ""
+	}
+	method, apiPath, found := strings.Cut(read, " ")
+	if !found || capabilities.Allows(method, apiPath) {
+		return ""
+	}
+	return read
 }
 
-type uiAuditEvent struct {
-	Type           string `json:"type"`
-	ExternalUserID string `json:"externalUserId"`
-	APIMethod      string `json:"apiMethod,omitempty"`
-	APIPath        string `json:"apiPath,omitempty"`
-	CLICommand     string `json:"cliCommand,omitempty"`
-	MCPTool        string `json:"mcpTool,omitempty"`
-	CreatedAt      string `json:"createdAt"`
+func tenantDashboardReadError(read string, err error) string {
+	return fmt.Sprintf("load tenant dashboard %s: %v", read, err)
 }
 
-func tenantDashboardAuditEvents(events []uiAuditEvent) []uiTenantDashboardAudit {
+// tenantDashboardIdentityError says what a refused identity read means for the
+// operator. The identity read is authorized like any other route, so a user with
+// no permissions at all is refused it — and "http 403: Forbidden" is the state
+// of their access, not a fault they can act on as written.
+func tenantDashboardIdentityError(err error) string {
+	switch {
+	case errors.Is(err, eruncommon.ErrPlatformForbidden):
+		return "You do not have access to this tenant's dashboard. Ask an administrator for access."
+	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
+		return "This tenant's platform did not accept the signed-in identity. Sign in to the tenant's cloud provider again."
+	default:
+		return tenantDashboardReadError(tenantDashboardReadWhoami, err)
+	}
+}
+
+func tenantDashboardReviews(reviews []eruncommon.PlatformReview) []uiTenantDashboardReview {
+	converted := make([]uiTenantDashboardReview, 0, len(reviews))
+	for _, review := range reviews {
+		converted = append(converted, uiTenantDashboardReview{
+			ReviewID:          review.ReviewID,
+			TenantID:          review.TenantID,
+			Name:              review.Name,
+			TargetBranch:      review.TargetBranch,
+			SourceBranch:      review.SourceBranch,
+			Status:            review.Status,
+			LastFailedBuildID: review.LastFailedBuildID,
+			LastReadyBuildID:  review.LastReadyBuildID,
+			LastMergedBuildID: review.LastMergedBuildID,
+			CreatedAt:         tenantDashboardTime(review.CreatedAt),
+			UpdatedAt:         tenantDashboardTime(review.UpdatedAt),
+		})
+	}
+	return converted
+}
+
+func tenantDashboardAuditEvents(events []eruncommon.PlatformAuditEvent) []uiTenantDashboardAudit {
 	converted := make([]uiTenantDashboardAudit, 0, len(events))
 	for _, event := range events {
 		converted = append(converted, uiTenantDashboardAudit{
 			Type:      event.Type,
 			Actor:     event.ExternalUserID,
 			Action:    tenantDashboardAuditAction(event),
-			CreatedAt: event.CreatedAt,
+			CreatedAt: tenantDashboardTime(event.CreatedAt),
 		})
 	}
 	return converted
 }
 
-func tenantDashboardAuditAction(event uiAuditEvent) string {
+func tenantDashboardAuditAction(event eruncommon.PlatformAuditEvent) string {
 	switch event.Type {
 	case "API":
 		return strings.TrimSpace(event.APIMethod + " " + event.APIPath)
@@ -136,73 +268,17 @@ func tenantDashboardAuditAction(event uiAuditEvent) string {
 	}
 }
 
+func tenantDashboardTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func (a *App) tenantDashboardUsernameHint(alias string) string {
 	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, strings.TrimSpace(alias))
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(provider.Username)
-}
-
-func loadTenantDashboardBuilds(ctx context.Context, client *http.Client, apiURL, bearer string, usernameHint string, reviews []uiTenantDashboardReview) ([]uiTenantDashboardBuild, error) {
-	builds := make([]uiTenantDashboardBuild, 0)
-	reviewNames := make(map[string]string, len(reviews))
-	for _, review := range reviews {
-		reviewID := strings.TrimSpace(review.ReviewID)
-		if reviewID == "" {
-			continue
-		}
-		reviewNames[reviewID] = strings.TrimSpace(review.Name)
-		reviewBuilds, err := loadTenantDashboardJSON[[]uiTenantDashboardBuild](ctx, client, apiURL, "/v1/reviews/"+url.PathEscape(reviewID)+"/builds", bearer, usernameHint)
-		if err != nil {
-			return nil, err
-		}
-		for _, build := range reviewBuilds {
-			build.ReviewName = reviewNames[build.ReviewID]
-			builds = append(builds, build)
-		}
-	}
-	return builds, nil
-}
-
-func loadTenantDashboardJSON[T any](ctx context.Context, client *http.Client, apiURL, apiPath, bearer string, usernameHint string) (T, error) {
-	var result T
-	endpoint, err := tenantDashboardURL(apiURL, apiPath)
-	if err != nil {
-		return result, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return result, err
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	if usernameHint = strings.TrimSpace(usernameHint); usernameHint != "" {
-		req.Header.Set("X-ERun-Username", usernameHint)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return result, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return result, fmt.Errorf("load tenant dashboard %s: %s", apiPath, resp.Status)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return result, fmt.Errorf("parse tenant dashboard %s: %w", apiPath, err)
-	}
-	return result, nil
-}
-
-func tenantDashboardURL(apiURL, apiPath string) (string, error) {
-	base, err := url.Parse(strings.TrimSpace(apiURL))
-	if err != nil {
-		return "", err
-	}
-	if base.Scheme == "" || base.Host == "" {
-		return "", fmt.Errorf("tenant API URL is invalid: %s", apiURL)
-	}
-	base.Path = strings.TrimRight(base.Path, "/") + "/" + strings.TrimLeft(apiPath, "/")
-	base.RawQuery = ""
-	base.Fragment = ""
-	return base.String(), nil
 }

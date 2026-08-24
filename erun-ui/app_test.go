@@ -1873,7 +1873,7 @@ func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	assertPrimaryCloudDashboardAuditEvents(t, dashboard.AuditEvents)
-	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/audit-events" {
+	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews/merge-queue,/v1/reviews,/v1/reviews/review-1/builds,/v1/audit-events" {
 		t.Fatalf("unexpected API requests: %+v", requests)
 	}
 }
@@ -1927,7 +1927,7 @@ func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	if !strings.Contains(dashboard.APIError, "/v1/whoami: 401") || dashboard.APILog != "auth rejected token" {
+	if !strings.Contains(dashboard.APIError, "did not accept the signed-in identity") || dashboard.APILog != "auth rejected token" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 }

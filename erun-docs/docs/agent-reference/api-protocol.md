@@ -169,12 +169,35 @@ Returns the resolved identity for the bearer token — useful for Agents verifyi
   "userId": "019a7fa5-c2c0-7c55-bc70-714873a71f11",
   "username": "agent-bot-a",            // omitted when no user repository is wired
   "roles": ["ReadAll", "WriteAll"],     // omitted when no user repository is wired
+  "capabilities": [                     // see "The capability set" below
+    { "method": "GET", "path": "/v1/reviews" },
+    { "method": "GET", "path": "/v1/reviews/{review_id}" }
+  ],
   "issuer": "https://issuer.example.com/oauth2/default",
   "subject": "agent-bot-a"
 }
 ```
 
 Errors: standard 401/403 only — no body-validation errors (the endpoint takes no input).
+
+### The capability set {#capability-set}
+
+`capabilities` is the caller's **effective permission set**: every registered route this caller would be let through to, already expanded from the exact and pattern rules their roles carry. It exists so a client can render only what the caller can actually do — and say why when it cannot — instead of showing an empty list or a button that fails with a `403` after the click.
+
+Its contract:
+
+| Property | Rule |
+|---|---|
+| Shape | An array of `{ "method", "path" }`. `path` is the **canonical route template** (`/v1/reviews/{review_id}`), the same form `role_permissions.api_path` and the audit trail use — never a concrete request URL. |
+| Membership | A pair is present if and only if authorization would permit it. It is computed by the same query and the same matcher the authorization middleware runs per request, so the set and enforcement cannot drift. Pattern rules (`api_method_pattern` / `api_path_pattern`) resolve identically here, anchors included. |
+| Candidates | Only routes this API instance actually serves. A route that is not registered (because its executor is unconfigured, say) is not in the set. |
+| Empty vs absent | `[]` means the caller may do nothing — an answer. `null`, or the field missing entirely, means this platform did not report a capability set at all; a client must then attempt the call and report the server's own refusal, rather than hide a surface the caller may in fact be able to use. |
+| Authority | Advisory, for rendering only. The server re-evaluates every request; a stale set never grants anything. |
+| Never derive from `roles` | A role's name says nothing about what a tenant granted it, so a surface gated on the name is wrong for every custom role and wrong again the moment a role's permissions change. `capabilities` is the only input. |
+
+Errors: when the capability set cannot be resolved, `GET /v1/whoami` fails with `500` rather than answering without one — an omitted set would otherwise read as "you may do nothing" and hide surfaces the caller can use. `GET /v1/whoami` is itself authorized like every other route, so a caller holding no permissions at all is refused it with `403` and never reaches an empty set; a client has to treat that refusal as "you have no access to this tenant", not as a transport fault.
+
+For how a client is expected to degrade from this set — a list the caller may not read is not an empty list, an action they may not perform is not an enabled button — see the permission-degradation rules in `erun-ui/AGENTS.md` and `erun-console/AGENTS.md`.
 
 ### `PATCH /v1/tenant-issuers`
 

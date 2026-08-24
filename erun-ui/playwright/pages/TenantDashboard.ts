@@ -12,8 +12,26 @@ export class TenantDashboard {
     await this.page.getByRole('tab', { name: 'Audit log' }).waitFor({ state: 'visible' });
   }
 
+  // waitForOpenRestricted anchors on a tab that survives permission gating, for
+  // the cases where the dashboard's other tabs are deliberately absent.
+  async waitForOpenRestricted(): Promise<void> {
+    await this.page.getByRole('tab', { name: 'API log' }).waitFor({ state: 'visible' });
+  }
+
   async selectTab(name: TenantDashboardTab): Promise<void> {
     await this.page.getByRole('tab', { name }).click();
+  }
+
+  tab(name: TenantDashboardTab): Locator {
+    return this.page.getByRole('tab', { name });
+  }
+
+  tabs(): Locator {
+    return this.page.getByRole('tab');
+  }
+
+  restrictedAccessNote(): Locator {
+    return this.page.getByText('Some panels are hidden because you do not have access to');
   }
 
   async clickRefresh(): Promise<void> {

@@ -163,6 +163,8 @@ export interface UITenantDashboard {
   tenant: string;
   environment?: string;
   apiUrl?: string;
+  // apiError is a whole-dashboard failure (the caller's identity could not be
+  // read). A single panel's own failure lives on that panel.
   apiError?: string;
   apiLog?: string;
   apiLogError?: string;
@@ -171,6 +173,16 @@ export interface UITenantDashboard {
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
   auditEvents?: UITenantDashboardAudit[];
+  panels?: UITenantDashboardPanel[];
+}
+
+// UITenantDashboardPanel is one panel's own outcome: `restricted` names the API
+// read the signed-in user lacks, so a panel they may not see is never rendered
+// as an empty one.
+export interface UITenantDashboardPanel {
+  tab: string;
+  restricted?: string;
+  error?: string;
 }
 
 export interface UITenantDashboardUser {

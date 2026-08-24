@@ -207,9 +207,12 @@ type uiTenantDashboardInput struct {
 }
 
 type uiTenantDashboard struct {
-	Tenant      string                    `json:"tenant"`
-	Environment string                    `json:"environment,omitempty"`
-	APIURL      string                    `json:"apiUrl,omitempty"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment,omitempty"`
+	APIURL      string `json:"apiUrl,omitempty"`
+	// APIError is a whole-dashboard failure: the caller's identity could not be
+	// read, so no panel can be resolved or gated. A single panel's own failure
+	// belongs on that panel, not here.
 	APIError    string                    `json:"apiError,omitempty"`
 	APILog      string                    `json:"apiLog,omitempty"`
 	APILogError string                    `json:"apiLogError,omitempty"`
@@ -218,6 +221,19 @@ type uiTenantDashboard struct {
 	MergeQueue  []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
 	Builds      []uiTenantDashboardBuild  `json:"builds,omitempty"`
 	AuditEvents []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
+	Panels      []uiTenantDashboardPanel  `json:"panels,omitempty"`
+}
+
+// uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab
+// strip tell "there is nothing here" apart from "you may not look": a panel the
+// caller lacks the permission for carries Restricted and is not rendered, while
+// one that failed carries Error and does not blank its neighbours.
+type uiTenantDashboardPanel struct {
+	Tab string `json:"tab"`
+	// Restricted names the API read the caller lacks, in canonical form
+	// ("GET /v1/audit-events"), so the reason can be shown rather than inferred.
+	Restricted string `json:"restricted,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type uiTenantDashboardUser struct {
