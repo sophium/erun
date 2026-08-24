@@ -632,6 +632,20 @@ type startSessionResult struct {
 	// deploy) instead of a foreground PTY session. There is no Local tab to
 	// activate; progress and completion surface through the activity queue.
 	Orchestrated bool `json:"orchestrated,omitempty"`
+	// Occupancy lists the leases already holding the environment when an
+	// unconfirmed AI session start found it occupied: SessionID is 0 and no
+	// session was started. The caller shows who is already here and, if the
+	// user wants a second agent anyway, retries with confirmed=true.
+	Occupancy []uiEnvironmentLease `json:"occupancy,omitempty"`
+}
+
+// uiEnvironmentLease is one activity lease surfaced from
+// eruncommon.EnvironmentActivityLease so the desktop can name the job already
+// working in an environment. PID and lease ID are implementation detail, not
+// shown; SecondsHeld is precomputed so the renderer never redoes the time math.
+type uiEnvironmentLease struct {
+	Name        string `json:"name"`
+	SecondsHeld int64  `json:"secondsHeld,omitempty"`
 }
 
 type deleteEnvironmentResult struct {
@@ -739,6 +753,11 @@ type uiIdleStatus struct {
 	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
 	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
 	Markers            []uiIdleMarker `json:"markers,omitempty"`
+	// Leases are the work claims currently holding the environment (an
+	// orchestrator or CLI job running via job_start/AttachEnvironmentJob) — not
+	// this desktop's own interactive AI/ERun/Local sessions, which never take
+	// one. A non-empty list is a coexisting agent the AI tab does not manage.
+	Leases []uiEnvironmentLease `json:"leases,omitempty"`
 	// StopPendingSince carries the RFC3339 timestamp at which this env
 	// first became StopEligible. When set, the desktop has armed the
 	// grace-period warning and the user has SecondsUntilForcedStop

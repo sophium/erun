@@ -11,6 +11,7 @@ export { DebugPanel } from './DebugPanel';
 export { ActivityQueueDrawer } from './ActivityQueueDrawer';
 export { AutoStartPromptDialog } from './AutoStartPromptDialog';
 export { CloseConfirmDialog } from './CloseConfirmDialog';
+export { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 export { OrchestratorDialog } from './OrchestratorDialog';
 export { OutputsDialog } from './OutputsDialog';
 export {

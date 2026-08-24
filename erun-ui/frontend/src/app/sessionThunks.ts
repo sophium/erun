@@ -2,7 +2,6 @@ import type { StartSessionResult, UISelection } from '@/types';
 
 import {
   CloseSession,
-  StartAISession,
   StartCreateVersionSession,
   StartDeploySession,
   StartInitialDeploySession,
@@ -10,6 +9,7 @@ import {
   StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
+import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { resolveAutoStartGate } from './autoStartGate';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
@@ -47,9 +47,14 @@ const spawnDefaultTab =
     rows: number,
   ): AppThunk<Promise<void>> =>
   async (dispatch) => {
-    const start = kind === 'local' ? StartLocalSession : StartAISession;
     try {
-      const result = (await start(runSelection, 0, cols, rows)) as StartSessionResult;
+      if (kind === 'ai') {
+        await dispatch(
+          startAITabOrPrompt({ key, selection: runSelection, slot: 0, cols, rows, label }),
+        );
+        return;
+      }
+      const result = (await StartLocalSession(runSelection, 0, cols, rows)) as StartSessionResult;
       dispatch(recordTab(key, result.sessionId, result.slot ?? 0, kind, label));
     } catch {
       // Tool unavailable; future env opens will retry.

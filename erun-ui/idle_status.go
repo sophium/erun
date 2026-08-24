@@ -103,12 +103,31 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopBlockedReason:   strings.TrimSpace(status.StopBlockedReason),
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
+		Leases:              environmentLeasesToUI(status.Leases, time.Now()),
 		// The desktop only observes the pending-stop fields, never computing
 		// them, so the pill renders the same state whichever client armed the stop.
 		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
 		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
 		GracePeriodSeconds:     status.GracePeriodSeconds,
 	}
+}
+
+// environmentLeasesToUI carries the held leases through to the desktop so it
+// can name the job already working in an environment — the data idle status
+// already resolves, previously dropped on the way to the UI contract.
+func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
+	if len(leases) == 0 {
+		return nil
+	}
+	out := make([]uiEnvironmentLease, 0, len(leases))
+	for _, lease := range leases {
+		entry := uiEnvironmentLease{Name: strings.TrimSpace(lease.Name)}
+		if !lease.StartedAt.IsZero() && now.After(lease.StartedAt) {
+			entry.SecondsHeld = int64(now.Sub(lease.StartedAt) / time.Second)
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {

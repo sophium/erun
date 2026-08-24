@@ -205,17 +205,24 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 // StartAISession spawns the AI tab's `erun open` PTY under the same per-env
 // queue gating as StartSession, so an AI tab opened alongside an ERun tab
 // cannot trigger a duplicate build+deploy.
-func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
+//
+// A fresh (non-reattach) start checks the environment's activity leases first:
+// this desktop's own AI/ERun/Local sessions never take one, so any held lease
+// names a job (an orchestrator or CLI agent) already competing for the same
+// pod's CPU, memory and disk. Unless confirmed is true, that start is reported
+// back as occupied rather than launched, so starting a second agent stays a
+// deliberate choice instead of a silent one.
+func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
 	}
 	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
-		return a.runAISession(ctx, selection, slot, cols, rows)
+		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
 	})
 }
 
-func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
+func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, *managedTerminal, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
@@ -239,6 +246,17 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		}, existing, nil
 	}
 	a.mu.Unlock()
+
+	if !confirmed {
+		if occupants := a.aiSessionOccupants(selection); len(occupants) > 0 {
+			return startSessionResult{
+				Selection: selection,
+				Slot:      slot,
+				Kind:      string(sessionKindAI),
+				Occupancy: occupants,
+			}, nil, nil
+		}
+	}
 
 	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
@@ -289,6 +307,18 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		Slot:      slot,
 		Kind:      string(sessionKindAI),
 	}, managed, nil
+}
+
+// aiSessionOccupants reuses the same idle-status resolution the titlebar polls
+// (local-vs-remote, merged) to read the environment's held leases. A failed
+// read fails open — returning no occupants rather than blocking the start —
+// because this is a best-effort notice, not an access check.
+func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
+	status, err := a.LoadIdleStatus(selection)
+	if err != nil {
+		return nil
+	}
+	return status.Leases
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {

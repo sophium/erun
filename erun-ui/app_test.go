@@ -3845,6 +3845,30 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	}
 }
 
+// TestIdleStatusToUICarriesLeases pins erun#1221: idle status already resolves
+// the leases holding an environment, but the UI projection dropped them before
+// this fix — the AI tab occupancy notice and any future consumer (#1245,
+// #1241) both read this field, so a silent regression here breaks them too.
+func TestIdleStatusToUICarriesLeases(t *testing.T) {
+	now := time.Now()
+	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+		Policy: eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Leases: []eruncommon.EnvironmentActivityLease{
+			{ID: "job-fix-1201", Name: "job-fix-1201", PID: 4242, StartedAt: now.Add(-90 * time.Second)},
+		},
+	})
+	if len(status.Leases) != 1 {
+		t.Fatalf("expected 1 lease carried through, got %+v", status.Leases)
+	}
+	lease := status.Leases[0]
+	if lease.Name != "job-fix-1201" {
+		t.Fatalf("unexpected lease name: %q", lease.Name)
+	}
+	if lease.SecondsHeld < 89 || lease.SecondsHeld > 91 {
+		t.Fatalf("expected ~90 seconds held, got %d", lease.SecondsHeld)
+	}
+}
+
 func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -4423,7 +4447,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24)
+	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
@@ -4696,7 +4720,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	first, err := app.StartAISession(selection, 0, 80, 24)
+	first, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("first StartAISession failed: %v", err)
 	}
@@ -4729,7 +4753,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		t.Fatalf("expected streamSession to drop the dead AI session from a.sessions after the cloud-context gate refused respawn")
 	}
 
-	second, err := app.StartAISession(selection, 0, 80, 24)
+	second, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("second StartAISession failed: %v", err)
 	}
@@ -4931,7 +4955,7 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
 

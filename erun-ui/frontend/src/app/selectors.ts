@@ -74,6 +74,20 @@ export const selectActiveSlotForSelection = (state: RootState, selection: UISele
   return (active ?? first).slot;
 };
 
+// selectActiveTabIsAI reports whether the terminal pane's currently-selected
+// tab (for the currently-selected environment) is the AI tab — used to gate
+// the "another agent is already here" persistent indicator to the one tab it
+// actually applies to.
+export const selectActiveTabIsAI = (state: RootState): boolean => {
+  const selection = state.selection.selected;
+  if (!selection) {
+    return false;
+  }
+  const tabs = state.terminal.tabsByEnv[selectionKey(selection)] ?? [];
+  const active = tabs.find((tab) => tab.sessionId === state.terminal.sessionId);
+  return active?.kind === 'ai';
+};
+
 // selectManageRuntimeImage resolves the runtime image for the version being
 // deployed. It resolves against the dialog-owned suggestion list — the same one
 // the picker renders (dialog.versionSuggestions), NOT the shared tenants slice,
