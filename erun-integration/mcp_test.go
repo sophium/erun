@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -98,6 +99,10 @@ type fakeMCPRequest struct {
 	// Tool is the tool a tools/call named, which is what proves a caller reached
 	// the intended surface rather than some other one.
 	Tool string
+	// IdleProbe reports whether the request carried the header that exempts it
+	// from the environment's activity accounting — set by a diagnostic read, and
+	// never by a call that can mutate the environment.
+	IdleProbe bool
 }
 
 func (e *fakeMCPEdge) start(t *testing.T, port int) {
@@ -138,6 +143,7 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Authbearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "),
 		SessionID:  r.Header.Get("Mcp-Session-Id"),
 		Tool:       request.Params.Name,
+		IdleProbe:  r.Header.Get(common.MCPIdleProbeHeader) == "true",
 	})
 	e.mu.Unlock()
 

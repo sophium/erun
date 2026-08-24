@@ -266,7 +266,7 @@ The structured tools take no arguments unless noted. Outputs are typed JSON.
 
 ### `idle`
 
-Resolves the env's idle policy and reports its current activity. Useful for an Agent to decide whether to stop or keep going.
+Resolves the env's idle policy and reports its current activity. Useful for an Agent to decide whether to stop or keep going. Asking never counts as activity itself, however often it's polled — see [Agent reference · Idle policy](/agent-reference/idle-policy#last_terminal_input) for the full list of tools this applies to.
 
 ```jsonc
 {

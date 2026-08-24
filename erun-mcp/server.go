@@ -76,7 +76,7 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 
 func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("X-Erun-Idle-Probe") == "true" {
+		if req.Header.Get(eruncommon.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
 			return
 		}

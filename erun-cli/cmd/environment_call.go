@@ -26,7 +26,13 @@ func environmentTargetsItself() bool {
 // its structured result. The second return reports whether a call was actually
 // made: a dry run resolves and traces the plan without reaching the edge, so the
 // plan stays readable for an environment that is not currently open.
-func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, tool string, arguments map[string]any) (T, bool, error) {
+//
+// idleProbe must be true only for a tool the caller knows is read-only (idle,
+// job_status, job_output, job_await, activity_lease_list): the probe header it
+// sets exempts the whole request from the environment's activity accounting, so
+// setting it for a tool that can mutate the environment (job_start, job_cancel,
+// activity_lease_take, ...) would let driving the environment read as idle.
+func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, tool string, arguments map[string]any, idleProbe bool) (T, bool, error) {
 	var decoded T
 	if arguments == nil {
 		arguments = map[string]any{}
@@ -39,7 +45,7 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	if commandCtx.DryRun {
 		return decoded, false, nil
 	}
-	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, arguments)
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, arguments, idleProbe)
 	if err != nil {
 		return decoded, false, mcpEdgeErrorWithExitCode(target, err)
 	}

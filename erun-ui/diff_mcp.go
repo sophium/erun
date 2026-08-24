@@ -16,7 +16,7 @@ type idleProbeRoundTripper struct {
 
 func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set("X-Erun-Idle-Probe", "true")
+	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport

@@ -29,7 +29,7 @@ const mcpChannelUnreachableExitCode = 126
 // hand-rolled retry loop falls into — probing the port binding is worthless
 // (a stale forward still accepts the connection), and a bare `erun open`
 // would silently start an environment the operator deliberately stopped.
-func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any) (common.MCPToolCallResult, error) {
+func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
 	call := func() (common.MCPToolCallResult, error) {
 		return common.CallMCPTool(ctx, common.MCPToolCallParams{
 			Endpoint:      target.endpoint,
@@ -37,6 +37,7 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, tar
 			ClientVersion: currentBuildInfo().Version,
 			Tool:          tool,
 			Arguments:     arguments,
+			IdleProbe:     idleProbe,
 		})
 	}
 	result, err := call()
@@ -173,7 +174,10 @@ func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOp
 		return nil
 	}
 
-	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments)
+	// Not an idle probe: this command calls a caller-named tool, and whether that
+	// tool is read-only is not something the CLI can know generically — its own
+	// help text says as much ("A tool can change the environment").
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
 	if err != nil {
 		return mcpEdgeErrorWithExitCode(target, err)
 	}
@@ -213,6 +217,7 @@ func listMCPToolsWithReattach(ctx context.Context, commandCtx common.Context, ta
 			Endpoint:      target.endpoint,
 			MintToken:     mcpEdgeTokenMinter(target),
 			ClientVersion: currentBuildInfo().Version,
+			IdleProbe:     true,
 		})
 	}
 	result, err := list()

@@ -48,7 +48,7 @@ func startJobInEnvironment(ctx context.Context, commandCtx common.Context, resol
 	putEnvironmentToolArgument(arguments, "env", params.Env)
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
-	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_start", arguments)
+	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_start", arguments, false)
 	return result.Job, resolved, err
 }
 
@@ -62,14 +62,14 @@ func attachJobInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	putEnvironmentToolArgument(arguments, "pid", params.PID)
 	putEnvironmentToolArgument(arguments, "logPath", params.LogPath)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
-	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_attach", arguments)
+	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_attach", arguments, false)
 	return result.Job, resolved, err
 }
 
 func jobStatusFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id string) (environmentJobStatusResult, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", id)
-	return callEnvironmentTool[environmentJobStatusResult](ctx, commandCtx, resolveOpen, tenant, environment, "job_status", arguments)
+	return callEnvironmentTool[environmentJobStatusResult](ctx, commandCtx, resolveOpen, tenant, environment, "job_status", arguments, true)
 }
 
 func awaitJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
@@ -79,7 +79,7 @@ func awaitJobInEnvironment(ctx context.Context, commandCtx common.Context, resol
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "timeoutSeconds", int64(params.Timeout.Seconds()))
-	return callEnvironmentTool[common.AwaitEnvironmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_await", arguments)
+	return callEnvironmentTool[common.AwaitEnvironmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_await", arguments, true)
 }
 
 func jobOutputFromEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
@@ -87,13 +87,13 @@ func jobOutputFromEnvironment(ctx context.Context, commandCtx common.Context, re
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "offset", params.Offset)
 	putEnvironmentToolArgument(arguments, "maxBytes", params.MaxBytes)
-	return callEnvironmentTool[common.EnvironmentJobOutput](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_output", arguments)
+	return callEnvironmentTool[common.EnvironmentJobOutput](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_output", arguments, true)
 }
 
 func cancelJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", params.ID)
 	putEnvironmentToolArgument(arguments, "signal", params.Signal)
-	result, resolved, err := callEnvironmentTool[environmentJobCancelResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_cancel", arguments)
+	result, resolved, err := callEnvironmentTool[environmentJobCancelResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "job_cancel", arguments, false)
 	return result.Cancel, resolved, err
 }

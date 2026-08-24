@@ -15,8 +15,8 @@ ERun watches four activity sources per env, all surfaced via the [MCP `idle` too
 | Property | Value |
 |---|---|
 | Type | RFC3339 UTC timestamp. |
-| Updated by | Any of: a keystroke on the in-pod SSH PTY; a successful in-pod `erun` invocation; any non-`idle` MCP `tools/call` against the env. |
-| **Not** updated by | the MCP edge's own `idle` polling (would self-perpetuate); file-only edits from a laptop-side IDE that doesn't open an SSH session; passive port-forward traffic without an active session. |
+| Updated by | Any of: a keystroke on the in-pod SSH PTY; a successful in-pod `erun` invocation; any MCP `tools/call` against the env that is not an **idle probe** (see below). |
+| **Not** updated by | an **idle probe** — a `tools/call` explicitly marked as a diagnostic read that must not perpetuate its own answer. `idle`, `job_status`, `job_output`, `job_await`, `activity_lease_list`, and a tools/list call are always idle probes; the host CLI and desktop mark them so regardless of who's asking or how often (#1227 — polling `erun idle` used to reset the very timer it reported). File-only edits from a laptop-side IDE that doesn't open an SSH session, and passive port-forward traffic without an active session, also don't update it. |
 | Initial value | Pod start time (so a freshly-started env is "active"). |
 | Persistence | In-memory in the runtime container's MCP server. A pod restart resets to the new start time. |
 

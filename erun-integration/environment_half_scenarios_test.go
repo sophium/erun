@@ -48,6 +48,13 @@ func TestIdleOffEnvironment(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "idle/off_environment_reports_the_environments_own_answer", normalize.Apply(result.Combined))
+
+		// #1227: asking whether the environment is idle must not itself count as
+		// activity, or polling this command holds the environment awake forever.
+		call := edge.requestFor(t, "tools/call")
+		if !call.IdleProbe {
+			t.Errorf("expected the idle call to carry the idle-probe header so it does not reset the environment's idle timer")
+		}
 	})
 
 	t.Run("unreachable_edge_is_not_reported_as_idle", func(t *testing.T) {
@@ -111,6 +118,11 @@ func TestJobOffEnvironment(t *testing.T) {
 		if call.Tool != "job_start" {
 			t.Fatalf("the environment was asked for %q, want job_start", call.Tool)
 		}
+		// job_start does real work in the environment, so it must count as
+		// activity like any other action — never carry the idle-probe header.
+		if call.IdleProbe {
+			t.Errorf("job_start must not carry the idle-probe header: it starts real work in the environment")
+		}
 	})
 
 	t.Run("start_dry_run_traces_the_environment_call", func(t *testing.T) {
@@ -156,6 +168,67 @@ func TestJobOffEnvironment(t *testing.T) {
 			t.Fatalf("exit %d, want 124 for a job still running: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "job/off_environment_await_maps_the_environments_outcome_onto_the_exit_code", normalize.Apply(result.Combined))
+
+		// #1227: waiting on a job is a read of its state, not new activity in the
+		// environment.
+		call := edge.requestFor(t, "tools/call")
+		if !call.IdleProbe {
+			t.Errorf("expected job_await to carry the idle-probe header")
+		}
+	})
+
+	t.Run("status_reads_the_environments_job_state", func(t *testing.T) {
+		// job_status is a pure read, same reasoning as idle (#1227): polling an
+		// environment's job status must not itself keep it awake.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"status"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev",` +
+			`"job":{"id":"suite","name":"suite","state":"running","childPid":4242,"outputBytes":0},` +
+			`"jobs":[{"id":"suite","name":"suite","state":"running","childPid":4242,"outputBytes":0}]}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "suite"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "job_status" {
+			t.Fatalf("the environment was asked for %q, want job_status", call.Tool)
+		}
+		if !call.IdleProbe {
+			t.Errorf("expected job_status to carry the idle-probe header so polling it does not reset the environment's idle timer")
+		}
+	})
+
+	t.Run("output_reads_the_environments_captured_output", func(t *testing.T) {
+		// job_output is a pure read too: it serves a page of already-captured
+		// output, so reading it must not reset the environment's idle timer.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"output"}],` +
+			`"structuredContent":{"output":"hello\n","offset":0,"nextOffset":6,"hasMore":false,"complete":true}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "output", "--tenant", "team", "--environment", "dev", "--id", "suite"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "job_output" {
+			t.Fatalf("the environment was asked for %q, want job_output", call.Tool)
+		}
+		if !call.IdleProbe {
+			t.Errorf("expected job_output to carry the idle-probe header so polling it does not reset the environment's idle timer")
+		}
 	})
 }
 
@@ -185,6 +258,11 @@ func TestActivityLeaseOffEnvironment(t *testing.T) {
 		if call.Tool != "activity_lease_take" {
 			t.Fatalf("the environment was asked for %q, want activity_lease_take", call.Tool)
 		}
+		// Taking a lease is a deliberate claim on the environment's busy state, so
+		// it must count as activity, not be exempted via the idle-probe header.
+		if call.IdleProbe {
+			t.Errorf("activity_lease_take must not carry the idle-probe header")
+		}
 	})
 
 	t.Run("list_reads_the_environments_held_leases", func(t *testing.T) {
@@ -210,6 +288,11 @@ func TestActivityLeaseOffEnvironment(t *testing.T) {
 		call := edge.requestFor(t, "tools/call")
 		if call.Tool != "activity_lease_list" {
 			t.Fatalf("the environment was asked for %q, want activity_lease_list", call.Tool)
+		}
+		// #1227: listing leases only observes them, so it must not itself count as
+		// activity.
+		if !call.IdleProbe {
+			t.Errorf("expected activity_lease_list to carry the idle-probe header")
 		}
 	})
 }
