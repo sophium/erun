@@ -17,7 +17,7 @@ import {
 import { Users } from 'lucide-react';
 import * as React from 'react';
 
-import type { EnrollIdentityUserInput, IdentityUser } from './client';
+import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
 

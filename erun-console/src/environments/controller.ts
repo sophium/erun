@@ -1,18 +1,21 @@
+import type { Environment } from 'erun-kit';
 import * as React from 'react';
 
 import {
-  createEnvironment,
   type CreateEnvironmentInput,
-  deployEnvironment,
-  getEnvironment,
-} from '../config/client';
-import type { Environment } from '../config/types';
+  type DeployOutcome,
+  environmentsApi,
+  useCreateEnvironmentMutation,
+  useDeployEnvironmentMutation,
+} from '../app/api/environmentsApi';
+import { useAppDispatch } from '../app/hooks';
+import { queryErrorMessage } from '../app/queryError';
 
-// Thin controllers over the typed client for the environments panel: one for
-// registering a new environment, one (keyed by environmentId) for deploying an
-// already-registered one and polling it to a terminal status. No business
-// logic beyond sequencing those calls lives here — the render layer
-// (EnvironmentsPanel) shows whatever state these hooks expose.
+// Thin controllers over the RTK Query endpoints for the environments panel:
+// one for registering a new environment, one (keyed by environmentId) for
+// deploying an already-registered one and polling it to a terminal status.
+// No business logic beyond sequencing those calls lives here — the render
+// layer (EnvironmentsPanel) shows whatever state these hooks expose.
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -34,10 +37,6 @@ export type DeployState =
   | { status: 'conflict' }
   | { status: 'unavailable' }
   | { status: 'error'; message: string };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unexpected error';
-}
 
 function isTerminal(environment: Environment): boolean {
   return environment.status === 'running' || environment.status === 'failed';
@@ -62,6 +61,7 @@ export function useRegisterEnvironmentController(
   onRegistered?: () => void,
 ): RegisterController {
   const [state, setState] = React.useState<RegisterState>({ status: 'idle' });
+  const [createEnvironment] = useCreateEnvironmentMutation();
 
   const activeRef = React.useRef(true);
   React.useEffect(() => {
@@ -74,7 +74,8 @@ export function useRegisterEnvironmentController(
   const register = React.useCallback(
     (input: CreateEnvironmentInput) => {
       setState({ status: 'creating' });
-      createEnvironment(token, input)
+      createEnvironment({ token, input })
+        .unwrap()
         .then((environment) => {
           if (!activeRef.current) {
             return;
@@ -84,11 +85,11 @@ export function useRegisterEnvironmentController(
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setState({ status: 'error', message: errorMessage(error) });
+            setState({ status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token, onRegistered],
+    [token, onRegistered, createEnvironment],
   );
 
   return { state, register };
@@ -107,6 +108,8 @@ export interface DeployController {
 // can refresh the read model and pick up the new status/deployedVersion there too.
 export function useDeployController(token: string, onSettled?: () => void): DeployController {
   const [states, setStates] = React.useState<Record<string, DeployState>>({});
+  const dispatch = useAppDispatch();
+  const [deployEnvironment] = useDeployEnvironmentMutation();
 
   const activeRef = React.useRef(true);
   React.useEffect(() => {
@@ -125,7 +128,13 @@ export function useDeployController(token: string, onSettled?: () => void): Depl
       if (!activeRef.current) {
         return;
       }
-      getEnvironment(token, environmentId)
+      dispatch(
+        environmentsApi.endpoints.getEnvironment.initiate(
+          { token, environmentId },
+          { forceRefetch: true },
+        ),
+      )
+        .unwrap()
         .then((environment) => {
           if (!activeRef.current) {
             return;
@@ -142,18 +151,19 @@ export function useDeployController(token: string, onSettled?: () => void): Depl
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setEnvState(environmentId, { status: 'error', message: errorMessage(error) });
+            setEnvState(environmentId, { status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token, setEnvState, onSettled],
+    [token, dispatch, setEnvState, onSettled],
   );
 
   const deploy = React.useCallback(
     (environmentId: string, version?: string) => {
       setEnvState(environmentId, { status: 'starting' });
-      deployEnvironment(token, environmentId, version)
-        .then((outcome) => {
+      deployEnvironment({ token, environmentId, version })
+        .unwrap()
+        .then((outcome: DeployOutcome) => {
           if (!activeRef.current) {
             return;
           }
@@ -175,11 +185,11 @@ export function useDeployController(token: string, onSettled?: () => void): Depl
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setEnvState(environmentId, { status: 'error', message: errorMessage(error) });
+            setEnvState(environmentId, { status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token, poll, setEnvState, onSettled],
+    [token, deployEnvironment, poll, setEnvState, onSettled],
   );
 
   return { states, deploy };

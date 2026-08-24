@@ -1,7 +1,8 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
+import { renderWithStore } from '../test/renderWithStore';
 
 // Mocking `fetch` exercises the whole config read path end-to-end. The OIDC
 // login flow is deliberately not covered here — it is a flagged placeholder
@@ -81,7 +82,7 @@ afterEach(() => {
 describe('ConfigView via App', () => {
   it('renders the tenant, both environments with their types, and the context', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     // The shell's own h1 carries the active section title ("Overview"); the
     // tenant name is a section-level h2 within it.
@@ -104,7 +105,7 @@ describe('ConfigView via App', () => {
 
   it('renders a running badge and a failed badge with its provision error', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     const contexts = within(await screen.findByRole('region', { name: 'Cloud contexts' }));
 
@@ -118,7 +119,7 @@ describe('ConfigView via App', () => {
 
   it('renders environment provisioning status badges, scoped to the environments table', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     const envs = within(await screen.findByRole('region', { name: 'Environments' }));
     expect(envs.getByText('Running')).toBeInTheDocument();
@@ -129,7 +130,7 @@ describe('ConfigView via App', () => {
 
   it('renders empty states for an empty payload', async () => {
     mockFetch(jsonResponse(EMPTY_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     expect(await screen.findByText('No environments yet.')).toBeInTheDocument();
     expect(screen.getByText('No cloud contexts yet.')).toBeInTheDocument();
@@ -144,7 +145,7 @@ describe('ConfigView via App', () => {
   // token at all.
   it('tells a signed-in but unenrolled caller they need enrolling, not to sign in again', async () => {
     mockFetch(jsonResponse('invalid bearer token', 401));
-    render(<App />);
+    renderWithStore(<App />);
 
     expect(
       await screen.findByText(
@@ -158,7 +159,7 @@ describe('ConfigView via App', () => {
 
   it('renders the sign-in prompt when there is no dev token', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
-    render(<App />);
+    renderWithStore(<App />);
 
     await waitFor(() => {
       expect(screen.getByText('Sign in to your console')).toBeInTheDocument();

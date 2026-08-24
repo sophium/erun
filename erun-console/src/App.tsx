@@ -1,10 +1,14 @@
-import { TooltipProvider } from 'erun-kit';
+import { type TenantConfigView, TooltipProvider } from 'erun-kit';
 import * as React from 'react';
 
-import { type OidcConfig, resolveOidcConfig, resolveToken, signOut } from './auth/auth';
-import { ConfigFetchError, fetchConfig } from './config/client';
+import { useGetConfigQuery } from './app/api/configApi';
+import { resolveAuth } from './app/authThunks';
+import { useAppDispatch, useAppSelector } from './app/hooks';
+import { describeQueryError } from './app/queryError';
+import { clearAuth } from './app/slices/authSlice';
+import type { OidcConfig } from './auth/auth';
+import { signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
-import type { TenantConfigView } from './config/types';
 import { AppShell } from './shell/AppShell';
 import {
   ErrorScreen,
@@ -24,16 +28,53 @@ type LoadState =
   | { status: 'not-enrolled'; token: string }
   | { status: 'error'; message: string };
 
+interface AuthPhase {
+  oidcResolved: boolean;
+  oidc?: OidcConfig;
+  oidcFallbackReason?: string;
+  status: 'resolving' | 'signed-out' | 'authenticated';
+  token?: string;
+  tokenError?: string;
+}
+
+interface ConfigQueryPhase {
+  isLoading: boolean;
+  isUninitialized: boolean;
+  error?: unknown;
+  data?: TenantConfigView;
+}
+
 // A 401 means two completely different things depending on whether a token was
 // held. With no token the caller is simply signed out. With a token, the
 // identity provider authenticated them and the API still said no — so the
 // identity is not enrolled, and telling them to sign in is a loop (#1167).
-function loadStateFromError(error: unknown, token: string | undefined): LoadState {
-  if (error instanceof ConfigFetchError && error.status === 401) {
-    return token === undefined ? { status: 'signed-out' } : { status: 'not-enrolled', token };
+function loadStateFromConfigQuery(token: string, configQuery: ConfigQueryPhase): LoadState {
+  if (configQuery.isLoading || configQuery.isUninitialized) {
+    return { status: 'loading' };
   }
-  const message = error instanceof Error ? error.message : 'unexpected error';
-  return { status: 'error', message };
+  if (configQuery.error !== undefined) {
+    const described = describeQueryError(configQuery.error);
+    return described.status === 401
+      ? { status: 'not-enrolled', token }
+      : { status: 'error', message: described.message };
+  }
+  if (configQuery.data !== undefined) {
+    return { status: 'ready', config: configQuery.data, token };
+  }
+  return { status: 'loading' };
+}
+
+function computeLoadState(auth: AuthPhase, configQuery: ConfigQueryPhase): LoadState {
+  if (!auth.oidcResolved || auth.status === 'resolving') {
+    return { status: 'loading' };
+  }
+  if (auth.tokenError !== undefined) {
+    return { status: 'error', message: auth.tokenError };
+  }
+  if (auth.status === 'signed-out' || auth.token === undefined) {
+    return { status: 'signed-out' };
+  }
+  return loadStateFromConfigQuery(auth.token, configQuery);
 }
 
 // useBrand resolves the platform's display name from discovery (GET
@@ -62,121 +103,20 @@ function useBrand(): string | undefined {
   return brand;
 }
 
-// useConsoleSession owns the sign-in → config-fetch lifecycle: resolve OIDC
-// config, resolve a bearer token, then load the tenant config. loadConfig is
-// also the refresh a write surface (register/deploy) triggers on completion,
-// so a newly registered env or a settled deploy's status shows up here too.
-function useConsoleSession(): {
-  state: LoadState;
-  oidc: OidcConfig | undefined;
-  oidcFallbackReason: string | undefined;
-  reload: () => void;
-  signOutAndReset: () => void;
-} {
-  const [oidc, setOidc] = React.useState<OidcConfig | undefined>(undefined);
-  const [oidcFallbackReason, setOidcFallbackReason] = React.useState<string | undefined>(undefined);
-  const [oidcResolved, setOidcResolved] = React.useState(false);
-  const [state, setState] = React.useState<LoadState>({ status: 'loading' });
-  const [token, setToken] = React.useState<string | undefined>(undefined);
-
-  const mountedRef = React.useRef(true);
-  React.useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    resolveOidcConfig()
-      .then((resolution) => {
-        if (!mountedRef.current) {
-          return;
-        }
-        setOidc(resolution.config);
-        setOidcFallbackReason(resolution.fallbackReason);
-        setOidcResolved(true);
-      })
-      .catch(() => {
-        if (mountedRef.current) {
-          setOidcResolved(true);
-        }
-      });
-  }, []);
-
-  React.useEffect(() => {
-    if (!oidcResolved) {
-      return;
-    }
-    resolveToken(oidc)
-      .then((resolved) => {
-        if (!mountedRef.current) {
-          return;
-        }
-        if (resolved === undefined) {
-          setState({ status: 'signed-out' });
-          return;
-        }
-        setToken(resolved);
-      })
-      .catch((error: unknown) => {
-        if (mountedRef.current) {
-          setState(loadStateFromError(error, undefined));
-        }
-      });
-  }, [oidcResolved, oidc]);
-
-  const loadConfig = React.useCallback((forToken: string) => {
-    fetchConfig(forToken)
-      .then((config) => {
-        if (mountedRef.current) {
-          setState({ status: 'ready', config, token: forToken });
-        }
-      })
-      .catch((error: unknown) => {
-        if (mountedRef.current) {
-          setState(loadStateFromError(error, forToken));
-        }
-      });
-  }, []);
-
-  React.useEffect(() => {
-    if (token !== undefined) {
-      loadConfig(token);
-    }
-  }, [token, loadConfig]);
-
-  return {
-    state,
-    oidc,
-    oidcFallbackReason,
-    reload: () => {
-      if (token !== undefined) {
-        loadConfig(token);
-      }
-    },
-    signOutAndReset: () => {
-      signOut();
-      setToken(undefined);
-      setState({ status: 'signed-out' });
-    },
-  };
-}
-
 function AppContent({
   brand,
   state,
   oidc,
   oidcFallbackReason,
-  reload,
-  signOutAndReset,
+  onChanged,
+  onSignOut,
 }: {
   brand: string | undefined;
   state: LoadState;
   oidc: OidcConfig | undefined;
   oidcFallbackReason: string | undefined;
-  reload: () => void;
-  signOutAndReset: () => void;
+  onChanged: () => void;
+  onSignOut: () => void;
 }): React.ReactElement {
   switch (state.status) {
     case 'loading':
@@ -193,8 +133,8 @@ function AppContent({
           brand={brand}
           token={state.token}
           config={state.config}
-          onChanged={reload}
-          onSignOut={signOutAndReset}
+          onChanged={onChanged}
+          onSignOut={onSignOut}
         />
       );
   }
@@ -202,7 +142,23 @@ function AppContent({
 
 export function App(): React.ReactElement {
   const brand = useBrand();
-  const { state, oidc, oidcFallbackReason, reload, signOutAndReset } = useConsoleSession();
+  const dispatch = useAppDispatch();
+  const auth = useAppSelector((s) => s.auth);
+
+  // Resolves the OIDC config from platform discovery (GET /v1/platform), then
+  // the bearer token (an OIDC callback exchange, a token held this session,
+  // or the dev-token fallback) — see app/authThunks.ts.
+  React.useEffect(() => {
+    void dispatch(resolveAuth());
+  }, [dispatch]);
+
+  // Loads the tenant config once a token is known. `refetch` is also the
+  // refresh a write surface (register/deploy) triggers on completion, so a
+  // newly registered env or a settled deploy's status shows up here too —
+  // via `invalidatesTags: ['Config']` on those mutations.
+  const configQuery = useGetConfigQuery(auth.token ?? '', { skip: auth.token === undefined });
+
+  const state = computeLoadState(auth, configQuery);
 
   // IconTooltip (used by the theme toggle and, once panels adopt it, elsewhere)
   // requires a TooltipProvider ancestor, same as the desktop's App.tsx.
@@ -211,10 +167,15 @@ export function App(): React.ReactElement {
       <AppContent
         brand={brand}
         state={state}
-        oidc={oidc}
-        oidcFallbackReason={oidcFallbackReason}
-        reload={reload}
-        signOutAndReset={signOutAndReset}
+        oidc={auth.oidc}
+        oidcFallbackReason={auth.oidcFallbackReason}
+        onChanged={() => {
+          void configQuery.refetch();
+        }}
+        onSignOut={() => {
+          signOut();
+          dispatch(clearAuth());
+        }}
       />
     </TooltipProvider>
   );

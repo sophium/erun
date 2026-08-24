@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { TooltipProvider } from 'erun-kit';
+import { type TenantConfigView, TooltipProvider } from 'erun-kit';
+import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { TenantConfigView } from '../config/types';
+import { createAppStore } from '../app/store';
 import { AppShell } from './AppShell';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -43,15 +44,17 @@ const COMPANY_CONFIG: TenantConfigView = {
 
 function renderShell(config: TenantConfigView): void {
   render(
-    <TooltipProvider>
-      <AppShell
-        brand="Acme"
-        token="dev-token"
-        config={config}
-        onChanged={vi.fn()}
-        onSignOut={vi.fn()}
-      />
-    </TooltipProvider>,
+    <Provider store={createAppStore()}>
+      <TooltipProvider>
+        <AppShell
+          brand="Acme"
+          token="dev-token"
+          config={config}
+          onChanged={vi.fn()}
+          onSignOut={vi.fn()}
+        />
+      </TooltipProvider>
+    </Provider>,
   );
 }
 
@@ -111,15 +114,17 @@ describe('AppShell identity chrome', () => {
     stubFetch();
     const onSignOut = vi.fn();
     render(
-      <TooltipProvider>
-        <AppShell
-          brand="Acme"
-          token="dev-token"
-          config={OPERATIONS_CONFIG}
-          onChanged={vi.fn()}
-          onSignOut={onSignOut}
-        />
-      </TooltipProvider>,
+      <Provider store={createAppStore()}>
+        <TooltipProvider>
+          <AppShell
+            brand="Acme"
+            token="dev-token"
+            config={OPERATIONS_CONFIG}
+            onChanged={vi.fn()}
+            onSignOut={onSignOut}
+          />
+        </TooltipProvider>
+      </Provider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(onSignOut).toHaveBeenCalledTimes(1);

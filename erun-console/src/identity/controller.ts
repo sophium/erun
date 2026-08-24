@@ -1,24 +1,18 @@
 import * as React from 'react';
 
-import type {
-  EnrollIdentityUserInput,
-  EnrollIdentityUserResult,
-  IdentityUser,
-  OrgSettings,
-  UpdateOrgSettingsInput,
-} from './client';
 import {
-  createIdentityUser,
-  deactivateIdentityUser,
-  getOrgSettings,
-  listIdentityUsers,
-  reactivateIdentityUser,
-  updateOrgSettings,
-} from './client';
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unexpected error';
-}
+  type EnrollIdentityUserInput,
+  type EnrollIdentityUserResult,
+  type IdentityUser,
+  type OrgSettings,
+  type UpdateOrgSettingsInput,
+  useCreateIdentityUserMutation,
+  useGetOrgSettingsQuery,
+  useListIdentityUsersQuery,
+  useSetIdentityUserActiveMutation,
+  useUpdateOrgSettingsMutation,
+} from '../app/api/identityApi';
+import { queryErrorMessage } from '../app/queryError';
 
 function useActiveRef(): React.RefObject<boolean> {
   const activeRef = React.useRef(true);
@@ -51,68 +45,66 @@ export interface UsersController {
 }
 
 // useUsersController lists, enrolls, deactivates and reactivates identities.
-// Enrolling or changing activation refreshes the list on success, so the
+// Enrolling or changing activation invalidates the list query's tag, so the
 // operator sees the effect without a manual reload.
 export function useUsersController(token: string): UsersController {
-  const [usersState, setUsersState] = React.useState<UsersState>({ status: 'loading' });
+  const listQuery = useListIdentityUsersQuery(token);
+  const { refetch } = listQuery;
   const [enrollState, setEnrollState] = React.useState<EnrollState>({ status: 'idle' });
+  // setActive has no state slot of its own in this controller's public shape;
+  // a failed toggle surfaces through usersState the same way the list read's
+  // own failure does, mirroring the pre-RTK-Query controller's behaviour.
+  const [actionError, setActionError] = React.useState<string | undefined>(undefined);
+  const [createIdentityUser] = useCreateIdentityUserMutation();
+  const [setIdentityUserActive] = useSetIdentityUserActiveMutation();
   const activeRef = useActiveRef();
 
-  const refresh = React.useCallback(() => {
-    setUsersState({ status: 'loading' });
-    listIdentityUsers(token)
-      .then((users) => {
-        if (activeRef.current) {
-          setUsersState({ status: 'ready', users });
-        }
-      })
-      .catch((error: unknown) => {
-        if (activeRef.current) {
-          setUsersState({ status: 'error', message: errorMessage(error) });
-        }
-      });
-  }, [token, activeRef]);
+  const usersState: UsersState =
+    actionError !== undefined
+      ? { status: 'error', message: actionError }
+      : listQuery.error !== undefined
+        ? { status: 'error', message: queryErrorMessage(listQuery.error) }
+        : listQuery.data !== undefined
+          ? { status: 'ready', users: listQuery.data }
+          : { status: 'loading' };
 
-  React.useEffect(refresh, [refresh]);
+  const refresh = React.useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const enroll = React.useCallback(
     (input: EnrollIdentityUserInput) => {
       setEnrollState({ status: 'enrolling' });
-      createIdentityUser(token, input)
+      setActionError(undefined);
+      createIdentityUser({ token, input })
+        .unwrap()
         .then((result) => {
           if (!activeRef.current) {
             return;
           }
           setEnrollState({ status: 'enrolled', result });
-          refresh();
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setEnrollState({ status: 'error', message: errorMessage(error) });
+            setEnrollState({ status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token, activeRef, refresh],
+    [token, activeRef, createIdentityUser],
   );
 
   const setActive = React.useCallback(
     (externalId: string, active: boolean) => {
-      const request = active
-        ? reactivateIdentityUser(token, externalId)
-        : deactivateIdentityUser(token, externalId);
-      request
-        .then(() => {
-          if (activeRef.current) {
-            refresh();
-          }
-        })
+      setActionError(undefined);
+      setIdentityUserActive({ token, externalId, active })
+        .unwrap()
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setUsersState({ status: 'error', message: errorMessage(error) });
+            setActionError(queryErrorMessage(error));
           }
         });
     },
-    [token, activeRef, refresh],
+    [token, activeRef, setIdentityUserActive],
   );
 
   return { usersState, enrollState, refresh, enroll, setActive };
@@ -130,47 +122,33 @@ export interface OrgSettingsController {
 }
 
 // useOrgSettingsController reads the org's login/password policy once and
-// applies partial updates, keeping the last-known settings visible under
-// `saving` so the form does not blank out while a save is in flight.
+// applies partial updates. `updateResult`'s own data takes precedence over
+// the read query's while a save is settling, so the form does not flicker
+// back to the pre-save value while the invalidated read query refetches.
 export function useOrgSettingsController(token: string): OrgSettingsController {
-  const [state, setState] = React.useState<OrgSettingsState>({ status: 'loading' });
-  const activeRef = useActiveRef();
-
-  React.useEffect(() => {
-    getOrgSettings(token)
-      .then((settings) => {
-        if (activeRef.current) {
-          setState({ status: 'ready', settings });
-        }
-      })
-      .catch((error: unknown) => {
-        if (activeRef.current) {
-          setState({ status: 'error', message: errorMessage(error) });
-        }
-      });
-  }, [token, activeRef]);
+  const query = useGetOrgSettingsQuery(token);
+  const [updateOrgSettings, updateResult] = useUpdateOrgSettingsMutation();
 
   const save = React.useCallback(
     (input: UpdateOrgSettingsInput) => {
-      setState((current) =>
-        current.status === 'ready' || current.status === 'saving'
-          ? { status: 'saving', settings: current.settings }
-          : current,
-      );
-      updateOrgSettings(token, input)
-        .then((settings) => {
-          if (activeRef.current) {
-            setState({ status: 'ready', settings });
-          }
-        })
-        .catch((error: unknown) => {
-          if (activeRef.current) {
-            setState({ status: 'error', message: errorMessage(error) });
-          }
-        });
+      void updateOrgSettings({ token, input });
     },
-    [token, activeRef],
+    [token, updateOrgSettings],
   );
+
+  const state: OrgSettingsState = (() => {
+    if (updateResult.isError) {
+      return { status: 'error', message: queryErrorMessage(updateResult.error) };
+    }
+    if (query.error !== undefined) {
+      return { status: 'error', message: queryErrorMessage(query.error) };
+    }
+    const settings = updateResult.data ?? query.data;
+    if (settings === undefined) {
+      return { status: 'loading' };
+    }
+    return updateResult.isLoading ? { status: 'saving', settings } : { status: 'ready', settings };
+  })();
 
   return { state, save };
 }

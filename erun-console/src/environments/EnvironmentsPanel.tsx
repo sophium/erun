@@ -4,13 +4,15 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  type CloudContext,
+  type Environment,
   FieldLabel,
   Input,
+  isTearingDown,
   SelectField,
 } from 'erun-kit';
 import * as React from 'react';
 
-import { type CloudContext, type Environment, isTearingDown } from '../config/types';
 import type { DeployState, RegisterState } from './controller';
 import { useDeployController, useRegisterEnvironmentController } from './controller';
 

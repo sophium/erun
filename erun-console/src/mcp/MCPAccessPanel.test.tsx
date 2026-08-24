@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
+import type { Environment } from 'erun-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Environment } from '../config/types';
+import { renderWithStore } from '../test/renderWithStore';
 import { MCPAccessPanel } from './MCPAccessPanel';
 
 // fetch is mocked at the boundary so the flow exercises the real client +
@@ -48,7 +49,7 @@ describe('MCPAccessPanel', () => {
     const calls = mockFetch(() =>
       jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }),
     );
-    render(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
 
@@ -62,7 +63,7 @@ describe('MCPAccessPanel', () => {
 
   it('surfaces a 501 when the backend has no signing key configured', async () => {
     mockFetch(() => jsonResponse('mcp token signing is not configured', 501));
-    render(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
 
@@ -72,7 +73,7 @@ describe('MCPAccessPanel', () => {
   });
 
   it('shows an empty state and no mint button when there are no environments', () => {
-    render(<MCPAccessPanel token="dev-token" environments={[]} />);
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={[]} />);
     expect(screen.getByText('Register an environment to mint an MCP token.')).toBeInTheDocument();
     expect(screen.queryByRole('button')).toBeNull();
   });

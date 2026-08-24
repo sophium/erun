@@ -1,7 +1,8 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import type { Environment } from 'erun-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { Environment } from '../config/types';
+import { renderWithStore } from '../test/renderWithStore';
 import { EnvironmentsPanel } from './EnvironmentsPanel';
 
 // fetch is mocked at the boundary so each flow exercises the real client +
@@ -64,7 +65,7 @@ describe('EnvironmentsPanel register form', () => {
         201,
       ),
     );
-    render(
+    renderWithStore(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
 
@@ -91,7 +92,7 @@ describe('EnvironmentsPanel register form', () => {
       jsonResponse({ environmentId: 'env-2', name: 'staging', type: 'runtime' }, 201),
     );
     const onChanged = vi.fn();
-    render(
+    renderWithStore(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={onChanged} />,
     );
 
@@ -106,7 +107,7 @@ describe('EnvironmentsPanel register form', () => {
 
   it('surfaces a 400 register error', async () => {
     mockFetch(() => jsonResponse('name must be a DNS-1123 label', 400));
-    render(
+    renderWithStore(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
 
@@ -136,7 +137,7 @@ describe('EnvironmentsPanel deploy flow', () => {
       getCount += 1;
       return getCount === 1 ? jsonResponse(deploying) : jsonResponse(running);
     });
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -172,7 +173,7 @@ describe('EnvironmentsPanel deploy flow', () => {
         'deploy job failed for version 1.2.3: probed registries ghcr.io/acme, docker.io/acme — pull denied; publish the version or grant pull access',
     };
     mockFetch((req) => (req.method === 'POST' ? jsonResponse(failed, 202) : jsonResponse(failed)));
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -189,7 +190,7 @@ describe('EnvironmentsPanel deploy flow', () => {
 
   it('renders a 409 as an in-flight deploy, not an error toast', async () => {
     mockFetch(() => jsonResponse('a deploy is already in progress for this environment', 409));
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -206,7 +207,7 @@ describe('EnvironmentsPanel deploy flow', () => {
 
   it('renders a 501 by naming the missing deploy executor plainly', async () => {
     mockFetch(() => jsonResponse('the deploy executor is not configured', 501));
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -223,7 +224,7 @@ describe('EnvironmentsPanel deploy flow', () => {
   });
 
   it('shows an empty state when there are no runtime environments', () => {
-    render(
+    renderWithStore(
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
     expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
@@ -234,7 +235,7 @@ describe('EnvironmentsPanel deploy flow', () => {
   // admission error back. Before the API guard existed it was worse: the deploy
   // was accepted and overwrote the teardown state.
   it('offers no Deploy control for an environment that is being deleted', () => {
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -252,7 +253,7 @@ describe('EnvironmentsPanel deploy flow', () => {
   it('surfaces the recorded blocker for a deletion-blocked environment instead of a Deploy button', () => {
     const blocker =
       'namespace "operations-prod" did not finish terminating within 20m0s:\nNamespaceFinalizersRemaining=True  acme.cert-manager.io/finalizer in 1 resource instances';
-    render(
+    renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
         contexts={[]}
@@ -275,7 +276,7 @@ describe('EnvironmentsPanel deploy flow', () => {
   it('still offers Deploy for every non-teardown status', () => {
     for (const status of ['registered', 'running', 'failed'] as const) {
       cleanup();
-      render(
+      renderWithStore(
         <EnvironmentsPanel
           token="dev-token"
           contexts={[]}

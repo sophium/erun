@@ -1,6 +1,5 @@
+import type { TenantConfigView } from 'erun-kit';
 import { Cloud, KeyRound, LayoutDashboard, Server, Settings, Users } from 'lucide-react';
-
-import type { TenantConfigView } from '../config/types';
 
 // Identity administration (issue #1209) is restricted server-side to an
 // OPERATIONS tenant; gating the nav entries here too keeps a COMPANY-tenant

@@ -1,29 +1,26 @@
-import type { StatusBadgeTone } from 'erun-kit';
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
+  type CloudContext,
+  type ContextStatus,
   EmptyState,
+  type Environment,
+  type EnvironmentStatus,
   StatusBadge,
+  type StatusBadgeTone,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  type Tenant,
+  type TenantConfigView,
 } from 'erun-kit';
 import { Cloud, Server } from 'lucide-react';
 import type * as React from 'react';
-
-import type {
-  CloudContext,
-  ContextStatus,
-  Environment,
-  EnvironmentStatus,
-  Tenant,
-  TenantConfigView,
-} from './types';
 
 // A pure render of the read model the parent fetched; the fetch/auth lifecycle
 // lives in App. Empty collections render an empty-state card, never an empty
