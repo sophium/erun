@@ -1191,15 +1191,17 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", func(t *testing.T) {
-		// The staleness guard used to fire only for a leftover pin naming
-		// the STOCK erun-devops image. A pin naming the tenant's OWN team-devops
-		// image at an older tag was honoured unconditionally forever, even though
-		// this deploy's own line already resolves the same image correctly with
-		// no override at all. The saved pin is provably redundant — it names
-		// exactly the image defaultDeployRuntimeImage would have picked, just at
-		// a stale tag — so it must be ignored and traced the same as the stock
-		// case, and the deploy must roll out the current version's tag.
+	t.Run("dry_run_remote_env_umbrella_honours_tenants_own_runtimeimage_tag", func(t *testing.T) {
+		// A pin naming the tenant's OWN team-devops image at a tag that disagrees
+		// with the deploy version used to be discarded as "provably redundant"
+		// and silently replaced with a guessed team-devops:<erun-version> tag.
+		// That guess conflated two independent version lines: the tenant's own
+		// image is versioned on the tenant's own release line (exactly what
+		// `erun pin` already documents and enforces — it never rewrites this
+		// tag), so a tag that disagrees with the deploy version is the expected,
+		// correct case, not staleness. The recorded runtimeimage must be
+		// honoured verbatim, and the deploy must roll out that tag rather than
+		// one nothing ever published.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -1207,13 +1209,13 @@ func TestDeploy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read env config: %v", err)
 		}
-		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/test/team-devops:old-tag\n")
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/test/team-devops:1.0.353-snapshot-20260824165146\n")
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.51")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.51", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_tenant_runtimeimage_tag", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_honours_tenants_own_runtimeimage_tag", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {

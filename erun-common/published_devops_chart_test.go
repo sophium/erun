@@ -1,6 +1,9 @@
 package eruncommon
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRuntimeImageRegistry(t *testing.T) {
 	cases := map[string]string{
@@ -80,4 +83,112 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 			t.Fatalf("chart registry = %q, want the deploy registry registry.example/test (the chart must not follow the image registry)", got)
 		}
 	})
+}
+
+// TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine pins #1265: a
+// tenant's own <tenant>-devops image is versioned on the tenant's own release
+// line, independent of the erun version the environment runs (as erun pin
+// already documents and enforces — it never rewrites this tag). A persisted
+// runtimeimage naming that image at the tenant's own tag must survive a
+// redeploy verbatim, never get discarded in favour of a guessed
+// <tenant>-devops:<erun-version> tag just because the two happen to share a
+// registry. Before the fix, whether the guess "won" depended on an accident —
+// which registry held the deploy role — reproducing the four-environment
+// matrix from the issue (same recorded image, only the registry wiring
+// differs).
+func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
+	const (
+		tenant           = "petios"
+		erunVersion      = "1.0.201"
+		recordedRegistry = "<acct>.dkr.ecr.eu-west-2.amazonaws.com"
+		recordedImage    = recordedRegistry + "/petios-devops:1.0.353-snapshot-20260824165146"
+		chartRegistry    = "ghcr.io/sophium"
+	)
+
+	cases := []struct {
+		name        string
+		registries  ContainerRegistries
+		wantHonored bool
+	}{
+		{
+			name: "deploy role held by the tenant's own registry",
+			registries: ContainerRegistries{
+				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+			},
+			wantHonored: true,
+		},
+		{
+			name: "deploy role held by the tenant's own registry, build elsewhere",
+			registries: ContainerRegistries{
+				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleDeploy}},
+				{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleBuild}},
+			},
+			wantHonored: true,
+		},
+		{
+			name: "deploy role held by erun's own registry",
+			registries: ContainerRegistries{
+				{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleDeploy}},
+				{Registry: recordedRegistry, Roles: []RegistryRole{RegistryRoleBuild}},
+			},
+			wantHonored: true,
+		},
+		{
+			name:        "no registry recorded at all",
+			registries:  nil,
+			wantHonored: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var trace strings.Builder
+			ctx := Context{Logger: NewLoggerWithWriters(0, &trace, &trace)}
+			target := OpenResult{
+				Tenant: tenant,
+				EnvConfig: EnvConfig{
+					RuntimeImage:        recordedImage,
+					ContainerRegistries: tc.registries,
+				},
+			}
+
+			got := resolveDeployRuntimeImage(ctx, target, chartRegistry, erunVersion, DevopsComponentName, "", "", false)
+
+			if tc.wantHonored {
+				if got != recordedImage {
+					t.Fatalf("resolveDeployRuntimeImage() = %q, want the recorded image %q honored verbatim", got, recordedImage)
+				}
+				if strings.Contains(trace.String(), "ignoring stale runtimeimage") {
+					t.Fatalf("trace unexpectedly discarded the recorded image: %s", trace.String())
+				}
+			}
+		})
+	}
+}
+
+// TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine guards the one
+// staleness signal that remains legitimate after #1265: a runtimeimage still
+// naming the stock erun-devops image on a deploy that has moved to the
+// tenant's own umbrella chart is provably wrong (that line never publishes
+// the stock image), so it is still healed to the umbrella's own image rather
+// than kept.
+func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T) {
+	var trace strings.Builder
+	ctx := Context{Logger: NewLoggerWithWriters(0, &trace, &trace)}
+	target := OpenResult{
+		Tenant: "acme",
+		EnvConfig: EnvConfig{
+			RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.178",
+		},
+	}
+
+	got := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
+
+	const want = "ghcr.io/sophium/acme-devops:1.0.201"
+	if got != want {
+		t.Fatalf("resolveDeployRuntimeImage() = %q, want %q (healed off the stale stock image)", got, want)
+	}
+	if !strings.Contains(trace.String(), "ignoring stale runtimeimage") {
+		t.Fatalf("expected a trace explaining the stock-image staleness, got: %s", trace.String())
+	}
 }
