@@ -1866,7 +1866,10 @@ func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
 func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
 	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
 		got := strings.Join(args, "\n")
-		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\ndeployment/frs-devops\n-c\nerun-backend-api\n--tail\n400"
+		// The erun-backend-api chart's Deployment/Service is <tenant>-api
+		// (eruncommon.APIDeploymentName), not the runtime's <tenant>-devops
+		// Deployment: the erun-backend-api container never exists there (#1197).
+		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\n-l\napp=frs-api\n--prefix\n-c\nerun-backend-api\n--tail\n400"
 		if got != want {
 			t.Fatalf("unexpected kubectl args:\n%s", got)
 		}
@@ -1894,7 +1897,7 @@ func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
 	outputPath := filepath.Join(dir, "kubectl.output")
 	exitPath := filepath.Join(dir, "kubectl.exit")
 	writeFakeKubectlStub(t, dir, argsPath, outputPath, exitPath)
-	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "deployment/frs-devops", "-c", "erun-backend-api", "--tail", "400"})
+	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "-l", "app=frs-api", "--prefix", "-c", "erun-backend-api", "--tail", "400"})
 	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
 		t.Fatalf("write fake kubectl output failed: %v", err)
 	}

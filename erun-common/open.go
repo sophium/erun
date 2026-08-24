@@ -678,6 +678,16 @@ func TenantResourcePrefix(tenant string) string {
 	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
 }
 
+// APIDeploymentName is the erun-backend-api chart's Deployment/Service resource
+// name (<prefix>-api, per TenantResourcePrefix). It is templated from
+// `.Values.tenant`, not from the chart's Helm release name
+// (publishedComponentReleaseName's `<tenant>-backend-api`), so callers that
+// need to address the running pod or service must derive it from here rather
+// than from the release name.
+func APIDeploymentName(tenant string) string {
+	return TenantResourcePrefix(tenant) + "-api"
+}
+
 func kubectlDeploymentWaitArgs(req ShellLaunchParams) []string {
 	args := kubectlTargetArgs(req)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+RuntimeReleaseName(req.Tenant))
