@@ -6,12 +6,14 @@ import {
   ResolveOrchestratorToReopen,
   RestartApp,
   RestartOrchestrator,
+  RevealOrchestratorGuidance,
   StartOrchestrator,
   StartOrchestratorWithResume,
   StopOrchestrator,
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
+import type { IDEKind, OrchestratorGuidanceLayer } from './model';
 import { planOrchestratorBusySeed } from './orchestratorBusySeed';
 import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
 import { planOrchestratorShellSeed } from './orchestratorShellActivitySeed';
@@ -267,6 +269,21 @@ export const deleteOrchestrator =
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));
+    } catch (error) {
+      dispatch(setOrchestratorsError(readError(error)));
+    }
+  };
+
+// revealOrchestratorGuidance opens one of an orchestrator's two guidance
+// layers — its own standing role or the shared contract every orchestrator
+// obeys — in the operator's chosen host IDE. Errors surface the same way
+// create/update/delete already do in OrchestratorDialog: inline, via the
+// shared `error` state, rather than a second notification channel.
+export const revealOrchestratorGuidance =
+  (id: string, layer: OrchestratorGuidanceLayer, ide: IDEKind): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      await RevealOrchestratorGuidance(id, layer, ide);
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));
     }
