@@ -12,7 +12,7 @@ What can you see when something goes wrong (or right). ERun doesn't ship a built
 |---|---|---|
 | **In-pod** | Stdout/stderr of every container, plus files under `/var/log/erun/` (CLI audit traces). | `kubectl logs`, `erun open` + shell, MCP `raw`. |
 | **Cluster** | Aggregated logs / metrics / traces across all envs on the cluster. | Whatever stack you've installed — Prometheus + Grafana + Loki, OpenTelemetry Collector, Datadog, …. |
-| **Durable** | Reviews, comments, builds, audit events — anything posted to the erun API. | erun API endpoints (admin-only for audit events; see [Audit log · Security events](/agent-reference/audit-log#security-events)). |
+| **Durable** | Reviews, comments, builds, audit events — anything posted to the erun API. | erun API endpoints (`GET /v1/audit-events` for the audit trail; see [Audit log · Query API](/agent-reference/audit-log#query-api)). |
 
 The first layer is always there. The other two are admin-opt-in.
 

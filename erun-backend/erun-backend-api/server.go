@@ -183,6 +183,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	contexts := repository.NewContextRepository(txManager)
 	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
 	usageEvents := repository.NewUsageEventRepository(txManager)
+	auditEvents := repository.NewAuditEventRepository(txManager)
 	releases := repository.NewReleaseRepository(txManager)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
@@ -210,6 +211,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, contexts, newEnvironmentProvisioner(options, environments, usageEvents, placementCredentials), newEnvironmentLifecycle(options, environments, usageEvents, placementCredentials), deleter)
 	newEnvironmentDeleteReconciler(options, environments, tenants, contexts, deleter)
 	routes.RegisterUsageEventRoutes(register, usageEvents)
+	routes.RegisterAuditEventRoutes(register, auditEvents)
 	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
 	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
 	var contextProvisioner routes.ContextProvisioner

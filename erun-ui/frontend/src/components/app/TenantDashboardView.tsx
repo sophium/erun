@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
   UITenant,
+  UITenantDashboardAudit,
   UITenantDashboardBuild,
   UITenantDashboardReview,
   UITenantDashboardUser,
@@ -116,12 +117,7 @@ function TenantDashboardTabContent({
         <BuildsTable builds={view.builds} apiError={view.apiError} />
       </TabsContent>
       <TabsContent value="audit" className="min-h-0 overflow-auto">
-        <div className="mt-4">
-          <EmptyState
-            heading="Audit log coming soon"
-            body="Tenant audit events will surface here once the backend ships them. Check back in a future release."
-          />
-        </div>
+        <AuditEventsTable events={view.auditEvents} apiError={view.apiError} />
       </TabsContent>
       <TabsContent value="api-log" className="min-h-0 overflow-auto">
         <APILogPanel log={view.apiLog} error={view.apiLogError} apiError={view.apiError} />
@@ -136,7 +132,7 @@ interface TenantDashboardViewData {
   hasAPIError: boolean;
   mergeQueue: UITenantDashboardReview[];
   builds: UITenantDashboardBuild[];
-  auditLogMessage: string;
+  auditEvents: UITenantDashboardAudit[];
   apiLog: string;
   apiLogError: string;
 }
@@ -147,7 +143,7 @@ const emptyTenantDashboardViewData: TenantDashboardViewData = {
   hasAPIError: false,
   mergeQueue: [],
   builds: [],
-  auditLogMessage: 'No audit events',
+  auditEvents: [],
   apiLog: '',
   apiLogError: '',
 };
@@ -165,7 +161,7 @@ function tenantDashboardViewData(
     hasAPIError: apiError.length > 0,
     mergeQueue: data.mergeQueue ?? [],
     builds: data.builds ?? [],
-    auditLogMessage: data.auditLogMessage ?? 'No audit events',
+    auditEvents: data.auditEvents ?? [],
     apiLog: data.apiLog ?? '',
     apiLogError: data.apiLogError ?? '',
   };
@@ -252,6 +248,40 @@ function BuildsTable({
           <DataCell>{build.commitId}</DataCell>
           <DataCell>{build.version}</DataCell>
           <DataCell>{formatDate(build.createdAt)}</DataCell>
+        </tr>
+      ))}
+    </DataTable>
+  );
+}
+
+function AuditEventsTable({
+  events,
+  apiError,
+}: {
+  events: UITenantDashboardAudit[];
+  apiError: string;
+}): React.ReactElement {
+  if (events.length === 0) {
+    if (apiError) {
+      return <DashboardMessage message={apiError} destructive />;
+    }
+    return (
+      <div className="mt-4">
+        <EmptyState
+          heading="No audit events"
+          body="Tenant activity will appear here as API, CLI, and MCP calls are made."
+        />
+      </div>
+    );
+  }
+  return (
+    <DataTable headers={['Time', 'Type', 'Actor', 'Action']}>
+      {events.map((event, index) => (
+        <tr key={`${event.createdAt ?? ''}-${String(index)}`}>
+          <DataCell>{formatDate(event.createdAt)}</DataCell>
+          <DataCell>{event.type}</DataCell>
+          <DataCell>{event.actor}</DataCell>
+          <DataCell strong>{event.action}</DataCell>
         </tr>
       ))}
     </DataTable>

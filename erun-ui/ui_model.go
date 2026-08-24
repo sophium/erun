@@ -186,18 +186,17 @@ type uiTenantDashboardInput struct {
 }
 
 type uiTenantDashboard struct {
-	Tenant          string                    `json:"tenant"`
-	Environment     string                    `json:"environment,omitempty"`
-	APIURL          string                    `json:"apiUrl,omitempty"`
-	APIError        string                    `json:"apiError,omitempty"`
-	APILog          string                    `json:"apiLog,omitempty"`
-	APILogError     string                    `json:"apiLogError,omitempty"`
-	User            *uiTenantDashboardUser    `json:"user,omitempty"`
-	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	AuditEvents     []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
-	AuditLogMessage string                    `json:"auditLogMessage,omitempty"`
+	Tenant      string                    `json:"tenant"`
+	Environment string                    `json:"environment,omitempty"`
+	APIURL      string                    `json:"apiUrl,omitempty"`
+	APIError    string                    `json:"apiError,omitempty"`
+	APILog      string                    `json:"apiLog,omitempty"`
+	APILogError string                    `json:"apiLogError,omitempty"`
+	User        *uiTenantDashboardUser    `json:"user,omitempty"`
+	Reviews     []uiTenantDashboardReview `json:"reviews,omitempty"`
+	MergeQueue  []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
+	Builds      []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	AuditEvents []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
 }
 
 type uiTenantDashboardUser struct {

@@ -9,6 +9,7 @@ import { OrchestratorDialog } from './OrchestratorDialog';
 import { OutputsDialog } from './OutputsDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
+import { TenantDashboard } from './TenantDashboard';
 import { TenantDialog } from './TenantDialog';
 import { TerminalPane } from './TerminalPane';
 import { TerminalTabStrip } from './TerminalTabStrip';
@@ -84,6 +85,10 @@ export class AppShell {
 
   get tenantDialog(): TenantDialog {
     return new TenantDialog(this.page);
+  }
+
+  get tenantDashboard(): TenantDashboard {
+    return new TenantDashboard(this.page);
   }
 
   get debugPanel(): DebugPanel {
