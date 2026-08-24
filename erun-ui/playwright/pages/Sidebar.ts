@@ -219,6 +219,29 @@ export class Sidebar {
     return this.erunSection().getByRole('button', { name: `Edit orchestrator ${name} settings` });
   }
 
+  // The row's main click target — labelled "Open" once running, "Start"
+  // otherwise — carries aria-current so a spec can assert it is (or is not)
+  // the sidebar's single focused row (#1204), mirroring envRowButton().
+  orchestratorRowButton(name: string): Locator {
+    return this.erunSection().getByRole('button', {
+      name: new RegExp(`^(Open|Start) orchestrator ${name}$`),
+    });
+  }
+
+  async openOrchestratorSession(name: string): Promise<void> {
+    await this.orchestratorRowButton(name).click();
+  }
+
+  // The tenant name button that opens its dashboard, carrying aria-current
+  // when the dashboard is the sidebar's focused row (#1204).
+  tenantDashboardButton(tenant: string): Locator {
+    return this.page.getByRole('button', { name: `Open ${tenant} dashboard` });
+  }
+
+  async openTenantDashboard(tenant: string): Promise<void> {
+    await this.tenantDashboardButton(tenant).click();
+  }
+
   // The orchestrator's Outputs button, mirroring the env row's. Like the other
   // row actions it is pointer-events-none until hover/focus and a hover raises
   // the IconTooltip popper that would swallow a click, so it is driven by
