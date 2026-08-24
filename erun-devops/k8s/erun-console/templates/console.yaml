@@ -10,6 +10,17 @@
   erun-zitadel's does from platform.authHost (no platform.consoleHost exists),
   so it defaults instead to "console.<platform.baseDomain>" when the platform
   block is configured, or must be set explicitly via console.externalDomain.
+
+  apex/www redirect: platform.baseDomain and "www.<baseDomain>" otherwise
+  resolve to nothing — only the console host is served. When a base
+  domain is known, this chart also renders a second Ingress for the apex and
+  www hosts carrying a Traefik redirect Middleware to the canonical console
+  origin, so a visitor who types the bare domain lands on the console instead
+  of a dead end, while sign-in (Authorization Code + PKCE) still has exactly
+  one origin. The redirect target is platform.consoleUrl when configured
+  (the value GET /v1/platform hands clients), falling back to this chart's own
+  externalDomain — never a literal. console.apexRedirectEnabled overrides the
+  default for a platform whose apex is used for something else.
 */}}
 {{- $tenant := default "erun" .Values.tenant -}}
 {{- $platform := default dict .Values.platform -}}
@@ -29,6 +40,28 @@
 {{- if hasKey $console "tlsSecretName" -}}
 {{- $tlsSecretName = $console.tlsSecretName -}}
 {{- end -}}
+{{- /* hasKey rather than `default`: an operator with a marketing site on the
+       apex must be able to set apexRedirectEnabled=false even though
+       baseDomain is set (default() would otherwise treat "false" fine, but
+       keeping the same hasKey idiom as tlsSecretName/adminPasswordChangeRequired
+       above avoids relying on default()'s "" handling here too). */ -}}
+{{- $apexRedirectEnabled := ne $baseDomain "" -}}
+{{- if hasKey $console "apexRedirectEnabled" -}}
+{{- $apexRedirectEnabled = $console.apexRedirectEnabled -}}
+{{- end -}}
+{{- $apexHost := default $baseDomain $console.apexHost -}}
+{{- $wwwHost := default (ternary (printf "www.%s" $apexHost) "" (ne $apexHost "")) $console.wwwHost -}}
+{{- if $apexRedirectEnabled -}}
+{{- $apexHost = required "erun-console: console.apexRedirectEnabled is true but no apex host could be resolved — set platform.baseDomain, or console.apexHost, or console.apexRedirectEnabled=false" $apexHost -}}
+{{- $wwwHost = required "erun-console: console.apexRedirectEnabled is true but no www host could be resolved — set platform.baseDomain, or console.wwwHost, or console.apexRedirectEnabled=false" $wwwHost -}}
+{{- end -}}
+{{- /* GET /v1/platform serves platform.consoleUrl to clients as the
+       canonical console address; reuse it here so the apex/www redirect
+       target is the same configured value, never a literal. Absent that
+       (platform.consoleUrl has no auto-default the way authHost does), fall
+       back to this chart's own externalDomain — itself never a literal. */ -}}
+{{- $redirectTarget := default (printf "https://%s" $externalDomain) $platform.consoleUrl -}}
+{{- $apexMiddlewareName := printf "%s-console-apex-redirect" $tenant -}}
 {{- $nginxPort := default 8080 $console.port -}}
 {{- $apiServiceName := default (printf "%s-api" $tenant) $console.apiServiceName -}}
 {{- $apiPort := default 17033 .Values.apiPort -}}
@@ -75,6 +108,10 @@ spec:
   tls:
     - hosts:
         - {{ $externalDomain }}
+        {{- if $apexRedirectEnabled }}
+        - {{ $apexHost }}
+        - {{ $wwwHost }}
+        {{- end }}
       secretName: {{ $tlsSecretName }}
   {{- end }}
   rules:
@@ -88,6 +125,66 @@ spec:
                 name: {{ $tenant }}-console
                 port:
                   name: http
+{{- if $apexRedirectEnabled }}
+---
+# The apex/www redirect Middleware: a plain 301 to the canonical console
+# origin, preserving path and query. Kept off the primary Ingress above so
+# that Ingress's rule stays the only one that ever reaches the Service — the
+# console's OIDC sign-in (Authorization Code + PKCE) depends on staying a
+# single origin.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $apexMiddlewareName }}
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  redirectRegex:
+    regex: "^https?://[^/]+(.*)$"
+    replacement: "{{ $redirectTarget }}$1"
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-console-apex-redirect
+  labels:
+    app: {{ $tenant }}-console
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" .Release.Namespace $apexMiddlewareName }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $apexHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+    - host: {{ $wwwHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment

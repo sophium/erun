@@ -79,6 +79,17 @@ Two things are yours to supply; the chart does the rest.
 
 **2. The certificate.** Set `console.certManagerIssuer` to the edge's DNS-01 Issuer and cert-manager fills the Ingress's TLS Secret for you. Leave it empty only if you issued the certificate yourself and named it in `console.tlsSecretName`. The host itself defaults to `console.<base-domain>` from the env's `platform:` block; set `console.externalDomain` explicitly to override it.
 
+### The apex and www redirect {#apex-redirect}
+
+The bare `<base-domain>` and `www.<base-domain>` are otherwise dead ends — only the console host resolves to anything. Whenever `platform.baseDomain` is set, `erun-console` also redirects those two hosts to the console with a permanent (301) redirect, so someone who types your product's own domain lands on the console instead. It stays a redirect rather than a third origin the console is also served on, because sign-in (Authorization Code + PKCE) depends on being reachable at exactly one origin.
+
+Two things beyond the console's own DNS/certificate above:
+
+1. **DNS for the apex and www hosts.** Apply the published `terraform-erun-cloudflare-apex` module (in your `terraform-<tenant>/` tree, the same way you reference `terraform-erun-cluster-edge`) — it writes `A` records for the apex and `www` directly into your already-Cloudflare-managed apex zone, pointing at the cluster's ingress IP. It does not create a zone (unlike `terraform-erun-cloudflare-services`, which delegates a *new* child zone) — your apex zone already exists.
+2. **The certificate covers all three hosts.** No extra step: the console chart already asks `console.certManagerIssuer` for a certificate covering `console.<base-domain>`, `<base-domain>`, and `www.<base-domain>` together, as long as the redirect is enabled.
+
+Running your apex for something else already (a marketing site)? Set `console.apexRedirectEnabled: false` and neither Ingress rule nor the extra certificate SANs render — the console host keeps working exactly as before. `console.apexHost`/`console.wwwHost` override the derived hostnames for a platform whose apex host isn't simply `<base-domain>`.
+
 **Signing in needs no console rebuild.** Unlike before, the console does not need `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` baked into its image — it resolves the issuer and its OIDC client id at runtime from [`GET /v1/platform`](/agent-reference/api-protocol#platform-endpoint), so the same built image serves every instance. **(Planned.)** The operator-facing config for populating that endpoint's `issuer`/`consoleClientId` (so it reflects the SPA client registered in [Hosted IdP § step 4](#hosted-idp) above) is landing alongside the backend work this depends on; until it does, an unset or absent `/v1/platform` falls back to the console's own `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` build-time values, which remain a local-dev override.
 
 ### Error behaviour
@@ -88,6 +99,9 @@ Two things are yours to supply; the chart does the rest.
 | No external domain resolvable | `erun deploy` aborts at the chart render with `an external domain is required`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.externalDomain` |
 | `GET /v1/platform` is absent or empty | The console falls back to its build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID`; with neither configured it shows the signed-out message with no Sign in button | Configure the backend's platform discovery, or set the console's `VITE_OIDC_*` build args as a stopgap |
 | `/v1/config` returns `502` through the console | The API Service the console's nginx proxies to isn't up yet, or `console.apiServiceName`/`console.apiServicePort` don't match the deployed API | Confirm `<tenant>-api` is running and the chart's proxy target matches its Service name/port |
+| The apex/www redirect is enabled but no apex host resolves | `erun deploy` aborts at the chart render with `console.apexRedirectEnabled is true but no apex host could be resolved`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.apexHost`/`console.wwwHost`, or `console.apexRedirectEnabled=false` |
+| The apex/www hosts don't resolve at all | The Helm chart's Ingress/Middleware are only half the picture — DNS is separate. Confirm the `terraform-erun-cloudflare-apex` module has actually been applied for this env | Apply it via your `terraform-<tenant>/` tree, pointed at the cluster's ingress IP |
+| Visiting the apex redirects to a `404`/wrong host | `platform.consoleUrl` names a different console than this chart's own `console.externalDomain` | Align `platform.consoleUrl` with the deployed console's host, or leave it unset so the redirect falls back to `console.externalDomain` |
 
 ## Which skills, and where
 
