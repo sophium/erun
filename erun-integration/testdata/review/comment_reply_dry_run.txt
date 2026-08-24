@@ -1,0 +1,3 @@
+Dry run: erun review comment planned.
+audit: erun review comment --commit abc123 --dry-run --file main.go --line 42 --reply-to comment-1 review-1
+platform: POST https://api.example.test/v1/reviews/review-1/comments (commitId=abc123, filePath=main.go, line=42, replyTo=comment-1)

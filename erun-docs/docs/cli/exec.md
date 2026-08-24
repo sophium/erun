@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Four subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), and `commit` (commit every change).
+Repository helpers that run from the project root. Five subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), and `push` (push a branch to a remote).
 
 ## Synopsis
 
@@ -13,6 +13,7 @@ erun exec diff [flags]
 erun exec raw COMMAND [ARG...] [flags]
 erun exec write PATH [flags]
 erun exec commit BRANCH [PATH...] [flags]
+erun exec push BRANCH [flags]
 ```
 
 ## Subcommands
@@ -43,6 +44,12 @@ Pass one or more PATH arguments to stage and commit only those paths instead of 
 
 `--dry-run` verifies the branch and traces the files that would be committed, without staging or committing. Reports the branch, commit id, and files committed; add `--output json` for a structured result.
 
+### `exec push`
+
+Pushes the project working tree's current branch to a remote (`origin` by default; override with `--remote`). BRANCH must match the working tree's actual current branch — refused, loudly, on mismatch, the same discipline as `commit`. A real, immediate mutation of shared remote state: it's the step that lands a branch somewhere a [review](/cli/review) (or another reviewer) can actually fetch it from — before this command, the only way to push a branch was `erun exec raw git push`.
+
+`--dry-run` verifies the branch and traces the push without running it. Reports the branch, remote, and pushed commit id; add `--output json` for a structured result.
+
 ## Examples
 
 ```bash
@@ -52,6 +59,7 @@ erun exec raw --dry-run -- kubectl get pods --all-namespaces
 erun exec write values.yaml < new-values.yaml
 echo 'fix the values typo' | erun exec commit main
 echo 'fix the values typo' | erun exec commit main values.yaml
+erun exec push feature/add-widget
 ```
 
 ## Error behaviour
@@ -67,3 +75,5 @@ echo 'fix the values typo' | erun exec commit main values.yaml
 | Nothing changed to commit (`commit`). | Refuses with `nothing to commit: the working tree has no changes`. |
 | Tree has changes outside the declared PATHs (`commit`). | Refuses with `refusing to commit: the working tree has changes outside the declared paths: ...`; nothing is staged. |
 | A PATH argument is blank (`commit`). | Refuses with `path entries must not be blank` rather than falling back to committing everything. |
+| BRANCH does not match the current branch (`push`). | Refuses with `refusing to push: working tree is on branch "X", not the declared "Y"`; nothing is pushed. |
+| The remote rejects the push (`push`), e.g. a non-fast-forward. | Git's own stderr surfaces verbatim; nothing about the local branch changes. |

@@ -1,0 +1,4 @@
+Dry run: erun review list planned.
+audit: erun review list --dry-run --mine
+platform: GET https://api.example.test/v1/whoami
+platform: GET https://api.example.test/v1/reviews (authorUserId=<caller>)

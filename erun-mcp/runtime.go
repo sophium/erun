@@ -57,6 +57,8 @@ type CommandOutput struct {
 	Write *eruncommon.WriteWorkingTreeFileResult `json:"write,omitempty"`
 	// Commit carries what a `commit` call actually committed.
 	Commit *eruncommon.CommitWorkingTreeResult `json:"commit,omitempty"`
+	// Push carries what a `push` call actually pushed.
+	Push *eruncommon.PushWorkingTreeBranchResult `json:"push,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)

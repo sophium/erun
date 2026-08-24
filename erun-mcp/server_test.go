@@ -154,7 +154,7 @@ var wantRegisteredTools = []string{
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
 	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_commit",
-	"exec_diff", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
+	"exec_diff", "exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
 	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
@@ -163,7 +163,9 @@ var wantRegisteredTools = []string{
 	"platform_env_register", "platform_env_stop", "platform_provision",
 	"platform_tenant_create", "platform_tenant_list", "platform_user_enroll",
 	"platform_user_list", "platform_whoami", "publish", "push", "raw",
-	"release", "terraform", "unexpose", "upgrade", "version", "write",
+	"release", "review_close", "review_comment", "review_create", "review_list",
+	"review_queue_advance", "review_queue_list", "review_show",
+	"terraform", "unexpose", "upgrade", "version", "write",
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {

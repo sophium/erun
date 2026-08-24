@@ -17,6 +17,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecRawCmd(findProjectRoot, runRaw),
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
+		newExecPushCmd(findProjectRoot),
 	)
 }
 
@@ -212,6 +213,51 @@ func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFind
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Committed %d file(s) as %s on %s.", len(result.Files), result.Commit, result.Branch))
+	return ctx.WriteResult(result)
+}
+
+func newExecPushCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	var remote string
+	cmd := &cobra.Command{
+		Use:   "push BRANCH",
+		Short: "Push the project working tree's current branch to a remote",
+		Long: "Push the project working tree's current branch to a remote.\n\n" +
+			"BRANCH must match the working tree's actual current branch; the push is refused, loudly, " +
+			"when it does not, rather than pushing whatever branch HEAD happens to be on. A real, " +
+			"immediate mutation of shared remote state: a branch a hosted review or another reviewer " +
+			"can only ever fetch once it has actually landed there.\n\n" +
+			"--dry-run traces the push without running it.",
+		Example:      "  erun exec push feature/add-widget\n  erun exec push feature/add-widget --remote upstream",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecPushCommand(commandContext(cmd), findProjectRoot, args[0], remote)
+		},
+	}
+	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to push to (defaults to origin)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch, remote string) error {
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return err
+	}
+	result, err := common.PushWorkingTreeBranch(ctx, projectRoot, common.PushWorkingTreeBranchParams{
+		Branch: branch,
+		Remote: remote,
+	}, common.PushWorkingTreeBranchDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Pushed %s to %s (%s).", result.Branch, result.Remote, result.Commit))
 	return ctx.WriteResult(result)
 }
 

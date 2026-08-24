@@ -47,6 +47,7 @@ const sidebars: SidebarsConfig = {
         'cli/cloud',
         'cli/context',
         'cli/platform',
+        'cli/review',
         'cli/sshd',
         'cli/list',
         'cli/outputs',

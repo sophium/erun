@@ -946,4 +946,85 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected only the seed commit, got log: %q", log)
 		}
 	})
+
+	t.Run("push_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "push", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/push_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("push_dry_run_verifies_branch_and_traces", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "push", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/push_dry_run_verifies_branch_and_traces", normalize.Apply(result.Combined))
+	})
+
+	t.Run("push_dry_run_refuses_branch_mismatch", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "push", "not-main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a branch mismatch under --dry-run, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/push_dry_run_refuses_branch_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("push_refuses_branch_mismatch", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "push", "not-main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a branch mismatch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/push_refuses_branch_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("push_real_run_lands_the_branch_on_the_remote", func(t *testing.T) {
+		// A real bare remote, not a stubbed git call, so "the branch actually
+		// landed on the remote" is an observable fact — the whole point of a
+		// typed push primitive over `raw` running `git push` (#1199).
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		remote := seedBareOrigin(t, setup)
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		result := erun.Run(t, []string{"exec", "push", "feature", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.PushWorkingTreeBranchResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Branch != "feature" || parsed.Remote != "origin" || parsed.Commit == "" {
+			t.Fatalf("unexpected result: %+v", parsed)
+		}
+		branches := captureGit(t, remote, "branch", "--list", "feature")
+		if !strings.Contains(branches, "feature") {
+			t.Fatalf("expected origin to carry the pushed feature branch, got: %q", branches)
+		}
+	})
+
+	t.Run("push_dry_run_must_not_reach_the_network", func(t *testing.T) {
+		// A dry run against a branch with no remote at all must still succeed:
+		// the whole point of --dry-run is that it never actually pushes.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "push", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "nonexistent") {
+			t.Fatalf("expected the trace to name the declared remote, got:\n%s", result.Combined)
+		}
+	})
 }

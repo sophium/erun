@@ -6,6 +6,7 @@ Usage:
 Available Commands:
   commit      Commit every change, or only the declared paths, in the project working tree
   diff        Show the current git diff
+  push        Push the project working tree's current branch to a remote
   raw         Run a raw command from the project root
   write       Write stdin to a file in the project working tree
 
