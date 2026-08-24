@@ -491,7 +491,7 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 	assertCommitToolOutput(t, output, projectRoot)
 }
 
-func assertCommitToolOutput(t *testing.T, output CommandOutput, projectRoot string) {
+func assertCommitToolOutput(t *testing.T, output JobEnvelopeOutput, projectRoot string) {
 	t.Helper()
 
 	if output.Commit == nil {
