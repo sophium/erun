@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import { openOutputs } from '@/app/outputsThunks';
+import { selectSidebarFocus } from '@/app/selectors';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
@@ -346,17 +347,18 @@ function useEnvironmentRowState(
     envBusyDetail,
     envObserved,
   );
-  // While an orchestrator owns the terminal pane, no environment is the focused
-  // thing — suppress the env's selected highlight so the sidebar matches what the
-  // pane renders (the orchestrator row carries the active highlight instead).
-  const orchestratorActive = useAppSelector(
-    (state) =>
-      state.terminal.sessionId > 0 &&
-      state.orchestrators.items.some((o) => o.sessionId === state.terminal.sessionId),
-  );
+  // The sidebar's single source of truth for "this row is the pane's focus"
+  // — the tenant dashboard and an orchestrator's session both take priority
+  // over an environment selection (see selectSidebarFocus), so a stale
+  // selection.selected left over from before either took the pane can never
+  // paint this row as selected too (#1204).
+  const focus = useAppSelector(selectSidebarFocus);
   return {
     ...derived,
-    selected: derived.selected && !orchestratorActive,
+    selected:
+      focus.kind === 'environment' &&
+      focus.tenant === tenantName &&
+      focus.environment === environmentName,
     envState,
     indicator: environmentIndicator({
       name: `${tenantName} / ${environmentName}`,

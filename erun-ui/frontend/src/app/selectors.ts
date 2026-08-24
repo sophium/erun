@@ -1,5 +1,6 @@
 import type { UISelection } from '@/types';
 
+import type { SidebarFocus } from './model';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
@@ -133,6 +134,31 @@ export const selectActiveSessionOrchestrator = (state: RootState): OrchestratorI
 // to know whether env-scoped chrome applies.
 export const selectIsOrchestratorSession = (state: RootState): boolean =>
   selectActiveSessionOrchestrator(state) !== null;
+
+// selectSidebarFocus names the one thing the sidebar highlights and the main
+// pane shows. The tenant dashboard, an orchestrator's session, and an
+// environment's session each used to compute their own "active" condition
+// from a different state slice, so a tenant dashboard row and an orchestrator
+// row could both render selected at once while the pane showed only one of
+// them (#1204). Every sidebar row derives its highlight from this single
+// value instead. The tenant dashboard takes priority regardless of a stale
+// terminal.sessionId left over from before it opened; an orchestrator session
+// takes priority over an environment selection for the same reason.
+export const selectSidebarFocus = (state: RootState): SidebarFocus => {
+  const dashboardTenant = state.tenantDashboard.tenant;
+  if (dashboardTenant) {
+    return { kind: 'dashboard', tenant: dashboardTenant };
+  }
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', sessionId: orchestrator.sessionId };
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    return { kind: 'environment', tenant: selected.tenant, environment: selected.environment };
+  }
+  return { kind: 'none' };
+};
 
 export interface ReviewEnvTarget {
   envKey: string;

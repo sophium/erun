@@ -20,6 +20,7 @@ import {
   startOrchestrator,
 } from '@/app/orchestratorThunks';
 import { openOutputs } from '@/app/outputsThunks';
+import { selectSidebarFocus } from '@/app/selectors';
 import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellActivitySlice';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
@@ -112,7 +113,7 @@ function OrchestratorsArea(): React.ReactElement {
   const dispatch = useAppDispatch();
   const items = useAppSelector((state) => state.orchestrators.items);
   const error = useAppSelector((state) => state.orchestrators.error);
-  const activeSessionId = useAppSelector((state) => state.terminal.sessionId);
+  const focus = useAppSelector(selectSidebarFocus);
 
   // The orchestrator a rebuild+restart returns to is restored by boot(), which
   // owns the initial pane selection; here we only load the list for the sidebar.
@@ -155,7 +156,7 @@ function OrchestratorsArea(): React.ReactElement {
             <OrchestratorRow
               key={orchestrator.id}
               orchestrator={orchestrator}
-              active={orchestrator.sessionId === activeSessionId && activeSessionId > 0}
+              active={focus.kind === 'orchestrator' && focus.sessionId === orchestrator.sessionId}
             />
           ))}
         </ul>
@@ -210,6 +211,7 @@ function OrchestratorRow({
           active ? 'font-medium' : 'font-normal',
         )}
         aria-label={`${running ? 'Open' : 'Start'} orchestrator ${orchestrator.name}`}
+        aria-current={active ? 'page' : undefined}
         onClick={() => {
           if (running) {
             dispatch(openOrchestrator(orchestrator.sessionId));

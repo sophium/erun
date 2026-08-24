@@ -26,8 +26,26 @@ import {
   setOrchestratorsError,
 } from './slices/orchestratorsSlice';
 import { setSelected } from './slices/selectionSlice';
+import { resetTenantDashboard } from './slices/tenantDashboardSlice';
 import { setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
+
+// focusOrchestratorSession makes an orchestrator's session own the terminal
+// pane. The pane and the sidebar highlight are each derived from whichever of
+// the tenant dashboard, an orchestrator's session, or an environment
+// selection currently applies (see selectSidebarFocus in ./selectors), so
+// handing an orchestrator the pane must clear the other two here, once,
+// rather than at every call site that starts, opens, or restarts one — a
+// caller that dispatched setSessionId directly used to leave the tenant
+// dashboard painted over the session the sidebar now highlighted as focused
+// (#1204).
+const focusOrchestratorSession =
+  (sessionId: number): AppThunk =>
+  (dispatch) => {
+    dispatch(resetTenantDashboard());
+    dispatch(setSelected(null));
+    dispatch(setSessionId(sessionId));
+  };
 
 // loadOrchestrators fetches the current list and, in the same pass, seeds the
 // AI-busy store from each orchestrator's own `busy` snapshot field,
@@ -100,7 +118,7 @@ export const startOrchestrator =
   async (dispatch) => {
     try {
       const info = await StartOrchestrator(id, 80, 24);
-      dispatch(setSessionId(info.sessionId));
+      dispatch(focusOrchestratorSession(info.sessionId));
       await dispatch(loadOrchestrators());
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));
@@ -112,7 +130,7 @@ export const openOrchestrator =
   (sessionId: number): AppThunk =>
   (dispatch) => {
     if (sessionId > 0) {
-      dispatch(setSessionId(sessionId));
+      dispatch(focusOrchestratorSession(sessionId));
     }
   };
 
@@ -125,7 +143,7 @@ export const restartOrchestrator =
   async (dispatch) => {
     try {
       const info = await RestartOrchestrator(id, 80, 24);
-      dispatch(setSessionId(info.sessionId));
+      dispatch(focusOrchestratorSession(info.sessionId));
       await dispatch(loadOrchestrators());
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));
@@ -214,8 +232,7 @@ export const restoreOpenOrchestrators =
               24,
             )
           : await StartOrchestrator(primary.id, 80, 24);
-        dispatch(setSelected(null));
-        dispatch(setSessionId(info.sessionId));
+        dispatch(focusOrchestratorSession(info.sessionId));
         restoredPane = true;
       }
       await dispatch(loadOrchestrators());
@@ -262,7 +279,7 @@ export const investigateFailure =
   async (dispatch) => {
     try {
       const info = await InvestigateFailure(report, tenant, environment, 80, 24);
-      dispatch(setSessionId(info.sessionId));
+      dispatch(focusOrchestratorSession(info.sessionId));
       await dispatch(loadOrchestrators());
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));

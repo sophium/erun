@@ -2,6 +2,7 @@ import { Folder, FolderOpen, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { selectSidebarFocus } from '@/app/selectors';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
 import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
 import { IconTooltip } from '@/components/app/IconTooltip';
@@ -21,11 +22,10 @@ export function TenantGroup({
   pending: UISelection | null;
 }): React.ReactElement {
   const collapsedTenants = useAppSelector((state) => state.sidebar.collapsedTenants);
-  const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
-  const selected = useAppSelector((state) => state.selection.selected);
+  const focus = useAppSelector(selectSidebarFocus);
   const collapsed = collapsedTenants.includes(tenant.name);
-  const active = dashboardTenant === tenant.name;
-  const related = active || selected?.tenant === tenant.name;
+  const active = focus.kind === 'dashboard' && focus.tenant === tenant.name;
+  const related = active || (focus.kind === 'environment' && focus.tenant === tenant.name);
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>

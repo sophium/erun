@@ -27,7 +27,7 @@ import {
   resetEnvOpening,
   trackOpenSession,
 } from './slices/sessionsSlice';
-import { setTenantDashboard } from './slices/tenantDashboardSlice';
+import { resetTenantDashboard } from './slices/tenantDashboardSlice';
 import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { TerminalTab, TerminalTabKind } from './state';
@@ -259,9 +259,7 @@ export const openSelection =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    dispatch(
-      setTenantDashboard({ tenant: '', tab: 'users', loading: false, error: '', data: null }),
-    );
+    dispatch(resetTenantDashboard());
     const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     const previousSessionId = getState().terminal.sessionId;
