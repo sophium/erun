@@ -16,11 +16,34 @@ export class Titlebar {
   }
 
   async toggleReviewPanel(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Toggle diff panel' }).click();
+    await this.diffPanelToggle().click();
+  }
+
+  diffPanelToggle(): Locator {
+    return this.page.getByRole('button', { name: 'Toggle diff panel' });
   }
 
   async toggleFilesPanel(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Toggle changed files list' }).click();
+    await this.changedFilesToggle().click();
+  }
+
+  changedFilesToggle(): Locator {
+    return this.page.getByRole('button', { name: 'Toggle changed files list' });
+  }
+
+  // Env-scoped titlebar controls: the two IDE buttons and the contribute
+  // toggle. These render only when the active session is an environment tab,
+  // not an orchestrator session (#1178).
+  vscodeButton(): Locator {
+    return this.page.getByRole('button', { name: /VS Code/i });
+  }
+
+  intellijButton(): Locator {
+    return this.page.getByRole('button', { name: /IntelliJ|IDEA/i });
+  }
+
+  contributeToggleButton(): Locator {
+    return this.page.getByRole('button', { name: /Contribute to ERun|Disable contribute mode/ });
   }
 
   async openVSCode(): Promise<void> {
