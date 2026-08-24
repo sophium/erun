@@ -20,6 +20,7 @@ import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddlewar
 import { uiTraceMiddleware } from './middleware/uiTraceMiddleware';
 import activityReducer from './slices/activitySlice';
 import aiActivityReducer from './slices/aiActivitySlice';
+import aiOccupancyPromptReducer from './slices/aiOccupancyPromptSlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import closeGateReducer from './slices/closeGateSlice';
 import contributeReducer from './slices/contributeSlice';
@@ -72,6 +73,7 @@ export const store = configureStore({
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
     closeGate: closeGateReducer,
+    aiOccupancyPrompt: aiOccupancyPromptReducer,
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
     outputsDialog: outputsDialogReducer,

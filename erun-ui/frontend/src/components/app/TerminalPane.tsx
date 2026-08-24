@@ -3,8 +3,10 @@ import * as React from 'react';
 import { useTerminalActivityLockState } from '@/app/activityQueueState';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startReviewResize } from '@/app/layoutThunks';
+import { selectActiveTabIsAI } from '@/app/selectors';
 import { clearHiddenLockOverlay, hideLockOverlay } from '@/app/slices/terminalStatusSlice';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
+import { AIOccupancyBanner } from '@/components/app/AIOccupancyBanner';
 import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { TerminalBusyOverlay } from '@/components/app/TerminalBusyOverlay';
@@ -39,6 +41,8 @@ export function TerminalPane({
     (state) => state.terminalStatus.hiddenLockSessions[sessionId],
   );
   const liveLock = locks.get(sessionId) ?? null;
+  const activeTabIsAI = useAppSelector(selectActiveTabIsAI);
+  const occupancyLeases = useAppSelector((state) => state.idle.idleStatus?.leases ?? []);
   // The user can dismiss the overlay locally for a session if it's
   // covering output they need to read or input they need to provide
   // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
@@ -78,12 +82,15 @@ export function TerminalPane({
         >
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
           <TerminalBusyOverlay message={terminalBusy ? terminalMessage : ''} />
-          {activeLock && (
+          {activeLock ? (
             <ActivityLockOverlay
               lock={activeLock}
               onOpenQueue={onOpenActivityQueue}
               onProceedAnyway={hideActiveLock}
             />
+          ) : (
+            activeTabIsAI &&
+            occupancyLeases.length > 0 && <AIOccupancyBanner leases={occupancyLeases} />
           )}
         </div>
       </div>

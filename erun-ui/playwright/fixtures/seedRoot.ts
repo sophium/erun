@@ -479,6 +479,35 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
+// activityLeaseDir is where eruncommon.TakeEnvironmentActivityLease persists
+// leases: XDG_CACHE_HOME/erun/activity/<tenant>/<environment>/leases.
+function activityLeaseDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'leases');
+}
+
+// writeHeldLease stages a real activity lease file — the same on-disk shape
+// eruncommon.TakeEnvironmentActivityLease writes — so a headless spec can
+// drive the AI-tab occupancy check (erun#1221) without a live orchestrator job.
+export function writeHeldLease(tenant: string, environment: string, name: string): void {
+  const dir = activityLeaseDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAt = new Date();
+  const expiresAt = new Date(startedAt.getTime() + 15 * 60 * 1000);
+  fs.writeFileSync(
+    path.join(dir, `${name}.json`),
+    JSON.stringify({
+      id: name,
+      name,
+      startedAt: startedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    }),
+  );
+}
+
+export function removeHeldLease(tenant: string, environment: string, name: string): void {
+  fs.rmSync(path.join(activityLeaseDir(tenant, environment), `${name}.json`), { force: true });
+}
+
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
 // uninitialized. Mirrors what `erun init` writes (createTenantConfig in

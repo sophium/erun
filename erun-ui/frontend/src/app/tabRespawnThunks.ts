@@ -7,6 +7,7 @@ import {
   StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
+import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
 import { selectEnvHasFailedDeploy } from './selectors';
@@ -93,11 +94,29 @@ const respawnDefaultTab =
   ): AppThunk<Promise<void>> =>
   async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    let result: StartSessionResult;
+    let result: StartSessionResult | null;
     try {
-      result = await startSessionForKind(runSelection, tab, cols, rows);
+      if (tab.kind === 'ai') {
+        result = await dispatch(
+          startAITabOrPrompt({
+            key,
+            selection: runSelection,
+            slot: tab.slot,
+            cols,
+            rows,
+            label: tab.label,
+          }),
+        );
+      } else {
+        result = await startSessionForKind(runSelection, tab, cols, rows);
+      }
     } catch (error: unknown) {
       dispatch(showTerminalMessage(readError(error)));
+      return;
+    }
+    if (!result) {
+      // The occupancy prompt took over; nothing to select until it resolves.
+      dispatch(hideTerminalMessage());
       return;
     }
     if (tab.kind === 'erun') {
@@ -111,6 +130,10 @@ const respawnDefaultTab =
     controller.queueTerminalResize();
   };
 
+// startSessionForKind now only serves callers that never gate on occupancy: a
+// dead AI tab click routes through startAITabOrPrompt above instead, but a
+// launch-flag relaunch (respawnRelaunchedAITab) restarts a tool the user was
+// already running, not a second agent, so it confirms straight through.
 async function startSessionForKind(
   runSelection: UISelection,
   tab: TerminalTab,
@@ -119,7 +142,7 @@ async function startSessionForKind(
 ): Promise<StartSessionResult> {
   switch (tab.kind) {
     case 'ai':
-      return await StartAISession(runSelection, tab.slot, cols, rows);
+      return await StartAISession(runSelection, tab.slot, cols, rows, true);
     case 'local':
       return await StartLocalSession(runSelection, tab.slot, cols, rows);
     case 'erun':

@@ -75,7 +75,7 @@ func TestEnsureEnvRuntimeOnceDedupesAcrossTabs(t *testing.T) {
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if _, err := app.StartAISession(selection, 0, 80, 24); err != nil {
+	if _, err := app.StartAISession(selection, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)

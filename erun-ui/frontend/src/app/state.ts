@@ -6,6 +6,7 @@ import type {
   UICloudProviderStatus,
   UIDeployableComponent,
   UIEnvironmentConfig,
+  UIEnvironmentLease,
   UIERunConfig,
   UIIdleStatus,
   UIRuntimeResourceStatus,
@@ -228,6 +229,30 @@ export interface AutoStartPromptState {
   error: string;
 }
 
+// AIOccupancyPendingStart carries what a confirmed retry needs to actually
+// start the session and record its tab — captured at the moment the
+// unconfirmed start reported the environment occupied.
+export interface AIOccupancyPendingStart {
+  key: string;
+  selection: UISelection;
+  slot: number;
+  cols: number;
+  rows: number;
+  label: string;
+}
+
+// AIOccupancyPromptState backs the "an agent is already here" dialog shown
+// when starting the AI tab finds the environment held by another job's
+// activity lease. Confirming is a deliberate "start a second agent anyway",
+// never an automatic retry.
+export interface AIOccupancyPromptState {
+  open: boolean;
+  leases: UIEnvironmentLease[];
+  pending: AIOccupancyPendingStart | null;
+  starting: boolean;
+  error: string;
+}
+
 export interface AppState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
@@ -239,6 +264,7 @@ export interface AppState {
   tenantDashboard: TenantDashboardState;
   globalConfigDialog: GlobalConfigDialogState;
   autoStartPrompt: AutoStartPromptState;
+  aiOccupancyPrompt: AIOccupancyPromptState;
   collapsedTenants: Set<string>;
   sessionId: number;
   tabsByEnv: Record<string, TerminalTab[]>;
@@ -362,6 +388,14 @@ export const defaultAutoStartPrompt = (): AutoStartPromptState => ({
   open: false,
   selection: null,
   saving: false,
+  error: '',
+});
+
+export const defaultAIOccupancyPrompt = (): AIOccupancyPromptState => ({
+  open: false,
+  leases: [],
+  pending: null,
+  starting: false,
   error: '',
 });
 

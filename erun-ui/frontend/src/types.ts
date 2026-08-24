@@ -223,6 +223,11 @@ export interface UIIdleStatus {
   cloudContextStatus?: string;
   cloudContextLabel?: string;
   markers?: UIIdleMarker[];
+  // Leases are the work claims currently holding the environment (an
+  // orchestrator or CLI job) — not this desktop's own interactive AI/ERun/Local
+  // sessions, which never take one. A non-empty list is a coexisting agent the
+  // AI tab does not manage.
+  leases?: UIEnvironmentLease[];
   // RFC3339 timestamp when the desktop first saw stopEligible=true. While set,
   // the auto-stop is "armed": ec2:StopInstances fires after
   // secondsUntilForcedStop more seconds unless cancelled or activity resumes.
@@ -281,6 +286,14 @@ export interface UIIdleMarkerClient {
   address: string;
   bytes?: number;
   secondsAgo?: number;
+}
+
+// UIEnvironmentLease is one activity lease held on the environment — a named
+// job, not this desktop's own interactive session. secondsHeld is precomputed
+// so the renderer never redoes the time math.
+export interface UIEnvironmentLease {
+  name: string;
+  secondsHeld?: number;
 }
 
 export interface UIVersionSuggestion {
@@ -559,6 +572,10 @@ export interface StartSessionResult {
   // no Local tab to activate, so progress and completion surface through the
   // activity queue.
   orchestrated?: boolean;
+  // Occupancy lists the leases already holding the environment when an
+  // unconfirmed AI session start found it occupied: sessionId is 0 and no
+  // session was started. Retry with confirmed=true to start anyway.
+  occupancy?: UIEnvironmentLease[];
 }
 
 export interface TerminalOutputPayload {

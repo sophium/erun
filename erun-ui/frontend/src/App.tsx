@@ -6,6 +6,7 @@ import { startSidebarResize } from '@/app/layoutThunks';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
+import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
@@ -117,6 +118,7 @@ export function App(): React.ReactElement {
         <OrchestratorDialog />
         <AutoStartPromptDialog />
         <CloseConfirmDialog />
+        <AIOccupancyPromptDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}
