@@ -467,6 +467,14 @@ func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
 // on ambient store state and be flaky, which is worse than not testing it here
 // -- the builder tests above cover the partial split with an injected resolver.
 func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T) {
+	// Pin the executable seam. Without it this test only passes where an erun
+	// binary happens to sit on PATH: writeOrchestratorMCPConfig resolves the
+	// executable BEFORE it reaches the no-port path, so on a host without one it
+	// returns errOrchestratorMCPExecutable and the assertion below never sees the
+	// skips it exists to check. The build's own test stage has no erun on PATH,
+	// which is where that surfaced.
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
