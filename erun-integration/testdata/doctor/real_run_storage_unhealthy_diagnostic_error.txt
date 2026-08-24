@@ -10,4 +10,6 @@ team-devops-pod-1   2/2     Running   0
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 audit: erun doctor --prune-images team dev
 trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor failed team/dev: runtime access failed because local Kubernetes storage for team/dev is unhealthy: Error from server: disk i/o error
 runtime access failed because local Kubernetes storage for team/dev is unhealthy: Error from server: disk i/o error

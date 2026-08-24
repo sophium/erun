@@ -410,6 +410,98 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerStartsAndFinishesDoctor: `erun doctor` runs
+// piped into the shared Local shell, which never produces a PTY exit, so the
+// `==> Doctor ...` trace lines are its only completion signal — mirroring
+// init/build, not a bespoke mechanism.
+func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	entry, ok := app.activityQueue.findActiveByCommand("doctor", "team", "dev")
+	if !ok {
+		t.Fatal("expected doctor entry to be active after ==> Doctor")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> Doctor done team/dev")
+	if _, ok := app.activityQueue.findActiveByCommand("doctor", "team", "dev"); ok {
+		t.Fatal("expected doctor entry to be finished after ==> Doctor done")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	handler("==> Doctor failed team/dev: kubectl not reachable")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if all[0].Error != "kubectl not reachable" {
+		t.Fatalf("expected parsed reason, got %q", all[0].Error)
+	}
+}
+
+// TestStartDoctorFromTraceDoesNotLockTerminal: doctor's recovery actions
+// prompt interactively in the very terminal it runs in, so unlike deploy/init
+// it must not lock terminals — locking would block the prompt it is waiting on.
+func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
+	app.sessions[localSession.key] = localSession
+	app.startDoctorFromTrace(selection, "team", "dev")
+	if localSession.lockedByActivity != "" {
+		t.Fatalf("expected doctor to not lock terminal, got %q", localSession.lockedByActivity)
+	}
+}
+
+// TestDoctorCompletedEventRecordsLastRunOutcome: doctor's outcome must reach
+// the frontend even though it runs piped into the shared Local shell (no PTY
+// exit) — this is what the Manage dialog's SSH tab renders as the persisted
+// last-run result.
+func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	handler("==> Doctor failed team/dev: kubectl not reachable")
+
+	events := emits.events(doctorCompletedEvent)
+	if len(events) != 1 {
+		t.Fatalf("doctor-completed emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(uiDoctorCompletedPayload)
+	if !ok {
+		t.Fatalf("doctor-completed payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" {
+		t.Fatalf("payload selection = %+v, want team/dev", payload)
+	}
+	if payload.Success {
+		t.Fatalf("expected success=false, got %+v", payload)
+	}
+	if payload.Message != "kubectl not reachable" {
+		t.Fatalf("expected parsed message, got %q", payload.Message)
+	}
+}
+
 func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	// Build/release/push run IN the user's terminal, so locking the session
 	// would freeze the very tab they are reading output in — unlike deploy, they

@@ -4,3 +4,5 @@ Cached backend path: <TMP>
 Cleared cached JetBrains Gateway backend metadata. Open IntelliJ again to let Gateway select or redeploy the backend.
 audit: erun doctor --repair-jetbrains-gateway team dev
 trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

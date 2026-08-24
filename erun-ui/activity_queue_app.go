@@ -311,6 +311,20 @@ var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/(
 // tenant/env` trace emitted when a step after Initializing errors.
 var activityInitFailedLineRe = regexp.MustCompile(`^==> Initialization failed ([^/\s]+)/([^/\s]+)\b`)
 
+// activityDoctorLineRe matches the `==> Doctor tenant/env` trace emitted at
+// the start of a target-scoped `erun doctor` run.
+var activityDoctorLineRe = regexp.MustCompile(`^==> Doctor ([^/\s]+)/([^/\s]+)\s*$`)
+
+// activityDoctorDoneLineRe matches the `==> Doctor done tenant/env` trace.
+// This line, not PTY exit, is doctor's completion signal: like `erun init`,
+// `erun doctor` runs piped into the shared Local shell (see erun-ui/AGENTS.md
+// § "Command Completion And State-Refresh Wiring").
+var activityDoctorDoneLineRe = regexp.MustCompile(`^==> Doctor done ([^/\s]+)/([^/\s]+)\b`)
+
+// activityDoctorFailedLineRe matches the `==> Doctor failed tenant/env:
+// reason` trace emitted when any step of the target-scoped run errors.
+var activityDoctorFailedLineRe = regexp.MustCompile(`^==> Doctor failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
+
 // activityBuildingLineRe matches the umbrella `==> Building` trace
 // emitted by RunBuildExecution at the top of the build pipeline.
 // Unlike deploy/init the line carries no tenant/env — build has no
@@ -391,6 +405,7 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 		case app.handleDeployTraceLine(selection, line):
 		case initTraceHonored && app.handleInitTraceLine(selection, line):
 		case app.handleCommandTraceLine(selection, line):
+		case app.handleDoctorTraceLine(selection, line):
 		case failedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
 		case errorRe.MatchString(line):
@@ -443,6 +458,24 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
 	}
 	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message)
+}
+
+// handleDoctorTraceLine dispatches the `erun doctor` lifecycle trace lines,
+// returning true on a match so the caller stops.
+func (a *App) handleDoctorTraceLine(selection uiSelection, line string) bool {
+	if match := activityDoctorLineRe.FindStringSubmatch(line); match != nil {
+		a.startDoctorFromTrace(selection, match[1], match[2])
+		return true
+	}
+	if match := activityDoctorDoneLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		return true
+	}
+	if match := activityDoctorFailedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		return true
+	}
+	return false
 }
 
 func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
@@ -596,6 +629,56 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
 	}
+}
+
+// startDoctorFromTrace registers an activity entry for `erun doctor`, giving
+// it a persistent, glanceable presence in the activity drawer/sidebar spinner
+// regardless of which surface started it (sidebar, Manage dialog, or a failed
+// deploy card's "Run doctor" recovery button). Unlike deploy/init it never
+// locks terminals: doctor's recovery actions prompt interactively in the very
+// terminal it runs in, and locking that terminal would block the prompt.
+func (a *App) startDoctorFromTrace(selection uiSelection, tenant, environment string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("doctor", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	if _, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "doctor",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "doctor " + tenant + "/" + environment,
+	}); !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+}
+
+// finishDoctorByTenantEnv finalizes the activity entry and records the
+// persisted last-run outcome the Manage dialog's SSH tab reads
+// (state.doctor.lastDoctorBySelection) — the answer "is this healthy?" that
+// otherwise vanished the moment the terminal scrolled past it.
+func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if a.activityQueue != nil {
+		if entry, ok := a.activityQueue.findActiveByCommand("doctor", tenant, environment); ok {
+			a.activityQueue.finish(entry.ID, status, errMsg)
+		}
+	}
+	a.emitDoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
 // startDeployFromTrace registers a deploy entry from a `==> Deploying` trace.

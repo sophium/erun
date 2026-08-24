@@ -105,6 +105,21 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 
+	// The desktop pipes `erun doctor` into its shared Local shell, which never
+	// produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion And
+	// State-Refresh Wiring"), so these are the only completion signal the
+	// desktop has: an activity-queue entry to show doctor running, and a
+	// recorded outcome the Manage dialog can display as the last run's result.
+	ctx.Info(fmt.Sprintf("==> Doctor %s/%s", result.Tenant, result.Environment))
+	if err := runDoctorForTarget(ctx, configStore, promptRunner, result, options); err != nil {
+		ctx.Info(fmt.Sprintf("==> Doctor failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))
+		return err
+	}
+	ctx.Info(fmt.Sprintf("==> Doctor done %s/%s", result.Tenant, result.Environment))
+	return nil
+}
+
+func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}

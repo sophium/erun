@@ -46,13 +46,13 @@ export function Sidebar(): React.ReactElement {
                 <ArrowUp />
               </Button>
             </IconTooltip>
-            <IconTooltip label="Initialize new remote environment">
+            <IconTooltip label="Initialize new environment">
               <Button
                 className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Initialize new remote environment"
+                aria-label="Initialize new environment"
                 onClick={() => {
                   dispatch(openInitializeDialog());
                 }}
@@ -67,7 +67,7 @@ export function Sidebar(): React.ReactElement {
             <EmptyState
               icon={<Plus />}
               heading="No environments yet"
-              body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
+              body="Initialize an environment to start working — local-agent, remote-agent, or runtime."
               action={
                 <Button
                   type="button"

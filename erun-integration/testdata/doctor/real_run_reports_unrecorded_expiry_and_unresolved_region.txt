@@ -27,3 +27,5 @@ Running: Remove unused Docker images
 Total reclaimed space: 2GB
 audit: erun doctor --prune-images team dev
 trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

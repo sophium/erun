@@ -6,3 +6,11 @@
 // one predicate.
 export const isMacPlatform =
   typeof navigator !== 'undefined' && /\b(Mac|iPhone|iPad|iPod)\b/.test(navigator.userAgent);
+
+// isWindowsPlatform gates the platform-specific recovery copy in
+// KubernetesContextSelect: the documented Windows getting-started path
+// (erun-docs/docs/getting-started/first-environment.md) is this very dialog,
+// so guidance that only makes sense on macOS (~/.zshenv, brew) must not be
+// the only copy a Windows reader sees.
+export const isWindowsPlatform =
+  typeof navigator !== 'undefined' && /\bWindows\b/.test(navigator.userAgent);

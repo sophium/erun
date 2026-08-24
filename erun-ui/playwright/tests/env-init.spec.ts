@@ -314,4 +314,111 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
   });
+
+  // erun#1217: VersionNotices used to render inside the version popover,
+  // whose open state required suggestions.length > 0 — so a listing failure
+  // (zero suggestions, one notice) computed the exact recovery advice and
+  // then put it in a surface that could structurally never open.
+  test('shows the version recovery advice even when the popover has nothing to list', async ({
+    app,
+    page,
+  }) => {
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [],
+              notices: [{ image: 'ghcr.io/acme/erun-devops', kind: 'auth' }],
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // Visible directly, without ever opening the (now correctly disabled,
+    // nothing-to-pick) popover.
+    await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled();
+    const notices = app.envInitDialog.versionNotices();
+    await expect(notices).toBeVisible();
+    await expect(notices).toContainText('ghcr.io/acme/erun-devops is private');
+    await expect(notices).toContainText('docker login ghcr.io');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // erun#1217: the in-app route that unblocks a user with no local kubectl
+  // context (Settings → Cloud aliases → Add AWS account → Cloud contexts →
+  // Init provisions a managed cluster) was never named on this screen.
+  test('names the managed-cloud-cluster route when no Kubernetes contexts are found', async ({
+    app,
+  }) => {
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const emptyState = app.envInitDialog.locator().getByText('No Kubernetes contexts found');
+    await expect(emptyState).toBeVisible();
+    const body = app.envInitDialog.locator();
+    await expect(body).toContainText('Cloud aliases');
+    await expect(body).toContainText('Cloud contexts');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // erun#1217: this dialog IS the documented Windows getting-started path
+  // (erun-docs/docs/getting-started/first-environment.md), but its recovery
+  // copy assumed macOS (~/.zshenv, brew) unconditionally.
+  test.describe('on a Windows user agent', () => {
+    test.use({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    });
+
+    test('names Windows recovery steps instead of macOS-only ones', async ({ app }) => {
+      await app.sidebar.openInitDialog();
+      await app.envInitDialog.waitForOpen();
+
+      const body = app.envInitDialog.locator();
+      await expect(body).toContainText('winget install');
+      await expect(body).not.toContainText('brew install');
+      await expect(body).not.toContainText('.zshenv');
+
+      await app.envInitDialog.cancel();
+      await app.envInitDialog.waitForClosed();
+    });
+  });
+
+  // erun#1217: a fresh install's container registry field offered no
+  // placeholder, no helper, and no suggestions — nothing to go on for a
+  // required free-text value.
+  test('explains the container registry format and the auto-detect route when nothing is detected', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // stubDialogCluster resolves a context but the harness's kubectl stub
+    // cannot reach a real cluster, so no in-cluster registry is detected —
+    // the "nothing to go on" state this fix targets.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await expect(page.getByText('Use in-cluster registry', { exact: false })).toHaveCount(0);
+
+    const help = app.envInitDialog.locator().getByText(/Where images push to and pull from/);
+    await expect(help).toBeVisible();
+    await expect(help).toContainText('ghcr.io/your-org');
+    await expect(help).toContainText('Cloud aliases');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
 });

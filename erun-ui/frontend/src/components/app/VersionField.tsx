@@ -76,7 +76,7 @@ export function VersionField({
               variant="ghost"
               size="icon"
               aria-label="Show version choices"
-              disabled={disabled}
+              disabled={disabled === true || suggestions.length === 0}
             >
               <ChevronsUpDown />
             </Button>
@@ -98,10 +98,13 @@ export function VersionField({
                 </CommandGroup>
               </CommandList>
             </Command>
-            <VersionNotices notices={notices} />
           </PopoverContent>
         </Popover>
       </div>
+      {/* Rendered outside the popover so a listing failure (zero suggestions,
+          one notice) still surfaces its recovery advice — a popover that only
+          opens when suggestions.length > 0 can never show it otherwise. */}
+      <VersionNotices notices={notices} />
       <p className="min-h-4 text-xs text-muted-foreground">{sourceText}</p>
     </div>
   );

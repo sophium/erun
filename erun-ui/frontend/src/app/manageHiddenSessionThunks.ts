@@ -6,7 +6,7 @@ import { showTerminalMessage } from './notificationThunks';
 import { activateLocalAfterCommand } from './sessionThunks';
 import { setManageDialog } from './slices/manageDialogSlice';
 import { setSelected } from './slices/selectionSlice';
-import { trackDoctorSession, trackSSHDInitSession } from './slices/sessionsSlice';
+import { trackSSHDInitSession } from './slices/sessionsSlice';
 import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import { defaultManageDialog } from './state';
@@ -14,27 +14,41 @@ import type { AppThunk } from './store';
 import { hiddenSessionBusyMessage } from './terminalStatus';
 import { requireController } from './thunkExtra';
 
-export const enableManageSSHD = (): AppThunk<Promise<void>> => async (dispatch) => {
-  await dispatch(startHiddenSession('sshd-init', StartSSHDInitSession));
+export const enableManageSSHD = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().manageDialog;
+  const selection = dialog.selection;
+  if (dialog.busy || dialog.configLoading || !selection) {
+    return;
+  }
+  await dispatch(startHiddenSession('sshd-init', selection, StartSSHDInitSession));
 };
 
-export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch) => {
-  await dispatch(startHiddenSession('doctor', StartDoctorSession));
+// Unlike enableManageSSHD, doctor is also reachable from the sidebar's
+// stethoscope button with no Manage dialog open — so it targets the
+// currently selected environment rather than the dialog's own selection,
+// which is only ever set together with the dialog itself opening.
+export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const dialog = state.manageDialog;
+  const selection = dialog.selection ?? state.selection.selected;
+  if (!selection) {
+    dispatch(showTerminalMessage('Select an environment first to run doctor.'));
+    return;
+  }
+  if (dialog.open && (dialog.busy || dialog.configLoading)) {
+    return;
+  }
+  await dispatch(startHiddenSession('doctor', selection, StartDoctorSession));
 };
 
 const startHiddenSession =
   (
     mode: HiddenSessionMode,
+    selection: UISelection,
     starter: (selection: UISelection, cols: number, rows: number) => Promise<unknown>,
   ): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    const state = getState();
-    const dialog = state.manageDialog;
-    const selection = dialog.selection;
-    if (dialog.busy || dialog.configLoading || !selection) {
-      return;
-    }
     const runSelection = { ...selection };
     dispatch(setSelected(selection));
     dispatch(setManageDialog(defaultManageDialog()));
@@ -60,7 +74,5 @@ const trackHiddenSession =
   (dispatch) => {
     if (mode === 'sshd-init') {
       dispatch(trackSSHDInitSession({ sessionId, selection }));
-      return;
     }
-    dispatch(trackDoctorSession({ sessionId, selection }));
   };

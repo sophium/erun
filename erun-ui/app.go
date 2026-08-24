@@ -21,6 +21,7 @@ const (
 	environmentInitFailedEvent  = "environment-init-failed"
 	environmentDeployedEvent    = "environment-deployed"
 	environmentsChangedEvent    = "environments-changed"
+	doctorCompletedEvent        = "doctor-completed"
 	aiActivityEvent             = "ai-activity"
 	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"

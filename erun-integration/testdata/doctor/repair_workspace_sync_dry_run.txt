@@ -4,6 +4,7 @@ Target: team/dev
   mirror: <TMP>
 audit: erun doctor --dry-run --repair-workspace-sync team dev
 trace-log: would append the full trace to <TMP>
+==> Doctor team/dev
 workspace-sync: would resolve the SSH public key and the local ssh config alias
 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR erun-team-dev true
 workspace-sync: write ssh config host erun-team-dev for team/dev
@@ -27,3 +28,4 @@ remote-ssh-authorized-keys:
   chmod 600 "$key_file"
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26122:26122 --address <LOOPBACK>
 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR erun-team-dev true
+==> Doctor done team/dev

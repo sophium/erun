@@ -82,3 +82,27 @@ func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 func (a *App) emitEnvironmentsChanged() {
 	a.emitEvent(environmentsChangedEvent, struct{}{})
 }
+
+type uiDoctorCompletedPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message,omitempty"`
+}
+
+// emitDoctorCompleted is `erun doctor`'s only completion signal (see
+// handleDoctorTraceLine): the Manage dialog's SSH tab records it as the
+// persisted last-run outcome so "is this healthy?" has a visible answer.
+func (a *App) emitDoctorCompleted(tenant, environment string, success bool, message string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	a.emitEvent(doctorCompletedEvent, uiDoctorCompletedPayload{
+		Tenant:      tenant,
+		Environment: environment,
+		Success:     success,
+		Message:     message,
+	})
+}
