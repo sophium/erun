@@ -51,6 +51,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - RLS policies must scope rows by `tenant_id` using a database session setting named `erun.tenant_id`.
 - Use `erun_current_tenant_id()` in tenant-scoped policies so a missing tenant setting denies access instead of matching rows.
 - Tenant-owned tables should default `tenant_id` from `erun_current_tenant_id()` so normal application inserts omit caller-provided tenant IDs and let the transaction security context populate ownership.
+- `erun_current_user_id()` is the sibling of `erun_current_tenant_id()`, reading the `erun.user_id` session setting the same way. Default a user-ownership column (such as `reviews.author_user_id`) to it rather than accepting the owner from the caller — a caller-supplied owner column is an impersonation surface the same way a caller-supplied `tenant_id` would be.
 - Define policies with both `USING` and `WITH CHECK` so reads, updates, deletes, and writes all enforce the tenant boundary.
 - Keep normal tenant and operations access in separate PostgreSQL roles and separate RLS policies. Do not put an `OR` branch for operations access inside tenant-scoped policies.
 - PostgreSQL role `erun_tenant` is for normal tenant-scoped access. PostgreSQL role `erun_operations` is for operations-tenant access across tenant-owned rows.
@@ -138,8 +139,11 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Do not bootstrap another operations tenant once any tenant row exists. After the first tenant exists, unknown issuers and subjects must remain unauthorized until explicitly configured.
 - The `reviews` table stores tenant-owned review records with tenant-scoped names, non-empty `target_branch`, and non-empty `source_branch`.
 - Review `name` is the squash merge message.
+- `reviews.author_user_id` records who opened the review, defaulted from `erun_current_user_id()` and foreign-keyed to `users (tenant_id, user_id)`. It is set once, at creation, and never reassigned.
+- The `review_reviewers` table assigns reviewers to a review with `PRIMARY KEY (tenant_id, review_id, user_id)`, tenant-scoped FKs to `reviews` and `users`. Many reviewers per review is the default shape; assigning a reviewer does not gate any status transition on its own.
 - `reviews.status` must be one of `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`.
 - Reviews track `last_failed_build_id`, `last_ready_build_id`, and `last_merged_build_id`. When a review status is `FAILED`, `READY`, `MERGE`, or `MERGED`, the matching last-build column must be populated.
+- At most one review with status not in `MERGED`/`CLOSED` may exist per `(tenant_id, source_branch, target_branch)`, enforced by a partial unique index (`reviews_tenant_live_source_target_idx`) rather than application logic, so a second live proposal of the same change is refused at insert time. Branch history stays unbounded: a recycled branch name may have many `MERGED`/`CLOSED` reviews.
 - The `review_merge_queue` table stores per-target-branch queue membership. Queue order is the ascending internal integer `review_merge_queue_id` surrogate key, not a mutable position column.
 - Move reviews through the queue by deleting and inserting `review_merge_queue` rows. Requeue a review by deleting any old queue row, setting the review back to `READY`, and inserting a new row so it sorts at the end.
 - `READY` reviews may appear in `review_merge_queue`. The active `MERGE` review must be removed from `review_merge_queue` when it is promoted, so the queue table contains only waiting reviews.
@@ -167,6 +171,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - `role_permissions` stores permissions owned by roles as exact API method/path pairs or regex method/path pattern pairs.
 - `reviews` stores tenant-owned review records with `name`, `target_branch`, `source_branch`, status, and last build links for failed, ready, and merged states.
 - `review_merge_queue` stores waiting review queue entries. Each queued review appears at most once per tenant, and queue order is by the internal integer `review_merge_queue.review_merge_queue_id`.
+- `review_reviewers` stores reviewer assignments for reviews.
 - `builds` stores tenant-owned build records linked to reviews, including `successful`, `commit_id`, and `version`.
 - `comments` stores tenant-owned review comments. Root comments own one review/commit/line discussion, and child comments must reference that root.
 - `audit_events` stores append-only API, MCP, and CLI activity with tenant, ERun user, external identity, source-specific action fields, and event time.

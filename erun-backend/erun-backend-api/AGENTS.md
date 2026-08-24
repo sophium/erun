@@ -95,7 +95,9 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
 - Failed builds for queued or merging reviews should move the review to `FAILED` and remove it from the queue.
 - `CLOSED` reviews must not appear in the merge queue.
-- Review list endpoints should support filtering by target branch.
+- Review list endpoints should support filtering by target branch, source branch, status, author, and reviewer, composable with each other.
+- `Review.AuthorUserID` is a read-only, database-defaulted field (`erun_current_user_id()`). Never add it to a repository `Create`/`Update` column list — a client-supplied value in the request body must be ignored, the same as tenant ID and timestamps.
+- Reviewer assignment is a separate resource (`ReviewReviewerRepository`, table `review_reviewers`), not a field on `Review`. Adding a reviewer does not gate any review status transition.
 
 ## Authentication
 
