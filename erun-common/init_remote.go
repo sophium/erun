@@ -192,7 +192,9 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 }
 
 func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
-	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" && runtimeImage != DevopsComponentName {
+	runtimeImage = strings.TrimSpace(runtimeImage)
+	runtimeImageStated := runtimeImage != "" && runtimeImage != DevopsComponentName
+	if runtimeImageStated {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}
 	// Pass the env's registries to the chart as-is: a cluster: entry is expanded
@@ -201,7 +203,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 	// localhost port-forward the pod cannot reach, so a later deploy that renders
 	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
 	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
-	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion, "")
+	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion, "", runtimeImageStated)
 	if err != nil {
 		return err
 	}

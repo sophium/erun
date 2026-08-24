@@ -1163,6 +1163,105 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_chart_flag_rescues_a_stock_runtime_image_override", func(t *testing.T) {
+		// erun#1249: an env recorded at an old runtimechart version, deployed with
+		// --version/--runtime-image/--runtime-chart together moving it forward.
+		// Before the fix, the image inference read the env's stale recorded chart
+		// version -- the --runtime-chart override was only applied to the deploy
+		// spec afterward -- concluded the stock erun-devops image could not be
+		// published "on another line", and silently substituted a tenant image
+		// tag that was never built (ImagePullBackOff). The operator's own image
+		// and chart must both install exactly as stated.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.201",
+			"--runtime-image", "ghcr.io/sophium/erun-devops:1.0.201",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:1.0.201") {
+			t.Fatalf("operator's explicit --runtime-image was discarded: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_rescues_a_stock_runtime_image_override", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_flag_alone_heals_a_persisted_stock_runtimeimage_memo", func(t *testing.T) {
+		// The ordering fix in isolation, with no --runtime-image flag this run: a
+		// persisted runtimeimage memo (not this invocation's own choice) still goes
+		// through the staleness heuristic, which must key off the operator's
+		// --runtime-chart rather than the env's stale recorded chart version. Before
+		// the fix, this healed pin was wrongly evicted the same way an explicit
+		// override was.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.201",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:1.0.201") {
+			t.Fatalf("persisted runtimeimage memo was wrongly evicted: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_alone_heals_a_persisted_stock_runtimeimage_memo", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_explicit_runtime_image_wins_on_the_tenants_own_version_line", func(t *testing.T) {
+		// erun#1249 second variant: the tenant's runtime image rides its own
+		// project's version line (VERSION symlinked to the project's release, not
+		// erun's), so an explicit --runtime-image shares a repository with the
+		// deploy's inferred default image but differs only by tag. Before the fix,
+		// staleRuntimeImageTrace treated that as a leftover pin and silently
+		// substituted the inferred tag, which the operator had never published.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"containerregistries:\n    - registry: registry.example/tenant\n      roles:\n        - build\n        - deploy\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-image", "registry.example/tenant/team-devops:9.9.9-snapshot-20260101010101",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/tenant/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("operator's explicit --runtime-image was discarded: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_explicit_runtime_image_wins_on_the_tenants_own_version_line", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
 		// A remote/runtime env has no local checkout, yet --components selects
 		// platform components: each resolves to its PUBLISHED erun-<component>
