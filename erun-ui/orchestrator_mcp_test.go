@@ -37,8 +37,13 @@ func orchestratorTestEnvs() []eruncommon.OrchestratorEnvConfig {
 	}
 }
 
+// orchestratorTestAlwaysReachable stands in for a.deps.canReachMCPEndpoint in
+// tests that are not themselves about reachability, so every wired env probes
+// as reachable rather than depending on a real port-forward.
+func orchestratorTestAlwaysReachable(int) bool { return true }
+
 func TestBuildOrchestratorMCPConfig(t *testing.T) {
-	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("expected 2 servers, got %d: %v", len(config.MCPServers), config.MCPServers)
@@ -68,7 +73,7 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 // place a bearer can leak from: an MCP client cannot refresh a header it was
 // configured with, so the fix for the expiry was to stop writing one at all.
 func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
-	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -84,7 +89,7 @@ func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 // and the caller skips --mcp-config rather than writing entries that fail on
 // first use.
 func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T) {
-	config, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort, orchestratorTestAlwaysReachable)
 	if len(config.MCPServers) != 0 {
 		t.Fatalf("expected no servers without an executable, got %v", config.MCPServers)
 	}
@@ -153,7 +158,7 @@ func writeBundledDesktopMCPConfig(t *testing.T, output string) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, _, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
+	path, _, _, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "dev"},
 	})
 	if err != nil {
@@ -320,7 +325,7 @@ func TestSanitizeOrchestratorFileID(t *testing.T) {
 // The pre-existing test above asserted the skip happened and said nothing about
 // it being reported, which is exactly why nothing caught this.
 func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
-	config, skipped := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, skipped, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("wired %d servers, want 2", len(config.MCPServers))
@@ -347,6 +352,92 @@ func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
 		t.Errorf("a malformed linked entry must still be reported, not silently dropped: %+v", skipped)
 	} else if !strings.Contains(reason, "no tenant or environment") {
 		t.Errorf("skip reason %q does not name the cause", reason)
+	}
+}
+
+// TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge is the regression
+// test for the corrected scope of a retracted design. The originally filed issue would have
+// counted a dead port-forward as unwired and dropped the environment for the
+// whole session -- retracted after reading erun-common/mcp_proxy.go, which
+// already recovers a transient edge outage per call. The corrected behaviour:
+// an env whose edge does not answer a probe at launch is wired anyway, and
+// reported as unreachable, never as skipped.
+func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
+	unreachableAlways := func(int) bool { return false }
+	config, skipped, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, unreachableAlways)
+
+	if len(config.MCPServers) != 2 {
+		t.Fatalf("expected both resolvable envs still wired despite an unreachable edge, got %d: %v", len(config.MCPServers), config.MCPServers)
+	}
+	if _, ok := config.MCPServers["erun-main"]; !ok {
+		t.Fatalf("expected erun-main still wired even though its edge is unreachable: %v", config.MCPServers)
+	}
+	if _, ok := config.MCPServers["petios-rihards-win-develop"]; !ok {
+		t.Fatalf("expected petios still wired even though its edge is unreachable: %v", config.MCPServers)
+	}
+	// The pre-existing skip count (unresolved port, blank tenant) must be
+	// unaffected by reachability -- those two never had a port to probe.
+	if len(skipped) != 2 {
+		t.Fatalf("expected the pre-existing skip count unaffected by reachability, got %d: %+v", len(skipped), skipped)
+	}
+	if len(unreachable) != 2 {
+		t.Fatalf("expected both wired envs reported unreachable, got %d: %+v", len(unreachable), unreachable)
+	}
+}
+
+// A reachable edge must not be reported as unreachable -- otherwise every
+// orchestrator launch would carry a spurious warning.
+func TestBuildOrchestratorMCPConfigReportsNoUnreachableEdgeWhenAllAnswer(t *testing.T) {
+	_, _, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
+	if len(unreachable) != 0 {
+		t.Fatalf("expected no unreachable envs when every edge answers, got %+v", unreachable)
+	}
+}
+
+func TestOrchestratorMCPUnreachableNoticeNamesTheEnvironments(t *testing.T) {
+	if got := orchestratorMCPUnreachableNotice("Petios", nil); got != "" {
+		t.Fatalf("expected no notice when nothing is unreachable, got %q", got)
+	}
+	notice := orchestratorMCPUnreachableNotice("Petios", []orchestratorMCPUnreachable{{Label: "frs/dev"}})
+	for _, want := range []string{"Petios", "frs/dev", "not answering"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice does not mention %q: %q", want, notice)
+		}
+	}
+}
+
+// TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo exercises the full
+// wiring path: the written config still carries the unreachable env, and the
+// operator gets a notice distinct from the partial-skip one.
+func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	path := app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}})
+	if strings.TrimSpace(path) == "" {
+		t.Fatal("expected an MCP config path even though the edge is unreachable")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written config: %v", err)
+	}
+	if !strings.Contains(string(data), "frs-dev") {
+		t.Fatalf("expected the unreachable env still wired into the config:\n%s", data)
+	}
+
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected exactly one notice about the unreachable edge, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if !strings.Contains(payload.Message, "frs/dev") || !strings.Contains(payload.Message, "not answering") {
+		t.Fatalf("notice does not name the environment and the reason: %q", payload.Message)
 	}
 }
 
@@ -379,7 +470,7 @@ func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, skipped, err := app.writeOrchestratorMCPConfig("nothing-wirable", []eruncommon.OrchestratorEnvConfig{
+	path, skipped, _, err := app.writeOrchestratorMCPConfig("nothing-wirable", []eruncommon.OrchestratorEnvConfig{
 		{Tenant: "ghost", Environment: "one"},
 		{Tenant: "ghost", Environment: "two"},
 	})

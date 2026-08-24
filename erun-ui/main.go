@@ -24,6 +24,7 @@ const defaultHeadlessPort = 34123
 
 func main() {
 	setAppIdentity("ERun")
+	defer initDurableAppLog()()
 
 	headless, port, leftover := parseHeadlessFlags(os.Args[1:])
 	// Strip recognized flags from os.Args before Wails parses them, so the

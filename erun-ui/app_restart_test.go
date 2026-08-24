@@ -55,6 +55,27 @@ func stageOrchestratorConversation(t *testing.T, conversationID string) {
 	}
 }
 
+// stageOrchestratorLiveSession writes the file an orchestrator's own hooks
+// would have written, recording sessionID as the live conversation — standing
+// in for a hook firing after Claude Code forks the transcript on compaction.
+func stageOrchestratorLiveSession(t *testing.T, orchestratorID, sessionID string) {
+	t.Helper()
+	path := orchestratorLiveSessionPath(orchestratorID)
+	if path == "" {
+		t.Fatalf("no live-session slot for %q", orchestratorID)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create live-session dir: %v", err)
+	}
+	data, err := json.Marshal(orchestratorLiveSession{SessionID: sessionID, AtUnix: time.Now().Unix()})
+	if err != nil {
+		t.Fatalf("encode live session: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write live session: %v", err)
+	}
+}
+
 // readRestoreState reads the hand-off staged in one orchestrator's own slot,
 // asserting the persisted file rather than what the resolver reports about it.
 func readRestoreState(t *testing.T, dir, orchestratorID string) orchestratorRestoreState {
@@ -173,6 +194,54 @@ func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
 	// shared, so "the note you wrote here" is satisfied by anyone's.
 	assertNamesOwnNote(t, "the resume prompt", id, target.ResumePrompt)
 	assertNoHandOffsLeftStaged(t, restoreDir)
+}
+
+// The bug: Claude Code forks the transcript to a new session id when a
+// resumed conversation compacts, so the id erun spawned the session with names
+// a conversation that has stopped growing by the time a restart is triggered.
+// A restart taken after a compaction must record the live id the
+// orchestrator's own hooks last saw, not the stale spawn-time id.
+func TestRestartHandoffPrefersTheLiveSessionAfterCompaction(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id := createAndStartOrchestrator(t, app)
+	spawnID := orchestratorSessionID(id)
+
+	liveID := "11111111-1111-1111-1111-111111111111"
+	stageOrchestratorLiveSession(t, id, liveID)
+	stageOrchestratorConversation(t, liveID)
+
+	if err := app.RestartApp(id); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+
+	state := readRestoreState(t, restoreDir, id)
+	if state.ConversationID == spawnID {
+		t.Fatalf("expected the post-compaction live session %q to be recorded instead of the stale spawn id %q", liveID, spawnID)
+	}
+	if state.ConversationID != liveID {
+		t.Fatalf("expected the live conversation %q to be recorded, got %+v", liveID, state)
+	}
+}
+
+// A live-session record naming a conversation that never made it to disk
+// cannot be trusted, so the restart falls back to the spawn-time id rather
+// than resuming a session that does not exist.
+func TestRestartHandoffIgnoresALiveRecordWhoseTranscriptIsGone(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id := createAndStartOrchestrator(t, app)
+	spawnID := orchestratorSessionID(id)
+
+	stageOrchestratorLiveSession(t, id, "99999999-9999-9999-9999-999999999999")
+	// Note: no stageOrchestratorConversation for that id -- it never existed.
+
+	if err := app.RestartApp(id); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+
+	state := readRestoreState(t, restoreDir, id)
+	if state.ConversationID != spawnID {
+		t.Fatalf("expected the spawn id to be used when the recorded live session does not exist on disk, got %+v", state)
+	}
 }
 
 // assertNamesOwnNote fails unless text points at the return note belonging to
