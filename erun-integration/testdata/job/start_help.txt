@@ -26,15 +26,15 @@ Usage:
 
 Examples:
   # Start a test suite and come back for the result.
-  erun job start --tenant team --environment dev --name suite -- ./gradlew test
-  erun job await --tenant team --environment dev --id suite --timeout 5m
+  erun exec job start --tenant team --environment dev --name suite -- ./gradlew test
+  erun exec job await --tenant team --environment dev --id suite --timeout 5m
 
   # Start an agent and watch what it is doing.
-  erun job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'
-  erun job status --tenant team --environment dev --id sweep
+  erun exec job start --tenant team --environment dev --name sweep --agent claude -- 'fix the failing tests'
+  erun exec job status --tenant team --environment dev --id sweep
 
   # Raise an agent's output-token cap for this run only.
-  erun job start --tenant team --environment dev --name sweep --agent claude \
+  erun exec job start --tenant team --environment dev --name sweep --agent claude \
     --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'
 
 Flags:

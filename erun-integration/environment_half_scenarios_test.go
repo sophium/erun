@@ -97,11 +97,19 @@ func TestJobOffEnvironment(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
 		fixture.SeedDesktopIdentity(t, setup)
-		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"started"}],` +
-			`"structuredContent":{"tenant":"team","environment":"dev","executed":true,"job":{` +
-			`"id":"suite","name":"suite","state":"running","childPid":4242,` +
-			`"logPath":"/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",` +
-			`"leaseId":"job-suite","outputBytes":0}}}`}}
+		// job_start is gone (#1246): starting a plain command remotely now goes
+		// through exec_raw's wait:false mode, whose own response only confirms
+		// the background start, so the CLI follows up with one exec_job_status
+		// call to learn the full record -- both need their own canned answer.
+		edge := &fakeMCPEdge{ToolResults: map[string]string{
+			"exec_raw": `{"content":[{"type":"text","text":"started"}],` +
+				`"structuredContent":{"executed":true,"jobId":"suite","state":"running","wait":false}}`,
+			"exec_job_status": `{"content":[{"type":"text","text":"status"}],` +
+				`"structuredContent":{"tenant":"team","environment":"dev","job":{` +
+				`"id":"suite","name":"suite","state":"running","childPid":4242,` +
+				`"logPath":"/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",` +
+				`"leaseId":"job-suite","outputBytes":0}}}`,
+		}}
 		edge.start(t, jobEdgeLocalPort)
 
 		result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "suite", "--", "work"},
@@ -114,14 +122,20 @@ func TestJobOffEnvironment(t *testing.T) {
 		}
 		golden.Equal(t, "job/off_environment_start_runs_the_work_in_the_environment", normalize.Apply(result.Combined))
 
-		call := edge.requestFor(t, "tools/call")
-		if call.Tool != "job_start" {
-			t.Fatalf("the environment was asked for %q, want job_start", call.Tool)
+		calls := edge.requestsFor("tools/call")
+		if len(calls) != 2 {
+			t.Fatalf("expected exec_raw then exec_job_status, got %d tools/call requests: %+v", len(calls), calls)
 		}
-		// job_start does real work in the environment, so it must count as
+		if calls[0].Tool != "exec_raw" {
+			t.Fatalf("the environment was asked for %q first, want exec_raw", calls[0].Tool)
+		}
+		// exec_raw does real work in the environment, so it must count as
 		// activity like any other action — never carry the idle-probe header.
-		if call.IdleProbe {
-			t.Errorf("job_start must not carry the idle-probe header: it starts real work in the environment")
+		if calls[0].IdleProbe {
+			t.Errorf("exec_raw must not carry the idle-probe header: it starts real work in the environment")
+		}
+		if calls[1].Tool != "exec_job_status" {
+			t.Fatalf("the environment was asked for %q second, want exec_job_status", calls[1].Tool)
 		}
 	})
 
@@ -197,8 +211,8 @@ func TestJobOffEnvironment(t *testing.T) {
 		}
 
 		call := edge.requestFor(t, "tools/call")
-		if call.Tool != "job_status" {
-			t.Fatalf("the environment was asked for %q, want job_status", call.Tool)
+		if call.Tool != "exec_job_status" {
+			t.Fatalf("the environment was asked for %q, want exec_job_status", call.Tool)
 		}
 		if !call.IdleProbe {
 			t.Errorf("expected job_status to carry the idle-probe header so polling it does not reset the environment's idle timer")
@@ -223,8 +237,8 @@ func TestJobOffEnvironment(t *testing.T) {
 		}
 
 		call := edge.requestFor(t, "tools/call")
-		if call.Tool != "job_output" {
-			t.Fatalf("the environment was asked for %q, want job_output", call.Tool)
+		if call.Tool != "exec_job_output" {
+			t.Fatalf("the environment was asked for %q, want exec_job_output", call.Tool)
 		}
 		if !call.IdleProbe {
 			t.Errorf("expected job_output to carry the idle-probe header so polling it does not reset the environment's idle timer")
