@@ -16,10 +16,18 @@ import (
 // processes actually resident in the runtime container and records activity for
 // the ones doing work, so uninstrumented work stops reading as idle.
 //
-// "Doing work" is deliberately CPU-time delta, not mere residency. An agent
-// parked at a prompt is resident for hours and would otherwise pin the
-// environment awake forever — the same failure the lease's expiry exists to
-// prevent. A process that burned no CPU since the previous sample is furniture.
+// "Doing work" is deliberately a CPU-time rate, not mere residency and not
+// "advanced by any amount". An agent parked at a prompt is resident for hours
+// and would otherwise pin the environment awake forever — the same failure
+// the lease's expiry exists to prevent. A process that burned no CPU since the
+// previous sample is furniture — but so, in practice, is one that burned a
+// sliver of a tick: scheduler noise, timers, and terminal repaints advance
+// `utime`/`stime` by a tick or two even while a session sits at an idle
+// prompt (measured against a real parked `claude-real`: 21 ticks — 210ms —
+// over a 30s sample, ~0.7% of one core, on every single tick). A strictly-
+// greater-than-zero test therefore never lapses. The fix compares the CPU
+// delta against elapsed wall time and requires it to clear a rate floor
+// before counting as work.
 
 const (
 	// ActivityKindProcess is the kind the sampler records under, so the idle
@@ -29,6 +37,22 @@ const (
 	// DefaultProcRoot is where the sampler reads process state. Overridable so a
 	// test can point it at a fixture tree.
 	DefaultProcRoot = "/proc"
+
+	// residentActivityClockTicksPerSecond converts /proc/[pid]/stat's utime and
+	// stime — reported in USER_HZ units — into seconds. USER_HZ is a fixed part
+	// of the Linux procfs ABI (unlike the kernel's actual timer frequency) and is
+	// 100 on every architecture erun runs on.
+	residentActivityClockTicksPerSecond = 100
+
+	// residentActivityCPURateFloor is the minimum share of one CPU core a
+	// process must have burned over the sample interval to count as work,
+	// measured rather than derived: a parked `claude-real` on a live environment
+	// advanced ~0.7% of one core on every 30s tick purely from scheduler and
+	// terminal-repaint noise, and cleared the old "advanced at all" test on
+	// every sample. 5% sits well clear of that measured noise floor while
+	// staying far below what any real build step or agent generation burns,
+	// which runs close to a full core.
+	residentActivityCPURateFloor = 0.05
 
 	residentActivitySampleFileName = "process-sample.json"
 )
@@ -62,10 +86,11 @@ var residentActivityCommPrefixes = []string{
 }
 
 // ScanResidentActivity compares this tick's CPU accounting against the previous
-// one. A matched process is work when its CPU time advanced, or when it appeared
-// since the previous sample — a build that just started has burned nothing yet.
-// The first-ever sample reports idle: with nothing to compare against, residency
-// alone would be exactly the false positive this design avoids.
+// one. A matched process is work when it appeared since the previous sample —
+// a build that just started has burned nothing yet — or when its CPU delta
+// over the elapsed interval clears residentActivityCPURateFloor. The first-
+// ever sample reports idle: with nothing to compare against, residency alone
+// would be exactly the false positive this design avoids.
 func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivitySample, now time.Time) (ResidentActivityResult, error) {
 	root := strings.TrimSpace(procRoot)
 	if root == "" {
@@ -82,6 +107,7 @@ func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivit
 		return ResidentActivityResult{}, err
 	}
 
+	elapsed := now.Sub(previous.SampledAt)
 	result := ResidentActivityResult{Sample: ResidentActivitySample{SampledAt: now, CPU: map[string]int64{}}}
 	first := len(previous.CPU) == 0
 	busy := map[string]struct{}{}
@@ -91,7 +117,11 @@ func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivit
 			continue
 		}
 		result.Sample.CPU[key] = cpu
-		if before, seen := previous.CPU[key]; !first && (!seen || cpu > before) {
+		if first {
+			continue
+		}
+		before, seen := previous.CPU[key]
+		if !seen || residentActivityCPUBusy(cpu-before, elapsed) {
 			busy[comm] = struct{}{}
 		}
 	}
@@ -99,6 +129,18 @@ func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivit
 	result.Processes = sortedKeys(busy)
 	result.Busy = len(result.Processes) > 0
 	return result, nil
+}
+
+// residentActivityCPUBusy reports whether a CPU-tick delta over the elapsed
+// sample interval clears the rate floor. A delta of zero or fewer ticks is
+// never busy — that case also covers a clock that did not advance, so the
+// rate is never computed against a non-positive interval.
+func residentActivityCPUBusy(deltaTicks int64, elapsed time.Duration) bool {
+	if deltaTicks <= 0 || elapsed <= 0 {
+		return false
+	}
+	rate := float64(deltaTicks) / residentActivityClockTicksPerSecond / elapsed.Seconds()
+	return rate >= residentActivityCPURateFloor
 }
 
 // readResidentActivityProcess reads one /proc entry, returning its name, the
