@@ -79,6 +79,8 @@ func TestUsage(t *testing.T) {
 			"cpu_usage_after=581611501",
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
+			"cpu_periods=376556",
+			"cpu_throttled_periods=425",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
@@ -92,6 +94,12 @@ func TestUsage(t *testing.T) {
 		// directory. Assert the literal, un-normalized value once here.
 		if !strings.Contains(result.Combined, `"mount": "/home/erun"`) {
 			t.Fatalf("expected the watched mount to be the literal /home/erun, got:\n%s", result.Combined)
+		}
+		// nr_periods/nr_throttled are the CPU-starvation signal
+		// RuntimeUsageHistory derives its throttle ratio from; assert them here
+		// since they carry no threshold of their own to warn on.
+		if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
+			t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
 	})

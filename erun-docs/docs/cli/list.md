@@ -40,6 +40,84 @@ Tenants:
 
 The full per-env field set (local port allocations, API URL, SSH details, …) prints under each tenant; the example abbreviates. See [Configuration](/reference/configuration) for what each value means.
 
+## The sizing recommendation
+
+`runtime-pod:` prints the size an environment was *given*. Under it, when ERun has watched the
+environment long enough to have an opinion, two more lines print what that size should be — derived
+from what the environment has actually done, not from what anyone guessed when they created it:
+
+```
+runtime-pod: cpu=12 memory=23552Mi
+sizing: memory lower to 18432Mi from 23552Mi (peak 12153Mi of 23552Mi (52%), no oom kills, keeping 1.5x headroom, low confidence); cpu lower to 10 from 12 (busiest interval 4.567 of 12, 0.00% of scheduling periods throttled (0 of 376556), keeping 2x headroom, low confidence)
+sizing-evidence: 31h12m observed, 240 samples, 1 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+```
+
+The lines are advisory. ERun never resizes an environment for you: acting on a recommendation means
+changing `runtimepod` and running [`erun deploy`](/cli/deploy), which restarts the pod, and that is
+a decision for you to make and time.
+
+### Where the figures come from
+
+The runtime container's own cgroup counters, read from inside the container. **No metrics-server is
+required** — that is deliberate, because `kubectl top` answers "Metrics API not available" on local
+clusters, which are the ones you iterate in all day. The counters are sampled on the same tick the
+[idle monitor](/agent-reference/idle-policy) already runs, and retained per environment.
+
+### What each signal says
+
+| Signal | Direction | Why |
+|---|---|---|
+| `memory.events` `oom_kill` above zero | **raise memory**, high confidence | Something was already killed. One kill is enough. The suggestion is sized from the limit that proved too small, not from the observed peak — the allocation that triggered the kill was refused, so it never reached `memory.peak`. |
+| Observed memory peak at 90% of the limit or more | **raise memory**, high confidence | Sampling means the true peak is at least the peak observed. An environment already this close has plausibly gone further between two reads. |
+| Observed memory peak below about two-thirds of the limit, over a long quiet window, no kills | **lower memory**, low confidence | The suggestion keeps 1.5× the observed peak. |
+| 5% or more of scheduling periods throttled | **raise CPU**, high confidence | `nr_throttled`/`nr_periods` is real starvation: the container wanted CPU and the quota refused it. |
+| Any throttling below that threshold | **hold CPU** | Tolerable, but not unused — the quota does bind sometimes, so this is not grounds to shrink. |
+| No throttling at all, over a long quiet window, busiest interval below half the quota | **lower CPU**, low confidence | The suggestion keeps 2× the busiest interval measured. |
+
+`insufficient-evidence` is a distinct answer from `hold`. `hold` means ERun looked and the size is
+right; `insufficient-evidence` means it has not watched long enough, or the counter was unavailable,
+and the line says which.
+
+### Why raising and shrinking are not symmetric
+
+Being wrong in the two directions does not cost the same. An over-provisioned environment quietly
+consumes cluster capacity. An under-provisioned one kills a running agent — the failure behind
+*"was killed (exit 137) — likely out of memory"*. So ERun raises on modest evidence and shrinks only
+on a long, quiet window, never below 1.5× the peak it actually observed, and never at better than low
+confidence. A quiet window is an argument from silence, and it is labelled as one.
+
+A raise is also bounded by what the environment's namespace quota can admit, where one is
+configured: a `ResourceQuota` counts every container in the pod, so the `erun-dind` sidecar's own
+limit is spent before the runtime container gets anything, and a suggestion above the remainder is a
+size Kubernetes would refuse to schedule. Raising the quota is a separate decision from resizing the
+pod, so ERun clamps and says it clamped rather than silently recommending both.
+
+### Two limits worth knowing
+
+Without these, the output reads wrong:
+
+- **`memory.peak` resets when the container restarts.** It is a high-water mark for the current
+  container lifetime, not for the environment. This is exactly why ERun retains a history instead of
+  reading the counter live — `sizing-evidence` reports how many restarts the history spans, and the
+  peak it quotes survived them.
+- **PSI is unavailable on some kernels.** `memory.pressure` and `cpu.pressure` are simply absent in
+  the runtime container's cgroup on some hosts, so nothing here depends on pressure stall
+  information. `nr_throttled`/`nr_periods` is the CPU-starvation signal that is actually available.
+
+And one thing the figures are *not*: a host loadavg. A loadavg counts the machine's runnable queue,
+so a 12-core environment sitting at a load of 10 looks saturated while `cpu.stat` reports not one
+throttled period — which is why the evidence line names its counters and says `not loadavg`.
+
+### When the lines do not print
+
+The history is written by the container that produced it, so it exists on that environment's own
+runtime pod. Running `erun list` from your laptop shows no sizing lines for a remote environment —
+there is no history there to read. Ask the environment (over
+[MCP](/mcp/overview) or an [`erun open`](/cli/open) shell) and it answers about itself; the MCP
+`list` tool carries the same recommendation as a structured `sizing` field on each environment.
+
+A newly created environment prints nothing either, until its monitor has taken a sample.
+
 ## Common usages
 
 ```bash

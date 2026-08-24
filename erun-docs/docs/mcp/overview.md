@@ -367,6 +367,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `terraform` | `erun terraform` | Work |
 | *(top-level)* | `doctor` | `erun doctor` | Work |
 | *(top-level)* | `observe` | `erun observe` | Read |
+| *(top-level)* | `usage` | `erun usage` | Read |
 | *(top-level)* | `delete` | `erun delete` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |
@@ -427,7 +428,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-74 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+75 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 
