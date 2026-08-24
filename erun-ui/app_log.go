@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -123,4 +124,43 @@ func initDurableAppLog() func() {
 	log.SetOutput(io.MultiWriter(os.Stderr, file))
 	log.Printf("erun-app: logging to %s", path)
 	return func() { _ = file.Close() }
+}
+
+// appLogTailBytes bounds how much of the durable app log one Diagnostics
+// console read transfers, matching the env trace log's own cap.
+const appLogTailBytes = 64 * 1024
+
+// uiAppLog is the Diagnostics console's read model for the desktop's own
+// durable log: the natural evidence for an orchestrator or app-level fault,
+// neither of which has an env trace to fall back on.
+type uiAppLog struct {
+	Available bool   `json:"available"`
+	Content   string `json:"content,omitempty"`
+	Path      string `json:"path"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// LoadAppLog reads the tail of the desktop's own log for the Diagnostics
+// console's orchestrator and app contexts. Read-only, like LoadEnvTrace.
+func (a *App) LoadAppLog() (uiAppLog, error) {
+	path, err := appLogPath()
+	if err != nil {
+		return uiAppLog{}, err
+	}
+	result := uiAppLog{Path: path}
+	content, err := tailFile(path, appLogTailBytes)
+	if err != nil {
+		if os.IsNotExist(err) {
+			result.Reason = "no log captured yet"
+			return result, nil
+		}
+		return uiAppLog{}, err
+	}
+	if strings.TrimSpace(content) == "" {
+		result.Reason = "no log captured yet"
+		return result, nil
+	}
+	result.Available = true
+	result.Content = content
+	return result, nil
 }

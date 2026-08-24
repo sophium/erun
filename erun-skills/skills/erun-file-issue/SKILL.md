@@ -29,6 +29,15 @@ The `gh` CLI is required. It is pre-wired inside a deployed ERun environment;
 on a laptop the user must have it installed and authenticated against
 `github.com` (`gh auth status` to check).
 
+For a fault observed inside the desktop app itself (an environment, an
+orchestrator session, or the app), the desktop's own Diagnostics panel
+("Report an erun issue") is the more direct route: it already has the
+evidence loaded and opens a prefilled issue in the browser for the operator
+to review and submit. Prefer pointing the operator at that button over
+hand-assembling a report when they're already in the desktop app; use this
+skill's `gh`-driven flow otherwise (a CLI/MCP session, or the operator asking
+you directly to file one).
+
 ## File a bug
 
 The environment block at the bottom of the body adapts to context. If the
