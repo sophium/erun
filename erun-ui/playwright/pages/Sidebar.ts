@@ -268,6 +268,23 @@ export class Sidebar {
     return this.erunSection().getByRole('status', { name: `${name} is working` });
   }
 
+  // Hovering the busy spinner raises the same IconTooltip popper every other
+  // spinner in the sidebar uses. The trigger is the spinning icon itself
+  // (`animate-spin`), whose continuously-changing bounding box never
+  // satisfies Playwright's hover "stable" actionability check — so the
+  // animation is frozen first. That is a test-only workaround for the
+  // Chromium/Playwright interaction, not a product concern.
+  async hoverOrchestratorBusySpinner(name: string): Promise<void> {
+    const spinner = this.orchestratorBusySpinner(name);
+    await spinner.waitFor({ state: 'visible' });
+    await this.page.addStyleTag({ content: '.animate-spin { animation: none !important; }' });
+    await spinner.hover();
+  }
+
+  orchestratorBusyTooltip(name: string): Locator {
+    return this.page.getByRole('tooltip', { name: `${name} is working` });
+  }
+
   // The row's background-shell indicator, rendered whenever the store's
   // orchestratorShellActivity.bySession has this orchestrator's session
   // flagged running — from the orchestrator-shell-activity event or from the
