@@ -1,0 +1,24 @@
+audit: erun usage --dry-run --interval 2.5
+kubectl --context test-context --namespace team-dev exec -c erun-devops deployment/team-devops -- /bin/sh -lc '<remote-script>'
+usage:
+  set -eu
+  cg=/sys/fs/cgroup
+  cg_type=""
+  [ -d "$cg" ] && cg_type=$(stat -fc %T "$cg" 2>/dev/null || true)
+  printf 'cgroup_type=%s\n' "$cg_type"
+  read_value() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
+  printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
+  printf 'memory_max=%s\n' "$(read_value $cg/memory.max)"
+  printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
+  printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
+  printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
+  cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
+  time_before=$(date +%s%N)
+  sleep 2.5
+  cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
+  time_after=$(date +%s%N)
+  printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
+  printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
+  printf 'cpu_time_before_ns=%s\n' "$time_before"
+  printf 'cpu_time_after_ns=%s\n' "$time_after"
+  printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"

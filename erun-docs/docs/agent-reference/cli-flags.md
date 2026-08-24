@@ -653,6 +653,70 @@ Each `--secret <name>=<key>` becomes one `kubectl get secret <name> -o json`, re
 
 ---
 
+## `erun usage` {#erun-usage}
+
+Reports an environment's live CPU, memory, and disk usage, read from the runtime container's own cgroup v2 accounting and a statfs of its workspace mount. Same operation as the MCP `usage` tool (see [MCP overview § `usage`](/mcp/overview#usage)).
+
+**No metrics-server is required.** Unlike `kubectl top` (which reports `error: Metrics API not available` on any cluster without the metrics-server add-on — every local orbstack/k3s-style cluster included), the underlying `kubectl exec`s a fixed diagnostic script into the runtime pod's `erun-devops` container and reads `/sys/fs/cgroup` and `df` directly. Nothing here can mutate the cluster.
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--interval <seconds>` | float | `1` | CPU sample window, clamped to `[0.1, 30]`. `cpu.stat`'s `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then runs one `kubectl exec -c erun-devops deployment/<tenant>-devops -- /bin/sh -lc <script>` against the resolved namespace. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "myapp", "environment": "prod",
+  "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
+  "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
+  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "warnings": []
+}
+```
+
+`cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
+
+### Unavailability, not failure {#usage-unavailability}
+
+Every field group reports its own unavailability rather than failing the whole call — cgroup v1, an unlimited limit, and a file the exec script could not read are all normal on some clusters, not errors:
+
+| Condition | Reported as |
+|---|---|
+| `/sys/fs/cgroup` is not `cgroup2fs` (cgroup v1, or absent). | `cpu.unavailable` and `memory.unavailable` name the reason; every other CPU/memory field stays zero. |
+| `cpu.max`'s quota is `max` (unlimited) or the file could not be read. | `cpu.unavailable` names the reason — there is no quota to measure utilisation against. |
+| `memory.max` is `max` (unlimited). | `memory.unlimited: true`; `memory.limitBytes`/`percentOfLimit` stay zero rather than a fabricated percentage. |
+| `memory.current` could not be read. | `memory.unavailable` names the reason. |
+| `df` reported nothing for the watched mount. | that entry's `disk[].unavailable` names the reason. |
+
+`memory.oomKills` comes from `memory.events`' `oom_kill` counter — a real kill count, not a guess made after the fact.
+
+### Named warning thresholds {#usage-thresholds}
+
+A reading nobody acts on is decoration, so `warnings` fires a plain-language entry (not a code) when:
+
+| Threshold | Reasoning |
+|---|---|
+| `memory.percentOfLimit` ≥ 85%. | A container this close to its limit is one build step away from an OOM kill. |
+| `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
+| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
+| `memory.oomKills` > 0. | Always reported: a kill already happened. |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| The namespace, deployment, or cluster is unreachable. | Errors naming the failed `kubectl exec`. |
+
+---
+
 ## `erun outputs`
 
 `erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).

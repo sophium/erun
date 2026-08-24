@@ -1,0 +1,20 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "cpu": {
+    "intervalSeconds": 1,
+    "unavailable": "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
+  },
+  "memory": {
+    "unavailable": "cgroup v2 not detected under /sys/fs/cgroup; memory usage needs memory.current/memory.max"
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "totalBytes": 202991730688,
+      "usedBytes": 91142750208,
+      "percentUsed": 44.899735520796746
+    }
+  ]
+}
+audit: erun usage --output json

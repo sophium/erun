@@ -54,6 +54,7 @@ Available Commands:
   terraform   Run a platform's per-env Terraform from the right folder automatically
   unexpose    Remove an environment's per-env wildcard DNS record
   upgrade     Redeploy opted-in environments to the latest version for their channel
+  usage       Report an environment's live CPU, memory, and disk usage
   version     Print build information
 
 Flags:

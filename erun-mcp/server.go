@@ -445,6 +445,10 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Report the resolved environment's Kubernetes state, read-only: pods, ResourceQuota/LimitRange usage, Ingress hosts and TLS secret names, and Certificate readiness. When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is walked automatically for the failure reason, so a stuck issuance (for example a webhook solver's RBAC denial) surfaces in this one call. Optionally check named Secrets for a key's presence without reading their values. Every call is a kubectl get; nothing here can mutate the cluster.",
 	}, observeTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "usage",
+		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call.",
+	}, usageTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))

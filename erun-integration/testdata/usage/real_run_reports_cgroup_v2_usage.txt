@@ -1,0 +1,24 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "cpu": {
+    "quotaCores": 1,
+    "utilizationPercent": 10,
+    "intervalSeconds": 1
+  },
+  "memory": {
+    "currentBytes": 413589504,
+    "peakBytes": 1027301376,
+    "limitBytes": 2147483648,
+    "percentOfLimit": 19.259262084960938
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "totalBytes": 202991730688,
+      "usedBytes": 91142750208,
+      "percentUsed": 44.899735520796746
+    }
+  ]
+}
+audit: erun usage --output json

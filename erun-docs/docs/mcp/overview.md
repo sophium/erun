@@ -135,6 +135,7 @@ Four categories. The protocol treats them all as MCP tools; the categorisation i
 |---|---|
 | `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, current activity snapshot, and the activity leases currently holding the env busy. |
 | `observe` | The env's Kubernetes state: pods, `ResourceQuota`/`LimitRange` usage, `Ingress` hosts + TLS secret names, and `Certificate` readiness — walking `CertificateRequest` → `Order` → `Challenge` for the failure reason when a certificate isn't Ready. Optionally checks named Secrets for a key's presence without reading their values. Every call is a `kubectl get`; nothing here can mutate the cluster. |
+| `usage` | The env's live CPU, memory, and disk usage, read from the runtime container's own cgroup v2 accounting and a statfs of its workspace mount — no metrics-server required, so it works on clusters where `kubectl top` reports unavailable. Memory is reported against the container's own limit with a real OOM-kill count; CPU against its quota over a sample window. A named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. |
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
 | `version` | Build version and commit of the MCP server. |
@@ -334,6 +335,35 @@ Reads pods, quota/limit usage, ingress routing, and certificate readiness for th
 ```
 
 `orders` is populated only for a Certificate that isn't `ready` — a healthy certificate reports no chain to walk. A `secrets` entry always reports `exists`/`hasKey`; a missing Secret reports `exists: false` rather than erroring, and a non-"not found" failure (e.g. an RBAC denial reading the Secret itself) is carried in an `error` field instead of being reported as absence.
+
+### `usage`
+
+Reads CPU quota utilisation, memory against the container's own cgroup limit, and disk usage for the workspace mount, straight from the runtime container's cgroup v2 accounting — no cluster metrics add-on involved, unlike `kubectl top`.
+
+```jsonc
+// usage {}
+{
+  "tenant": "myapp",
+  "environment": "prod",
+  "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
+  "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
+  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ]
+}
+```
+
+Every field reports its own unavailability rather than failing the call: a cluster on cgroup v1 (or with `/sys/fs/cgroup` missing) reports `cpu.unavailable`/`memory.unavailable` with the reason instead of a fabricated zero, and an unlimited `memory.max` reports `memory.unlimited: true` rather than a percentage with no denominator. A `warnings` array appears only when a named threshold is crossed (memory ≥ 85% of its limit, `memory.peak` ≥ 95%, or a watched mount ≥ 90% used) — a heavily-loaded environment might return:
+
+```jsonc
+{
+  "memory": { "currentBytes": 1932735283, "limitBytes": 2147483648, "percentOfLimit": 90.0, "peakBytes": 2100000000, "oomKills": 1 },
+  "warnings": [
+    "memory is at 90% of its 2048Mi limit (warns at 85%)",
+    "the cgroup recorded 1 OOM kill(s)"
+  ]
+}
+```
+
+`intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
 ### `doctor`
 

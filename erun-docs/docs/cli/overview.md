@@ -38,6 +38,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun list`](/cli/list) | List tenants, environments, and the effective target. |
 | [`erun idle`](/cli/idle) | Show an environment's idle / auto-stop status. |
 | [`erun observe`](/cli/observe) | Report an environment's Kubernetes state, read-only — pods, quota/limit usage, ingress + TLS, certificate readiness. |
+| [`erun usage`](/cli/usage) | Report an environment's live CPU, memory, and disk usage, read from cgroup v2 — no metrics-server required. |
 | [`erun job`](/agent-reference/cli-flags#erun-job) | Start long work in an environment and observe it by handle — `start`, `status`, `await`, `output`, `cancel`. |
 | [`erun doctor`](/cli/doctor) | Diagnose and repair an environment's runtime and config. |
 | [`erun version`](/cli/version) | Print erun's build version (and the project's, when in one) + latest published versions. |
