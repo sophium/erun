@@ -10,6 +10,7 @@ export { ReviewPanel } from './ReviewPanel';
 export { DebugPanel } from './DebugPanel';
 export { ActivityQueueDrawer } from './ActivityQueueDrawer';
 export { AutoStartPromptDialog } from './AutoStartPromptDialog';
+export { CloseConfirmDialog } from './CloseConfirmDialog';
 export { OrchestratorDialog } from './OrchestratorDialog';
 export { OutputsDialog } from './OutputsDialog';
 export {

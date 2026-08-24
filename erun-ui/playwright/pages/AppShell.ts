@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
+import { CloseConfirmDialog } from './CloseConfirmDialog';
 import { DebugPanel } from './DebugPanel';
 import { EnvironmentInitDialog } from './EnvironmentInitDialog';
 import { GlobalConfigDialog } from './GlobalConfigDialog';
@@ -105,6 +106,10 @@ export class AppShell {
 
   get autoStartPromptDialog(): AutoStartPromptDialog {
     return new AutoStartPromptDialog(this.page);
+  }
+
+  get closeConfirmDialog(): CloseConfirmDialog {
+    return new CloseConfirmDialog(this.page);
   }
 
   get orchestratorDialog(): OrchestratorDialog {

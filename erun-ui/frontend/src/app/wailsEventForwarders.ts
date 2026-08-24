@@ -3,8 +3,17 @@ import type { ActivityLockEvent, ActivityQueueEntry } from './activityQueueState
 import { wailsApi } from './api/wailsApi';
 import type { AppNotificationClearPayload } from './model';
 import { setActivityLock, upsertActivityEntry } from './slices/activitySlice';
+import { openCloseGate } from './slices/closeGateSlice';
 import { dismissNotificationForEnv } from './slices/notificationSlice';
 import type { AppDispatch } from './store';
+
+// Payload shape of the "app-close-gate" event PrepareWindowClose emits (Go
+// main.uiCloseGate). Only the running list matters here: the event only
+// fires when blocked is true.
+interface AppCloseGatePayload {
+  blocked: boolean;
+  running?: ActivityQueueEntry[];
+}
 
 // attachWailsEventForwarders bridges Go runtime events into Redux with
 // page-lifetime subscriptions we never tear down. createListenerMiddleware is
@@ -31,5 +40,8 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   });
   EventsOn('environments-changed', () => {
     dispatch(wailsApi.util.invalidateTags(['AppState']));
+  });
+  EventsOn('app-close-gate', (gate: AppCloseGatePayload) => {
+    dispatch(openCloseGate(gate.running ?? []));
   });
 }

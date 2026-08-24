@@ -177,6 +177,14 @@ func runHeadless(app *App, port int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// wailsruntime.Quit requires a context Wails itself constructed (it looks
+	// up a "frontend" value that is never set here) and calls log.Fatal
+	// otherwise, so ConfirmWindowClose's quit — and any other caller of
+	// deps.quitApp — must not reach it in headless mode. Cancelling this
+	// context instead unblocks the select below the same way a SIGTERM does,
+	// which server.Listen already turns into a graceful HTTP shutdown.
+	app.deps.quitApp = cancel
+
 	// The desktop PTY/session code assumes a non-nil a.ctx, which Wails would
 	// normally supply, so mirror its startup/teardown lifecycle by hand here.
 	app.startup(ctx)
