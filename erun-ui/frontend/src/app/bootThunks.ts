@@ -1,8 +1,12 @@
+import type { UITenant } from '@/types';
+
 import { stateApi } from './api/stateApi';
+import { planEnvActivitySeed } from './envActivitySeed';
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { loadOrchestrators, restoreOpenOrchestrators } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
+import { setEnvActivityForEnv } from './slices/envStatusSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
   setCloudProviders,
@@ -10,11 +14,23 @@ import {
   setVersionSuggestionNotices,
   setVersionSuggestions,
 } from './slices/tenantsSlice';
-import type { AppThunk } from './store';
+import type { AppDispatch, AppThunk } from './store';
 import {
   normalizeVersionSuggestionNotices,
   normalizeVersionSuggestions,
 } from './versionSuggestions';
+
+// Seeds each env's busy/reachable row from the poller's own last observation
+// (erun#1216) — the same snapshot-seeding shape loadOrchestrators uses for
+// the orchestrator rows, needed here for the same reason: the env-activity
+// Wails event only fires on a transition, so a boot with no prior transition
+// to replay (a page reload, not a process restart) would otherwise render a
+// still-busy env as idle until its next one.
+function seedEnvActivity(dispatch: AppDispatch, tenants: UITenant[]): void {
+  for (const seed of planEnvActivitySeed(tenants)) {
+    dispatch(setEnvActivityForEnv(seed));
+  }
+}
 
 // boot deliberately does not seed the env-init dialog's kubectl context
 // list — that dialog owns and refreshes its own.
@@ -25,6 +41,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
       stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
     dispatch(setTenants(loaded.tenants));
+    seedEnvActivity(dispatch, loaded.tenants);
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
     dispatch(setSelected(loaded.selected ?? null));
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));
