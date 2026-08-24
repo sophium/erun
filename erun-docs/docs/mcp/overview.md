@@ -10,6 +10,15 @@ ERun's conventions reach the Agent through a separate mechanism — [skill bundl
 
 Every open environment exposes an MCP server in its runtime pod. It runs **inside the runtime container** — the same image the in-pod Agent and an `erun open` shell use — so a tool call executes with the environment's own toolchain, including anything a custom runtime image adds. The desktop app port-forwards it to localhost so any MCP-compatible client — the Claude Code desktop app, the Codex desktop app, custom agents, any other JSON-RPC client — can connect directly.
 
+**A server acts only on its own environment.** Many tools take `tenant` and
+`environment` arguments, but those are how a caller *states* which environment it
+believes it is talking to — not a way to redirect the work. The server runs every
+tool in its own pod, against that pod's repo and that pod's `erun` binary, so a
+`tenant`/`environment` naming a different environment is **refused** rather than
+silently run locally. Omit them to accept the server's own scope, or restate that
+scope to assert it. To act on another environment, call that environment's own MCP
+edge.
+
 **Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app](/desktop/overview).
 
 <figure className="erun-hero-figure">
