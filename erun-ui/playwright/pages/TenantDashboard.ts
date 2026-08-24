@@ -1,6 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
 
-export type TenantDashboardTab = 'Users' | 'Merge queue' | 'Builds' | 'Audit log' | 'API log';
+export type TenantDashboardTab =
+  | 'Users'
+  | 'Reviews'
+  | 'Merge queue'
+  | 'Builds'
+  | 'Audit log'
+  | 'API log';
 
 // TenantDashboard POM. Unlike the dialogs, this view replaces the main pane
 // content (MainPane.tsx) rather than rendering inside a Radix dialog, so
@@ -52,5 +58,21 @@ export class TenantDashboard {
 
   auditEmptyState(): Locator {
     return this.activePanel().getByText('No audit events', { exact: true });
+  }
+
+  reviewsTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  reviewsRows(): Locator {
+    return this.reviewsTable().locator('tbody tr');
+  }
+
+  reviewsEmptyState(): Locator {
+    return this.activePanel().getByText('No reviews yet', { exact: true });
+  }
+
+  async openReview(name: string): Promise<void> {
+    await this.page.getByRole('button', { name: `Open review ${name}` }).click();
   }
 }
