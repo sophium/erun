@@ -30,6 +30,7 @@ func (a *App) LoadState() (uiState, error) {
 	}
 	info := a.deps.resolveBuildInfo()
 	state := stateFromListResult(result, info)
+	a.seedEnvironmentActivitySnapshots(&state)
 	suggestionTenant := ""
 	suggestionEnv := ""
 	if state.Selected != nil {

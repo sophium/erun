@@ -30,6 +30,27 @@ type uiEnvironment struct {
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
 	AutoStart         *bool  `json:"autoStart,omitempty"`
+	// Activity is the environment-activity poller's last observation for this
+	// env, if any. The poller only emits a Wails event on a transition, so a
+	// Redux store that resets without the Go process restarting (e.g. the
+	// ErrorBoundary "Reload app" button) would otherwise have nothing to seed
+	// from and render a still-busy env as idle until its next transition —
+	// which for a long agent turn can be tens of minutes away, if it comes
+	// before the turn ends at all. nil means the poller has not observed this
+	// env yet.
+	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+}
+
+// uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation
+// fields, minus the tenant/environment identity envActivityPayload carries
+// for the event stream — here that identity is already the enclosing
+// uiEnvironment.
+type uiEnvironmentActivitySnapshot struct {
+	Reachable bool   `json:"reachable"`
+	Observed  bool   `json:"observed"`
+	Outage    bool   `json:"outage"`
+	Busy      bool   `json:"busy"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // uiWorkingIssue backs the sidebar hover card's "what is this env working on".

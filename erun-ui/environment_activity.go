@@ -242,6 +242,34 @@ func (a *App) emitEnvActivityIfChanged(observation environmentActivity) {
 	a.emitEnvActivity(observation)
 }
 
+// seedEnvironmentActivitySnapshots attaches each environment's last poller
+// observation, if any, to the initial-state read model. See uiEnvironment's
+// Activity field for why this exists: emitEnvActivityIfChanged only fires on
+// a transition, so a boot that starts from a clean store (a page reload, not
+// a process restart) has no other way to learn an env is already busy.
+func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for ti := range state.Tenants {
+		tenant := &state.Tenants[ti]
+		for ei := range tenant.Environments {
+			env := &tenant.Environments[ei]
+			key := selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			observed, ok := a.envActivity[key]
+			if !ok {
+				continue
+			}
+			env.Activity = &uiEnvironmentActivitySnapshot{
+				Reachable: observed.reachable,
+				Observed:  observed.observed,
+				Outage:    observed.outage,
+				Busy:      observed.busy,
+				Detail:    observed.detail,
+			}
+		}
+	}
+}
+
 func (a *App) emitEnvActivity(observation environmentActivity) {
 	a.emitEvent(envActivityEvent, envActivityPayload{
 		Tenant:      observation.selection.Tenant,
