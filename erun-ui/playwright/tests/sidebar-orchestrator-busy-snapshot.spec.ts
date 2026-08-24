@@ -69,4 +69,19 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
     await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
   });
+
+  // Hovering the busy spinner used to reveal nothing, unlike every other
+  // spinner in the sidebar (the shell indicator three lines below it, and
+  // every environment row's own activity popover).
+  test('hovering the busy spinner reveals a tooltip naming the orchestrator', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(page, true);
+    await app.reboot();
+
+    await app.sidebar.hoverOrchestratorBusySpinner(SEED_ORCHESTRATOR);
+
+    await expect(app.sidebar.orchestratorBusyTooltip(SEED_ORCHESTRATOR)).toBeVisible();
+  });
 });

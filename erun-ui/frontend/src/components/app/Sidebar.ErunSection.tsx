@@ -222,12 +222,26 @@ function OrchestratorRow({
       >
         <span className="min-w-0 truncate">{orchestrator.name}</span>
       </button>
-      {busy && <BusyRowSpinner label={`${orchestrator.name} is working`} />}
+      {busy && <OrchestratorBusyIndicator name={orchestrator.name} />}
       {!busy && shellActivity?.running && (
         <OrchestratorShellIndicator name={orchestrator.name} activity={shellActivity} />
       )}
       <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
     </li>
+  );
+}
+
+// OrchestratorBusyIndicator is the turn-busy sibling of OrchestratorShellIndicator
+// below, wrapped in the same IconTooltip so a working orchestrator explains
+// itself on hover exactly like every other spinner in the sidebar — the
+// aria-label alone reached only screen readers, leaving a sighted mouse user
+// with an inert spin.
+function OrchestratorBusyIndicator({ name }: { name: string }): React.ReactElement {
+  const label = `${name} is working`;
+  return (
+    <IconTooltip label={label}>
+      <BusyRowSpinner label={label} />
+    </IconTooltip>
   );
 }
 
