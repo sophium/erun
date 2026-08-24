@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -89,5 +90,91 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 				t.Errorf("got busy=%v detail=%q, want busy=%v detail=%q", busy, detail, testCase.wantBusy, testCase.wantDetail)
 			}
 		})
+	}
+}
+
+// TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation is the
+// regression for erun#1216 bug 2: a Redux reset that does not restart the Go
+// process (the ErrorBoundary "Reload app" button) must not lose a busy
+// environment's activity — the initial-state read model has to carry the
+// poller's own memory forward, since emitEnvActivityIfChanged only re-emits
+// on a transition and a still-busy env produces none.
+func TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation(t *testing.T) {
+	app := &App{envActivity: map[string]environmentActivityState{
+		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
+			reachable: true,
+			observed:  true,
+			busy:      true,
+			detail:    "an agent is driving it over MCP",
+		},
+	}}
+	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
+
+	app.seedEnvironmentActivitySnapshots(&state)
+
+	activity := state.Tenants[0].Environments[0].Activity
+	if activity == nil {
+		t.Fatal("expected the busy observation to be seeded onto the env")
+	}
+	if !activity.Reachable || !activity.Observed || !activity.Busy || activity.Detail != "an agent is driving it over MCP" {
+		t.Fatalf("unexpected snapshot: %+v", activity)
+	}
+}
+
+// TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil guards the
+// other side: an env the poller has never reached (no forward established,
+// or the poller hasn't run yet) must not get a fabricated snapshot.
+func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
+	app := &App{}
+	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
+
+	app.seedEnvironmentActivitySnapshots(&state)
+
+	if state.Tenants[0].Environments[0].Activity != nil {
+		t.Fatalf("expected no activity snapshot, got %+v", state.Tenants[0].Environments[0].Activity)
+	}
+}
+
+// TestLoadStateSeedsEnvironmentActivityFromThePoller exercises the full
+// wiring: LoadState (what the frontend's boot() thunk actually calls) must
+// carry the poller's last observation onto the env it just reloaded from
+// disk, without waiting for the next poll tick.
+func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"acme": {Name: "acme", DefaultEnvironment: "dev"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"acme/dev": {Name: "dev", LocalRepoPath: projectRoot},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:            store,
+		findProjectRoot:  func() (string, string, error) { return "acme", projectRoot, nil },
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.0"} },
+		resolveImageRegistry: func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
+			return eruncommon.RuntimeRegistryVersions{}, nil
+		},
+	})
+	app.envActivity = map[string]environmentActivityState{
+		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
+			reachable: true,
+			observed:  true,
+			busy:      true,
+			detail:    "an agent is driving it over MCP",
+		},
+	}
+
+	state, err := app.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+	if len(state.Tenants) != 1 || len(state.Tenants[0].Environments) != 1 {
+		t.Fatalf("unexpected state shape: %+v", state)
+	}
+	activity := state.Tenants[0].Environments[0].Activity
+	if activity == nil || !activity.Busy {
+		t.Fatalf("expected LoadState to seed the busy observation, got %+v", activity)
 	}
 }

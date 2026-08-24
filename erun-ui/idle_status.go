@@ -43,7 +43,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	}
 	merged := a.mergeLocalIdleActivity(result, status)
 	a.maybeStopIdleCloudEnvironment(result, merged)
-	return a.idleStatusToUI(result, merged), nil
+	return a.idleStatusToUI(result, merged, true), nil
 }
 
 type resolvedUIIdleStatus struct {
@@ -51,16 +51,22 @@ type resolvedUIIdleStatus struct {
 	status eruncommon.EnvironmentIdleStatus
 }
 
+// loadLocalIdleStatus assembles the idle status from what the host itself
+// knows, taken only when the pod could not be asked (mcp unreachable, or the
+// pod call itself failed). The resulting uiIdleStatus.FromPod is always
+// false: this reading may be stale relative to whatever the pod is actually
+// doing right now.
 func (a *App) loadLocalIdleStatus(result eruncommon.OpenResult) (resolvedUIIdleStatus, error) {
 	status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return resolvedUIIdleStatus{}, err
 	}
-	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status), status: status}, nil
+	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status, false), status: status}, nil
 }
 
-func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
+func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
+	ui.FromPod = fromPod
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return ui

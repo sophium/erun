@@ -30,6 +30,27 @@ type uiEnvironment struct {
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
 	AutoStart         *bool  `json:"autoStart,omitempty"`
+	// Activity is the environment-activity poller's last observation for this
+	// env, if any. The poller only emits a Wails event on a transition, so a
+	// Redux store that resets without the Go process restarting (e.g. the
+	// ErrorBoundary "Reload app" button) would otherwise have nothing to seed
+	// from and render a still-busy env as idle until its next transition —
+	// which for a long agent turn can be tens of minutes away, if it comes
+	// before the turn ends at all. nil means the poller has not observed this
+	// env yet.
+	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+}
+
+// uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation
+// fields, minus the tenant/environment identity envActivityPayload carries
+// for the event stream — here that identity is already the enclosing
+// uiEnvironment.
+type uiEnvironmentActivitySnapshot struct {
+	Reachable bool   `json:"reachable"`
+	Observed  bool   `json:"observed"`
+	Outage    bool   `json:"outage"`
+	Busy      bool   `json:"busy"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 // uiWorkingIssue backs the sidebar hover card's "what is this env working on".
@@ -701,17 +722,23 @@ type pastedFileResult struct {
 }
 
 type uiIdleStatus struct {
-	TimeoutSeconds      int64          `json:"timeoutSeconds"`
-	SecondsUntilStop    int64          `json:"secondsUntilStop"`
-	StopEligible        bool           `json:"stopEligible"`
-	OutsideWorkingHours bool           `json:"outsideWorkingHours"`
-	ManagedCloud        bool           `json:"managedCloud"`
-	StopBlockedReason   string         `json:"stopBlockedReason,omitempty"`
-	StopError           string         `json:"stopError,omitempty"`
-	CloudContextName    string         `json:"cloudContextName,omitempty"`
-	CloudContextStatus  string         `json:"cloudContextStatus,omitempty"`
-	CloudContextLabel   string         `json:"cloudContextLabel,omitempty"`
-	Markers             []uiIdleMarker `json:"markers,omitempty"`
+	TimeoutSeconds      int64 `json:"timeoutSeconds"`
+	SecondsUntilStop    int64 `json:"secondsUntilStop"`
+	StopEligible        bool  `json:"stopEligible"`
+	OutsideWorkingHours bool  `json:"outsideWorkingHours"`
+	ManagedCloud        bool  `json:"managedCloud"`
+	// FromPod is true only when this reading came from the pod's own idle
+	// monitor over MCP. False means it was assembled on the host because the
+	// pod could not be reached — the same moment the sidebar may be showing
+	// this environment as unreachable — so the countdown it carries is a
+	// best-effort local reconstruction, not a live observation.
+	FromPod            bool           `json:"fromPod"`
+	StopBlockedReason  string         `json:"stopBlockedReason,omitempty"`
+	StopError          string         `json:"stopError,omitempty"`
+	CloudContextName   string         `json:"cloudContextName,omitempty"`
+	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
+	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
+	Markers            []uiIdleMarker `json:"markers,omitempty"`
 	// StopPendingSince carries the RFC3339 timestamp at which this env
 	// first became StopEligible. When set, the desktop has armed the
 	// grace-period warning and the user has SecondsUntilForcedStop

@@ -170,7 +170,7 @@ type App struct {
 	// state, not configuration), so any code path that needs "is this context
 	// running right now?" must consult this map.
 	cloudContextStatusesMu sync.RWMutex
-	cloudContextStatuses   map[string]string
+	cloudContextStatuses   map[string]cloudContextCacheEntry
 	cloudContextPollerStop chan struct{}
 
 	// closeConfirmed latches the operator's explicit "close anyway" choice from
