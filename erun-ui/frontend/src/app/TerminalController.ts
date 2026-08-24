@@ -211,6 +211,7 @@ export class TerminalController {
 
     this.terminal = new Terminal({
       allowProposedApi: false,
+      screenReaderMode: true,
       scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
       fontFamily:

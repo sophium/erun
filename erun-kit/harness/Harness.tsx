@@ -193,6 +193,8 @@ function MiscSection() {
           label="Resize"
           className="absolute inset-y-0 right-0 w-1 cursor-col-resize bg-border"
           onMouseDown={() => undefined}
+          value={{ now: 24, min: 0, max: 96 }}
+          onStep={() => undefined}
         />
       </div>
       <ErrorBoundaryDemo />

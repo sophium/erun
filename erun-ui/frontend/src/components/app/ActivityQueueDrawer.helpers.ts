@@ -28,6 +28,25 @@ export function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
   );
 }
 
+// A visible, readable-by-assistive-tech label for a status that is otherwise
+// conveyed only by an aria-hidden icon and a border color (WCAG 1.4.1).
+export function activityStatusLabel(status: ActivityQueueEntry['status']): string {
+  switch (status) {
+    case 'waiting':
+      return 'Waiting';
+    case 'running':
+      return 'Running';
+    case 'succeeded':
+      return 'Succeeded';
+    case 'failed':
+      return 'Failed';
+    case 'skipped':
+      return 'Skipped';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+}
+
 export function activityElapsedLabel(entry: ActivityQueueEntry, now: number): string {
   const isRunning = entry.status === 'running';
   const isWaiting = entry.status === 'waiting';

@@ -8,10 +8,27 @@ export class ReviewPanel {
     return this.page.locator('aside').filter({ hasText: 'Filter files' }).first();
   }
 
+  resizeHandle(): Locator {
+    return this.page.getByRole('slider', { name: 'Resize diff panel' });
+  }
+
   async isOpen(): Promise<boolean> {
-    const splitter = this.page.getByRole('button', { name: 'Resize diff panel' });
+    const splitter = this.resizeHandle();
     if (!(await splitter.count())) return false;
     return splitter.first().isVisible();
+  }
+
+  // The scrollable diff content region (ReviewPanel.tsx); focusable so a
+  // keyboard-only reviewer can scroll past the first screenful of a diff.
+  diffContentRegion(): Locator {
+    return this.page.getByRole('region', { name: 'Diff content' });
+  }
+
+  // One horizontal scroller per hunk (DiffList.tsx), focusable so a keyboard
+  // user can read a line wider than the panel. `filePath` narrows to one
+  // file's hunk(s) when more than one diff section is rendered.
+  hunkRegion(filePath: string): Locator {
+    return this.page.getByRole('region', { name: new RegExp(`^Diff for ${filePath} `) });
   }
 
   filterInput(): Locator {

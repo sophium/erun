@@ -3,8 +3,9 @@ import * as React from 'react';
 
 import { ControllerProvider } from '@/app/ControllerContext';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { startSidebarResize } from '@/app/layoutThunks';
+import { startSidebarResize, stepSidebarResize } from '@/app/layoutThunks';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
+import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '@/app/state';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialog';
@@ -31,6 +32,7 @@ export function App(): React.ReactElement {
   const controller = React.useMemo(() => new TerminalController(), []);
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const sidebarWidth = useAppSelector((state) => state.layout.sidebarWidth);
   const activityQueueOpen = useAppSelector((state) => state.layout.activityQueueOpen);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
@@ -89,6 +91,10 @@ export function App(): React.ReactElement {
                   label="Resize sidebar"
                   onMouseDown={(event) => {
                     dispatch(startSidebarResize(event));
+                  }}
+                  value={{ now: sidebarWidth, min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH }}
+                  onStep={(delta) => {
+                    dispatch(stepSidebarResize(delta));
                   }}
                 />
               )}

@@ -3,9 +3,10 @@ import * as React from 'react';
 
 import { useTerminalActivityLockState } from '@/app/activityQueueState';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { startReviewResize } from '@/app/layoutThunks';
+import { startReviewResize, stepReviewResize } from '@/app/layoutThunks';
 import { selectActiveTabIsAI } from '@/app/selectors';
 import { clearHiddenLockOverlay, hideLockOverlay } from '@/app/slices/terminalStatusSlice';
+import { computeMaxReviewWidth, MIN_REVIEW_WIDTH } from '@/app/state';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { AIOccupancyBanner } from '@/components/app/AIOccupancyBanner';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
@@ -33,6 +34,10 @@ export function TerminalPane({
   const dispatch = useAppDispatch();
   const sessionId = useAppSelector((state) => state.terminal.sessionId);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const reviewWidth = useAppSelector((state) => state.layout.reviewWidth);
+  const effectiveSidebarWidth = useAppSelector((state) =>
+    state.layout.sidebarHidden ? 0 : state.layout.sidebarWidth,
+  );
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
   const terminalMessage = useAppSelector((state) => state.terminalStatus.terminalMessage);
   const locks = useTerminalActivityLockState();
@@ -77,6 +82,8 @@ export function TerminalPane({
         {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
         <div
           id="erun-terminal-pane"
+          role="group"
+          aria-label="Terminal"
           className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5"
         >
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
@@ -100,6 +107,14 @@ export function TerminalPane({
         hidden={!reviewOpen}
         onMouseDown={(event) => {
           dispatch(startReviewResize(event));
+        }}
+        value={{
+          now: reviewWidth,
+          min: MIN_REVIEW_WIDTH,
+          max: computeMaxReviewWidth(window.innerWidth, effectiveSidebarWidth),
+        }}
+        onStep={(delta) => {
+          dispatch(stepReviewResize(delta));
         }}
       />
       <ReviewPanel

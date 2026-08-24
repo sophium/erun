@@ -69,6 +69,12 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+      // A scrollable content region has no ARIA role that jsx-a11y classifies
+      // as interactive, yet WCAG 2.1.1 / axe's scrollable-region-focusable
+      // require it to be in the tab order (there is no native control for
+      // "scrollable div"). role="region" + tabIndex is the accepted pattern;
+      // scope the exception to that one role rather than loosening the rule.
+      'jsx-a11y/no-noninteractive-tabindex': ['error', { roles: ['region'] }],
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
       'react-refresh/only-export-components': ['error', { allowConstantExport: true }],
