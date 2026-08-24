@@ -40,7 +40,14 @@ type orchestratorShellActivity struct {
 	Running bool   `json:"running"`
 	Command string `json:"command,omitempty"`
 	TaskID  string `json:"taskId,omitempty"`
-	AtUnix  int64  `json:"atUnix"`
+	// SessionID is the id of the session that wrote this report (the hook's own
+	// stdin session_id, the same field orchestratorSessionRecordHookCommand
+	// reads). An orchestrator id is reused across restarts, so this is what lets
+	// a later read tell a report apart from one a since-replaced session left
+	// behind, instead of trusting "running" from whichever session happens to be
+	// live for the id now.
+	SessionID string `json:"sessionId,omitempty"`
+	AtUnix    int64  `json:"atUnix"`
 }
 
 // orchestratorShellActivitySafetyBound is the outer bound on a "running"
@@ -81,7 +88,21 @@ func orchestratorShellActivityPath(id string) string {
 // staleness bound: a report from a session the desktop can no longer see ages
 // out on the short, shared bound, because nothing will ever explicitly clear
 // it for a session that is gone.
-func readOrchestratorShellActivity(id string, now time.Time, sessionAlive bool) (orchestratorShellActivity, bool) {
+//
+// An orchestrator id is reused by design on every restart, and sessionAlive is
+// computed per id — from whichever session is live for that id right now —
+// not per the session that actually wrote this report. So a "running" report
+// left behind by a session that has since been replaced would otherwise be
+// protected by its successor's liveness and get the generous bound forever,
+// which is #1274. liveSessionID is the id the desktop currently has recorded
+// as live for this orchestrator; a report naming a different one names a
+// session that is no longer live for real, and is rejected regardless of the
+// staleness bound. Neither an empty report session id (an older write, or a
+// clear which never carries one) nor an empty liveSessionID (no live-session
+// record yet) is treated as a mismatch — there is nothing to compare, and
+// rejecting on that basis alone would make every report unusable before the
+// live-session recorder has ever fired.
+func readOrchestratorShellActivity(id string, now time.Time, sessionAlive bool, liveSessionID string) (orchestratorShellActivity, bool) {
 	path := orchestratorShellActivityPath(id)
 	if path == "" {
 		return orchestratorShellActivity{}, false
@@ -94,6 +115,9 @@ func readOrchestratorShellActivity(id string, now time.Time, sessionAlive bool) 
 	if err := json.Unmarshal(data, &activity); err != nil {
 		return orchestratorShellActivity{}, false
 	}
+	if activity.Running && shellActivityNamesAReplacedSession(activity.SessionID, liveSessionID) {
+		return orchestratorShellActivity{}, false
+	}
 	bound := orchestratorActivityTTL
 	if sessionAlive {
 		bound = orchestratorShellActivitySafetyBound
@@ -102,6 +126,15 @@ func readOrchestratorShellActivity(id string, now time.Time, sessionAlive bool) 
 		return orchestratorShellActivity{}, false
 	}
 	return activity, true
+}
+
+// shellActivityNamesAReplacedSession reports whether a report's own session id
+// names a session other than the one currently recorded as live. Either side
+// being empty means there is nothing to compare, not a mismatch: an older
+// report never carried a session id at all, and a fresh orchestrator has no
+// live-session record until its recorder hook first fires.
+func shellActivityNamesAReplacedSession(reportSessionID, liveSessionID string) bool {
+	return reportSessionID != "" && liveSessionID != "" && reportSessionID != liveSessionID
 }
 
 // orchestratorShellActivityFileVar is both the environment variable the hook
@@ -141,17 +174,20 @@ func isOrchestratorShellActivityHookBlock(block any) bool {
 
 // orchestratorShellActivityStartHookCommand recognizes a Bash call that
 // backgrounded a shell (tool_response.backgroundTaskId) and records it as
-// running, with the command it is running and the task id later needed to
-// clear it. Any other Bash call — foreground, or one that never backgrounds —
-// leaves the previous report untouched: a foreground command says nothing
-// about whatever shell is already running.
+// running, with the command it is running, the task id later needed to clear
+// it, and the id of the session that started it (session_id, the same
+// top-level hook stdin field orchestratorSessionRecordHookCommand reads) —
+// what later lets a stale report be told apart from one whose session is
+// still live. Any other Bash call — foreground, or one that never
+// backgrounds — leaves the previous report untouched: a foreground command
+// says nothing about whatever shell is already running.
 func orchestratorShellActivityStartHookCommand() string {
 	dir := filepath.ToSlash(orchestratorShellActivityDir())
 	script := `let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
 		`const j=JSON.parse(d);` +
 		`const id=j.tool_response&&j.tool_response.backgroundTaskId;` +
 		`if(!id)return;` +
-		`const out={running:true,command:(j.tool_input&&j.tool_input.command)||"",taskId:id,atUnix:Math.floor(Date.now()/1000)};` +
+		`const out={running:true,command:(j.tool_input&&j.tool_input.command)||"",taskId:id,sessionId:j.session_id||"",atUnix:Math.floor(Date.now()/1000)};` +
 		`require("fs").writeFileSync(process.env.` + orchestratorShellActivityFileVar + `,JSON.stringify(out));` +
 		`}catch(e){}});`
 	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
@@ -178,6 +214,21 @@ func orchestratorShellActivityClearHookCommand() string {
 		`}catch(e){}});`
 	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
 		orchestratorShellActivityFileVar + `="` + dir + `/$ERUN_ORCHESTRATOR_ID.json" node -e '` + script + `' || true`
+}
+
+// orchestratorShellActivityResetHookCommand clears an inherited "running"
+// report at a session boundary, the same reason orchestratorActivityHookCommand
+// (false) clears the busy report there: an orchestrator id is mutable and
+// reusable, so a report a previous run under this id left behind — including
+// one whose shell finished without either hook ever observing it — must not
+// survive into a session that has not started any shell of its own yet. A
+// bare printf, like the busy report's reset, since there is nothing to parse:
+// it always writes the same fixed shape.
+func orchestratorShellActivityResetHookCommand() string {
+	dir := filepath.ToSlash(orchestratorShellActivityDir())
+	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
+		`printf '{"running":false,"atUnix":%s}' "$(date +%s)" > "` + dir + `/$ERUN_ORCHESTRATOR_ID.json"` +
+		` || true`
 }
 
 // orchestratorShellActivityHookBlocks are the two PostToolUse-only hooks the

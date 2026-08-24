@@ -790,9 +790,13 @@ func orchestratorSessionStartHook(dir string) []any {
 	// Resetting it here to whatever id this launch actually starts with is what
 	// keeps a stale record from outliving the run that wrote it.
 	liveSession := map[string]any{"type": "command", "command": orchestratorSessionRecordHookCommand()}
+	// A background shell report has the exact same hazard: a shell the previous
+	// run started (or its clear) can outlive that run entirely, and nothing else
+	// resets it at a boundary — see orchestrator_shell_activity.go.
+	shellIdle := map[string]any{"type": "command", "command": orchestratorShellActivityResetHookCommand()}
 	return []any{map[string]any{
 		"matcher": orchestratorSessionStartMatcher,
-		"hooks":   []any{command, idle, liveSession},
+		"hooks":   []any{command, idle, liveSession, shellIdle},
 	}}
 }
 

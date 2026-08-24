@@ -126,7 +126,14 @@ func (a *App) reconcileOrchestratorActivity() {
 		// state — it can keep running after the turn that started it ends — so
 		// it gets the same re-emit-every-tick treatment on its own, not folded
 		// into the busy report above.
-		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive)
+		//
+		// The report has to name the session that wrote it and be checked against
+		// whichever session is currently live for this id: sessionAlive alone is
+		// computed per orchestrator id, not per session, so a report a replaced
+		// session left behind would otherwise borrow its successor's liveness
+		// (#1274).
+		liveSessionID, _ := readOrchestratorLiveSessionID(r.id)
+		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveSessionID)
 		shellRunning := shellOK && shell.Running
 		a.mu.Lock()
 		if session := a.orchestrators[r.id]; session != nil {
