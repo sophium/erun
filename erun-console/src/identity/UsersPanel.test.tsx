@@ -54,7 +54,12 @@ describe('UsersPanel', () => {
     mockFetch((req) => {
       if (req.url === '/v1/identity/users') {
         return jsonResponse([
-          { id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE', email: 'alice@example.com' },
+          {
+            id: 'idp-1',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            email: 'alice@example.com',
+          },
         ]);
       }
       return jsonResponse({}, 404);

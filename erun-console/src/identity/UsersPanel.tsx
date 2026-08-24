@@ -10,7 +10,8 @@ function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement
       return (
         <p className="identity-feedback identity-feedback--error" role="alert">
           {enroll.result.idpUser.username} was created in the identity provider (id{' '}
-          {enroll.result.idpUser.id}), but could not be enrolled as an erun user: {enroll.result.error}
+          {enroll.result.idpUser.id}), but could not be enrolled as an erun user:{' '}
+          {enroll.result.error}
         </p>
       );
     }
