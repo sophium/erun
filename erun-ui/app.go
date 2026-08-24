@@ -168,7 +168,7 @@ type App struct {
 	// state, not configuration), so any code path that needs "is this context
 	// running right now?" must consult this map.
 	cloudContextStatusesMu sync.RWMutex
-	cloudContextStatuses   map[string]string
+	cloudContextStatuses   map[string]cloudContextCacheEntry
 	cloudContextPollerStop chan struct{}
 
 	// workingIssueCache memoizes the resolved working issue per env so the sidebar
