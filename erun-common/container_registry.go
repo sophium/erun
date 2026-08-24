@@ -428,6 +428,13 @@ func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
+// actually drops the migrated key instead of preserving it forever as an
+// unrecognized field.
+func (ProjectConfig) legacyYAMLKeys() []string {
+	return []string{"containerregistry"}
+}
+
 // UnmarshalYAML migrates an env's legacy fields on read so configs written by
 // older binaries keep working after those fields were removed from the struct.
 func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -458,6 +465,13 @@ func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
+// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
+// actually drops these migrated keys instead of preserving them forever as
+// unrecognized fields.
+func (EnvConfig) legacyYAMLKeys() []string {
+	return []string{"containerregistry", "remote", "snapshot", "repopath"}
+}
+
 // UnmarshalYAML migrates the per-env legacy `containerregistry` scalar the same
 // way as the project default.
 func (c *ProjectEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -472,6 +486,13 @@ func (c *ProjectEnvironmentConfig) UnmarshalYAML(value *yaml.Node) error {
 	*c = ProjectEnvironmentConfig(aux.plain)
 	c.ContainerRegistries = migrateLegacyContainerRegistry(c.ContainerRegistries, aux.LegacyContainerRegistry)
 	return nil
+}
+
+// legacyYAMLKeys implements config_roundtrip.go's legacyYAMLKeys, so a save
+// actually drops the migrated key instead of preserving it forever as an
+// unrecognized field.
+func (ProjectEnvironmentConfig) legacyYAMLKeys() []string {
+	return []string{"containerregistry"}
 }
 
 // ContainerRegistriesForEnvironment resolves the marked list for an

@@ -139,6 +139,48 @@ func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testi
 	}
 }
 
+// TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey guards the
+// one-way migration documented on migrateLegacyContainerRegistry (erun#1222):
+// a legacy scalar key an UnmarshalYAML migrated into a current field must
+// actually disappear on the next save, not survive as an "unknown" field the
+// plain struct has no name for. Left unfixed, the desktop's own save (which
+// clears EnvConfig.ContainerRegistries to route a local-agent env's marked
+// list into the project config instead) writes a merged file that still
+// carries the legacy key, so the very next load re-migrates it and clobbers
+// whatever roles the operator just set.
+func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T) {
+	existing := []byte("name: alpha\ncontainerregistry: registry.example/test\ntype: local-agent\n")
+
+	var loaded EnvConfig
+	if err := yaml.Unmarshal(existing, &loaded); err != nil {
+		t.Fatalf("seed unmarshal: %v", err)
+	}
+	if loaded.ContainerRegistries.IsZero() {
+		t.Fatalf("legacy scalar did not migrate: %+v", loaded)
+	}
+
+	// Mirrors what the desktop does for a local-agent env: the marked list
+	// moves to the project config, so the env's own ContainerRegistries clears.
+	cleared := loaded
+	cleared.ContainerRegistries = nil
+
+	out, err := marshalConfigPreservingUnknownFields(existing, cleared)
+	if err != nil {
+		t.Fatalf("marshalConfigPreservingUnknownFields: %v", err)
+	}
+	if strings.Contains(string(out), "containerregistry:") {
+		t.Fatalf("output still carries the migrated legacy key:\n%s", out)
+	}
+
+	var roundTripped EnvConfig
+	if err := yaml.Unmarshal(out, &roundTripped); err != nil {
+		t.Fatalf("unmarshal merged output: %v", err)
+	}
+	if !roundTripped.ContainerRegistries.IsZero() {
+		t.Fatalf("legacy key re-migrated after save: %+v", roundTripped.ContainerRegistries)
+	}
+}
+
 // TestMarshalConfigPreservingUnknownFieldsNoExistingFile covers the plain
 // first-write path: with nothing to preserve, the output is just the ordinary
 // marshal of config.

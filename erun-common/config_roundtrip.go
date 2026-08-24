@@ -243,9 +243,21 @@ func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
+// legacyYAMLKeys is implemented by config types whose UnmarshalYAML migrates
+// one or more legacy scalar keys into current fields (see container_registry.go).
+// Without this, knownYAMLFields never learns those keys exist, so
+// mergeConfigNode treats a legacy key surviving in the old document as
+// "unknown" and copies it through untouched forever — defeating the
+// documented one-way migration: the value keeps re-migrating on every load,
+// clobbering whatever the current fields were actually set to.
+type legacyYAMLKeys interface {
+	legacyYAMLKeys() []string
+}
+
 // knownYAMLFields returns the yaml key -> field-type map t declares, inlining
-// embedded/",inline" fields so their keys count as t's own. Non-struct types
-// (including the zero reflect.Type) declare no keys.
+// embedded/",inline" fields so their keys count as t's own, plus any legacy
+// keys t declares via legacyYAMLKeys. Non-struct types (including the zero
+// reflect.Type) declare no keys.
 func knownYAMLFields(t reflect.Type) map[string]reflect.Type {
 	fields := map[string]reflect.Type{}
 	if t == nil {
@@ -274,7 +286,25 @@ func knownYAMLFields(t reflect.Type) map[string]reflect.Type {
 		}
 		fields[name] = field.Type
 	}
+	addLegacyYAMLKeys(fields, t)
 	return fields
+}
+
+// addLegacyYAMLKeys adds t's legacy keys (if it declares any via
+// legacyYAMLKeys) to fields, mapped to a nil type. A legacy key is always
+// fully migrated into other fields, so the fresh marshal never re-emits it;
+// mergeConfigNode's own "known field with no current value" rule then drops
+// it, and that path never consults the type, so nil is safe here.
+func addLegacyYAMLKeys(fields map[string]reflect.Type, t reflect.Type) {
+	legacy, ok := reflect.New(t).Elem().Interface().(legacyYAMLKeys)
+	if !ok {
+		return
+	}
+	for _, key := range legacy.legacyYAMLKeys() {
+		if _, exists := fields[key]; !exists {
+			fields[key] = nil
+		}
+	}
 }
 
 // parseYAMLFieldTag mirrors yaml.v3's own field-name resolution closely enough
