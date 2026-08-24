@@ -32,20 +32,20 @@ func TestOrchestratorShellActivityIsReadFromTheReportNotTheTerminal(t *testing.T
 	t.Setenv("HOME", t.TempDir())
 	now := time.Now()
 
-	if _, ok := readOrchestratorShellActivity("erun", now, true); ok {
+	if _, ok := readOrchestratorShellActivity("erun", now, true, ""); ok {
 		t.Fatal("an orchestrator that has reported nothing has no running shell")
 	}
 
 	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
 		Running: true, Command: "sleep 300", TaskID: "task-1", AtUnix: now.Unix(),
 	})
-	activity, ok := readOrchestratorShellActivity("erun", now, true)
+	activity, ok := readOrchestratorShellActivity("erun", now, true, "")
 	if !ok || !activity.Running || activity.Command != "sleep 300" {
 		t.Fatalf("a fresh running report must be believed, got %+v %v", activity, ok)
 	}
 
 	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{Running: false, AtUnix: now.Unix()})
-	activity, ok = readOrchestratorShellActivity("erun", now, true)
+	activity, ok = readOrchestratorShellActivity("erun", now, true, "")
 	if !ok || activity.Running {
 		t.Fatalf("the clear report must read as not running, got %+v %v", activity, ok)
 	}
@@ -65,14 +65,14 @@ func TestOrchestratorShellActivitySurvivesALongRunButStillBounds(t *testing.T) {
 	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
 		Running: true, TaskID: "task-1", AtUnix: now.Add(-orchestratorActivityTTL - 5*time.Minute).Unix(),
 	})
-	if activity, ok := readOrchestratorShellActivity("erun", now, true); !ok || !activity.Running {
+	if activity, ok := readOrchestratorShellActivity("erun", now, true, ""); !ok || !activity.Running {
 		t.Fatalf("a live session's shell may run well past the short bound, got %+v %v", activity, ok)
 	}
 
 	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
 		Running: true, TaskID: "task-1", AtUnix: now.Add(-orchestratorShellActivitySafetyBound - time.Minute).Unix(),
 	})
-	if _, ok := readOrchestratorShellActivity("erun", now, true); ok {
+	if _, ok := readOrchestratorShellActivity("erun", now, true, ""); ok {
 		t.Fatal("a report nothing has renewed for hours must still age out eventually")
 	}
 }
@@ -88,7 +88,7 @@ func TestOrchestratorShellActivityExpiresQuicklyForADeadSession(t *testing.T) {
 	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
 		Running: true, TaskID: "task-1", AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
 	})
-	if _, ok := readOrchestratorShellActivity("erun", now, false); ok {
+	if _, ok := readOrchestratorShellActivity("erun", now, false, ""); ok {
 		t.Fatal("a report from a session we can no longer see must not keep the indicator spinning")
 	}
 }
@@ -107,11 +107,56 @@ func TestOrchestratorShellActivityTreatsUnreadableInputAsNotRunning(t *testing.T
 	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, ok := readOrchestratorShellActivity("erun", now, true); ok {
+	if _, ok := readOrchestratorShellActivity("erun", now, true, ""); ok {
 		t.Fatal("unparseable input must not read as running")
 	}
-	if _, ok := readOrchestratorShellActivity("  ", now, true); ok {
+	if _, ok := readOrchestratorShellActivity("  ", now, true, ""); ok {
 		t.Fatal("an orchestrator with no id has no report")
+	}
+}
+
+// The defect in #1274: an orchestrator id is reused across restarts, and a
+// report a since-replaced session left behind must not borrow the id's
+// current liveness. Requiring the report's own session id to match the one
+// the desktop currently has recorded as live is what stops that borrowing —
+// independent of, and in addition to, the SessionStart reset that clears the
+// report at the boundary itself.
+func TestOrchestratorShellActivityRejectsAReportFromAReplacedSession(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+
+	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
+		Running: true, Command: "sleep 300", TaskID: "task-1", SessionID: "old-session", AtUnix: now.Unix(),
+	})
+
+	if _, ok := readOrchestratorShellActivity("erun", now, true, "new-session"); ok {
+		t.Fatal("a report naming a session that is no longer live must not be honoured")
+	}
+
+	activity, ok := readOrchestratorShellActivity("erun", now, true, "old-session")
+	if !ok || !activity.Running {
+		t.Fatalf("a report naming the current live session must still be honoured, got %+v %v", activity, ok)
+	}
+}
+
+// A report with no session id (an older write, or a hook stdin that carried
+// none) and a desktop with no live-session record yet must not be rejected
+// just because there is nothing to compare — that would make every report
+// unusable before the live-session recorder has ever fired.
+func TestOrchestratorShellActivityHonoursAReportWithNoSessionIDToCompare(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+
+	writeOrchestratorShellActivity(t, "erun", orchestratorShellActivity{
+		Running: true, TaskID: "task-1", AtUnix: now.Unix(),
+	})
+	if _, ok := readOrchestratorShellActivity("erun", now, true, "new-session"); !ok {
+		t.Fatal("a report with no recorded session id must not be rejected on that basis alone")
+	}
+	if _, ok := readOrchestratorShellActivity("erun", now, true, ""); !ok {
+		t.Fatal("no live-session record at all must not be treated as a mismatch")
 	}
 }
 
@@ -206,4 +251,25 @@ func eventCarriesShellActivityReport(blocks []any) bool {
 		}
 	}
 	return false
+}
+
+// SessionStart clears an inherited "running" shell report, the same way it
+// already clears the busy report: an orchestrator id is mutable and reusable,
+// so a report a previous run under this id left behind must not survive into
+// a new one that hasn't started any shell of its own yet.
+func TestOrchestratorShellActivityClearsAnInheritedRunningReportOnSessionStart(t *testing.T) {
+	hooks, data := orchestratorSettingsHooks(t)
+
+	if !eventRunsCommand(hooks["SessionStart"], orchestratorShellActivityResetHookCommand()) {
+		t.Fatalf("SessionStart must clear an inherited running shell report:\n%s", data)
+	}
+}
+
+// The start hook must capture the writing session's own id, not just the
+// task id and command, so a later read can tell a report apart from one a
+// since-replaced session left behind.
+func TestOrchestratorShellActivityStartHookCapturesTheSessionID(t *testing.T) {
+	if !strings.Contains(orchestratorShellActivityStartHookCommand(), "session_id") {
+		t.Fatalf("the start hook must record the writing session's id: %q", orchestratorShellActivityStartHookCommand())
+	}
 }

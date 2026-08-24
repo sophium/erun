@@ -336,6 +336,42 @@ func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
 	}
 }
 
+// TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness is the
+// #1274 regression: an orchestrator id is reused across restarts, so
+// sessionAlive alone (computed per id, from whichever session is live for
+// that id right now) is not enough to trust a "running" report — the report
+// itself has to name the session that wrote it, and that name has to match
+// the session the desktop currently has recorded as live for this id.
+// Without that check, a report a dead session left behind reads as running
+// for as long as ITS SUCCESSOR keeps the id alive, which in practice is
+// indefinitely.
+func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	// The session that started the shell has since been replaced: the
+	// recorded live session is a different id from the one the report names.
+	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
+		Running: true, Command: "sleep 300", TaskID: "task-1", SessionID: "dead-session", AtUnix: time.Now().Unix(),
+	})
+	stageOrchestratorLiveSession(t, created.ID, "current-session")
+
+	app.reconcileOrchestratorActivity()
+
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || listed[0].ShellRunning {
+		t.Fatalf("a report from a replaced session must not keep the indicator lit, got %+v", listed)
+	}
+}
+
 // TestReconcileOrchestratorActivityReEmitsShellStateEveryTick is the shell-report
 // half of the busy-signal re-emit lock: the shell signal is republished every
 // tick regardless of whether it changed, so a dropped or mistimed
