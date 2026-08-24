@@ -259,6 +259,7 @@ func (s *ReleaseService) recordBuild(ctx context.Context, release model.Release,
 	}
 	build, err := s.builds.Create(ctx, model.Build{
 		ReviewID:   release.ReviewID,
+		Kind:       model.BuildKindRecorded,
 		Successful: true,
 		CommitID:   release.CommitID,
 		Version:    version,

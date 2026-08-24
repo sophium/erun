@@ -148,7 +148,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Move reviews through the queue by deleting and inserting `review_merge_queue` rows. Requeue a review by deleting any old queue row, setting the review back to `READY`, and inserting a new row so it sorts at the end.
 - `READY` reviews may appear in `review_merge_queue`. The active `MERGE` review must be removed from `review_merge_queue` when it is promoted, so the queue table contains only waiting reviews.
 - `CLOSED` reviews must not appear in the merge queue.
-- The `builds` table stores tenant-owned review build records. Each build belongs to one review and stores whether it was successful, the commit ID it ran on, and the produced version.
+- The `builds` table stores tenant-owned review build records. Each build belongs to one review and stores whether it was successful, the commit ID it ran on, and its `kind`: `RECORDED` (a client-reported build or a release's own build, either of which mints a version and requires it non-empty) or `GATE` (the merge queue's own prospective-merge build, which publishes nothing and so has a NULL version). A failed `GATE` build must carry `failure_detail` in the gate's own words; a `RECORDED` failure's reason lives wherever the reporting caller's own CI recorded it, not here.
 - A successful build moves an `OPEN` or `FAILED` review into the target branch merge queue as `READY`; if there is no active `MERGE` review for that target branch, the next queued review may be promoted to `MERGE`.
 - A failed build for a queued or merging review moves it to `FAILED` and removes it from the merge queue.
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
@@ -172,7 +172,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - `reviews` stores tenant-owned review records with `name`, `target_branch`, `source_branch`, status, and last build links for failed, ready, and merged states.
 - `review_merge_queue` stores waiting review queue entries. Each queued review appears at most once per tenant, and queue order is by the internal integer `review_merge_queue.review_merge_queue_id`.
 - `review_reviewers` stores reviewer assignments for reviews.
-- `builds` stores tenant-owned build records linked to reviews, including `successful`, `commit_id`, and `version`.
+- `builds` stores tenant-owned build records linked to reviews, including `successful`, `commit_id`, `kind` (`RECORDED` or `GATE`), `version` (required for `RECORDED`, NULL for `GATE`), and `failure_detail` (required for a failed `GATE` build).
 - `comments` stores tenant-owned review comments. Root comments own one review/commit/line discussion, and child comments must reference that root.
 - `audit_events` stores append-only API, MCP, and CLI activity with tenant, ERun user, external identity, source-specific action fields, and event time.
 - Future environment, deployment, activity, and runtime state tables should hang from `tenants(tenant_id)` and use tenant-scoped indexes.
