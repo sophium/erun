@@ -53,6 +53,8 @@ erun push --version 1.0.81-snapshot-20260616120000 --dry-run
 
 ## Authentication
 
+Before building anything, `erun push` checks whether it can authenticate to a ghcr.io registry it would push to at all — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`. GHCR never accepts an anonymous push, so having none of the three is refused immediately rather than discovered after a full multi-arch build.
+
 If the registry rejects the push as unauthorised, `erun push` retries automatically with an interactive `docker login` prompt; for GHCR, a scope-mismatch additionally triggers `gh auth refresh -s write:packages,read:packages`. Both retries need an interactive terminal, and the GHCR scope refresh is skipped entirely inside a runtime pod — that shell has no browser to complete the login, even though it looks like a terminal. When the scope refresh can't run, the push fails with an error that names the missing `write:packages` scope and the exact `gh auth refresh` + `docker login` commands to run from a host shell with a browser. Full retry-trigger pattern table: [Agent reference · CLI flag spec · `erun push` authentication](/agent-reference/cli-flags#erun-push).
 
 ## Error behaviour
@@ -62,5 +64,6 @@ If the registry rejects the push as unauthorised, `erun push` retries automatica
 | No `--version`. | Errors before any work: `push requires a version` — push publishes a specific version, it does not mint one. Exit code 1. |
 | No build context to publish. | Errors; nothing is pushed. |
 | Foreign-arch binfmt missing. | Fails before the per-arch build with a direct error. |
+| No credential resolves for a ghcr.io registry to push to at all (no docker config, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). | Refuses before any build — GHCR never accepts an anonymous push, so this is a certain failure rather than one worth spending a build to discover. Errors with the exact `gh auth login` / `docker login` commands to run. |
 | Registry rejects the push as unauthorised. | Retries with `docker login` (and `gh auth refresh` for GHCR scope mismatches); both need an interactive terminal, and the GHCR scope refresh is also skipped inside a runtime pod (no browser). Without one, errors — for a GHCR scope mismatch with the exact `gh auth refresh` + `docker login` recovery commands. |
 | Chart `helm push` or the `helm pull` verification fails. | The verification is retried a few times first — a chart that has just landed is not always immediately readable. If it still fails, errors after the images pushed: the version's images are published but at least one chart is not, so it is not yet deployable. The error names which charts published, which failed, and which were not attempted. Re-run `erun push --version <version>` once the registry/auth issue is fixed; republishing a chart that already landed is safe. |

@@ -76,6 +76,7 @@ A base branch that moves while a release is in flight is therefore answered at b
 | `TAG_CONFLICT` | Release tag already exists in git or in the registry. | `1` |
 | `MULTI_ARCH_VERIFY_FAILED` | Manifest list missing `linux/amd64` or `linux/arm64`. The release tag is **not** pushed. | `2` |
 | `UNPUBLISHABLE_RELEASE_IMAGE` | The release stamps an image no build in this run publishes — usually `erun release` run from inside one component's build directory. Refused during resolution, before any stage runs. | `1` |
+| `REGISTRY_CREDENTIAL_MISSING` | No credential resolves for a ghcr.io registry the release would publish to at all (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). GHCR never accepts an anonymous push, so this is refused before the build rather than at the push. | `1` |
 | `BASE_BRANCH_MOVED` | `origin/<release.mainbranch>` gained commits after the release rebased onto it, so the final push could not land. Refused before the build; nothing is published and the canonical `VERSION` is untouched. Recover with `git pull --rebase origin <branch>` then `erun release --force` (`--force` recreates the local tag the rebase leaves behind). | `1` |
 | `PUBLISHED_ARTIFACT_UNRESOLVABLE` | A just-pushed image manifest did not resolve on read-back. The release tag is **not** pushed. | `2` |
 | `REGISTRY_PUSH_AUTH_FAILED` | Registry rejected the push after one interactive-login retry. The release tag is **not** pushed. | `2` |

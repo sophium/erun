@@ -82,6 +82,11 @@ type remoteInitKubectlStub struct {
 	SSHConfigExists          bool
 	HostConfigVerifyExitCode int
 	LsRemoteFailures         int
+	// RegistryCredentialConfigured answers the #1201 registry-credential-check
+	// script: whether the pod appears to have a ghcr.io credential (docker
+	// config, gh session, or GH_TOKEN/GITHUB_TOKEN). Defaults to false (no
+	// credential), matching a freshly-deployed pod.
+	RegistryCredentialConfigured bool
 }
 
 // stubRemoteInitKubectl stands in for the remote pod's shell so real-run
@@ -108,6 +113,15 @@ func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub)
 		`    printf '` + sshConfigState + `\n'`,
 		`    exit 0 ;;`,
 	}
+	credentialAnswer := "0"
+	if spec.RegistryCredentialConfigured {
+		credentialAnswer = "1"
+	}
+	lines = append(lines,
+		`  *'.docker/config.json'*)`,
+		`    printf '`+credentialAnswer+`\n'`,
+		`    exit 0 ;;`,
+	)
 	if spec.HostConfigVerifyExitCode != 0 {
 		lines = append(lines,
 			`  *'test -s'*)`,
@@ -717,6 +731,87 @@ func TestInit(t *testing.T) {
 		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "init/remote_real_run_existing_repo_pulls", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_real_run_ghcr_registry_missing_credential_refuses", func(t *testing.T) {
+		// #1201: init deployed a pod configured to build+push to ghcr.io, but the
+		// pod itself never authenticated (no docker config, no gh session, no
+		// GH_TOKEN). Before this fix, init reported success and the failure only
+		// surfaced 7 minutes into the first `erun release`, at the push. Init must
+		// now refuse right after the deploy, before ever touching git/SSH setup --
+		// no repository state probe, no SSH key output.
+		setup := env.New(t)
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RegistryCredentialConfigured: false})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pod has no ghcr.io credential, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/remote_real_run_ghcr_registry_missing_credential_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_real_run_ghcr_registry_credential_configured_succeeds", func(t *testing.T) {
+		// The other half of #1201: a pod that already has a ghcr.io credential
+		// (the operator authenticated it, or it inherited one from a prior push)
+		// must not be blocked by the new check -- init completes normally.
+		setup := env.New(t)
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RegistryCredentialConfigured: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			// No-git keeps this scenario about the credential check alone; git
+			// checkout setup is covered by the other remote real-run scenarios.
+			"--no-git",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/remote_real_run_ghcr_registry_credential_configured_succeeds", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_dry_run_traces_registry_credential_check", func(t *testing.T) {
+		// Dry-run must show the new check as a trace line like every other
+		// action init takes, and must not fail the plan preview over pod state a
+		// preview cannot know (the pod does not exist yet in dry-run).
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--no-git",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/remote_dry_run_traces_registry_credential_check", normalize.Apply(result.Combined))
 	})
 
 	t.Run("remote_real_run_codecommit_key_import_retry", func(t *testing.T) {

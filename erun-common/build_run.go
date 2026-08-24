@@ -438,12 +438,15 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 // upfront refusal as a release whose images are not covered by a build it will
 // publish.
 //
-// Two checks run here, and they answer different questions: VerifyGHCRPushScope
-// is a per-registry check of the credential's own write:packages scope (cheap,
-// one request per registry); VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a
-// per-artifact check of whether the registry would actually grant push for that
-// specific repository, including creating it for the first time — a token can
-// have write:packages and still be denied create_package by org policy on a
+// Three checks run here, cheapest and most certain first: VerifyGHCRCredentialConfigured
+// answers whether any credential resolves at all -- an environment that has
+// never authenticated to ghcr.io is certain to fail at push, never merely
+// inconclusive (#1201). VerifyGHCRPushScope is a per-registry check of a
+// resolved credential's own write:packages scope (cheap, one request per
+// registry). VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a per-artifact
+// check of whether the registry would actually grant push for that specific
+// repository, including creating it for the first time — a token can have
+// write:packages and still be denied create_package by org policy on a
 // component nothing has ever published before, which the scope check alone
 // cannot see.
 //
@@ -475,6 +478,9 @@ func preflightRegistryPushAccess(ctx Context, execution DockerPushExecutionSpec)
 		}
 	}
 	for _, chart := range execution.componentCharts {
+		if err := VerifyGHCRChartCredentialConfigured(chart.OCIRepo); err != nil {
+			return err
+		}
 		if err := VerifyGHCRCanPushChart(context.Background(), nil, chart.OCIRepo, chart.ChartName); err != nil {
 			return err
 		}
@@ -514,6 +520,9 @@ func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
 		return nil
 	}
 	c.checkedRegistries[registry] = struct{}{}
+	if err := VerifyGHCRCredentialConfigured(tag); err != nil {
+		return err
+	}
 	return VerifyGHCRPushScope(context.Background(), nil, tag)
 }
 

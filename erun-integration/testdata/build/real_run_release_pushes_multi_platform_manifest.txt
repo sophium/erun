@@ -36,6 +36,7 @@ release version: <VERSION>
 step timing (ordered by duration):
   build [<ELAPSED>]
     publish [<ELAPSED>]
+      (unaccounted) [<ELAPSED>]
       api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
         linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
         linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]

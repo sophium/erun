@@ -104,9 +104,10 @@ An env created by this same run skips the reconcile entirely — it was written 
 3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository`.
 4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default.
 5. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`.
-6. With `--remote`: open SSH and write the in-pod bootstrap marker.
-7. Update default-tenant pointer if `--set-default-tenant`.
-8. Exit `0`.
+6. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. Abort if none resolves; the pod is left deployed (init is safe to re-run once authenticated).
+7. With `--remote`: open SSH and write the in-pod bootstrap marker.
+8. Update default-tenant pointer if `--set-default-tenant`.
+9. Exit `0`.
 
 ### Error codes
 
@@ -117,6 +118,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |
+| `REGISTRY_CREDENTIAL_MISSING` | The pod init just deployed has no ghcr.io credential for a registry it is configured to build to or deploy from (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). The pod is left deployed; authenticate it (`erun open`) and re-run `erun init` to confirm. | `1` |
 
 ---
 
@@ -259,6 +261,10 @@ Any other failure is treated as final and fails on the first attempt. A read tha
 
 `--force`, `--dry-run`, `--output`.
 
+### Upfront registry-credential check
+
+Before building anything, `erun push` (and `erun release`, which reuses `push`'s publish stage) checks whether any credential resolves for a ghcr.io registry it would push to — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`. GHCR never accepts an anonymous push, so no credential at all is a certain failure, not an ambiguous one; refusing here turns a multi-arch build spent for nothing into an immediate, actionable error naming the missing credential and the `gh auth login`/`docker login` commands to fix it.
+
 ### Authentication retry semantics
 
 When `docker push` returns one of these registry-side error strings, `erun push` retries automatically:
@@ -291,6 +297,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 |---|---|---|
 | `NO_VERSION` | No `<version>` argument. `push` publishes a specific version; it does not mint one. | `1` |
 | `NO_BUILDABLE_CONTEXT` | No `<tenant>-devops/docker/<image>/` build context found to build the version from. | `1` |
+| `REGISTRY_CREDENTIAL_MISSING` | No credential resolves for a ghcr.io registry to push to at all (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). Refused before any build. | `1` |
 | `REGISTRY_AUTH_FAILED` | All retry attempts failed (or no TTY for the interactive login). | `2` |
 | `MANIFEST_LIST_ASSEMBLY_FAILED` | Per-arch tags pushed but `docker manifest create` failed. | `2` |
 | `CHART_PUSH_FAILED` | Images pushed but a chart's `helm push`, or its `helm pull` verification after every retry, failed — the version is not yet deployable. Charts publish one at a time, so the error names the split explicitly (`published:` / `failed:` / `not attempted:`) and states the recovery: re-run `erun push --version <version>`, which republishes idempotently. | `2` |

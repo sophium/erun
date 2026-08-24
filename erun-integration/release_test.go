@@ -681,7 +681,11 @@ esac
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
 		fixture.StubBinary(t, stubs, "helm", "")
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)})
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the simulated docker failure it is about.
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
 		}
@@ -781,6 +785,9 @@ exit 0
 			// host and the tool are both declared rather than left to the runner.
 			"ERUN_HOST_OS_OVERRIDE=linux",
 			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
+			// #1201: give the registry-credential preflight a resolvable credential
+			// so this scenario still reaches the moved-branch-absorption it is about.
+			"GH_TOKEN=integration-test-token",
 		)
 
 		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -880,7 +887,12 @@ func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	stubDockerWithManifestTracking(t, stubs)
 	fixture.StubBinary(t, stubs, "helm", "")
-	return fixture.StubEnv(stubs, "docker", "helm")
+	envVars := fixture.StubEnv(stubs, "docker", "helm")
+	// #1201: the registry-credential preflight refuses up front when no
+	// ghcr.io credential resolves at all. A real publish toolchain always has
+	// one; GH_TOKEN is the fixture-side stand-in so these scenarios keep
+	// exercising what happens once that check passes.
+	return append(envVars, "GH_TOKEN=integration-test-token")
 }
 
 // seedBareOrigin gives a release scenario a real remote, so "the tag is public"

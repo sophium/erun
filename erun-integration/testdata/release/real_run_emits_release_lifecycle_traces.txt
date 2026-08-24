@@ -39,6 +39,7 @@ release version: <VERSION>
 step timing (ordered by duration):
   release [<ELAPSED>]
     publish [<ELAPSED>]
+      (unaccounted) [<ELAPSED>]
       api (cache hit) [<ELAPSED>]
         linux/amd64 (cache hit) [<ELAPSED>]
         linux/arm64 (cache hit) [<ELAPSED>]
