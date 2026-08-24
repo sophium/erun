@@ -20,7 +20,8 @@
     "types": ["vitest/globals", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@kit/*": ["../erun-kit/src/*"]
     }
   },
   "include": ["src", "vite-env.d.ts"]

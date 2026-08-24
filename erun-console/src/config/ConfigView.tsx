@@ -1,3 +1,5 @@
+import type { StatusBadgeTone } from 'erun-kit';
+import { StatusBadge } from 'erun-kit';
 import type * as React from 'react';
 
 import type {
@@ -49,7 +51,7 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
       <td>{placeholder(env.runtimeVersion)}</td>
       <td>{deployedVersionCell(env)}</td>
       <td>
-        <StatusBadge status={env.status} labels={ENV_STATUS_LABELS} />
+        {renderStatusBadge(env.status, ENV_STATUS_TONES, ENV_STATUS_LABELS)}
         {env.status === 'failed' && env.provisionError !== undefined && (
           <span className="context-error">{env.provisionError}</span>
         )}
@@ -97,6 +99,12 @@ const STATUS_LABELS: Record<ContextStatus, string> = {
   failed: 'Failed',
 };
 
+const STATUS_TONES: Record<ContextStatus, StatusBadgeTone> = {
+  provisioning: 'in-progress',
+  running: 'success',
+  failed: 'destructive',
+};
+
 const ENV_STATUS_LABELS: Record<EnvironmentStatus, string> = {
   registered: 'Registered',
   provisioning: 'Provisioning',
@@ -108,21 +116,28 @@ const ENV_STATUS_LABELS: Record<EnvironmentStatus, string> = {
   'deletion-blocked': 'Delete blocked',
 };
 
-// The badge pairs color with a text label so it reads for color-blind and
-// screen-reader users, not color alone. A resource with no status (registered
-// before provisioning existed) renders no badge. Generic over the status label
-// map so contexts and environments share one badge.
-function StatusBadge<T extends string>({
-  status,
-  labels,
-}: {
-  status: T | undefined;
-  labels: Record<T, string>;
-}): React.ReactElement | null {
+const ENV_STATUS_TONES: Record<EnvironmentStatus, StatusBadgeTone> = {
+  registered: 'muted',
+  provisioning: 'in-progress',
+  running: 'success',
+  failed: 'destructive',
+  deleting: 'in-progress',
+  'deletion-blocked': 'warning',
+};
+
+// Shares the desktop's StatusBadge (erun-kit) so the same erun status renders
+// identically in both surfaces. A resource with no status (registered before
+// provisioning existed) renders no badge. Generic over the status maps so
+// contexts and environments share one call site.
+function renderStatusBadge<T extends string>(
+  status: T | undefined,
+  tones: Record<T, StatusBadgeTone>,
+  labels: Record<T, string>,
+): React.ReactElement | null {
   if (status === undefined) {
     return null;
   }
-  return <span className={`status-badge status-badge--${status}`}>{labels[status]}</span>;
+  return <StatusBadge tone={tones[status]} label={labels[status]} />;
 }
 
 function ContextItem({ context }: { context: CloudContext }): React.ReactElement {
@@ -133,7 +148,7 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
         {context.provider} · {context.region}
       </span>
       <span className="context-status">
-        <StatusBadge status={context.status} labels={STATUS_LABELS} />
+        {renderStatusBadge(context.status, STATUS_TONES, STATUS_LABELS)}
         {context.status === 'failed' && context.provisionError !== undefined && (
           // The failure reason is essential, so it is visible inline rather
           // than hidden in a title tooltip.

@@ -1,3 +1,9 @@
+@import 'erun-kit/theme.css';
+/* erun-kit ships Tailwind utility classes in its component source, which lives
+   under node_modules via the workspace symlink and is excluded from Tailwind's
+   default content scan; @source opts it back in so those classes still emit. */
+@source '../../erun-kit/src';
+
 :root {
   --fg: #0f1320;
   --muted: #5b6472;
@@ -97,31 +103,6 @@ th {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.status-badge {
-  display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border: 1px solid currentColor;
-}
-
-.status-badge--registered {
-  color: #64748b;
-}
-
-.status-badge--provisioning {
-  color: #92740a;
-}
-
-.status-badge--running {
-  color: #15803d;
-}
-
-.status-badge--failed {
-  color: #b91c1c;
 }
 
 .context-error {
