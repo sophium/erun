@@ -27,7 +27,6 @@ import {
 } from './slices/reviewSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
-import { selectionKey } from './versionSuggestions';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
@@ -207,13 +206,13 @@ export const refreshReviewDiff = (): AppThunk<Promise<void>> => async (dispatch,
 function isCurrentReviewDiffRequest(
   getState: () => ReturnType<typeof import('./store').store.getState>,
   request: number,
-  selectedKey: string,
+  scopeKey: string,
 ): boolean {
   const state = getState();
-  return (
-    request === state.requestCounters.reviewDiff &&
-    selectedKey === selectionKey(state.selection.selected ?? { tenant: '', environment: '' })
-  );
+  const currentScopeKey = reviewEnvTargets(state)
+    .map((target) => target.envKey)
+    .join(',');
+  return request === state.requestCounters.reviewDiff && scopeKey === currentScopeKey;
 }
 
 function scheduleReviewDiffRefresh(
