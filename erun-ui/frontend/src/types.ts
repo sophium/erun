@@ -211,6 +211,10 @@ export interface UIIdleStatus {
   stopEligible: boolean;
   outsideWorkingHours: boolean;
   managedCloud: boolean;
+  // fromPod is true only when this reading came from the pod's own idle
+  // monitor over MCP. False means it was assembled on the host because the
+  // pod could not be reached, so the countdown it carries may be stale.
+  fromPod: boolean;
   stopBlockedReason?: string;
   stopError?: string;
   cloudContextName?: string;

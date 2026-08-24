@@ -135,12 +135,24 @@ function isPersistentIdleBlocker(reason: string): boolean {
 }
 
 export function idleStatusTooltipLines(idleStatus: IdleStatus): string[] {
-  const lines = idleStatusSummaryLines(idleStatus);
+  const lines: string[] = [];
+  appendIdleProvenanceLine(lines, idleStatus);
+  lines.push(...idleStatusSummaryLines(idleStatus));
   appendIdleBlockerLine(lines, idleStatus);
   appendIdleCloudContextLine(lines, idleStatus);
   lines.push(...idleStatusActiveMarkerLines(idleStatus));
   appendIdleStopOutcomeLines(lines, idleStatus);
   return lines;
+}
+
+// Leads the tooltip, ahead of the countdown itself, because a reading the
+// pod never confirmed is the caveat that changes how the rest of the tooltip
+// should be read — not a footnote after it.
+function appendIdleProvenanceLine(lines: string[], idleStatus: IdleStatus): void {
+  if (idleStatus.fromPod) {
+    return;
+  }
+  lines.push('Not confirmed with the pod: showing the last known state; it may be stale.');
 }
 
 function idleStatusSummaryLines(idleStatus: IdleStatus): string[] {
@@ -252,6 +264,7 @@ function appendIdleStopOutcomeLines(lines: string[], idleStatus: IdleStatus): vo
 
 export function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   const parts = [
+    ...(idleStatus.fromPod ? [] : ['not confirmed with the pod, showing the last known state']),
     `Idle timeout ${String(idleStatus.timeoutSeconds)} seconds`,
     `seconds until stop ${String(idleStatus.secondsUntilStop)}`,
     `stop eligible ${idleStatus.stopEligible ? 'yes' : 'no'}`,
@@ -263,10 +276,17 @@ export function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   if (idleStatus.stopError) {
     parts.push(`stop error: ${idleStatus.stopError}`);
   }
-  if (idleStatus.cloudContextName) {
-    parts.push(
-      `cloud environment ${idleStatus.cloudContextLabel?.trim() ? idleStatus.cloudContextLabel : (idleStatus.cloudContextName ?? '')}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`,
-    );
-  }
+  appendIdleAccessibleCloudContextPart(parts, idleStatus);
   return parts.join(', ');
+}
+
+function appendIdleAccessibleCloudContextPart(parts: string[], idleStatus: IdleStatus): void {
+  if (!idleStatus.cloudContextName) {
+    return;
+  }
+  const label = idleStatus.cloudContextLabel?.trim()
+    ? idleStatus.cloudContextLabel
+    : idleStatus.cloudContextName;
+  const status = idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : '';
+  parts.push(`cloud environment ${label}${status}`);
 }
