@@ -202,7 +202,7 @@ function MemoryMeters({ memory }: { memory: UIRuntimeMemoryUsage }): React.React
         valueText={`${memory.current ?? '—'} of ${memory.limit ?? '—'}`}
         percent={memory.percentOfLimit}
         warnAt={MEMORY_WARN_PERCENT}
-        detail={percentDetail(memory.percentOfLimit)}
+        detail={percentDetail(memory.percentOfLimit, 'of the limit')}
       />
       <MemoryPeakAndKills memory={memory} />
     </div>
@@ -257,7 +257,7 @@ function DiskMeter({ disk }: { disk: UIRuntimeDiskUsage }): React.ReactElement {
       valueText={`${disk.used ?? '—'} of ${disk.total ?? '—'}`}
       percent={disk.percentUsed}
       warnAt={DISK_WARN_PERCENT}
-      detail={percentDetail(disk.percentUsed)}
+      detail={percentDetail(disk.percentUsed, 'used')}
     />
   );
 }
@@ -289,8 +289,11 @@ function percentText(value: number | undefined): string {
   return value === undefined || !Number.isFinite(value) ? '—' : `${value.toFixed(0)}%`;
 }
 
-function percentDetail(value: number | undefined): string | undefined {
+// The qualifier is the caller's, because the noun differs by resource and the
+// wrong one is user-facing nonsense: memory is a fraction "of the limit" it was
+// given, while a disk mount has capacity, not a limit, and is simply "used".
+function percentDetail(value: number | undefined, qualifier: string): string | undefined {
   return value === undefined || !Number.isFinite(value)
     ? undefined
-    : `${value.toFixed(0)}% of the limit`;
+    : `${value.toFixed(0)}% ${qualifier}`;
 }

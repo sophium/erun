@@ -81,7 +81,7 @@ test.describe('manage dialog runtime usage panel', () => {
     await expect(panel).toContainText('75% of the limit');
     await expect(panel).toContainText('1.8 GiB');
     await expect(panel).toContainText('90.0 GiB of 100.0 GiB');
-    await expect(panel).toContainText('90% of the limit');
+    await expect(panel).toContainText('90% used');
 
     // A percentage against a limit is a magnitude, so each measured field
     // renders a meter carrying its own value -- CPU, memory and the one disk
