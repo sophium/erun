@@ -13,7 +13,7 @@ import {
 // at this" and "there is nothing here" identically. These pin the difference.
 
 function dashboard(panels: UITenantDashboardPanel[]): UITenantDashboard {
-  return { tenant: 'frs', panels };
+  return { tenant: 'frs', panels, canCreateReview: false, canAdvanceMergeQueue: false };
 }
 
 test('a tab the user may not open does not render', () => {
@@ -39,7 +39,14 @@ test('a dashboard that reported no panels keeps every tab', () => {
   // An unknown permission is not a denied one: before the load answers, nothing
   // may be hidden.
   assert.equal(visibleTenantDashboardTabs(null).length, 6);
-  assert.equal(visibleTenantDashboardTabs({ tenant: 'frs' }).length, 6);
+  assert.equal(
+    visibleTenantDashboardTabs({
+      tenant: 'frs',
+      canCreateReview: false,
+      canAdvanceMergeQueue: false,
+    }).length,
+    6,
+  );
 });
 
 test('the missing access is named rather than left to be guessed', () => {

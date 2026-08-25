@@ -1,6 +1,15 @@
-import type { UITenantConfig, UITenantDashboard, UITenantDashboardInput } from '@/types';
+import type {
+  UIAdvanceMergeQueueInput,
+  UICreateReviewInput,
+  UITenantConfig,
+  UITenantDashboard,
+  UITenantDashboardInput,
+  UITenantDashboardReview,
+} from '@/types';
 
 import {
+  AdvanceMergeQueue,
+  CreateReview,
   LoadTenantConfig,
   LoadTenantDashboard,
   SaveTenantConfig,
@@ -29,6 +38,18 @@ export const tenantApi = wailsApi.injectEndpoints({
       ),
       providesTags: (_result, _error, input) => [{ type: 'TenantDashboard', id: input.tenant }],
     }),
+    createReview: builder.mutation<UITenantDashboardReview, UICreateReviewInput>({
+      queryFn: wailsQueryFn<UICreateReviewInput, UITenantDashboardReview>((input) =>
+        CreateReview(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [{ type: 'TenantDashboard', id: input.tenant }],
+    }),
+    advanceMergeQueue: builder.mutation<UITenantDashboardReview, UIAdvanceMergeQueueInput>({
+      queryFn: wailsQueryFn<UIAdvanceMergeQueueInput, UITenantDashboardReview>((input) =>
+        AdvanceMergeQueue(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [{ type: 'TenantDashboard', id: input.tenant }],
+    }),
   }),
 });
 
@@ -38,4 +59,6 @@ export const {
   useSaveTenantConfigMutation,
   useGetTenantDashboardQuery,
   useLazyGetTenantDashboardQuery,
+  useCreateReviewMutation,
+  useAdvanceMergeQueueMutation,
 } = tenantApi;

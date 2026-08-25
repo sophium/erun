@@ -174,6 +174,11 @@ export interface UITenantDashboard {
   builds?: UITenantDashboardBuild[];
   auditEvents?: UITenantDashboardAudit[];
   panels?: UITenantDashboardPanel[];
+  // canCreateReview and canAdvanceMergeQueue report whether the signed-in user
+  // may attempt those writes at all, so the composing actions can be hidden
+  // rather than rendered to fail on submit.
+  canCreateReview: boolean;
+  canAdvanceMergeQueue: boolean;
 }
 
 // UITenantDashboardPanel is one panel's own outcome: `restricted` names the API

@@ -1,4 +1,5 @@
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -11,10 +12,15 @@ import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { closeReviewDetail } from '@/app/reviewDetailThunks';
+import {
+  cancelCloseReview,
+  closeReviewDetail,
+  confirmCloseReview,
+  submitCloseReview,
+} from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
 import { formatDashboardDate, reviewStatusTone } from '@/app/tenantDashboardPanels';
-import type { UITenantDashboardBuild } from '@/types';
+import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
 
@@ -107,11 +113,85 @@ function ReviewDetailLoaded({
           {data.queuePosition ? ` · queue position ${String(data.queuePosition)}` : ''}
         </DialogDescription>
       </DialogHeader>
+      <CloseReviewAction review={review} data={data} detail={detail} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <ReviewDetailBuilds data={data} />
         <ReviewDetailComments detail={detail} />
       </div>
     </>
+  );
+}
+
+const reviewOpenStatuses = new Set(['OPEN', 'READY', 'FAILED', 'MERGE']);
+
+// CloseReviewAction degrades by permission (no access, named rather than
+// discovered from a failed submit) and gives Close a visible commitment
+// boundary: a confirm step before the write, and the write's own
+// busy/error state.
+function CloseReviewAction({
+  review,
+  data,
+  detail,
+}: {
+  review: UITenantDashboardReview;
+  data: NonNullable<ReviewDetailState['data']>;
+  detail: ReviewDetailState;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  if (!reviewOpenStatuses.has(review.status)) {
+    return null;
+  }
+  if (!data.canClose) {
+    return (
+      <p className="text-[13px] text-muted-foreground">
+        You do not have access to close this review.
+      </p>
+    );
+  }
+  if (detail.closeConfirming) {
+    return (
+      <div className="flex items-center gap-2">
+        {detail.closeError && (
+          <span className="text-[13px] text-destructive">{detail.closeError}</span>
+        )}
+        <span className="text-[13px] text-foreground">Close this review without merging it?</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={detail.closing}
+          onClick={() => {
+            dispatch(cancelCloseReview());
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={detail.closing}
+          onClick={() => {
+            void dispatch(submitCloseReview());
+          }}
+        >
+          {detail.closing && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+          Confirm close
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="w-fit"
+      onClick={() => {
+        dispatch(confirmCloseReview());
+      }}
+    >
+      Close review
+    </Button>
   );
 }
 

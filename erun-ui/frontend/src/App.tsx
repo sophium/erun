@@ -11,6 +11,7 @@ import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
+import { CreateReviewDialog } from '@/components/app/CreateReviewDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
@@ -124,6 +125,7 @@ export function App(): React.ReactElement {
         <CloseConfirmDialog />
         <AIOccupancyPromptDialog />
         <ReviewDetailDialog />
+        <CreateReviewDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}

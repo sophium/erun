@@ -1,16 +1,32 @@
-import { Button, cn } from 'erun-kit';
-import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 'lucide-react';
+import { Button, cn, Popover, PopoverAnchor, PopoverContent, Textarea } from 'erun-kit';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Copy,
+  Info,
+  LoaderCircle,
+  MessageSquarePlus,
+  Play,
+  PlugZap,
+  RefreshCw,
+} from 'lucide-react';
 import * as React from 'react';
 
 import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
+import {
+  cancelReviewComment,
+  setReviewCommentDraft,
+  startReviewComment,
+  submitReviewComment,
+} from '@/app/reviewDetailThunks';
 import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
 import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
 import { diffPathKey } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
-import type { DiffFile, DiffHunk } from '@/types';
+import type { DiffFile, DiffHunk, DiffLine, DiffResult } from '@/types';
 
 export function DiffList(): React.ReactElement {
   const targets = useAppSelector(selectReviewEnvTargets);
@@ -92,6 +108,7 @@ function DiffEnvSection({
     if (files.length === 0) {
       return <ReviewStatus>No matching files</ReviewStatus>;
     }
+    const commitHash = resolveDiffCommitHash(slot.diff);
     return (
       <>
         {files.map((file) => (
@@ -99,6 +116,7 @@ function DiffEnvSection({
             key={file.path}
             file={file}
             selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
+            commitHash={commitHash}
           />
         ))}
       </>
@@ -111,6 +129,19 @@ function DiffEnvSection({
       {body}
     </>
   );
+}
+
+// resolveDiffCommitHash is the commit a new diff-line thread anchors to: the
+// specific commit when one is selected, otherwise the newest commit the
+// diff's own range covers. Empty when the range covers only uncommitted
+// worktree changes, which have no commit id to anchor a comment to yet.
+function resolveDiffCommitHash(diff: DiffResult | null | undefined): string {
+  const selected = diff?.selectedCommit?.trim();
+  if (selected) {
+    return selected;
+  }
+  const commits = diff?.reviewCommits ?? [];
+  return commits[commits.length - 1]?.hash ?? '';
 }
 
 // diffErrorCopy resolves the title/body/technical-detail text and whether this
@@ -289,9 +320,11 @@ function CopyErrorButton({ text }: { text: string }): React.ReactElement {
 function DiffFileView({
   file,
   selected,
+  commitHash,
 }: {
   file: DiffFile;
   selected: boolean;
+  commitHash: string;
 }): React.ReactElement {
   return (
     <section
@@ -310,7 +343,12 @@ function DiffFileView({
         <ReviewStatus>Binary file changed</ReviewStatus>
       ) : (
         (file.hunks ?? []).map((hunk) => (
-          <DiffHunkView key={hunk.header} hunk={hunk} filePath={file.path} />
+          <DiffHunkView
+            key={hunk.header}
+            hunk={hunk}
+            filePath={file.path}
+            commitHash={commitHash}
+          />
         ))
       )}
     </section>
@@ -320,9 +358,11 @@ function DiffFileView({
 function DiffHunkView({
   hunk,
   filePath,
+  commitHash,
 }: {
   hunk: DiffHunk;
   filePath: string;
+  commitHash: string;
 }): React.ReactElement {
   const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
   const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
@@ -343,7 +383,7 @@ function DiffHunkView({
           <div
             key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
             className={cn(
-              'grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
+              'group grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)_22px] bg-background font-mono text-[11px] leading-5',
               line.kind === 'add' && 'bg-diff-add',
               line.kind === 'delete' && 'bg-diff-delete',
               line.kind === 'meta' && 'bg-muted text-muted-foreground',
@@ -359,6 +399,7 @@ function DiffHunkView({
               {diffLineMark(line.kind)}
             </span>
             <span className="min-w-0 whitespace-pre pr-4">{line.content || ' '}</span>
+            <DiffLineCommentAction filePath={filePath} line={line} commitHash={commitHash} />
           </div>
         ))}
       </div>
@@ -368,4 +409,131 @@ function DiffHunkView({
 
 export function ReviewStatus({ children }: { children: React.ReactNode }): React.ReactElement {
   return <div className="px-3 py-3.5 text-sm leading-[1.4] text-muted-foreground">{children}</div>;
+}
+
+// DiffLineCommentAction starts a new top-level review thread anchored to this
+// diff line (#1348) — the gap ReviewDetailDialog.Comments.tsx used to call
+// out as deferred, since only the diff panel knows which line was clicked.
+// The button is always visible (recognition over recall); clicking it when a
+// precondition is unmet explains which one rather than doing nothing.
+function DiffLineCommentAction({
+  filePath,
+  line,
+  commitHash,
+}: {
+  filePath: string;
+  line: DiffLine;
+  commitHash: string;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  // The active commenting context is the last-opened review, which survives
+  // closing its dialog (see closeReviewDetail) precisely so it can still be
+  // referenced from here — the dialog is modal and would otherwise cover the
+  // diff panel entirely while "open".
+  const hasActiveReview = useAppSelector((state) => state.reviewDetail.reviewId !== '');
+  const canComment = useAppSelector((state) => state.reviewDetail.data?.canComment ?? false);
+  const anchor = useAppSelector((state) => state.reviewDetail.newCommentAnchor);
+  const draft = useAppSelector((state) => state.reviewDetail.newCommentDraft);
+  const submitting = useAppSelector((state) => state.reviewDetail.newCommentSubmitting);
+  const submitError = useAppSelector((state) => state.reviewDetail.newCommentSubmitError);
+  const [hintOpen, setHintOpen] = React.useState(false);
+
+  const lineNumber = line.newLine;
+  if (line.kind === 'meta' || lineNumber === undefined) {
+    return null;
+  }
+  const isThisLine = anchor !== null && anchor.filePath === filePath && anchor.line === lineNumber;
+  const blockedReason = diffLineCommentBlockedReason(hasActiveReview, canComment, commitHash);
+  const open = isThisLine || hintOpen;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          return;
+        }
+        setHintOpen(false);
+        if (isThisLine) {
+          dispatch(cancelReviewComment());
+        }
+      }}
+    >
+      <PopoverAnchor asChild>
+        <button
+          type="button"
+          aria-label={`Comment on line ${String(lineNumber)} of ${filePath}`}
+          className="flex size-full items-center justify-center border-l border-[oklch(0_0_0/0.05)] bg-inherit text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+          onClick={() => {
+            if (blockedReason) {
+              setHintOpen(true);
+              return;
+            }
+            dispatch(startReviewComment({ commitId: commitHash, filePath, line: lineNumber }));
+          }}
+        >
+          <MessageSquarePlus className="size-3" aria-hidden="true" />
+        </button>
+      </PopoverAnchor>
+      <PopoverContent side="right" align="start" className="w-72">
+        {blockedReason ? (
+          <p className="text-[13px] text-muted-foreground">{blockedReason}</p>
+        ) : (
+          <div className="grid gap-2">
+            <Textarea
+              aria-label="New comment"
+              placeholder="Start a discussion about this line…"
+              value={draft}
+              disabled={submitting}
+              onChange={(event) => {
+                dispatch(setReviewCommentDraft(event.target.value));
+              }}
+            />
+            {submitError && <p className="text-[13px] text-destructive">{submitError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={submitting}
+                onClick={() => {
+                  dispatch(cancelReviewComment());
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={submitting || !draft.trim()}
+                onClick={() => {
+                  void dispatch(submitReviewComment());
+                }}
+              >
+                {submitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+                Comment
+              </Button>
+            </div>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function diffLineCommentBlockedReason(
+  hasActiveReview: boolean,
+  canComment: boolean,
+  commitHash: string,
+): string {
+  if (!hasActiveReview) {
+    return 'Open a review from the Reviews tab to comment on this line.';
+  }
+  if (!commitHash) {
+    return 'Commit this change before commenting on it.';
+  }
+  if (!canComment) {
+    return 'You do not have access to comment on this review.';
+  }
+  return '';
 }
