@@ -217,6 +217,62 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	}
 }
 
+// TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto pins the third
+// place #1330's hazard applies: the pacing nudge writes its text, then a bare
+// carriage return 150ms later, the same shape as the AI repaint resize that
+// corrupted a submitted prompt. Firing it into a pane mid-sentence would glue
+// the pacing text onto whatever the operator is typing. The skip must not
+// cost against the nudge cap: it is deferred, not counted, so the reconciler
+// can retry once the operator pauses.
+func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{})
+	session := newCallRecordingSession()
+	key := orchestratorSessionKey("agent")
+	managed := &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	app.sessions[key] = managed
+	app.orchestrators["agent"] = &orchestratorSession{
+		id:        "agent",
+		serial:    5,
+		name:      "agent",
+		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
+	}
+
+	// First stale tick: no recent input, so the reconciler nudges normally.
+	app.reconcileOrchestratorPacing()
+	firstCalls := session.Calls()
+	if len(firstCalls) != 2 {
+		t.Fatalf("expected the first stale tick to nudge, got %v", firstCalls)
+	}
+	app.mu.Lock()
+	count := app.orchestrators["agent"].pacingNudgeCount
+	app.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("expected one recorded nudge, got %d", count)
+	}
+
+	// The operator starts typing into the pane between ticks.
+	app.mu.Lock()
+	managed.lastInputAt = time.Now()
+	app.mu.Unlock()
+
+	// A later stale tick must stand down rather than glue the nudge text onto
+	// the half-typed line, and must not consume a nudge against the cap.
+	app.reconcileOrchestratorPacing()
+	if got := session.Calls(); len(got) != len(firstCalls) {
+		t.Fatalf("a pane being typed into must not receive a pacing nudge, got extra writes %v", got[len(firstCalls):])
+	}
+	app.mu.Lock()
+	count = app.orchestrators["agent"].pacingNudgeCount
+	app.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("skipping for input must not consume a nudge from the cap, got count=%d", count)
+	}
+}
+
 // TestSendSessionInputRearmsOrchestratorPacing locks the other rearm path: real
 // operator input into the pane clears the cap and the count immediately,
 // without waiting for a fresh busy report.

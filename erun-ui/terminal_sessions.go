@@ -967,12 +967,13 @@ func (a *App) RepaintSession(sessionID int) error {
 		// a line being entered. Someone typing needs no synthetic repaint.
 		return nil
 	}
-	// Only AI TUIs (claude/codex) need the WINCH repaint: they render on the MAIN
-	// screen and only repaint on a real geometry change, so a tab switch leaves
-	// them blank until their next diff. Plain shells and alt-screen apps
-	// reconstruct from the replayed buffer, so a nudge would just cause a needless
-	// reflow. The frontend fires this on every switch and lets this gate decide.
-	if !isAITabKind(managed) {
+	// Only main-screen TUIs (claude/codex, whether in an AI tab or an
+	// orchestrator pane) need the WINCH repaint: they only repaint on a real
+	// geometry change, so a tab switch leaves them blank until their next diff.
+	// Plain shells and alt-screen apps reconstruct from the replayed buffer, so a
+	// nudge would just cause a needless reflow. The frontend fires this on every
+	// switch and lets this gate decide.
+	if !needsWINCHRepaint(managed) {
 		return nil
 	}
 	// No attach delay on a switch: the program is already attached (unlike the
@@ -1328,13 +1329,24 @@ func isAITabKind(managed *managedTerminal) bool {
 		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
 }
 
+// needsWINCHRepaint reports whether a session runs a main-screen TUI that only
+// repaints on a real pty geometry change (a WINCH), so a same-size tab switch
+// or reattach leaves it blank until one is forced. AI tabs and the orchestrator
+// both run that kind of program (claude/codex). Kept separate from isAITabKind,
+// which also drives AI-activity accounting (managedAITabFor, aiActivityKind)
+// where an orchestrator is deliberately excluded for unrelated reasons — see
+// aiActivityKind's comment.
+func needsWINCHRepaint(managed *managedTerminal) bool {
+	return isAITabKind(managed) || (managed != nil && managed.kind == sessionKindOrchestrator)
+}
+
 // maybeNudgeAIRepaint fires the AI repaint nudge when the attach marker first
 // appears. dtach hands a reattached client a cleared screen, but Claude (an Ink
 // main-screen TUI) only fully repaints on an actual geometry change — a
 // same-size reattach raises no effective WINCH, so the tab would render blank.
 // The nudge forces that geometry change once Claude is attached.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
-	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
+	if !needsWINCHRepaint(managed) || !bytes.Contains(chunk, aiAttachMarker) {
 		return
 	}
 	a.mu.Lock()

@@ -222,6 +222,16 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time) 
 		a.mu.Unlock()
 		return
 	}
+	if typedRecentlyLocked(managed) {
+		// The operator is mid-sentence in this pane. Writing the nudge text
+		// plus its submitting "\r" now would glue onto whatever they are
+		// typing, the same hazard the AI repaint nudge stands down for
+		// (#1330). Skip without touching the nudge count or timestamp so
+		// this does not cost against orchestratorPacingMaxNudges; the
+		// reconciler retries on its next 15s tick once they pause.
+		a.mu.Unlock()
+		return
+	}
 	session.pacingNudgeCount++
 	session.pacingLastNudgeAtUnix = now.Unix()
 	count := session.pacingNudgeCount

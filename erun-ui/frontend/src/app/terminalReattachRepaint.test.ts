@@ -45,13 +45,24 @@ let fitCount = 0;
 
 function fakeTerminal(cols: number, rows: number) {
   const resizes: [number, number][] = [];
+  let content = '';
   return {
     cols,
     rows,
     resizes,
-    // Every line reads empty: the state dtach leaves a reattached pane in, and
+    // setContent lets a test simulate the program redrawing on its own, e.g.
+    // while typing is still within the quiet window.
+    setContent(next: string) {
+      content = next;
+    },
+    // Empty by default: the state dtach leaves a reattached pane in, and
     // therefore the state the repaint cycle fires on.
-    buffer: { active: { viewportY: 0, getLine: () => null } },
+    buffer: {
+      active: {
+        viewportY: 0,
+        getLine: () => (content === '' ? null : { translateToString: () => content }),
+      },
+    },
     resize(nextCols: number, nextRows: number) {
       this.cols = nextCols;
       this.rows = nextRows;
@@ -80,7 +91,7 @@ function harness() {
 beforeEach(() => {
   resizeCalls.length = 0;
   installWindow();
-  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
 });
 
 afterEach(() => {
@@ -103,20 +114,48 @@ test('a keystroke restores the shrunken geometry at once, not mid-line 650ms lat
   assert.equal(fitCount, 1, 'the restore must re-fit exactly once');
 
   // The original 650ms restore must not also land: a second reflow on a line
-  // being edited is the corruption.
+  // being edited is the corruption. Tick less than a full poller period (1300ms)
+  // past the restore so this stays a test of the cancelled timeout, not of the
+  // (legitimate, separately covered) next poll cycle once the quiet window
+  // elapses.
   const afterInput = terminal.resizes.length;
-  mock.timers.tick(5000);
+  mock.timers.tick(700);
   assert.equal(terminal.resizes.length, afterInput, 'the cancelled hold must not fire');
   assert.equal(fitCount, 1, 'the cancelled hold must not re-fit again');
 });
 
-test('input disarms the poller, so no later cycle starts behind the user', () => {
+test('input defers the cycle through the quiet window but does not disarm it', () => {
   const { terminal, repaint } = harness();
   repaint.schedule(7);
   repaint.noteInput();
 
-  mock.timers.tick(30000);
-  assert.deepEqual(terminal.resizes, [], 'a pane being typed into must never be resized');
+  // A tick landing inside the 1500ms quiet window must not resize a pane the
+  // operator is actively typing into.
+  mock.timers.tick(1300);
+  assert.deepEqual(terminal.resizes, [], 'a tick within the quiet window must not resize');
+
+  // Once the quiet window elapses with the screen still blank, the poller must
+  // still repaint it. This is the only repaint path left for an orchestrator
+  // pane (#1332's Go-side WINCH nudge is dead code for that session kind), so
+  // permanently disarming on the first keystroke left the pane blank for the
+  // rest of the session -- exactly the defect behind the operator's blind,
+  // concatenated retype (#1330 follow-up).
+  mock.timers.tick(1300);
+  assert.equal(terminal.rows, 26, 'a still-blank pane must be repainted once typing pauses');
+  assert.deepEqual(lastResizeCall(), [7, 120, 26]);
+});
+
+test('a repainted (now visible) pane is left alone even after the quiet window elapses', () => {
+  const { terminal, repaint } = harness();
+  repaint.schedule(7);
+  repaint.noteInput();
+
+  // The screen becomes visible while the operator is still within the quiet
+  // window -- e.g. the program redrew on its own after the keystroke.
+  terminal.setContent('visible content');
+  mock.timers.tick(3000);
+
+  assert.deepEqual(terminal.resizes, [], 'a pane with visible content must never be resized');
 });
 
 test('without input the cycle still completes, so the repaint is not simply disabled', () => {

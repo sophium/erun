@@ -520,16 +520,18 @@ export class TerminalController {
     // AI TUIs (claude/codex) render on the MAIN screen — not the alt-screen — and
     // only repaint on a real geometry change, so the trimmed replay above can't
     // reconstruct their frame and the pane is blank on switch until the app next
-    // emits a diff (the black-pane the operator hit). Nudge the backend pty on
-    // every switch to raise a genuine WINCH and force a full repaint; the Go side
-    // (RepaintSession) applies it only to AI sessions and no-ops for plain shells
-    // and alt-screen apps (which reconstruct from the replay), so this is safe to
-    // call unconditionally. The local xterm is never resized — no visible reflow.
+    // emits a diff (the black-pane the operator hit). An orchestrator pane runs
+    // the same kind of TUI. Nudge the backend pty on every switch to raise a
+    // genuine WINCH and force a full repaint; the Go side (RepaintSession)
+    // applies it only to AI and orchestrator sessions and no-ops for plain
+    // shells and alt-screen apps (which reconstruct from the replay), so this is
+    // safe to call unconditionally. The local xterm is never resized — no
+    // visible reflow.
     void RepaintSession(sessionId);
-    // A pty-only WINCH (RepaintSession above) does not reach a reattached Claude,
-    // so if this session stays blank after selection (a reattached AI tab) the
-    // reattach-repaint helper forces a real xterm+pty resize cycle. See
-    // TerminalReattachRepaint.
+    // A pty-only WINCH (RepaintSession above) does not reach a reattached
+    // main-screen TUI, so if this session stays blank after selection (a
+    // reattached AI tab or orchestrator pane) the reattach-repaint helper
+    // forces a real xterm+pty resize cycle. See TerminalReattachRepaint.
     this.reattachRepaint.schedule(sessionId);
   }
 }
