@@ -118,7 +118,7 @@ func mergeConfigValue(old, new *yaml.Node, fieldType reflect.Type) *yaml.Node {
 	if fieldType == nil {
 		return new
 	}
-	for fieldType.Kind() == reflect.Ptr {
+	for fieldType.Kind() == reflect.Pointer {
 		fieldType = fieldType.Elem()
 	}
 	switch fieldType.Kind() {
@@ -144,7 +144,7 @@ func mergeConfigSliceNode(old, new *yaml.Node, elemType reflect.Type) *yaml.Node
 	if old.Kind != yaml.SequenceNode || new.Kind != yaml.SequenceNode {
 		return new
 	}
-	for elemType.Kind() == reflect.Ptr {
+	for elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 	if elemType.Kind() != reflect.Struct {
@@ -263,7 +263,7 @@ func knownYAMLFields(t reflect.Type) map[string]reflect.Type {
 	if t == nil {
 		return fields
 	}
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {

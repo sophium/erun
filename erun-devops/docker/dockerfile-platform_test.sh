@@ -57,6 +57,16 @@ if grep -qF 'GOBIN=/out go install' "${devops_dockerfile}"; then
 fi
 assert_line "${devops_dockerfile}" 'find "$(go env GOPATH)/bin" -name golangci-lint -exec cp {} /out/golangci-lint \;'
 
+# Both golangci-lint installs (test stage, builder stage) resolve their version
+# from the single checked-in repo-root file, not a hardcoded Dockerfile default —
+# a Dockerfile-only default silently drifted from what the repo's own tooling
+# installed. Each stage must COPY the file in and fall back to it.
+assert_count "${devops_dockerfile}" 'COPY GOLANGCI_LINT_VERSION /src/GOLANGCI_LINT_VERSION' 2
+assert_count "${devops_dockerfile}" 'GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '"'"'\n'"'"' < /src/GOLANGCI_LINT_VERSION)}"' 2
+if grep -qF 'ARG GOLANGCI_LINT_VERSION=v2.2.2' "${devops_dockerfile}"; then
+    fail "${devops_dockerfile}: golangci-lint version must not be hardcoded as an ARG default; source it from the checked-in GOLANGCI_LINT_VERSION file"
+fi
+
 # erun-backend-api and erun-dns01-webhook: single builder stage, only the
 # compiled binary is copied into the final image, so pinning is unconditional.
 assert_line "${docker_dir}/erun-backend-api/Dockerfile" 'FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder'
