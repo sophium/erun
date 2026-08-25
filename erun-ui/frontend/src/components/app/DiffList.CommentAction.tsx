@@ -20,9 +20,10 @@ import { InlineAlert } from './InlineAlert';
 // The affordance is revealed on hover or keyboard focus, the way the sidebar's
 // per-row actions already are: the diff is the densest reading surface in the
 // app, so one persistent icon on every line would compete with the code it is
-// there to discuss. Its column is always laid out, so revealing it shifts
-// nothing. Clicking it when a precondition is unmet explains which one rather
-// than doing nothing.
+// there to discuss. Its column leads the row and is always laid out, so
+// revealing it shifts nothing and it cannot scroll out of view on a diff wider
+// than the panel. Clicking it when a precondition is unmet explains which one
+// rather than doing nothing.
 export function DiffLineCommentAction({
   filePath,
   line,
@@ -68,7 +69,7 @@ export function DiffLineCommentAction({
           type="button"
           aria-label={`Comment on line ${String(lineNumber)} of ${filePath}`}
           className={cn(
-            'flex size-full items-center justify-center border-l border-[oklch(0_0_0/0.05)] bg-inherit text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:text-foreground',
+            'flex size-full items-center justify-center border-r border-[oklch(0_0_0/0.05)] bg-inherit text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:text-foreground',
             open && 'opacity-100',
           )}
           onClick={() => {

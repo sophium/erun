@@ -369,12 +369,16 @@ function DiffHunkView({
           <div
             key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
             className={cn(
-              'group grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)_22px] bg-background font-mono text-[11px] leading-5',
+              'group grid min-h-5 w-max min-w-full grid-cols-[22px_48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
               line.kind === 'add' && 'bg-diff-add',
               line.kind === 'delete' && 'bg-diff-delete',
               line.kind === 'meta' && 'bg-muted text-muted-foreground',
             )}
           >
+            {/* Leads the row: a trailing column sits past the content width, so
+                on any diff wider than the panel the affordance was only
+                reachable by scrolling right. */}
+            <DiffLineCommentAction filePath={filePath} line={line} commitHash={commitHash} />
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
               {line.oldLine ?? ''}
             </span>
@@ -385,7 +389,6 @@ function DiffHunkView({
               {diffLineMark(line.kind)}
             </span>
             <span className="min-w-0 whitespace-pre pr-4">{line.content || ' '}</span>
-            <DiffLineCommentAction filePath={filePath} line={line} commitHash={commitHash} />
           </div>
         ))}
       </div>

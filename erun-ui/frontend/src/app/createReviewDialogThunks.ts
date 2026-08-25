@@ -139,7 +139,11 @@ export const pushCreateReviewBranch = (): AppThunk<Promise<void>> => async (disp
   if (!dialog.sourceBranch || dialog.pushing) {
     return;
   }
-  dispatch(patchCreateReviewDialog({ pushing: true, pushError: '' }));
+  // Starting the push clears the commit step's failure too: it belongs to an
+  // attempt the operator has moved past, and leaving it renders a red banner
+  // beside the green "Pushed to origin/…" badge, which says two contradictory
+  // things about the same branch.
+  dispatch(patchCreateReviewDialog({ pushing: true, pushError: '', commitError: '' }));
   try {
     const result = await dispatch(
       execApi.endpoints.execPush.initiate({

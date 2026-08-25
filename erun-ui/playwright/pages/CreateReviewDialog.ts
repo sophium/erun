@@ -30,8 +30,14 @@ export class CreateReviewDialog {
     return this.locator().getByLabel('Review name');
   }
 
+  // By role, not by label: the field's chevron is labelled "Show target branch
+  // choices", which getByLabel('Target branch') also matches.
   targetBranchInput(): Locator {
-    return this.locator().getByLabel('Target branch');
+    return this.locator().getByRole('combobox', { name: /^Target branch/ });
+  }
+
+  async openTargetBranchChoices(): Promise<void> {
+    await this.locator().getByRole('button', { name: 'Show target branch choices' }).click();
   }
 
   async fillName(name: string): Promise<void> {

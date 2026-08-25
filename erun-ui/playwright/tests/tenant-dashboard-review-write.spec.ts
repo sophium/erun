@@ -92,7 +92,15 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
         const body = invokeBody(request);
         if (body.method === 'LoadTenantDashboard') {
-          await fulfillJSON(route, dashboardResponse(environment, { canCreateReview: true }));
+          await fulfillJSON(
+            route,
+            dashboardResponse(environment, {
+              canCreateReview: true,
+              // Two target branches already in use, so the field has a known
+              // set to offer rather than asking the operator to retype one.
+              reviews: [REVIEW, { ...REVIEW, reviewId: 'review-2', targetBranch: 'release/1.0' }],
+            }),
+          );
           return;
         }
         if (body.method === 'EnvironmentWorkingIssue') {
@@ -149,11 +157,71 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
 
       await dialog.fillName('Add widget');
       await expect(dialog.requirementHint()).toHaveCount(0);
+
+      // The target branch is offered from the branches this tenant's reviews
+      // already target. Page-scoped locators from here: the open choices
+      // popover is itself a role="dialog".
+      await dialog.openTargetBranchChoices();
+      await expect(page.getByRole('button', { name: 'release/1.0' })).toBeVisible();
+      await page.getByRole('button', { name: 'main', exact: true }).click();
+      await expect(dialog.targetBranchInput()).toHaveValue('main');
+
       await dialog.create();
 
       await dialog.waitForClosed();
       expect(createCalled).toBe(true);
       await app.reviewDetailDialog.waitForOpen();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('a failed commit does not survive the push that follows it', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('review-create-stale-error');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, dashboardResponse(environment, { canCreateReview: true }));
+          return;
+        }
+        if (body.method === 'EnvironmentWorkingIssue') {
+          await fulfillJSON(route, { available: true, branch: 'feature/1348-x' });
+          return;
+        }
+        if (body.method === 'ExecCommit') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'nothing to commit — the working tree is clean' }),
+          });
+          return;
+        }
+        if (body.method === 'ExecPush') {
+          await fulfillJSON(route, {
+            branch: 'feature/1348-x',
+            remote: 'origin',
+            commit: 'abc123',
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await openDashboardReviewsTab(app, environment);
+      await app.tenantDashboard.newReviewButton().click();
+      const dialog = app.createReviewDialog;
+      await dialog.waitForOpen();
+
+      await dialog.fillCommitMessage('describe the change');
+      await dialog.commit();
+      await expect(dialog.locator().getByRole('alert')).toContainText('nothing to commit');
+
+      await dialog.push();
+      await expect(dialog.locator()).toContainText('Pushed to origin/feature/1348-x');
+      // The failure belonged to an attempt the operator has moved past; left
+      // in place it sits beside the green badge saying the opposite.
+      await expect(dialog.locator().getByRole('alert')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
