@@ -909,7 +909,6 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		// Match the desktop's former contribute prelude.
 		body = append(body,
 			"export PATH=\"$HOME/.erun/contribute/bin:$PATH\"",
-			"export ERUN_SKIP_LINT=1",
 			"cd \"$HOME/git/erun\"",
 		)
 	}

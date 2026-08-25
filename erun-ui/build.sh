@@ -6,12 +6,31 @@ ORIGINAL_DIR=$(pwd)
 # -P so a checkout reached through a symlink resolves to the one spelling the
 # lint gate below caches its findings against.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
-TARGET=${1:-"$SCRIPT_DIR/bin/erun-app"}
-VERSION_FILE="$SCRIPT_DIR/../erun-devops/VERSION"
 WAILS_BIN="${WAILS_BIN:-$(go env GOPATH)/bin/wails}"
 TARGET_GOOS="${GOOS:-$(go env GOOS)}"
 YARN_BIN="${YARN_BIN:-}"
 NODE_BIN_DIR="${NODE_BIN_DIR:-}"
+SKIP_LINT=0
+TARGET=""
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--skip-lint)
+			SKIP_LINT=1
+			shift
+			;;
+		*)
+			if [ -n "$TARGET" ]; then
+				printf 'build.sh: unexpected extra argument %s\n' "$1" >&2
+				exit 2
+			fi
+			TARGET="$1"
+			shift
+			;;
+	esac
+done
+TARGET=${TARGET:-"$SCRIPT_DIR/bin/erun-app"}
+VERSION_FILE="$SCRIPT_DIR/../erun-devops/VERSION"
 
 cd "$SCRIPT_DIR"
 
@@ -52,9 +71,11 @@ if [ -d frontend ]; then
 	# (e.g. radix-ui) from node_modules.
 	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile)
 	cd frontend
-	# Gate the bundle on the same checks CI would run. `ERUN_SKIP_LINT=1`
-	# escapes the gates locally when iterating; CI never sets it.
-	if [ "${ERUN_SKIP_LINT:-0}" != "1" ]; then
+	# Gate the bundle on the same checks CI would run. `--skip-lint` escapes
+	# the gates for one invocation when iterating locally; CI never passes it.
+	if [ "$SKIP_LINT" -eq 1 ]; then
+		printf '>> SKIPPING typecheck/lint/format:check/test (--skip-lint)\n' >&2
+	else
 		"$YARN_BIN" typecheck
 		"$YARN_BIN" lint
 		"$YARN_BIN" format:check
