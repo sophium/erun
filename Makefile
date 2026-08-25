@@ -64,10 +64,10 @@ test-erun-ui:
 # The shared frontend kit (erun-kit) and the hosted console (erun-console) —
 # the two Yarn-workspace members outside erun-ui/frontend (in the workspace,
 # so `yarn install` here resolves all three, but its own gate stays in
-# erun-ui/build.sh; see that target's comment for why). This is what erun#1207
-# added to close the gap the issue named: the console's own gates
-# (`erun-console/AGENTS.md`) previously ran "by hand or not at all", so the
-# module drifted from the desktop's design system by default.
+# erun-ui/build.sh; see that target's comment for why). Closes the gap where
+# the console's own gates (`erun-console/AGENTS.md`) previously ran "by hand
+# or not at all", so the module drifted from the desktop's design system by
+# default.
 #
 # `yarn shadcn:check` (erun-kit) is deliberately excluded here: it fetches
 # component definitions from ui.shadcn.com on every invocation, a third-party
