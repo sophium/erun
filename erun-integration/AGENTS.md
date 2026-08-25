@@ -233,7 +233,8 @@ and keep `skipIfPortsBusy` as a last-resort guard only.
 ## Goldens and normalization
 
 - `golden.Equal(t, "command/scenario", normalize.Apply(out))` is the standard assertion. Normalization strips ANSI escapes, version numbers, ISO timestamps, compact timestamps, OS temp paths, hex tokens, and home-dir prefixes. Add new rules to `internal/normalize/` if a fresh source of nondeterminism appears in output.
-- Set `UPDATE_GOLDEN=1` to (re)write the file. Default mode is read-and-compare.
+- Set `UPDATE_GOLDEN=1` to (re)write the file when invoking `go test` directly (e.g. `UPDATE_GOLDEN=1 go test -run Test<Command> ./...`). Default mode is read-and-compare.
+- The gate script (`scripts/integration-test.sh`, run by `make integration-test`/`make check`) never honors `UPDATE_GOLDEN` from the environment — it refuses outright if the variable is set, since Make exports command-line variables into recipe environments and an inherited `UPDATE_GOLDEN=1` would turn every `golden.Equal` into a silent write instead of a comparison while the gate still reports green. To reseed testdata, run `./erun-integration/scripts/integration-test.sh --update-golden` directly; it skips the coverage gate and cannot be triggered via `make check UPDATE_GOLDEN=1`.
 - Goldens are reviewed artifacts. Treat a diff in any golden file as a behavior change to inspect, not as noise. If a trace line drift reflects an intentional change, update and explain in the PR. If it doesn't, the test is doing its job.
 
 ### Whole-output snapshots vs targeted substring assertions

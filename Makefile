@@ -85,8 +85,10 @@ test-frontend:
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
 # erun-integration/scripts/integration-test.sh; override with
-# COVERAGE_THRESHOLD=NN. Use UPDATE_GOLDEN=1 to refresh testdata files in
-# place.
+# COVERAGE_THRESHOLD=NN. To refresh testdata files in place, run the script
+# directly with --update-golden (./erun-integration/scripts/integration-test.sh
+# --update-golden) — gate mode refuses outright if UPDATE_GOLDEN is set in the
+# environment, so it cannot be reseeded via `make check UPDATE_GOLDEN=1`.
 integration-test:
 	./erun-integration/scripts/integration-test.sh
 
