@@ -1,6 +1,7 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { renderWithStore } from '../test/renderWithStore';
 import { ProvisionPanel } from './ProvisionPanel';
 
 // fetch is mocked at the boundary so each flow exercises the real client +
@@ -71,7 +72,7 @@ const PROVISIONING_CONTEXT = { ...RUNNING_CONTEXT, status: 'provisioning' };
 describe('ProvisionPanel alias form', () => {
   it('PUTs the BYO-cloud credentials to /v1/cloud-provider-aliases/{alias}', async () => {
     const calls = mockFetch(() => noContentResponse());
-    render(<ProvisionPanel token="dev-token" />);
+    renderWithStore(<ProvisionPanel token="dev-token" />);
 
     fireEvent.change(screen.getByLabelText('Alias name', { exact: false }), {
       target: { value: 'aws-acme' },
@@ -99,7 +100,7 @@ describe('ProvisionPanel alias form', () => {
 
   it('surfaces a 400 alias error', async () => {
     mockFetch(() => jsonResponse('credentials empty', 400));
-    render(<ProvisionPanel token="dev-token" />);
+    renderWithStore(<ProvisionPanel token="dev-token" />);
 
     fireEvent.change(screen.getByLabelText('Alias name', { exact: false }), {
       target: { value: 'aws-acme' },
@@ -130,7 +131,7 @@ describe('ProvisionPanel create-context flow', () => {
       getCount += 1;
       return getCount === 1 ? jsonResponse(PROVISIONING_CONTEXT) : jsonResponse(RUNNING_CONTEXT);
     });
-    render(<ProvisionPanel token="dev-token" />);
+    renderWithStore(<ProvisionPanel token="dev-token" />);
 
     fireEvent.change(screen.getByLabelText('Context name', { exact: false }), {
       target: { value: 'primary' },
@@ -177,7 +178,7 @@ describe('ProvisionPanel create-context flow', () => {
         ? jsonResponse({ context: failed, plan: [] }, 202)
         : jsonResponse(failed),
     );
-    render(<ProvisionPanel token="dev-token" />);
+    renderWithStore(<ProvisionPanel token="dev-token" />);
 
     fireEvent.change(screen.getByLabelText('Context name', { exact: false }), {
       target: { value: 'primary' },

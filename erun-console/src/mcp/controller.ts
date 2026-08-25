@@ -1,17 +1,14 @@
 import * as React from 'react';
 
-import type { McpToken } from '../config/client';
-import { requestMcpToken } from '../config/client';
+import type { McpToken } from '../app/api/mcpApi';
+import { useRequestMcpTokenMutation } from '../app/api/mcpApi';
+import { queryErrorMessage } from '../app/queryError';
 
 export type McpTokenState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'ready'; token: McpToken }
   | { status: 'error'; message: string };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unexpected error';
-}
 
 export interface McpTokenController {
   state: McpTokenState;
@@ -22,6 +19,7 @@ export interface McpTokenController {
 // no polling; the active-ref guard drops a response that lands after unmount.
 export function useMcpTokenController(token: string): McpTokenController {
   const [state, setState] = React.useState<McpTokenState>({ status: 'idle' });
+  const [requestMcpToken] = useRequestMcpTokenMutation();
 
   const activeRef = React.useRef(true);
   React.useEffect(() => {
@@ -34,7 +32,8 @@ export function useMcpTokenController(token: string): McpTokenController {
   const requestToken = React.useCallback(
     (environmentId: string) => {
       setState({ status: 'loading' });
-      requestMcpToken(token, environmentId)
+      requestMcpToken({ token, environmentId })
+        .unwrap()
         .then((minted) => {
           if (activeRef.current) {
             setState({ status: 'ready', token: minted });
@@ -42,11 +41,11 @@ export function useMcpTokenController(token: string): McpTokenController {
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setState({ status: 'error', message: errorMessage(error) });
+            setState({ status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token],
+    [token, requestMcpToken],
   );
 
   return { state, requestToken };

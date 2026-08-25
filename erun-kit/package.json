@@ -23,6 +23,7 @@
     "shadcn:check": "shadcn add button card checkbox command dialog input label popover select table tabs textarea tooltip --overwrite --yes && git diff --exit-code -- src/components/ui src/lib/utils.ts src/styles/theme.css components.json package.json yarn.lock"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.12.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

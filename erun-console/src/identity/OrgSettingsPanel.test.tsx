@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { renderWithStore } from '../test/renderWithStore';
 import { OrgSettingsPanel } from './OrgSettingsPanel';
 
 interface MockReq {
@@ -56,7 +57,7 @@ afterEach(() => {
 describe('OrgSettingsPanel', () => {
   it('loads and renders the org settings and verified domains', async () => {
     mockFetch(() => jsonResponse(INITIAL_SETTINGS));
-    render(<OrgSettingsPanel token="dev-token" />);
+    renderWithStore(<OrgSettingsPanel token="dev-token" />);
 
     expect(await screen.findByText('erun.example.com')).toBeInTheDocument();
     expect(screen.getByLabelText<HTMLInputElement>('Minimum password length').value).toBe('8');
@@ -72,7 +73,7 @@ describe('OrgSettingsPanel', () => {
       }
       return jsonResponse(INITIAL_SETTINGS);
     });
-    render(<OrgSettingsPanel token="dev-token" />);
+    renderWithStore(<OrgSettingsPanel token="dev-token" />);
     await screen.findByText('erun.example.com');
 
     fireEvent.click(screen.getByLabelText('Require multi-factor authentication'));
@@ -89,7 +90,7 @@ describe('OrgSettingsPanel', () => {
 
   it('surfaces a load error', async () => {
     mockFetch(() => jsonResponse('forbidden', 403));
-    render(<OrgSettingsPanel token="dev-token" />);
+    renderWithStore(<OrgSettingsPanel token="dev-token" />);
     expect(await screen.findByText(/Could not load org settings/)).toBeInTheDocument();
   });
 });

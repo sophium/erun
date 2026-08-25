@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { renderWithStore } from '../test/renderWithStore';
 import { UsersPanel } from './UsersPanel';
 
 interface MockReq {
@@ -46,7 +47,7 @@ afterEach(() => {
 describe('UsersPanel', () => {
   it('lists identities and renders an empty state when there are none', async () => {
     mockFetch(() => jsonResponse([]));
-    render(<UsersPanel token="dev-token" />);
+    renderWithStore(<UsersPanel token="dev-token" />);
     expect(await screen.findByText('No users enrolled yet.')).toBeInTheDocument();
   });
 
@@ -64,7 +65,7 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    render(<UsersPanel token="dev-token" />);
+    renderWithStore(<UsersPanel token="dev-token" />);
     expect(await screen.findByText('alice')).toBeInTheDocument();
     expect(screen.getByText('alice@example.com')).toBeInTheDocument();
     expect(screen.getByText('USER_STATE_ACTIVE')).toBeInTheDocument();
@@ -85,7 +86,7 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    render(<UsersPanel token="dev-token" />);
+    renderWithStore(<UsersPanel token="dev-token" />);
     await screen.findByText('No users enrolled yet.');
 
     fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
@@ -110,7 +111,7 @@ describe('UsersPanel', () => {
       }
       return jsonResponse([]);
     });
-    render(<UsersPanel token="dev-token" />);
+    renderWithStore(<UsersPanel token="dev-token" />);
     await screen.findByText('No users enrolled yet.');
 
     fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
@@ -139,7 +140,7 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    render(<UsersPanel token="dev-token" />);
+    renderWithStore(<UsersPanel token="dev-token" />);
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));

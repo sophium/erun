@@ -5,13 +5,13 @@ import {
   CardHeader,
   CardTitle,
   EmptyState,
+  type Environment,
   SelectField,
   Textarea,
 } from 'erun-kit';
 import { KeyRound } from 'lucide-react';
 import * as React from 'react';
 
-import type { Environment } from '../config/types';
 import type { McpTokenState } from './controller';
 import { useMcpTokenController } from './controller';
 

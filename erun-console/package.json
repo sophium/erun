@@ -16,9 +16,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.12.0",
     "erun-kit": "*",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "react-redux": "^9.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.4",

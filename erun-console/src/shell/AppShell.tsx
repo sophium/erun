@@ -1,8 +1,8 @@
+import type { TenantConfigView } from 'erun-kit';
 import * as React from 'react';
 
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
-import type { TenantConfigView } from '../config/types';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';

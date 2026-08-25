@@ -11,7 +11,7 @@ import {
 } from 'erun-kit';
 import * as React from 'react';
 
-import type { OrgSettings, UpdateOrgSettingsInput } from './client';
+import type { OrgSettings, UpdateOrgSettingsInput } from '../app/api/identityApi';
 import type { OrgSettingsState } from './controller';
 import { useOrgSettingsController } from './controller';
 
