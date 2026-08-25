@@ -20,6 +20,7 @@ import {
   PAST_TENANTS_STORAGE_KEY,
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  TERMINAL_SCREEN_READER_MODE_STORAGE_KEY,
 } from './state';
 
 const MAX_SAVED_STRING_LIST_ITEMS = 20;
@@ -71,6 +72,14 @@ export function loadSavedFilesOpen(): boolean {
 export function loadSavedDebugOpen(): boolean {
   try {
     return window.localStorage.getItem(DEBUG_OPEN_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function loadSavedTerminalScreenReaderMode(): boolean {
+  try {
+    return window.localStorage.getItem(TERMINAL_SCREEN_READER_MODE_STORAGE_KEY) === 'true';
   } catch {
     return false;
   }

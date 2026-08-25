@@ -17,8 +17,23 @@ test.describe('terminal accessibility', () => {
     await expect(host).toHaveAccessibleName('Terminal');
   });
 
-  test('xterm builds its screen-reader accessibility tree', async ({ app }) => {
-    // Only present when `screenReaderMode: true` was passed to `new Terminal(...)`
+  // #1335: screenReaderMode must be OFF unless asked for. xterm's
+  // AccessibilityManager rewrites the same hidden helper textarea that captures
+  // keystrokes, so with it on a focus transition mid-line made the next input
+  // event re-emit the whole accumulated buffer -- the operator's sentence
+  // arrived as several concatenated, progressively longer copies of itself.
+  // The absence of the tree by default IS the guard: this fails against the
+  // hardcoded `screenReaderMode: true` #1291 shipped.
+  test('the screen-reader accessibility tree is absent by default', async ({ app }) => {
+    await expect(app.terminalPane.accessibilityTree()).toHaveCount(0);
+  });
+
+  test('xterm builds its screen-reader accessibility tree when opted in', async ({ app, page }) => {
+    await page.evaluate(() => {
+      window.localStorage.setItem('erun.terminal.screenReaderMode', 'true');
+    });
+    await page.reload();
+    // Only present when `screenReaderMode: true` reached `new Terminal(...)`
     // -- xterm's AccessibilityManager is not instantiated otherwise, so this
     // element's mere existence is the regression guard for the option.
     await expect(app.terminalPane.accessibilityTree()).toHaveCount(1);
