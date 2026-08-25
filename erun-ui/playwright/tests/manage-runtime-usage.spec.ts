@@ -74,10 +74,33 @@ test.describe('manage dialog runtime usage panel', () => {
     await expect(panel).toBeVisible();
     await expect(app.manageDialog.runtimeUsageRefreshButton()).toBeVisible();
 
-    await expect(panel).toContainText('45.0% of a 2.00 cores quota');
-    await expect(panel).toContainText('1.5 GiB of 2.0 GiB (75%)');
+    // The exact figures a slider decision needs, each beside its own meter.
+    await expect(panel).toContainText('45.0%');
+    await expect(panel).toContainText('of a 2.00 cores quota');
+    await expect(panel).toContainText('1.5 GiB of 2.0 GiB');
+    await expect(panel).toContainText('75% of the limit');
     await expect(panel).toContainText('1.8 GiB');
-    await expect(panel).toContainText('90.0 GiB of 100.0 GiB (90%)');
+    await expect(panel).toContainText('90.0 GiB of 100.0 GiB');
+    await expect(panel).toContainText('90% of the limit');
+
+    // A percentage against a limit is a magnitude, so each measured field
+    // renders a meter carrying its own value -- CPU, memory and the one disk
+    // mount. Asserting the count pins that an unmeasured field adds none.
+    await expect(panel.getByRole('meter')).toHaveCount(3);
+    await expect(panel.getByRole('meter', { name: 'Memory' })).toHaveAttribute(
+      'aria-valuenow',
+      '75',
+    );
+
+    // Severity lives in the meter itself, not only in the warning line below,
+    // and it is carried in the accessible name too -- colour alone would not
+    // reach a colourblind reader or forced-colors mode. Disk is at its 90%
+    // threshold; memory at 75% is below its 85% one and stays unmarked.
+    await expect(panel.getByRole('meter', { name: /Disk .* \(warning\)/ })).toHaveAttribute(
+      'aria-valuenow',
+      '90',
+    );
+    await expect(panel.getByRole('meter', { name: /Memory \(/ })).toHaveCount(0);
 
     // The disk-usage warning the reader already produces must surface, not
     // just the raw figures — it is what makes the reading actionable.
@@ -138,11 +161,18 @@ test.describe('manage dialog runtime usage panel', () => {
 
     // An unlimited container is a real, available reading and must render its
     // current/peak figures, but with no synthesized limit or percentage.
-    await expect(panel).toContainText('512 MiB of no limit set');
+    await expect(panel).toContainText('512 MiB');
+    await expect(panel).toContainText('no limit set');
 
     // The unreadable disk mount must say so, never "0%" used.
     await expect(panel).toContainText('Unavailable — df did not report usage for /home/erun');
     await expect(panel).not.toContainText('0% used');
+
+    // The sharpest form of the fail-soft contract: not one of these three
+    // fields was measurable against a limit, so the panel renders NO meter at
+    // all. A zero-width bar would read as "0%, idle" rather than "unknown" --
+    // which is the confident-wrong-number failure #1336 exists to prevent.
+    await expect(panel.getByRole('meter')).toHaveCount(0);
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
