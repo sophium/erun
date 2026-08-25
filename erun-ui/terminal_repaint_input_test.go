@@ -109,6 +109,44 @@ func TestRepaintSessionNudgesQuietPane(t *testing.T) {
 	}
 }
 
+func newOrchestratorTerminalForRepaint(app *App, serial int) (*managedTerminal, *stubTerminalSession) {
+	session := newSilentStubTerminalSession()
+	key := "orchestrator-pane"
+	managed := &managedTerminal{
+		session:  session,
+		key:      key,
+		serial:   serial,
+		kind:     sessionKindOrchestrator,
+		lastCols: 120,
+		lastRows: 40,
+	}
+	app.nextSerial = serial
+	app.sessions[key] = managed
+	return managed, session
+}
+
+// TestRepaintSessionNudgesOrchestratorPane pins the real chain behind #1330's
+// follow-up: an orchestrator pane runs the same main-screen TUI (claude) an AI
+// tab does, but isAITabKind only recognizes sessionKindAI/sessionKindContributeAI,
+// so RepaintSession's WINCH nudge was dead code for it -- the entire Go half of
+// #1332 never ran for an orchestrator. This must fail against that code, and
+// pass once RepaintSession gates on needsWINCHRepaint instead.
+func TestRepaintSessionNudgesOrchestratorPane(t *testing.T) {
+	shortenRepaintTimings(t)
+	app := NewApp(erunUIDeps{})
+	_, session := newOrchestratorTerminalForRepaint(app, 1)
+
+	if err := app.RepaintSession(1); err != nil {
+		t.Fatalf("RepaintSession failed: %v", err)
+	}
+	if !waitForResizes(t, session, 2, 3*time.Second) {
+		t.Fatalf("an orchestrator pane must be nudged just like an AI tab, got %d resizes", session.resizeCount())
+	}
+	if got, _ := session.lastResize(); got != [2]int{120, 40} {
+		t.Fatalf("the nudge must restore the pty to its real size, ended at %v", got)
+	}
+}
+
 // TestMaybeNudgeAIRepaintSkipsPaneBeingTypedInto covers the attach-marker half.
 // It also pins that the skip does NOT consume repaintNudged: this attach has
 // not been repainted, so a later chunk must still be able to do it once the
