@@ -13,6 +13,10 @@
 #                         an earlier step don't pay the build cost twice.
 #   --skip-build          (Deprecated alias for the default behaviour. Kept
 #                         so older invocations still work.)
+#   --skip-lint           Skip typecheck/lint/format:check for this invocation
+#                         only (and forward the same skip to build.sh when a
+#                         rebuild runs). Use only when iterating locally;
+#                         never in CI.
 #   --port N              Backend port (default 34123).
 #   --headed              Run the browser with a visible window.
 #   --                    Forward everything after this to `playwright test`.
@@ -31,11 +35,16 @@ HEADED=0
 PORT=34123
 PLAYWRIGHT_ARGS=""
 E2E_K3D=0
+SKIP_LINT=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--build)
 			FORCE_BUILD=1
+			shift
+			;;
+		--skip-lint)
+			SKIP_LINT=1
 			shift
 			;;
 		--e2e-k3d)
@@ -120,7 +129,11 @@ cd "$SCRIPT_DIR"
 # Go code and want a fresh binary pass --build.
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -x "$BIN_PATH" ]; then
 	printf '>> playwright: building %s...\n' "$BIN_PATH" >&2
-	"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
+	if [ "$SKIP_LINT" -eq 1 ]; then
+		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
+	else
+		"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
+	fi
 fi
 
 if [ ! -x "$BIN_PATH" ]; then
@@ -142,9 +155,11 @@ if [ ! -x "$PLAYWRIGHT_BIN" ]; then
 	exit 1
 fi
 
-# Gate the suite on the same checks CI would run. Skip with
-# ERUN_SKIP_LINT=1 when iterating locally.
-if [ "${ERUN_SKIP_LINT:-0}" != "1" ]; then
+# Gate the suite on the same checks CI would run. Skip with --skip-lint for
+# one invocation when iterating locally; never in CI.
+if [ "$SKIP_LINT" -eq 1 ]; then
+	printf '>> SKIPPING typecheck/lint/format:check (--skip-lint)\n' >&2
+else
 	printf '>> playwright: typecheck + lint + format:check\n' >&2
 	"$YARN_BIN" typecheck
 	"$YARN_BIN" lint

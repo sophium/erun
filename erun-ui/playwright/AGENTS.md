@@ -48,6 +48,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 
 - `--build` force a desktop-binary rebuild even when `../bin/erun-app` exists. Use this after editing Go code.
 - `--skip-build` deprecated no-op kept for older callers; the default behaviour already avoids building when the binary is present.
+- `--skip-lint` skip typecheck/lint/format:check for this invocation only, forwarding the same skip to `build.sh` when a rebuild runs. Per-invocation only — it cannot arrive from an environment variable, and a skipped run always prints `>> SKIPPING ...` so the skip is never silent. Use only when iterating locally; never in CI.
 - `--port N` override the backend port. Defaults to `34123` to avoid clashing with `wails dev`'s `34115`. Exported as `ERUN_PLAYWRIGHT_PORT` so `playwright.config.ts` stays in sync.
 - `--headed` run the browser with a visible window. Otherwise headless.
 - `--` everything after this is forwarded to `playwright test` (e.g. `./run.sh -- --grep sidebar`).

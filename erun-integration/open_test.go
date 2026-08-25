@@ -808,8 +808,8 @@ func TestOpen(t *testing.T) {
 	t.Run("app_session_contribute_ai_dry_run_preludes_clone", func(t *testing.T) {
 		// The contribute-AI tab runs `erun open --app-session contribute-ai
 		// --contribute --ai`. The persistent dtach launcher must prepend the
-		// contribute prelude (contribute toolchain on PATH, ERUN_SKIP_LINT, cd into
-		// the cloned repo) before launching the cwd-guarded claude, all inside the
+		// contribute prelude (contribute toolchain on PATH, cd into the cloned
+		// repo) before launching the cwd-guarded claude, all inside the
 		// reattachable session.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
