@@ -1,3 +1,14 @@
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Checkbox,
+  FieldLabel,
+  Input,
+  Label,
+} from 'erun-kit';
 import * as React from 'react';
 
 import type { OrgSettings, UpdateOrgSettingsInput } from './client';
@@ -6,10 +17,10 @@ import { useOrgSettingsController } from './controller';
 
 function DomainsList({ domains }: { domains: string[] }): React.ReactElement {
   if (domains.length === 0) {
-    return <p className="identity-empty">No verified domains.</p>;
+    return <p className="text-sm text-muted-foreground">No verified domains.</p>;
   }
   return (
-    <ul className="identity-domains-list">
+    <ul className="list-disc pl-5 text-sm text-muted-foreground">
       {domains.map((domain) => (
         <li key={domain}>{domain}</li>
       ))}
@@ -29,17 +40,16 @@ function PolicyCheckbox({
   onChange: (checked: boolean) => void;
 }): React.ReactElement {
   return (
-    <label htmlFor={id}>
-      <input
+    <div className="flex items-center gap-2">
+      <Checkbox
         id={id}
-        type="checkbox"
         checked={checked}
-        onChange={(e) => {
-          onChange(e.target.checked);
+        onCheckedChange={(value) => {
+          onChange(value === true);
         }}
       />
-      {label}
-    </label>
+      <Label htmlFor={id}>{label}</Label>
+    </div>
   );
 }
 
@@ -124,29 +134,37 @@ function SettingsForm({
   };
 
   return (
-    <form className="identity-form" onSubmit={submit} aria-labelledby="org-settings-form-heading">
-      <h3 id="org-settings-form-heading">Login and password policy</h3>
+    <form
+      className="grid max-w-md gap-3"
+      onSubmit={submit}
+      aria-labelledby="org-settings-form-heading"
+    >
+      <h3 id="org-settings-form-heading" className="text-sm font-semibold text-foreground">
+        Login and password policy
+      </h3>
       <PolicyCheckbox
         id="org-force-mfa"
         label="Require multi-factor authentication"
         checked={forceMfa}
         onChange={setForceMfa}
       />
-      <label htmlFor="org-min-length">Minimum password length</label>
-      <input
-        id="org-min-length"
-        type="number"
-        min={1}
-        value={minLength}
-        onChange={(e) => {
-          setMinLength(Number(e.target.value));
-        }}
-      />
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="org-min-length">Minimum password length</FieldLabel>
+        <Input
+          id="org-min-length"
+          type="number"
+          min={1}
+          value={minLength}
+          onChange={(e) => {
+            setMinLength(Number(e.target.value));
+          }}
+        />
+      </div>
       <PasswordComplexityFields fields={complexity} />
-      <button type="submit" disabled={saving}>
+      <Button type="submit" disabled={saving} className="justify-self-start">
         {saving ? 'Saving…' : 'Save settings'}
-      </button>
-      <h3>Verified domains</h3>
+      </Button>
+      <h3 className="mt-2 text-sm font-semibold text-foreground">Verified domains</h3>
       <DomainsList domains={settings.verifiedDomains} />
     </form>
   );
@@ -160,11 +178,15 @@ function OrgSettingsBody({
   onSave: (input: UpdateOrgSettingsInput) => void;
 }): React.ReactElement {
   if (state.status === 'loading') {
-    return <p role="status">Loading org settings…</p>;
+    return (
+      <p className="text-sm text-muted-foreground" role="status">
+        Loading org settings…
+      </p>
+    );
   }
   if (state.status === 'error') {
     return (
-      <p className="identity-feedback identity-feedback--error" role="alert">
+      <p className="text-sm text-destructive" role="alert">
         Could not load org settings: {state.message}
       </p>
     );
@@ -181,9 +203,13 @@ function OrgSettingsBody({
 export function OrgSettingsPanel({ token }: { token: string }): React.ReactElement {
   const { state, save } = useOrgSettingsController(token);
   return (
-    <section className="identity-org-settings-panel" aria-labelledby="org-settings-heading">
-      <h2 id="org-settings-heading">Org settings</h2>
-      <OrgSettingsBody state={state} onSave={save} />
-    </section>
+    <Card aria-labelledby="org-settings-heading">
+      <CardHeader>
+        <CardTitle id="org-settings-heading">Org settings</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <OrgSettingsBody state={state} onSave={save} />
+      </CardContent>
+    </Card>
   );
 }

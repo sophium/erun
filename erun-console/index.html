@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>erun console</title>
+    <!-- Overwritten at runtime from platform discovery (GET /v1/platform)
+         once the instance's brand resolves — see App.tsx's useBrand. This is
+         only the pre-JS bootstrap value. -->
+    <title>ERun console</title>
   </head>
   <body>
     <div id="root"></div>

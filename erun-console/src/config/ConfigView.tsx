@@ -1,5 +1,19 @@
 import type { StatusBadgeTone } from 'erun-kit';
-import { StatusBadge } from 'erun-kit';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  StatusBadge,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from 'erun-kit';
+import { Cloud, Server } from 'lucide-react';
 import type * as React from 'react';
 
 import type {
@@ -12,7 +26,7 @@ import type {
 } from './types';
 
 // A pure render of the read model the parent fetched; the fetch/auth lifecycle
-// lives in App. Empty collections render an empty-state line, never an empty
+// lives in App. Empty collections render an empty-state card, never an empty
 // table, so an empty view never reads as a disabled input.
 
 function placeholder(value: string | undefined): string {
@@ -21,11 +35,9 @@ function placeholder(value: string | undefined): string {
 
 function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
   return (
-    <header className="tenant-header">
-      <h1>{tenant.name}</h1>
-      <p className="tenant-meta">
-        Tenant · <span>{tenant.type || 'unknown type'}</span>
-      </p>
+    <header>
+      <h2 className="text-xl font-semibold text-foreground">{tenant.name}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Tenant · {tenant.type || 'unknown type'}</p>
     </header>
   );
 }
@@ -44,19 +56,21 @@ function deployedVersionCell(env: Environment): string {
 
 function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
   return (
-    <tr>
-      <td>{env.name}</td>
-      <td>{env.type}</td>
-      <td>{placeholder(env.kubernetesContext)}</td>
-      <td>{placeholder(env.runtimeVersion)}</td>
-      <td>{deployedVersionCell(env)}</td>
-      <td>
-        {renderStatusBadge(env.status, ENV_STATUS_TONES, ENV_STATUS_LABELS)}
-        {env.status === 'failed' && env.provisionError !== undefined && (
-          <span className="context-error">{env.provisionError}</span>
-        )}
-      </td>
-    </tr>
+    <TableRow>
+      <TableCell className="font-medium text-foreground">{env.name}</TableCell>
+      <TableCell>{env.type}</TableCell>
+      <TableCell>{placeholder(env.kubernetesContext)}</TableCell>
+      <TableCell>{placeholder(env.runtimeVersion)}</TableCell>
+      <TableCell>{deployedVersionCell(env)}</TableCell>
+      <TableCell>
+        <div className="flex flex-col items-start gap-1">
+          {renderStatusBadge(env.status, ENV_STATUS_TONES, ENV_STATUS_LABELS)}
+          {env.status === 'failed' && env.provisionError !== undefined && (
+            <span className="text-xs text-destructive">{env.provisionError}</span>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -66,30 +80,34 @@ function EnvironmentsSection({
   environments: Environment[];
 }): React.ReactElement {
   return (
-    <section aria-labelledby="environments-heading">
-      <h2 id="environments-heading">Environments</h2>
-      {environments.length === 0 ? (
-        <p className="empty-state">No environments yet.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Type</th>
-              <th scope="col">Kubernetes context</th>
-              <th scope="col">Runtime version</th>
-              <th scope="col">Deployed version</th>
-              <th scope="col">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {environments.map((env) => (
-              <EnvironmentRow key={env.environmentId} env={env} />
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+    <Card role="region" aria-labelledby="environments-heading">
+      <CardHeader>
+        <CardTitle id="environments-heading">Environments</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {environments.length === 0 ? (
+          <EmptyState icon={<Server />} heading="No environments yet." />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Kubernetes context</TableHead>
+                <TableHead>Runtime version</TableHead>
+                <TableHead>Deployed version</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {environments.map((env) => (
+                <EnvironmentRow key={env.environmentId} env={env} />
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -142,17 +160,15 @@ function renderStatusBadge<T extends string>(
 
 function ContextItem({ context }: { context: CloudContext }): React.ReactElement {
   return (
-    <li>
-      <span className="context-name">{context.name}</span>
-      <span className="context-meta">
+    <li className="flex items-center justify-between gap-3 border-b border-border py-2.5 text-sm last:border-b-0">
+      <span className="font-medium text-foreground">{context.name}</span>
+      <span className="text-muted-foreground">
         {context.provider} · {context.region}
       </span>
-      <span className="context-status">
+      <span className="flex flex-col items-end gap-1">
         {renderStatusBadge(context.status, STATUS_TONES, STATUS_LABELS)}
         {context.status === 'failed' && context.provisionError !== undefined && (
-          // The failure reason is essential, so it is visible inline rather
-          // than hidden in a title tooltip.
-          <span className="context-error">{context.provisionError}</span>
+          <span className="text-xs text-destructive">{context.provisionError}</span>
         )}
       </span>
     </li>
@@ -161,24 +177,28 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
 
 function ContextsSection({ contexts }: { contexts: CloudContext[] }): React.ReactElement {
   return (
-    <section aria-labelledby="contexts-heading">
-      <h2 id="contexts-heading">Cloud contexts</h2>
-      {contexts.length === 0 ? (
-        <p className="empty-state">No cloud contexts yet.</p>
-      ) : (
-        <ul className="context-list">
-          {contexts.map((context) => (
-            <ContextItem key={context.contextId} context={context} />
-          ))}
-        </ul>
-      )}
-    </section>
+    <Card role="region" aria-labelledby="contexts-heading">
+      <CardHeader>
+        <CardTitle id="contexts-heading">Cloud contexts</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {contexts.length === 0 ? (
+          <EmptyState icon={<Cloud />} heading="No cloud contexts yet." />
+        ) : (
+          <ul>
+            {contexts.map((context) => (
+              <ContextItem key={context.contextId} context={context} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
 export function ConfigView({ config }: { config: TenantConfigView }): React.ReactElement {
   return (
-    <div className="config-view">
+    <div className="grid gap-6">
       <TenantHeader tenant={config.tenant} />
       <EnvironmentsSection environments={config.environments} />
       <ContextsSection contexts={config.contexts} />

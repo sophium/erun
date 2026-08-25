@@ -68,7 +68,9 @@ describe('EnvironmentsPanel register form', () => {
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
 
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'staging' } });
+    fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
+      target: { value: 'staging' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
 
     expect(await screen.findByText('Environment staging registered.')).toBeInTheDocument();
@@ -93,7 +95,9 @@ describe('EnvironmentsPanel register form', () => {
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={onChanged} />,
     );
 
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'staging' } });
+    fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
+      target: { value: 'staging' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
 
     await screen.findByText('Environment staging registered.');
@@ -106,7 +110,9 @@ describe('EnvironmentsPanel register form', () => {
       <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
     );
 
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bad Name' } });
+    fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
+      target: { value: 'Bad Name' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Register environment' }));
 
     expect(

@@ -47,6 +47,21 @@ __debug_bin*
 /erun-ui/playwright/playwright-report
 /erun-ui/.golangci-cache
 
+# Root yarn workspace (erun-kit, erun-console, erun-ui/frontend): the
+# erun-devops test stage runs `yarn install` + the kit/console gates
+# in-image, so hoisted deps and build outputs are regenerated there and must
+# never enter the build context — the workspace root node_modules alone is
+# hundreds of MB, and its presence would diverge the context from the
+# fingerprint the same way /erun-docs/node_modules would.
+/node_modules
+/erun-kit/node_modules
+/erun-kit/dist
+/erun-console/node_modules
+/erun-console/dist
+/erun-console/playwright/node_modules
+/erun-console/playwright/test-results
+/erun-console/playwright/playwright-report
+
 # Docs site dependencies and build outputs. The erun-docs image runs
 # `yarn install` + `yarn build` inside its Dockerfile, so these are
 # regenerated in-image and must never enter the build context: they bloat it
