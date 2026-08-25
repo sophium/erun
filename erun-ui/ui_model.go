@@ -570,6 +570,67 @@ type uiRuntimeReclaimResult struct {
 	Message string `json:"message"`
 }
 
+// uiRuntimeUsage is one live reading of the selected environment's own CPU,
+// memory and disk usage against its cgroup limits — as opposed to
+// uiRuntimeResourceStatus, which reads the node. Available is the probe's own
+// reachability; CPU/Memory/Disk each additionally state their own
+// unavailability, since cgroup v1, an unlimited limit, or an unreadable file
+// are all normal readings, not probe failures.
+type uiRuntimeUsage struct {
+	Tenant      string               `json:"tenant"`
+	Environment string               `json:"environment"`
+	Available   bool                 `json:"available"`
+	Message     string               `json:"message,omitempty"`
+	CPU         uiRuntimeCPUUsage    `json:"cpu"`
+	Memory      uiRuntimeMemoryUsage `json:"memory"`
+	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
+	Warnings    []string             `json:"warnings,omitempty"`
+}
+
+// uiRuntimeCPUUsage carries Available=false with Unavailable set when the
+// reader could not measure utilisation at all (no cgroup v2, or cpu.max
+// reports no quota) — never a zero utilisation, which would read as "idle"
+// rather than "unknown".
+type uiRuntimeCPUUsage struct {
+	Available          bool    `json:"available"`
+	Unavailable        string  `json:"unavailable,omitempty"`
+	QuotaCores         float64 `json:"quotaCores,omitempty"`
+	Quota              string  `json:"quota,omitempty"`
+	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
+	Utilization        string  `json:"utilization,omitempty"`
+}
+
+// uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is
+// a real, available reading (the container simply has no ceiling declared),
+// distinct from Unavailable (the cgroup file itself could not be read). Both
+// suppress the percent-of-limit figure, but only Unavailable is an error
+// state the panel should call out.
+type uiRuntimeMemoryUsage struct {
+	Available      bool    `json:"available"`
+	Unavailable    string  `json:"unavailable,omitempty"`
+	Unlimited      bool    `json:"unlimited,omitempty"`
+	CurrentBytes   int64   `json:"currentBytes,omitempty"`
+	Current        string  `json:"current,omitempty"`
+	PeakBytes      int64   `json:"peakBytes,omitempty"`
+	Peak           string  `json:"peak,omitempty"`
+	LimitBytes     int64   `json:"limitBytes,omitempty"`
+	Limit          string  `json:"limit,omitempty"`
+	PercentOfLimit float64 `json:"percentOfLimit,omitempty"`
+	OOMKills       int64   `json:"oomKills"`
+}
+
+type uiRuntimeDiskUsage struct {
+	Mount       string  `json:"mount"`
+	Available   bool    `json:"available"`
+	Unavailable string  `json:"unavailable,omitempty"`
+	TotalBytes  int64   `json:"totalBytes,omitempty"`
+	Total       string  `json:"total,omitempty"`
+	UsedBytes   int64   `json:"usedBytes,omitempty"`
+	Used        string  `json:"used,omitempty"`
+	PercentUsed float64 `json:"percentUsed,omitempty"`
+	Percent     string  `json:"percent,omitempty"`
+}
+
 // uiClusterRegistryStatus reports whether the selected Kubernetes context has an
 // in-cluster erun-registry deployed, so the new-environment dialog can default to
 // a resolvable cluster: registry entry instead of a hardcoded host.

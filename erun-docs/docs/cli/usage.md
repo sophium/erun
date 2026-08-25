@@ -34,6 +34,10 @@ A crossed threshold (memory, memory's peak, or disk usage getting close to full)
 
 The full JSON shape and the exact unavailability/warning rules are specified in [Agent reference · `erun usage`](/agent-reference/cli-flags#erun-usage).
 
+## From the desktop
+
+The same read is one click away without a terminal: the desktop app's Manage dialog → **Runtime** tab shows **This environment's usage** directly under the resource sliders, refreshed on demand. See [Desktop app overview](/desktop/overview) and [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures).
+
 ## From an MCP-connected orchestrator
 
 The same read reaches an Agent through the `usage` MCP tool — see [MCP overview § Inspection](/mcp/overview#inspection--read-only).

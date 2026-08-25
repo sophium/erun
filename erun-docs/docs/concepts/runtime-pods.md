@@ -97,6 +97,14 @@ Two cases the number alone cannot explain, so the tab spells them out:
   cluster without metrics its real consumption — Testcontainers, the build cache — is invisible to
   the reading and the tab warns that the true usage is higher than shown.
 
+That is the node's answer to "how full is the machine". The environment's own answer to "how close
+am I to my own limits" is a different reading — CPU against its own quota, memory current and peak
+against its own cgroup limit with a real OOM-kill count, disk on the workspace mount — and it needs
+no cluster metrics add-on at all, so it works on the same metrics-server-less clusters where the
+node reading above falls back to declared limits. **This environment's usage**, directly below the
+resource sliders on the Runtime tab, is the direct route to it; [`erun usage`](/cli/usage) gives the
+same reading from a terminal or an MCP-connected orchestrator.
+
 ## What the environment thinks it should be sized as
 
 The figures above describe the node. The environment also has an opinion about *itself*: every

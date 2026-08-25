@@ -10,6 +10,7 @@ import type {
   UIRuntimeActivity,
   UIRuntimeReclaimInput,
   UIRuntimeReclaimResult,
+  UIRuntimeUsage,
 } from '@/uiRuntimeTypes';
 
 import {
@@ -21,6 +22,7 @@ import {
   LoadEnvironmentConfig,
   LoadRuntimeActivity,
   LoadRuntimeResourceStatus,
+  LoadRuntimeUsage,
   LoadVersionSuggestions,
   ReclaimRuntimeResources,
   SaveEnvironmentConfig,
@@ -108,7 +110,7 @@ export const environmentApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentStopResult>((selection) =>
         StopEnvironment(selection),
       ),
-      invalidatesTags: ['RuntimeResourceStatus', 'RuntimeActivity', 'AppState'],
+      invalidatesTags: ['RuntimeResourceStatus', 'RuntimeActivity', 'RuntimeUsage', 'AppState'],
     }),
     // What the runtime pod is running right now: sessions and the processes
     // holding memory. Read-only — nothing here reclaims anything.
@@ -126,6 +128,15 @@ export const environmentApi = wailsApi.injectEndpoints({
         ReclaimRuntimeResources(input),
       ),
       invalidatesTags: ['RuntimeActivity', 'RuntimeResourceStatus'],
+    }),
+    // This environment's own CPU, memory and disk usage against its cgroup
+    // limits — the reading that turns the sliders above from a guess into a
+    // decision.
+    getRuntimeUsage: builder.query<UIRuntimeUsage, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeUsage>((selection) =>
+        LoadRuntimeUsage(selection),
+      ),
+      providesTags: ['RuntimeUsage'],
     }),
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
@@ -148,4 +159,5 @@ export const {
   useLazyGetRuntimeResourceStatusQuery,
   useGetRuntimeActivityQuery,
   useReclaimRuntimeResourcesMutation,
+  useGetRuntimeUsageQuery,
 } = environmentApi;

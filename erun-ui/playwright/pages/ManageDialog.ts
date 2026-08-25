@@ -130,6 +130,20 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-stop-help');
   }
 
+  // "This environment's usage" reports the environment's own CPU, memory and
+  // disk reading against its cgroup limits, directly below the sliders that
+  // set those limits.
+  runtimeUsagePanel(): Locator {
+    return this.locator()
+      .locator('div')
+      .filter({ hasText: /^This environment's usage/ })
+      .first();
+  }
+
+  runtimeUsageRefreshButton(): Locator {
+    return this.locator().locator('#environment-config-usage-refresh');
+  }
+
   // "Running in this environment" reports what the pod is actually running —
   // observed sessions and the processes holding memory — beneath the sliders,
   // because that is the next question once the figures read as capped.

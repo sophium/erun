@@ -47,3 +47,58 @@ export interface UIRuntimeReclaimResult {
   action: string;
   message: string;
 }
+
+// UIRuntimeUsage is one live reading of the selected environment's own CPU,
+// memory and disk usage against its cgroup limits — as opposed to
+// UIRuntimeResourceStatus, which reads the node. `available` is the probe's
+// own reachability; cpu/memory/disk each additionally carry their own
+// `available`/`unavailable`, since cgroup v1, an unlimited limit, or an
+// unreadable file are all normal readings, not probe failures. A field must
+// never be read as a real 0 unless `available` is true.
+export interface UIRuntimeUsage {
+  tenant: string;
+  environment: string;
+  available: boolean;
+  message?: string;
+  cpu: UIRuntimeCPUUsage;
+  memory: UIRuntimeMemoryUsage;
+  disk?: UIRuntimeDiskUsage[];
+  warnings?: string[];
+}
+
+export interface UIRuntimeCPUUsage {
+  available: boolean;
+  unavailable?: string;
+  quotaCores?: number;
+  quota?: string;
+  utilizationPercent?: number;
+  utilization?: string;
+}
+
+// `unlimited` is a real, available reading (no ceiling declared), distinct
+// from `unavailable` (the cgroup file could not be read at all).
+export interface UIRuntimeMemoryUsage {
+  available: boolean;
+  unavailable?: string;
+  unlimited?: boolean;
+  currentBytes?: number;
+  current?: string;
+  peakBytes?: number;
+  peak?: string;
+  limitBytes?: number;
+  limit?: string;
+  percentOfLimit?: number;
+  oomKills: number;
+}
+
+export interface UIRuntimeDiskUsage {
+  mount: string;
+  available: boolean;
+  unavailable?: string;
+  totalBytes?: number;
+  total?: string;
+  usedBytes?: number;
+  used?: string;
+  percentUsed?: number;
+  percent?: string;
+}
