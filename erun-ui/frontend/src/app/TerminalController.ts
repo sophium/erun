@@ -13,6 +13,7 @@ import type { MountElements, TerminalDataDisposable, TerminalWriteData } from '.
 import { showTerminalError } from './notificationThunks';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
+import { loadSavedTerminalScreenReaderMode } from './storage';
 import { store } from './store';
 import {
   bufferCursorVisibility,
@@ -211,7 +212,7 @@ export class TerminalController {
 
     this.terminal = new Terminal({
       allowProposedApi: false,
-      screenReaderMode: true,
+      screenReaderMode: loadSavedTerminalScreenReaderMode(),
       scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
       fontFamily:
