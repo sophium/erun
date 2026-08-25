@@ -6,6 +6,10 @@ interface TerminalFocusDeps {
   getTerminal: () => TerminalFocusTarget | null;
   // windowIsActive is false exactly when another application is frontmost.
   windowIsActive: () => boolean;
+  // focusIsFree is false when some other control deliberately holds focus --
+  // an input the user clicked into, a button they tabbed to. Restoring focus
+  // to the terminal is only ever correct when nothing else is holding it.
+  focusIsFree: () => boolean;
 }
 
 // scheduleTerminalFocus restores focus to the terminal after something moved it
@@ -23,19 +27,30 @@ interface TerminalFocusDeps {
 // window in between -- checking only at schedule time would let the 80ms
 // attempt steal focus the user had already moved elsewhere.
 export function scheduleTerminalFocus(deps: TerminalFocusDeps): void {
-  const focusIfWindowActive = (): void => {
+  const focusIfSafe = (): void => {
+    // Cross-application: never PULL the window forward (#1338).
     if (!deps.windowIsActive()) {
+      return;
+    }
+    // Within the window: never take focus off a control the user deliberately
+    // put it on. A restore exists to undo focus that an action DESTROYED (a
+    // dialog closing removes the focused node, so focus falls back to body),
+    // not to overrule a live choice. Without this the 80ms attempt lands after
+    // the user has already clicked into something else and yanks the caret to
+    // the terminal, which reads as the app stealing focus even though the
+    // window never changed.
+    if (!deps.focusIsFree()) {
       return;
     }
     deps.getTerminal()?.focus();
   };
   window.setTimeout(() => {
-    focusIfWindowActive();
+    focusIfSafe();
     window.requestAnimationFrame(() => {
-      focusIfWindowActive();
+      focusIfSafe();
     });
     window.setTimeout(() => {
-      focusIfWindowActive();
+      focusIfSafe();
     }, 80);
   }, 0);
 }

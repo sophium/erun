@@ -321,6 +321,13 @@ export class TerminalController {
     scheduleTerminalFocus({
       getTerminal: () => this.terminal,
       windowIsActive: () => document.hasFocus(),
+      focusIsFree: () => {
+        const active = document.activeElement;
+        if (!active || active === document.body) {
+          return true;
+        }
+        return this.terminalRoot?.contains(active) ?? false;
+      },
     });
   }
 

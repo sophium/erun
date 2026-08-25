@@ -39,7 +39,7 @@ afterEach(() => {
   mock.timers.reset();
 });
 
-function harness(windowIsActive: () => boolean) {
+function harness(windowIsActive: () => boolean, focusIsFree: () => boolean = () => true) {
   let focusCount = 0;
   scheduleTerminalFocus({
     getTerminal: () => ({
@@ -48,6 +48,7 @@ function harness(windowIsActive: () => boolean) {
       },
     }),
     windowIsActive,
+    focusIsFree,
   });
   return {
     count: () => focusCount,
@@ -86,4 +87,35 @@ test('the guard is re-checked, so focus leaving the window mid-sequence stops it
   flushRaf();
   mock.timers.tick(80);
   assert.equal(h.count(), 1, 'attempts after focus left the window must stand down');
+});
+
+// The other half of #1338, and the one document.hasFocus() cannot see: the
+// window IS active, so nothing crosses an application boundary, but the user
+// has deliberately clicked into another control. A restore exists to undo focus
+// an action destroyed, not to overrule a live choice -- yanking the caret back
+// to the terminal reads as the app stealing focus just the same.
+test('focus is never taken off a control the user deliberately focused', () => {
+  const h = harness(
+    () => true,
+    () => false,
+  );
+  mock.timers.tick(0);
+  flushRaf();
+  mock.timers.tick(80);
+  assert.equal(h.count(), 0, 'a control holding focus must not be overruled');
+});
+
+test('a restore still happens when nothing else holds focus', () => {
+  let free = true;
+  const h = harness(
+    () => true,
+    () => free,
+  );
+  mock.timers.tick(0);
+  assert.equal(h.count(), 1, 'a dialog close leaves focus free, so the restore must run');
+  // The user clicks into something before the trailing attempts land.
+  free = false;
+  flushRaf();
+  mock.timers.tick(80);
+  assert.equal(h.count(), 1, 'later attempts must stand down once a control takes focus');
 });
