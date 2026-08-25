@@ -30,6 +30,10 @@ export interface OrchestratorInfo {
   sessionId: number;
   status: string;
   busy: boolean;
+  // busyAtUnix is when that busy report was written. Optional because a
+  // report can predate the field; the label degrades rather than inventing a
+  // duration (#1343).
+  busyAtUnix?: number;
   transient: boolean;
   shellRunning: boolean;
   shellCommand: string;
