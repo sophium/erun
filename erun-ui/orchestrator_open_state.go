@@ -100,14 +100,24 @@ func recordOpenOrchestrator(path, orchestratorID, sessionID string, scope []stri
 	if path == "" || orchestratorID == "" {
 		return nil
 	}
+	sessionID = strings.TrimSpace(sessionID)
 	entries := readOpenOrchestrators(path)
 	out := make([]orchestratorOpenEntry, 0, len(entries)+1)
 	for _, entry := range entries {
-		if entry.OrchestratorID != orchestratorID {
-			out = append(out, entry)
+		if entry.OrchestratorID == orchestratorID {
+			continue
 		}
+		// A conversation belongs to one orchestrator. If another entry already
+		// names the session this launch is running, it is a stale claim by
+		// definition — this launch is the one with the conversation open now —
+		// so release it rather than leaving the id under two owners, which is
+		// what made a crossing stick across every later restart.
+		if sessionID != "" && strings.TrimSpace(entry.SessionID) == sessionID {
+			entry.SessionID = ""
+		}
+		out = append(out, entry)
 	}
-	out = append(out, orchestratorOpenEntry{OrchestratorID: orchestratorID, SessionID: strings.TrimSpace(sessionID), Environments: scope})
+	out = append(out, orchestratorOpenEntry{OrchestratorID: orchestratorID, SessionID: sessionID, Environments: scope})
 	return writeOpenOrchestrators(path, out)
 }
 
@@ -189,7 +199,37 @@ func dedupOrchestratorEntries(entries []orchestratorOpenEntry) []orchestratorOpe
 	if len(out) == 0 {
 		return nil
 	}
-	return out
+	return dropDuplicateSessionClaims(out)
+}
+
+// dropDuplicateSessionClaims enforces the invariant the rest of restore assumes
+// but nothing used to check: a conversation belongs to exactly ONE orchestrator.
+//
+// Deduping by orchestrator id alone let one session id sit under two ids at
+// once, and every later launch then resolved both of them to the same
+// conversation — so one orchestrator was handed the other's history, complete
+// with the other's scope and return note, and the crossing was self-reinforcing
+// because each launch recorded it again.
+//
+// Entries are oldest-first, so the walk runs backwards and the MOST RECENT claim
+// on a session keeps it. An older entry that named the same conversation stays
+// open — the operator had it open, and closing it would lose more than it fixes
+// — but comes back with no session id, which restore already treats as "start
+// this one fresh" rather than guessing.
+func dropDuplicateSessionClaims(entries []orchestratorOpenEntry) []orchestratorOpenEntry {
+	claimed := make(map[string]string, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		session := strings.TrimSpace(entries[i].SessionID)
+		if session == "" {
+			continue
+		}
+		if owner, ok := claimed[session]; ok && owner != entries[i].OrchestratorID {
+			entries[i].SessionID = ""
+			continue
+		}
+		claimed[session] = entries[i].OrchestratorID
+	}
+	return entries
 }
 
 // writeOpenOrchestrators persists the open set, migrating a legacy file to the
