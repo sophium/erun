@@ -141,6 +141,7 @@ func (a *App) reconcileOrchestratorActivity() {
 		a.mu.Lock()
 		if session := a.orchestrators[r.id]; session != nil {
 			session.aiBusy = busy
+			session.aiBusyAtUnix = activity.AtUnix
 			session.shellRunning = shellRunning
 			session.shellCommand = shell.Command
 			session.shellStartedAtUnix = shell.AtUnix

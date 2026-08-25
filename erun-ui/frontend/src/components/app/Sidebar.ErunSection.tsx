@@ -15,6 +15,7 @@ import { openDocumentation } from '@/app/documentationThunks';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startManageDoctor } from '@/app/manageEnvironmentThunks';
+import { orchestratorBusyLabel } from '@/app/orchestratorBusyLabel';
 import { orchestratorShellLabel } from '@/app/orchestratorShellLabel';
 import {
   loadOrchestrators,
@@ -28,6 +29,7 @@ import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellAc
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
+import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
@@ -217,36 +219,48 @@ function OrchestratorRow({
       : undefined,
   );
   return (
-    <li
-      className={cn(
-        'group mr-1 ml-1 flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-3.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-        active &&
-          'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
-      )}
-    >
-      <button
-        type="button"
+    <li>
+      {/* The row's own styling moves onto the hover card's anchor div, the way
+          EnvironmentRow does it, so the <li> keeps its list semantics inside
+          the "AI orchestrators" list while the hover surface is the whole row
+          rather than a 12px spinner icon (#1343). */}
+      <OrchestratorHoverCard
         className={cn(
-          'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-          active ? 'font-medium' : 'font-normal',
+          'group mr-1 ml-1 flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-3.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active &&
+            'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
         )}
-        aria-label={`${running ? 'Open' : 'Start'} orchestrator ${orchestrator.name}`}
-        aria-current={active ? 'page' : undefined}
-        onClick={() => {
-          if (running) {
-            dispatch(openOrchestrator(orchestrator.sessionId));
-          } else {
-            void dispatch(startOrchestrator(orchestrator.id));
-          }
-        }}
+        orchestrator={orchestrator}
       >
-        <span className="min-w-0 truncate">{orchestrator.name}</span>
-      </button>
-      {busy && <OrchestratorBusyIndicator name={orchestrator.name} />}
-      {!busy && shellActivity?.running && (
-        <OrchestratorShellIndicator name={orchestrator.name} activity={shellActivity} />
-      )}
-      <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
+        <button
+          type="button"
+          className={cn(
+            'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+            active ? 'font-medium' : 'font-normal',
+          )}
+          aria-label={`${running ? 'Open' : 'Start'} orchestrator ${orchestrator.name}`}
+          aria-current={active ? 'page' : undefined}
+          onClick={() => {
+            if (running) {
+              dispatch(openOrchestrator(orchestrator.sessionId));
+            } else {
+              void dispatch(startOrchestrator(orchestrator.id));
+            }
+          }}
+        >
+          <span className="min-w-0 truncate">{orchestrator.name}</span>
+        </button>
+        {busy && (
+          <OrchestratorBusyIndicator
+            name={orchestrator.name}
+            busyAtUnix={orchestrator.busyAtUnix}
+          />
+        )}
+        {!busy && shellActivity?.running && (
+          <OrchestratorShellIndicator name={orchestrator.name} activity={shellActivity} />
+        )}
+        <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
+      </OrchestratorHoverCard>
     </li>
   );
 }
@@ -256,8 +270,14 @@ function OrchestratorRow({
 // itself on hover exactly like every other spinner in the sidebar — the
 // aria-label alone reached only screen readers, leaving a sighted mouse user
 // with an inert spin.
-function OrchestratorBusyIndicator({ name }: { name: string }): React.ReactElement {
-  const label = `${name} is working`;
+function OrchestratorBusyIndicator({
+  name,
+  busyAtUnix,
+}: {
+  name: string;
+  busyAtUnix: number | undefined;
+}): React.ReactElement {
+  const label = orchestratorBusyLabel(name, busyAtUnix, Date.now());
   return (
     <IconTooltip label={label}>
       <BusyRowSpinner label={label} />
