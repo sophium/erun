@@ -26,6 +26,7 @@ import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivi
 import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
+import { RuntimeUsageField } from '@/components/app/ManageDialogRuntimeUsage';
 import { RuntimeDeployVersionPicker } from '@/components/app/ManageDialogVersionPicker';
 import { PinVersionAction } from '@/components/app/PinVersionAction';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
@@ -81,8 +82,16 @@ export function RuntimeTab(): React.ReactElement {
       <RuntimeChartField dialog={dialog} />
       <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
-      {/* Directly under the sliders: when the figures read as capped, the next
-          question is what this environment is holding, and the answer is here. */}
+      {/* Directly under the sliders: how close this environment already is to
+          the limits those sliders set is the evidence for moving them. */}
+      {dialog.selection && (
+        <RuntimeUsageField
+          selection={dialog.selection}
+          disabled={dialog.busy || dialog.configLoading}
+        />
+      )}
+      {/* Next: when the figures read as capped, the following question is what
+          this environment is holding, and the answer is here. */}
       {dialog.selection && (
         <RuntimeActivityField
           selection={dialog.selection}

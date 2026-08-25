@@ -86,6 +86,7 @@ type erunUIDeps struct {
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
 	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
+	loadRuntimeUsage          func(context.Context, uiSelection) (uiRuntimeUsage, error)
 	stopCloudContext          func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
@@ -439,6 +440,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	if deps.execRuntimePod == nil {
 		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
 			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
+		}
+	}
+	if deps.loadRuntimeUsage == nil {
+		deps.loadRuntimeUsage = func(ctx context.Context, selection uiSelection) (uiRuntimeUsage, error) {
+			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
 		}
 	}
 	if deps.recordActivity == nil {
