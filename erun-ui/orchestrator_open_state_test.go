@@ -456,3 +456,101 @@ func TestAlsoReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 		t.Fatalf("expected the notice to name %q and both scopes, got %q", stale, target.Notice)
 	}
 }
+
+// A conversation belongs to exactly one orchestrator. Recording a launch must
+// release any other orchestrator's claim on the same session, or every later
+// restart resolves both ids to one conversation and hands one orchestrator the
+// other's history, scope and return note.
+func TestRecordingALaunchReleasesAnotherOrchestratorsClaimOnTheSameSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
+
+	if err := recordOpenOrchestrator(path, "petios-admin", "shared-conversation", []string{"petios/rihards-develop"}); err != nil {
+		t.Fatalf("record petios-admin: %v", err)
+	}
+	if err := recordOpenOrchestrator(path, "erun", "shared-conversation", []string{"erun/build"}); err != nil {
+		t.Fatalf("record erun: %v", err)
+	}
+
+	entries := readOpenOrchestrators(path)
+	if len(entries) != 2 {
+		t.Fatalf("both orchestrators must stay open, got %d entries: %+v", len(entries), entries)
+	}
+	claims := map[string]string{}
+	for _, entry := range entries {
+		claims[entry.OrchestratorID] = entry.SessionID
+	}
+	if claims["erun"] != "shared-conversation" {
+		t.Fatalf("the launch that just happened keeps the session, got %q", claims["erun"])
+	}
+	if claims["petios-admin"] != "" {
+		t.Fatalf("the stale claim must be released so that orchestrator starts fresh, got %q", claims["petios-admin"])
+	}
+}
+
+// An already-crossed file heals on read: the operator hit this before the write
+// path was fixed, and a restart must not keep replaying the crossing.
+func TestReadingAnAlreadyCrossedOpenRecordReleasesTheOlderClaim(t *testing.T) {
+	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
+	crossed := `{"orchestrators":[` +
+		`{"orchestratorId":"petios-admin","sessionId":"b40e4de0","environments":["petios/rihards-develop"]},` +
+		`{"orchestratorId":"erun","sessionId":"b40e4de0","environments":["erun/build"]}]}`
+	if err := os.WriteFile(path, []byte(crossed), 0o644); err != nil {
+		t.Fatalf("write crossed record: %v", err)
+	}
+
+	entries := readOpenOrchestrators(path)
+	if len(entries) != 2 {
+		t.Fatalf("expected both orchestrators, got %+v", entries)
+	}
+	if entries[0].OrchestratorID != "petios-admin" || entries[0].SessionID != "" {
+		t.Fatalf("older claim must be released, got %+v", entries[0])
+	}
+	if entries[1].OrchestratorID != "erun" || entries[1].SessionID != "b40e4de0" {
+		t.Fatalf("most recent claim keeps the conversation, got %+v", entries[1])
+	}
+}
+
+// One orchestrator legitimately moving between conversations (a compaction fork
+// re-recorded under the same id) must not be mistaken for a crossing.
+func TestOneOrchestratorMovingConversationsKeepsItsOwnLatestSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
+
+	for _, session := range []string{"before-compact", "after-compact"} {
+		if err := recordOpenOrchestrator(path, "agent-1", session, []string{"frs/dev"}); err != nil {
+			t.Fatalf("record %s: %v", session, err)
+		}
+	}
+
+	entries := readOpenOrchestrators(path)
+	if len(entries) != 1 || entries[0].SessionID != "after-compact" {
+		t.Fatalf("expected the one orchestrator to hold its newest session, got %+v", entries)
+	}
+}
+
+// Releasing a duplicate claim must not cost the loser its history: its own
+// hooks still know which conversation is really its, and reopen should prefer
+// that over minting a fresh id. This is the other half of
+// TestRecordingALaunchReleasesAnotherOrchestratorsClaimOnTheSameSession.
+func TestAReleasedClaimRecoversTheOrchestratorsOwnLiveConversation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HOME", home)
+
+	stageOrchestratorConversation(t, "its-own-conversation")
+	stageOrchestratorLiveSession(t, "petios-admin", "its-own-conversation")
+
+	entry := orchestratorOpenEntry{OrchestratorID: "petios-admin", SessionID: ""}
+	if got := resolveReopenSessionID(entry); got != "its-own-conversation" {
+		t.Fatalf("expected the orchestrator's own live conversation, got %q", got)
+	}
+
+	// But never one another orchestrator claims — that is the crossing again.
+	stageOrchestratorLiveSession(t, "erun", "its-own-conversation")
+	got := resolveReopenSessionID(entry)
+	if got == "its-own-conversation" {
+		t.Fatal("a conversation another orchestrator claims must not be adopted on reopen")
+	}
+	if got == "" {
+		t.Fatal("expected a freshly minted conversation id")
+	}
+}

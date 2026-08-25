@@ -305,6 +305,18 @@ func resolveReopenSessionID(entry orchestratorOpenEntry) string {
 	if entry.SessionID != "" && orchestratorSessionExists(entry.SessionID) {
 		return entry.SessionID
 	}
+	// The durable record has no usable conversation for this orchestrator:
+	// either it never recorded one, or its claim was released because another
+	// orchestrator held the same session. Its OWN hooks may still know which
+	// conversation is really its, so prefer that over minting a fresh id and
+	// orphaning a live transcript — the release exists to end a crossing, not
+	// to cost the loser its history. Still refused if a different orchestrator
+	// claims it, which is the crossing this would otherwise re-create.
+	if live, ok := readOrchestratorLiveSessionID(entry.OrchestratorID); ok &&
+		orchestratorSessionExists(live) &&
+		!orchestratorLiveSessionClaimedByOther(entry.OrchestratorID, live) {
+		return live
+	}
 	return uuid.NewString()
 }
 
