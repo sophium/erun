@@ -9,6 +9,7 @@ import { GlobalConfigDialog } from './GlobalConfigDialog';
 import { ManageDialog } from './ManageDialog';
 import { OrchestratorDialog } from './OrchestratorDialog';
 import { OutputsDialog } from './OutputsDialog';
+import { ReviewDetailDialog } from './ReviewDetailDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
 import { TenantDashboard } from './TenantDashboard';
@@ -99,6 +100,10 @@ export class AppShell {
 
   get reviewPanel(): ReviewPanel {
     return new ReviewPanel(this.page);
+  }
+
+  get reviewDetailDialog(): ReviewDetailDialog {
+    return new ReviewDetailDialog(this.page);
   }
 
   get activityDrawer(): ActivityQueueDrawer {

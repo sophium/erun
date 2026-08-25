@@ -169,6 +169,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
         page,
         dashboardData(environment, [
           { tab: 'users', restricted: 'GET /v1/whoami' },
+          { tab: 'reviews', restricted: 'GET /v1/reviews' },
           { tab: 'queue', restricted: 'GET /v1/reviews/merge-queue' },
           { tab: 'builds', restricted: 'GET /v1/reviews' },
           { tab: 'audit', restricted: 'GET /v1/audit-events' },

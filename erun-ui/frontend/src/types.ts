@@ -635,3 +635,6 @@ export interface AgentOutputsList {
 // Diff view types live in ./diffTypes to keep this file under eslint's max-lines
 // cap; re-exported here so `from './types'` keeps resolving them.
 export * from './diffTypes';
+
+// Review-detail types live in ./reviewTypes for the same reason.
+export * from './reviewTypes';

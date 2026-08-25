@@ -1,8 +1,14 @@
 import { EmptyState, StatusBadge, TabsContent } from 'erun-kit';
 import * as React from 'react';
 
+import { useAppDispatch } from '@/app/hooks';
+import { openReviewDetail } from '@/app/reviewDetailThunks';
 import type { AppState } from '@/app/state';
-import { formatDashboardDate, tenantDashboardPanel } from '@/app/tenantDashboardPanels';
+import {
+  formatDashboardDate,
+  reviewStatusTone,
+  tenantDashboardPanel,
+} from '@/app/tenantDashboardPanels';
 import type {
   UITenantDashboardAudit,
   UITenantDashboardBuild,
@@ -18,6 +24,7 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
   return (
     <>
       <UsersPanel data={data} />
+      <ReviewsPanel data={data} />
       <MergeQueuePanel data={data} />
       <BuildsPanel data={data} />
       <AuditPanel data={data} />
@@ -25,6 +32,37 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
         <APILogPanel log={data?.apiLog ?? ''} error={data?.apiLogError ?? ''} />
       </TabsContent>
     </>
+  );
+}
+
+// ReviewsPanel is the review object's own home: status, branches, and — via
+// each row — its builds, comment threads, and merge-queue position. The
+// merge-queue tab stays a queue-shaped view of the same reviews.
+function ReviewsPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reviews = data?.reviews ?? [];
+  return (
+    <TabsContent value="reviews" className="min-h-0 overflow-auto">
+      <PanelBody
+        data={data}
+        tab="reviews"
+        empty={
+          <EmptyState
+            heading="No reviews yet"
+            body="A review appears here once someone opens one from the CLI's erun review create."
+          />
+        }
+      >
+        {reviews.length > 0 ? (
+          <ReviewsTable
+            reviews={reviews}
+            onSelect={(review) => {
+              void dispatch(openReviewDetail(review.reviewId));
+            }}
+          />
+        ) : null}
+      </PanelBody>
+    </TabsContent>
   );
 }
 
@@ -109,7 +147,7 @@ function PanelBody({
   children,
 }: {
   data: TenantDashboardData;
-  tab: 'users' | 'queue' | 'builds' | 'audit';
+  tab: 'users' | 'reviews' | 'queue' | 'builds' | 'audit';
   empty: React.ReactElement;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -146,13 +184,36 @@ function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactE
   );
 }
 
-function ReviewsTable({ reviews }: { reviews: UITenantDashboardReview[] }): React.ReactElement {
+function ReviewsTable({
+  reviews,
+  onSelect,
+}: {
+  reviews: UITenantDashboardReview[];
+  onSelect?: (review: UITenantDashboardReview) => void;
+}): React.ReactElement {
   return (
     <DataTable headers={['Review', 'Status', 'Target', 'Source', 'Updated']}>
       {reviews.map((review) => (
         <tr key={review.reviewId}>
-          <DataCell strong>{review.name || review.reviewId}</DataCell>
-          <DataCell>{review.status}</DataCell>
+          <DataCell strong>
+            {onSelect ? (
+              <button
+                type="button"
+                className="text-left text-foreground underline-offset-2 hover:underline focus-visible:underline"
+                onClick={() => {
+                  onSelect(review);
+                }}
+                aria-label={`Open review ${review.name || review.reviewId}`}
+              >
+                {review.name || review.reviewId}
+              </button>
+            ) : (
+              review.name || review.reviewId
+            )}
+          </DataCell>
+          <DataCell>
+            <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
+          </DataCell>
           <DataCell>{review.targetBranch}</DataCell>
           <DataCell>{review.sourceBranch}</DataCell>
           <DataCell>{formatDashboardDate(review.updatedAt)}</DataCell>

@@ -162,7 +162,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
 
-	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/reviews/merge-queue,/v1/reviews,/v1/reviews/review-1/builds,/v1/audit-events" {
+	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/audit-events" {
 		t.Fatalf("expected every read to be attempted, got %q", got)
 	}
 	for _, panel := range dashboard.Panels {

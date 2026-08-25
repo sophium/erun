@@ -8,6 +8,8 @@ Review code on a hosted erun platform from a terminal or an Agent — the client
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
+The [desktop app](/desktop/overview#control-panel)'s tenant dashboard has a **Reviews** tab that lists reviews, their builds, and their comment threads, and lets you reply to an existing thread — but starting a review and commenting on a diff line for the first time are CLI-only for now.
+
 ## Synopsis
 
 ```
