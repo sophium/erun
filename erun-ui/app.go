@@ -107,9 +107,14 @@ type App struct {
 	// verify those tokens. nil in unit tests.
 	identity *desktopIdentity
 
-	mu               sync.Mutex
-	nextSerial       int
-	sessions         map[string]*managedTerminal
+	mu         sync.Mutex
+	nextSerial int
+	sessions   map[string]*managedTerminal
+	// sessionWG tracks every streamSession reader goroutine (spawned via
+	// spawnStreamSession) so shutdown can wait for all of them to actually
+	// exit after closing their sessions, rather than assuming a closed fd
+	// means the goroutine reading it is already gone.
+	sessionWG        sync.WaitGroup
 	idleStops        map[string]struct{}
 	intentionalStops map[string]struct{}
 	// runtimeStops latches a per-env `erun stop` the desktop issued. Kept
@@ -185,9 +190,11 @@ type App struct {
 	workingIssueMu    sync.Mutex
 	workingIssueCache map[string]workingIssueCacheEntry
 
-	// emitMu guards emitFn: NewApp starts the activity queue's notify loop
-	// before a caller gets a chance to call SetEmitter, so emit() can race
-	// SetEmitter from that background goroutine without it.
+	// emitMu guards emitFn. Two independent reasons, both real: NewApp starts
+	// the activity queue's notify loop before a caller gets a chance to call
+	// SetEmitter, so emit() can race SetEmitter from that goroutine; and
+	// SetEmitter can be called after other background goroutines (session
+	// streamers among them) are already emitting through it.
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
 }
@@ -494,10 +501,14 @@ func (a *App) shutdown(context.Context) {
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()
 	a.stopAllCloudCredentialsRefreshersLocked()
 	a.closeAllSessionsLocked()
+	a.mu.Unlock()
+	// Every closed session's reader goroutine takes a.mu itself (via
+	// currentSessionFor) on its way out, so this must wait outside the lock
+	// above or it would deadlock against them.
+	a.sessionWG.Wait()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

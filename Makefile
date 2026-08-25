@@ -57,9 +57,17 @@ lint:
 # recorded PASS that is no longer true, and the gate reports `(cached)` while
 # the thing it guards is broken. That is exactly how a release-breaking
 # regression reached main once.
+#
+# -race is load-bearing too: this module's terminal/orchestrator session
+# lifecycle spawns goroutines that share managedTerminal/App state with their
+# spawner, and a plain `go test ./...` cannot see a data race even when one is
+# live on every run -- five shipped here undetected until someone ran -race by
+# hand as extra diligence. Measured locally: ~15s -> ~18s (roughly +15-20%
+# wall time) for this module's suite; pay it here rather than let this class
+# of bug go dark again.
 test-erun-ui:
 	@echo ">> go test erun-ui"
-	@(cd erun-ui && go test -count=1 ./...)
+	@(cd erun-ui && go test -race -count=1 ./...)
 
 # The shared frontend kit (erun-kit) and the hosted console (erun-console) —
 # the two Yarn-workspace members outside erun-ui/frontend (in the workspace,
