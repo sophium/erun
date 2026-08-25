@@ -8,6 +8,7 @@ package main
 #include <stdlib.h>
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
+#import <os/log.h>
 
 // erunObserveActivation records every time this app becomes the frontmost
 // application, with the in-process call stack at that moment.
@@ -31,8 +32,15 @@ static void erunObserveActivation(void) {
 		                 queue:nil
 		            usingBlock:^(NSNotification *note) {
 			            (void)note;
-			            NSLog(@"erun-activation: became frontmost; stack=%@",
-			                  [NSThread callStackSymbols]);
+			            // %{public}@, not NSLog: os_log treats every dynamic
+			            // argument as private by default, so the stack this
+			            // trace exists to capture came out as
+			            // "stack=<private>" and told us nothing. Un-redacting
+			            // afterwards needs a configuration profile, so the
+			            // only thing that works is marking it public here.
+			            os_log(OS_LOG_DEFAULT,
+			                   "erun-activation: became frontmost; stack=%{public}@",
+			                   [NSThread callStackSymbols]);
 		            }];
 	}
 }
