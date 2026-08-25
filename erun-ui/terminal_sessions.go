@@ -749,6 +749,7 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	if _, err := io.WriteString(managed.session, data); err != nil {
 		return err
 	}
+	a.noteSessionInput(managed)
 	a.clearAwaitingPostRespawnInput(managed)
 	a.recordTerminalActivity(managed.selection)
 	if id, ok := orchestratorIDFromSessionKey(managed.key); ok {
@@ -949,11 +950,21 @@ func (a *App) RepaintSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
 	var cols, rows int
+	var gen uint64
+	var typedRecently bool
 	if managed != nil {
 		cols, rows = managed.lastCols, managed.lastRows
+		gen = managed.inputGen
+		typedRecently = typedRecentlyLocked(managed)
 	}
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
+		return nil
+	}
+	if typedRecently {
+		// Switching into a pane fires this on every switch, so it is the other
+		// half of #1330: a switch-and-type sequence would resize the pty under
+		// a line being entered. Someone typing needs no synthetic repaint.
 		return nil
 	}
 	// Only AI TUIs (claude/codex) need the WINCH repaint: they render on the MAIN
@@ -966,7 +977,7 @@ func (a *App) RepaintSession(sessionID int) error {
 	}
 	// No attach delay on a switch: the program is already attached (unlike the
 	// attach-marker path, which must wait for dtach to reattach first).
-	go a.nudgeAIRepaint(managed, cols, rows, 0)
+	go a.nudgeAIRepaint(managed, cols, rows, 0, gen)
 	return nil
 }
 
@@ -1255,6 +1266,42 @@ var (
 	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
 )
 
+// aiRepaintInputQuiet is how recently input must have arrived for the repaint
+// nudge to stand down. The nudge exists to repaint a BLANK reattached screen; a
+// pane receiving keystrokes is by definition not that, and resizing it mid-line
+// is what corrupted submitted prompts (#1330). Generous on purpose: skipping a
+// repaint costs one keypress to fix, while a bad reflow costs the message.
+const aiRepaintInputQuiet = 1500 * time.Millisecond
+
+// noteSessionInput records that real user input just reached this pane.
+func (a *App) noteSessionInput(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	managed.inputGen++
+	managed.lastInputAt = time.Now()
+	a.mu.Unlock()
+}
+
+// sessionInputGen reads the pane's input counter so a nudge can detect input
+// that arrived after it was scheduled.
+func (a *App) sessionInputGen(managed *managedTerminal) uint64 {
+	if managed == nil {
+		return 0
+	}
+	a.mu.Lock()
+	gen := managed.inputGen
+	a.mu.Unlock()
+	return gen
+}
+
+// typedRecentlyLocked reports whether the pane saw input inside the quiet
+// window. Caller holds a.mu.
+func typedRecentlyLocked(managed *managedTerminal) bool {
+	return !managed.lastInputAt.IsZero() && time.Since(managed.lastInputAt) < aiRepaintInputQuiet
+}
+
 // defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
 // delivery. POSIX kubectl exec delivers the resize via SIGWINCH immediately, so
 // a short hold suffices. On Windows there is no SIGWINCH: kubectl exec -it POLLS
@@ -1295,28 +1342,59 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 		a.mu.Unlock()
 		return
 	}
+	if typedRecentlyLocked(managed) {
+		// The user is at the keyboard, so the pane is not the blank screen
+		// this nudge repaints -- and their typing will force the redraw
+		// anyway. Deliberately does NOT set repaintNudged: this attach has
+		// not been nudged, so a later chunk may still do it once they stop.
+		a.mu.Unlock()
+		return
+	}
 	managed.repaintNudged = true
 	cols, rows := managed.lastCols, managed.lastRows
+	gen := managed.inputGen
 	a.mu.Unlock()
-	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay)
+	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay, gen)
 }
 
 // nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
 // the change reaches Claude as a real WINCH and forces the full repaint a
 // same-size reattach cannot. The local xterm is never resized, so the user sees
 // the tab's content appear with no visible reflow.
-func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration) {
+func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration, gen uint64) {
 	if cols <= 0 || rows <= 1 {
 		return
 	}
 	if initialDelay > 0 {
 		time.Sleep(initialDelay)
 	}
+	// Input during the delay means the user started typing between the attach
+	// marker and here. Shrink now and the restore reflows their line, so do
+	// not start the cycle at all -- nothing has been resized yet, so bailing
+	// costs nothing.
+	if a.sessionInputGen(managed) != gen {
+		return
+	}
 	if !a.resizeSessionIfLive(managed, cols, rows-1) {
 		return
 	}
-	time.Sleep(aiRepaintNudgeSettle)
+	// Past this point the pty IS a row short, so it must be restored on every
+	// path. awaitRepaintSettle returns early on input so the shrunken geometry
+	// is held across as little typing as possible.
+	a.awaitRepaintSettle(managed, gen)
 	a.resizeSessionIfLive(managed, cols, rows)
+}
+
+// awaitRepaintSettle waits out the nudge settle, returning as soon as user
+// input arrives so the caller can restore the pty immediately.
+func (a *App) awaitRepaintSettle(managed *managedTerminal, gen uint64) {
+	const slice = 10 * time.Millisecond
+	for waited := time.Duration(0); waited < aiRepaintNudgeSettle; waited += slice {
+		time.Sleep(slice)
+		if a.sessionInputGen(managed) != gen {
+			return
+		}
+	}
 }
 
 // resizeSessionIfLive guards the AI repaint nudge: a session that exits
@@ -2048,6 +2126,16 @@ type managedTerminal struct {
 	// on the first output after a (re)attach and not on every chunk.
 	// tryReconnect clears it so the next attach nudges again.
 	repaintNudged bool
+
+	// lastInputAt/inputGen record real user input into this pane. The repaint
+	// nudge changes pty geometry behind the user's back, so it must not fire
+	// into a pane someone is typing into and must abandon a hold in progress
+	// the moment they start: holding the pty a row short across a keystroke
+	// reflowed the line being edited and corrupted the submitted prompt
+	// (#1330). inputGen is a counter rather than a flag so a nudge can tell
+	// "input since I was scheduled" from "input at some point".
+	lastInputAt time.Time
+	inputGen    uint64
 
 	// awaitingPostRespawnInput, when true, tells streamSession to skip
 	// the 2s output-activity ticker. Set on each successful respawn so

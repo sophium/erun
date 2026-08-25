@@ -246,6 +246,10 @@ export class TerminalController {
       () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
+      // Before the write, not after: a synthetic resize cycle in flight has to
+      // stand down as early as possible, because it is the reflow landing on a
+      // line being typed that corrupts the submission (#1330).
+      this.reattachRepaint.noteInput();
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
         store.dispatch(showTerminalError(readError(error)));
       });
