@@ -237,21 +237,45 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 	})
 }
 
+// databaseRepositories bundles every repository registerDatabaseRoutes wires,
+// so registration reads as what each route needs rather than as 12 repeated
+// repository.NewXRepository(txManager) calls (#1302).
+type databaseRepositories struct {
+	reviews         *repository.ReviewRepository
+	reviewReviewers *repository.ReviewReviewerRepository
+	builds          *repository.BuildRepository
+	comments        *repository.CommentRepository
+	tenantIssuers   *repository.TenantIssuerRepository
+	tenants         *repository.TenantRepository
+	environments    *repository.EnvironmentRepository
+	contexts        *repository.ContextRepository
+	tenantQuotas    *repository.TenantQuotaRepository
+	usageEvents     *repository.UsageEventRepository
+	auditEvents     *repository.AuditEventRepository
+	releases        *repository.ReleaseRepository
+}
+
+func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
+	return databaseRepositories{
+		reviews:         repository.NewReviewRepository(txManager),
+		reviewReviewers: repository.NewReviewReviewerRepository(txManager),
+		builds:          repository.NewBuildRepository(txManager),
+		comments:        repository.NewCommentRepository(txManager),
+		tenantIssuers:   repository.NewTenantIssuerRepository(txManager),
+		tenants:         repository.NewTenantRepository(txManager),
+		environments:    repository.NewEnvironmentRepository(txManager),
+		contexts:        repository.NewContextRepository(txManager),
+		tenantQuotas:    repository.NewTenantQuotaRepository(txManager),
+		usageEvents:     repository.NewUsageEventRepository(txManager),
+		auditEvents:     repository.NewAuditEventRepository(txManager),
+		releases:        repository.NewReleaseRepository(txManager),
+	}
+}
+
 // registerDatabaseRoutes registers every route backed by persistence, which is
 // all of them except the health check and the DNS-01 broker.
 func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
-	reviews := repository.NewReviewRepository(txManager)
-	reviewReviewers := repository.NewReviewReviewerRepository(txManager)
-	builds := repository.NewBuildRepository(txManager)
-	comments := repository.NewCommentRepository(txManager)
-	tenantIssuers := repository.NewTenantIssuerRepository(txManager)
-	tenants := repository.NewTenantRepository(txManager)
-	environments := repository.NewEnvironmentRepository(txManager)
-	contexts := repository.NewContextRepository(txManager)
-	tenantQuotas := repository.NewTenantQuotaRepository(txManager)
-	usageEvents := repository.NewUsageEventRepository(txManager)
-	auditEvents := repository.NewAuditEventRepository(txManager)
-	releases := repository.NewReleaseRepository(txManager)
+	repos := newDatabaseRepositories(txManager)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
 	// bootstrapping itself already requires), which leaves every context
@@ -269,30 +293,30 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	// executor: the executor (via BuildService, below) already depends back on
 	// reviewService's own MarkBuildResult, and Go composition cannot wire the
 	// resulting cycle. See AGENTS.md "Merge Queue".
-	reviewService := service.NewReviewService(reviews, builds)
-	commentService := service.NewCommentService(comments)
+	reviewService := service.NewReviewService(repos.reviews, repos.builds)
+	commentService := service.NewCommentService(repos.comments)
 	// releaseService records its build against the raw repository, not through
 	// BuildService: by the time a release runs, the review it recorded against
 	// (if any) is already MERGED, so BuildService's extra MarkBuildResult call
 	// would be an inert no-op — going through the raw repository instead is what
 	// keeps releaseService out of the mergeQueueService -> releaseRoutes ->
 	// releaseService cycle that routing it through BuildService would create.
-	releaseService := service.NewReleaseService(releases, builds, newReleaseRunner(options))
-	releaseRoutes := routes.RegisterReleaseRoutes(register, releases, releaseService, newReleaseQueue(options, releaseService), tenants)
-	mergeQueueService := service.NewMergeQueueService(reviews, builds, newMergeRunner(options), releaseRoutes)
-	mergeQueue := newMergeQueue(options, mergeQueueService, tenants)
-	buildService := service.NewBuildService(builds, reviewService, mergeQueue)
-	routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
-	routes.RegisterReviewRoutes(register, reviews, reviewReviewers, reviewService, mergeQueue)
-	routes.RegisterBuildRoutes(register, builds, buildService)
-	routes.RegisterCommentRoutes(register, comments, commentService)
-	deleter := newEnvironmentDeleter(options, environments, usageEvents, placementCredentials)
-	routes.RegisterEnvironmentRoutes(register, environments, tenantQuotas, tenants, contexts, newEnvironmentProvisioner(options, environments, usageEvents, placementCredentials), newEnvironmentLifecycle(options, environments, usageEvents, placementCredentials), deleter)
-	newEnvironmentDeleteReconciler(options, environments, tenants, contexts, deleter)
-	routes.RegisterUsageEventRoutes(register, usageEvents)
-	routes.RegisterAuditEventRoutes(register, auditEvents)
-	routes.RegisterMCPTokenRoutes(register, environments, tenants, options.MCPSigner)
-	routes.RegisterDNS01TokenRoutes(register, environments, tenants, options.MCPSigner)
+	releaseService := service.NewReleaseService(repos.releases, repos.builds, newReleaseRunner(options))
+	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService, newReleaseQueue(options, releaseService), repos.tenants)
+	mergeQueueService := service.NewMergeQueueService(repos.reviews, repos.builds, newMergeRunner(options), releaseRoutes)
+	mergeQueue := newMergeQueue(options, mergeQueueService, repos.tenants)
+	buildService := service.NewBuildService(repos.builds, reviewService, mergeQueue)
+	routes.RegisterTenantIssuerRoutes(register, repos.tenantIssuers)
+	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService, mergeQueue)
+	routes.RegisterBuildRoutes(register, repos.builds, buildService)
+	routes.RegisterCommentRoutes(register, repos.comments, commentService)
+	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
+	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter)
+	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
+	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
+	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
+	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
+	routes.RegisterDNS01TokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
 	var contextProvisioner routes.ContextProvisioner
 	if options.Cipher != nil {
 		aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
@@ -300,7 +324,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 		if options.DBOSContext != nil {
 			contextProvisioner = provision.NewProvisioner(
 				options.DBOSContext,
-				contexts,
+				repos.contexts,
 				contextCredentials,
 				aliases,
 				options.Cipher,
@@ -308,11 +332,11 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 			)
 		}
 	}
-	routes.RegisterContextRoutes(register, contexts, contextProvisioner)
-	routes.RegisterTenantRoutes(register, tenants)
-	routes.RegisterTenantQuotaRoute(register, tenantQuotas, tenantQuotas)
-	routes.RegisterConfigRoute(register, tenants, environments, contexts)
-	routes.RegisterProvisionRoute(register, tenants, environments, tenantQuotas)
+	routes.RegisterContextRoutes(register, repos.contexts, contextProvisioner)
+	routes.RegisterTenantRoutes(register, repos.tenants)
+	routes.RegisterTenantQuotaRoute(register, repos.tenantQuotas, repos.tenantQuotas)
+	routes.RegisterConfigRoute(register, repos.tenants, repos.environments, repos.contexts)
+	routes.RegisterProvisionRoute(register, repos.tenants, repos.environments, repos.tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
 	registerIdentityAdminRoutes(register, options, txManager)
 }
