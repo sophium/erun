@@ -123,6 +123,8 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard)
 	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard, reviewsOutcome)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
+	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
+	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
 }
 
 // reviewsLoadOutcome carries the Reviews panel's own result forward to the

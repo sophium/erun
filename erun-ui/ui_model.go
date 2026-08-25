@@ -222,6 +222,12 @@ type uiTenantDashboard struct {
 	Builds      []uiTenantDashboardBuild  `json:"builds,omitempty"`
 	AuditEvents []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
 	Panels      []uiTenantDashboardPanel  `json:"panels,omitempty"`
+	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
+	// may attempt those writes at all, so the composing actions can be hidden
+	// rather than rendered to fail on submit — the same contract CanComment
+	// already gives the reply composer.
+	CanCreateReview      bool `json:"canCreateReview"`
+	CanAdvanceMergeQueue bool `json:"canAdvanceMergeQueue"`
 }
 
 // uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab
@@ -312,6 +318,8 @@ type uiReviewDetail struct {
 	// CanComment reports whether the signed-in user may reply at all, so the
 	// composer can be hidden rather than rendered to fail on submit.
 	CanComment bool `json:"canComment"`
+	// CanClose mirrors CanComment for the close action.
+	CanClose bool `json:"canClose"`
 }
 
 type uiReviewComment struct {
@@ -336,6 +344,47 @@ type uiCreateReviewReplyInput struct {
 	CloudProviderAlias string `json:"cloudProviderAlias"`
 	ReviewID           string `json:"reviewId"`
 	ParentCommentID    string `json:"parentCommentId"`
+	CommitID           string `json:"commitId"`
+	FilePath           string `json:"filePath"`
+	Line               int    `json:"line"`
+	Body               string `json:"body"`
+}
+
+// uiCreateReviewInput opens a review on the platform. sourceBranch must
+// already be pushed to the remote — see ExecPush — since the review
+// references it by name.
+type uiCreateReviewInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	Name               string `json:"name"`
+	TargetBranch       string `json:"targetBranch"`
+	SourceBranch       string `json:"sourceBranch"`
+}
+
+type uiCloseReviewInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	ReviewID           string `json:"reviewId"`
+}
+
+type uiAdvanceMergeQueueInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	TargetBranch       string `json:"targetBranch"`
+}
+
+// uiCreateReviewCommentInput starts a new top-level thread anchored to a diff
+// line, as opposed to uiCreateReviewReplyInput's reply-in-an-existing-thread.
+// Every field but Body is the anchor the operator picked by clicking a line in
+// the diff panel, not a value they typed.
+type uiCreateReviewCommentInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	ReviewID           string `json:"reviewId"`
 	CommitID           string `json:"commitId"`
 	FilePath           string `json:"filePath"`
 	Line               int    `json:"line"`

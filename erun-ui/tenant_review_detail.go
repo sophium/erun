@@ -70,6 +70,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	loadReviewDetailBuilds(requestCtx, client, capabilities, reviewID, review.Name, &detail)
 	detail.QueuePosition = loadReviewDetailQueuePosition(requestCtx, client, capabilities, review, reviewID)
 	detail.CanComment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteComment) == ""
+	detail.CanClose = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewStatus) == ""
 	return detail, nil
 }
 
