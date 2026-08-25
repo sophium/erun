@@ -23,6 +23,7 @@ import type {
   UITenantDashboardUser,
 } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
 import { DashboardMessage, DataCell, DataTable } from './TenantDashboardMessage';
 
 type TenantDashboardData = AppState['tenantDashboard']['data'];
@@ -172,53 +173,81 @@ function AdvanceMergeQueueAction({
       </span>
     );
   }
-  const targetBranch = mergeQueueTargetBranch(mergeQueue);
-  if (mergeQueue.length === 0 || !targetBranch) {
+  if (mergeQueue.length === 0) {
     return null;
   }
-  if (action.confirming) {
+  const targetBranch = mergeQueueTargetBranch(mergeQueue);
+  if (!targetBranch) {
     return (
-      <div className="flex items-center gap-2">
-        {action.error && <span className="text-[13px] text-destructive">{action.error}</span>}
-        <span className="text-[13px] text-foreground">
-          Merge the queue head into {targetBranch}?
-        </span>
+      <span className="max-w-xs text-right text-[13px] text-muted-foreground">
+        These reviews target more than one branch, so there is no single queue head to advance.
+      </span>
+    );
+  }
+  return (
+    <div className="flex min-w-0 flex-col items-end gap-2">
+      {action.confirming ? (
+        <AdvanceMergeQueueConfirm targetBranch={targetBranch} busy={action.busy} />
+      ) : (
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={action.busy}
           onClick={() => {
-            dispatch(cancelAdvanceMergeQueue());
+            dispatch(confirmAdvanceMergeQueue());
           }}
         >
-          Cancel
+          Advance queue
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          disabled={action.busy}
-          onClick={() => {
-            void dispatch(submitAdvanceMergeQueue(targetBranch));
-          }}
-        >
-          {action.busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-          Confirm
-        </Button>
-      </div>
-    );
-  }
+      )}
+      {action.error && (
+        <div className="max-w-sm">
+          <InlineAlert>{action.error}</InlineAlert>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The confirm step is its own row so the question reads left-to-right into the
+// two answers, and a failure lands under it rather than shouldering its way
+// into the middle of the sentence.
+function AdvanceMergeQueueConfirm({
+  targetBranch,
+  busy,
+}: {
+  targetBranch: string;
+  busy: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={() => {
-        dispatch(confirmAdvanceMergeQueue());
-      }}
-    >
-      Advance queue
-    </Button>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <span className="text-[13px] text-foreground">
+        Merge the queue head into <span className="font-mono">{targetBranch}</span>?
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => {
+          dispatch(cancelAdvanceMergeQueue());
+        }}
+      >
+        Cancel
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        disabled={busy}
+        onClick={() => {
+          void dispatch(submitAdvanceMergeQueue(targetBranch));
+        }}
+      >
+        {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+        Confirm
+      </Button>
+    </div>
   );
 }
 

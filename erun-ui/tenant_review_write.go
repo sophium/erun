@@ -12,7 +12,7 @@ import (
 // `erun review create|close|merge-queue advance` and the equivalent MCP tools
 // already have: opening a review, closing one, and advancing a target
 // branch's merge queue, all through the same eruncommon.PlatformClient the
-// dashboard's reads already use (#1348).
+// dashboard's reads already use.
 
 // The write routes the dashboard gates on, in the same canonical
 // "METHOD /path" form tenant_dashboard.go's read routes use.

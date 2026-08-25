@@ -8,9 +8,9 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// Starting a new top-level review thread from a diff line is the point of
-// #1348 — ReviewDetailDialog.Comments.tsx used to defer it for exactly this
-// reason: only the diff panel knows which line was clicked. The Go side
+// Starting a new top-level review thread from a diff line is what
+// ReviewDetailDialog.Comments.tsx used to defer for exactly this reason: only
+// the diff panel knows which line was clicked. The Go side
 // (CreateReviewComment) is covered by erun-ui/tenant_review_write_test.go;
 // these specs cover the desktop's own precondition gating and the happy path.
 
@@ -90,7 +90,15 @@ test.describe('diff panel — commenting on a line (#1348)', () => {
     await app.titlebar.toggleReviewPanel();
     await expect(app.page.getByText('package main')).toBeVisible();
 
-    await app.page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
+    // The affordance is revealed by hovering its own line rather than painted
+    // on every row: the diff is the densest reading surface in the app, so a
+    // persistent per-line icon would compete with the code it discusses.
+    const action = app.page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await expect(action).toHaveCSS('opacity', '0');
+    await app.page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1');
+
+    await action.click();
     await expect(
       app.page.getByText('Open a review from the Reviews tab to comment on this line.'),
     ).toBeVisible();

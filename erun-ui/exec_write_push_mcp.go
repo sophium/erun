@@ -14,7 +14,7 @@ import (
 // tools the same way diff_mcp.go already reaches exec_diff (as "diff") —
 // session.CallTool over the env's own MCP edge — so the desktop can push a
 // review's source branch itself instead of requiring the operator to drop to
-// the CLI first (#1348).
+// the CLI first.
 
 // execCommitViaMCP commits the runtime repo's working tree via the exec_commit
 // tool. wait is left at its default (synchronous), matching how the CLI's own

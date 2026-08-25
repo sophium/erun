@@ -103,4 +103,12 @@ export class TenantDashboard {
   advanceMergeQueueRestrictedNote(): Locator {
     return this.activePanel().getByText('You do not have access to advance the merge queue.');
   }
+
+  // A queue spanning several target branches has no single head, so the action
+  // is replaced by the reason rather than silently absent.
+  advanceMergeQueueMixedBranchNote(): Locator {
+    return this.activePanel().getByText(
+      'These reviews target more than one branch, so there is no single queue head to advance.',
+    );
+  }
 }

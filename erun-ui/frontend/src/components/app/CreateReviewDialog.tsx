@@ -6,8 +6,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  EditableComboField,
+  FieldLabel,
   Input,
-  Label,
   StatusBadge,
 } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
@@ -22,15 +23,20 @@ import {
 } from '@/app/createReviewDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { CreateReviewDialogState } from '@/app/reviewWriteState';
+import { selectReviewTargetBranches } from '@/app/selectors';
 
-// CreateReviewDialog opens a review from the desktop (#1348). Push is the
-// precondition of create — the platform can only reference a sourceBranch
-// that already exists on the remote — so both steps live in one dialog with
-// their own explicit buttons and their own busy/error state, rather than one
-// combined action the operator cannot see the pieces of.
+import { InlineAlert } from './InlineAlert';
+
+// CreateReviewDialog opens a review from the desktop. Push is the precondition
+// of create — the platform can only reference a sourceBranch that already
+// exists on the remote — so both steps live in one dialog with their own
+// explicit buttons and their own busy/error state, rather than one combined
+// action the operator cannot see the pieces of. Every write here lands in one
+// named environment, so the dialog says which one before anything runs.
 export function CreateReviewDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.createReviewDialog);
+  const missing = missingToCreate(dialog);
   return (
     <Dialog
       open={dialog.open}
@@ -44,13 +50,18 @@ export function CreateReviewDialog(): React.ReactElement {
         <DialogHeader>
           <DialogTitle>Open a review</DialogTitle>
           <DialogDescription>
-            Push your branch, then open a review proposing it merge into a target branch.
+            Pushes the branch checked out in{' '}
+            <span className="font-mono">{environmentLabel(dialog)}</span> and opens a review
+            proposing it merge into a target branch.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <PushBranchStep dialog={dialog} />
           <ReviewDetailsStep dialog={dialog} />
         </div>
+        {missing && !dialog.creating && (
+          <p className="text-[13px] text-muted-foreground">{missing}</p>
+        )}
         <DialogFooter>
           <Button
             type="button"
@@ -64,7 +75,7 @@ export function CreateReviewDialog(): React.ReactElement {
           </Button>
           <Button
             type="button"
-            disabled={!canCreate(dialog)}
+            disabled={Boolean(missing) || dialog.creating}
             onClick={() => {
               void dispatch(submitCreateReview());
             }}
@@ -78,16 +89,25 @@ export function CreateReviewDialog(): React.ReactElement {
   );
 }
 
-function canCreate(dialog: CreateReviewDialogState): boolean {
-  const sourceBranch = (dialog.pushedBranch || dialog.sourceBranch).trim();
-  return (
-    Boolean(dialog.name.trim()) &&
-    Boolean(dialog.targetBranch.trim()) &&
-    Boolean(sourceBranch) &&
-    !dialog.creating &&
-    !dialog.committing &&
-    !dialog.pushing
-  );
+function environmentLabel(dialog: CreateReviewDialogState): string {
+  return dialog.environment ? `${dialog.tenant} / ${dialog.environment}` : dialog.tenant;
+}
+
+// missingToCreate names what the review still needs, so a create the operator
+// cannot yet run says why instead of presenting a dead button (Nielsen:
+// visibility of system status, error prevention).
+function missingToCreate(dialog: CreateReviewDialogState): string {
+  if (dialog.committing || dialog.pushing) {
+    return 'Wait for the branch step to finish.';
+  }
+  if (!(dialog.pushedBranch || dialog.sourceBranch).trim()) {
+    return 'This needs a branch to propose — the environment’s current branch could not be read.';
+  }
+  const absent = [
+    dialog.name.trim() ? '' : 'a name',
+    dialog.targetBranch.trim() ? '' : 'a target branch',
+  ].filter(Boolean);
+  return absent.length > 0 ? `Add ${absent.join(' and ')} to open the review.` : '';
 }
 
 function PushBranchStep({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
@@ -104,9 +124,7 @@ function PushBranchStep({ dialog }: { dialog: CreateReviewDialogState }): React.
   if (dialog.branchError || !dialog.sourceBranch) {
     return (
       <StepShell label="Push your branch">
-        <p className="text-[13px] text-destructive">
-          {dialog.branchError || 'The current branch could not be read.'}
-        </p>
+        <InlineAlert>{dialog.branchError || 'The current branch could not be read.'}</InlineAlert>
       </StepShell>
     );
   }
@@ -124,9 +142,10 @@ function PushBranchStep({ dialog }: { dialog: CreateReviewDialogState }): React.
 function PushBranchComposer({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
-    <>
+    <div className="grid gap-2">
+      <FieldLabel htmlFor="create-review-commit-message">Commit message</FieldLabel>
       <Input
-        aria-label="Commit message"
+        id="create-review-commit-message"
         placeholder="Describe what changed (optional if already committed)"
         value={dialog.commitMessage}
         disabled={dialog.committing || dialog.pushing}
@@ -134,16 +153,20 @@ function PushBranchComposer({ dialog }: { dialog: CreateReviewDialogState }): Re
           dispatch(updateCreateReviewDialog({ commitMessage: event.target.value }));
         }}
       />
-      {dialog.commitError && <p className="text-[13px] text-destructive">{dialog.commitError}</p>}
-      {dialog.pushError && <p className="text-[13px] text-destructive">{dialog.pushError}</p>}
-    </>
+      <p className="text-[13px] text-muted-foreground">
+        Commit records every change in this environment’s worktree. Skip it if the branch is already
+        committed.
+      </p>
+      {dialog.commitError && <InlineAlert>{dialog.commitError}</InlineAlert>}
+      {dialog.pushError && <InlineAlert>{dialog.pushError}</InlineAlert>}
+    </div>
   );
 }
 
 function PushBranchActions({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         type="button"
         variant="outline"
@@ -175,14 +198,21 @@ function PushBranchActions({ dialog }: { dialog: CreateReviewDialogState }): Rea
   );
 }
 
+// ReviewDetailsStep asks only for what the operator authors. The target branch
+// is a known set — the branches this tenant's reviews and queue already target
+// — so it is offered as choices that stay typeable for a branch that is new
+// here (recognition over recall).
 function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
+  const targetBranches = useAppSelector(selectReviewTargetBranches);
   return (
     <StepShell label="Review details">
-      <Label className="grid gap-1.5 text-[13px]">
-        Name
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="create-review-name" required>
+          Review name
+        </FieldLabel>
         <Input
-          aria-label="Review name"
+          id="create-review-name"
           placeholder="The eventual squash-merge message"
           value={dialog.name}
           disabled={dialog.creating}
@@ -190,19 +220,19 @@ function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): Rea
             dispatch(updateCreateReviewDialog({ name: event.target.value }));
           }}
         />
-      </Label>
-      <Label className="grid gap-1.5 text-[13px]">
-        Target branch
-        <Input
-          aria-label="Target branch"
-          value={dialog.targetBranch}
-          disabled={dialog.creating}
-          onChange={(event) => {
-            dispatch(updateCreateReviewDialog({ targetBranch: event.target.value }));
-          }}
-        />
-      </Label>
-      {dialog.createError && <p className="text-[13px] text-destructive">{dialog.createError}</p>}
+      </div>
+      <EditableComboField
+        id="create-review-target-branch"
+        label="Target branch"
+        value={dialog.targetBranch}
+        suggestions={targetBranches}
+        required
+        disabled={dialog.creating}
+        onValueChange={(next) => {
+          dispatch(updateCreateReviewDialog({ targetBranch: next }));
+        }}
+      />
+      {dialog.createError && <InlineAlert>{dialog.createError}</InlineAlert>}
     </StepShell>
   );
 }

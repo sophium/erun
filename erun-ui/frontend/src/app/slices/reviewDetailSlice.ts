@@ -11,11 +11,8 @@ export const reviewDetailSlice = createSlice({
     patchReviewDetail(state, action: PayloadAction<Partial<ReviewDetailState>>) {
       Object.assign(state, action.payload);
     },
-    resetReviewDetail() {
-      return defaultReviewDetail();
-    },
   },
 });
 
-export const { patchReviewDetail, resetReviewDetail } = reviewDetailSlice.actions;
+export const { patchReviewDetail } = reviewDetailSlice.actions;
 export default reviewDetailSlice.reducer;

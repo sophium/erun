@@ -14,7 +14,7 @@ import (
 // `exec_commit`/`exec_push` tools already give the CLI and agents — reached
 // the way `LoadDiff` (terminal_sessions.go) already reaches exec_diff, so a
 // review's source branch can be pushed from the app instead of requiring a
-// drop to the CLI first (#1348).
+// drop to the CLI first.
 
 // uiExecCommitInput commits every change in the runtime repo's working tree.
 // Branch is the caller's belief about the current branch, verified server-side

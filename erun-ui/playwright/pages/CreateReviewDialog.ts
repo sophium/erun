@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// CreateReviewDialog is the "Open a review" dialog (#1348): pushing the
+// CreateReviewDialog is the "Open a review" dialog: pushing the
 // selected environment's branch, then creating the review itself.
 export class CreateReviewDialog {
   constructor(public readonly page: Page) {}
@@ -50,8 +50,18 @@ export class CreateReviewDialog {
     await this.locator().getByRole('button', { name: 'Push' }).click();
   }
 
+  createButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Create review' });
+  }
+
+  // The hint that replaces a dead Create button: it names what the review
+  // still needs instead of leaving the operator to guess.
+  requirementHint(): Locator {
+    return this.locator().getByText('Add a name to open the review.');
+  }
+
   async create(): Promise<void> {
-    await this.locator().getByRole('button', { name: 'Create review' }).click();
+    await this.createButton().click();
   }
 
   async cancel(): Promise<void> {

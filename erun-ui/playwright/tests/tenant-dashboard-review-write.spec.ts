@@ -9,8 +9,8 @@ import {
 } from '../fixtures/seedRoot.js';
 import type { AppShell } from '../pages/index.js';
 
-// The desktop can read a review but until #1348 could do nothing else: no
-// create, no close, no merge-queue advance. These specs cover the new write
+// The desktop could read a review but do nothing else: no create, no close,
+// no merge-queue advance. These specs cover the new write
 // surface over the stubbed platform RPC — see tenant-dashboard-reviews.spec.ts
 // for why the collaboration API is stubbed rather than staged for real: it
 // comes from a hosted erun-backend-api the inert harness deliberately has no
@@ -134,6 +134,13 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       const dialog = app.createReviewDialog;
       await dialog.waitForOpen();
       await expect(dialog.locator()).toContainText('feature/1348-x');
+      // Every write in this dialog lands in one environment, so the dialog
+      // names it before anything runs.
+      await expect(dialog.locator()).toContainText(`${SEED_TENANT} / ${environment}`);
+      // Create is unavailable until the review has a name, and says so rather
+      // than presenting a dead button.
+      await expect(dialog.requirementHint()).toBeVisible();
+      await expect(dialog.createButton()).toBeDisabled();
 
       await dialog.fillCommitMessage('describe the change');
       await dialog.commit();
@@ -141,6 +148,7 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await expect(dialog.locator()).toContainText('Pushed to origin/feature/1348-x');
 
       await dialog.fillName('Add widget');
+      await expect(dialog.requirementHint()).toHaveCount(0);
       await dialog.create();
 
       await dialog.waitForClosed();
@@ -283,6 +291,38 @@ test.describe('tenant dashboard — advancing the merge queue (#1348)', () => {
       await app.tenantDashboard.advanceMergeQueueConfirmButton().click();
 
       await expect(app.tenantDashboard.advanceMergeQueueConfirmButton()).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('names the reason instead of vanishing when the queue spans two target branches', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('queue-advance-mixed');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(
+            route,
+            dashboardResponse(environment, {
+              canAdvanceMergeQueue: true,
+              mergeQueue: [
+                REVIEW,
+                { ...REVIEW, reviewId: 'review-2', name: 'Add gadget', targetBranch: 'release' },
+              ],
+            }),
+          );
+          return;
+        }
+        await route.continue();
+      });
+
+      await openDashboardReviewsTab(app, environment, 'Merge queue');
+      await expect(app.tenantDashboard.advanceMergeQueueButton()).toHaveCount(0);
+      await expect(app.tenantDashboard.advanceMergeQueueMixedBranchNote()).toBeVisible();
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

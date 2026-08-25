@@ -1,4 +1,4 @@
-// State for the desktop's review write surface (#1348): the Merge Queue
+// State for the desktop's review write surface: the Merge Queue
 // panel's "Advance queue" action and the "Open a review" dialog. Split out
 // of state.ts to keep that file under eslint's 500-line max-lines cap, the
 // same pattern diffTypes.ts/reviewTypes.ts use for types.ts.
