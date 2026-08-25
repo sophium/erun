@@ -23,6 +23,7 @@ import {
   SHOW_CURSOR_SEQUENCE,
 } from './terminalBuffers';
 import { TerminalClipboard } from './terminalClipboard';
+import { scheduleTerminalFocus } from './terminalFocus';
 import { applyTerminalLayoutVars } from './terminalLayoutVars';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
@@ -317,11 +318,10 @@ export class TerminalController {
   }
 
   focusTerminalSoon(): void {
-    window.setTimeout(() => {
-      this.terminal?.focus();
-      window.requestAnimationFrame(() => this.terminal?.focus());
-      window.setTimeout(() => this.terminal?.focus(), 80);
-    }, 0);
+    scheduleTerminalFocus({
+      getTerminal: () => this.terminal,
+      windowIsActive: () => document.hasFocus(),
+    });
   }
 
   scheduleIdleStatusPoll(delay = 1000): void {
