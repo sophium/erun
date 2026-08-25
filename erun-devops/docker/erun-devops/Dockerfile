@@ -2,7 +2,13 @@
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
 # stage's reasoning further down).
-FROM node:22.14-bookworm AS node
+# Pinned to $BUILDPLATFORM because its only consumer is the `test` stage below,
+# which is itself $BUILDPLATFORM: this toolchain runs `make test-frontend` at
+# build time and never ships in the final image. Left unpinned it resolves to
+# the TARGET platform, so a multi-arch release copied an amd64 `node` into an
+# arm64 stage and died with "running an x86 program on an arm64 OS". Only a
+# release builds both arches, so a native build never showed it.
+FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS node
 
 # Run the repository test gate inside the build, per the delivery-pipeline
 # convention (docs /pipeline, "How you set it up — and where tests run"):
