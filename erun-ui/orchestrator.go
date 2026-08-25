@@ -747,12 +747,21 @@ const orchestratorNoAskStopGuardReason = "Your closing message hands the operato
 // nudged turn (stop_hook_active) is let go so a session is corrected once rather
 // than looped. Like the activity reports it is bare shell, so it keeps working
 // when erun is not on PATH.
+//
+// It reads the turn's last ASSISTANT entry, never the raw tail of the
+// transcript. A firing is itself recorded in the transcript, and the record
+// carries this command — every trigger phrase included — so a window of raw
+// lines matches the guard's own echo from then on and the session can never
+// end again. It is also what let an operator's own question ("would you like
+// me to…") refuse the reply that answered it. Only what the turn said can
+// decide whether the turn handed back a decision.
 func orchestratorNoAskStopGuardCommand() string {
 	return orchestratorNoAskGuardMarker + `; input=$(cat); ` +
 		`printf '%s' "$input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && exit 0; ` +
 		`transcript=$(printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\\\/\//g'); ` +
 		`[ -f "$transcript" ] || exit 0; ` +
-		`tail -n 5 "$transcript" | grep -qiE 'say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call' || exit 0; ` +
+		`said=$(tail -n 40 "$transcript" | grep -E '"type"[[:space:]]*:[[:space:]]*"assistant"' | tail -n 1); ` +
+		`printf '%s' "$said" | grep -qiE 'say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call' || exit 0; ` +
 		`printf '%s' '` + orchestratorNoAskStopGuardReason + `' >&2; exit 2`
 }
 

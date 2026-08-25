@@ -42,6 +42,33 @@ func writeGuardTranscript(t *testing.T, dir, name, text string) string {
 	return path
 }
 
+// writeGuardTranscriptEntries writes the transcript verbatim, so a test can
+// stage what Claude Code actually records around a turn — the hook's own
+// firing, the operator's prompt — and not just the turn's own message.
+func writeGuardTranscriptEntries(t *testing.T, dir, name string, entries []map[string]any) string {
+	t.Helper()
+	var encoded []byte
+	for _, entry := range entries {
+		line, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatalf("encode transcript entry: %v", err)
+		}
+		encoded = append(append(encoded, line...), '\n')
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	return path
+}
+
+func assistantTranscriptEntry(text string) map[string]any {
+	return map[string]any{
+		"type":    "assistant",
+		"message": map[string]any{"content": []any{map[string]any{"text": text}}},
+	}
+}
+
 func guardHookInput(t *testing.T, transcript string, active bool) string {
 	t.Helper()
 	encoded, err := json.Marshal(map[string]any{"transcript_path": transcript, "stop_hook_active": active})
@@ -61,6 +88,18 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	dir := t.TempDir()
 	gate := writeGuardTranscript(t, dir, "gate.jsonl", "Filed it. Say the word and I will open the PR.")
 	clean := writeGuardTranscript(t, dir, "clean.jsonl", "Filed it and opened the PR. Both are verified.")
+	// A firing is recorded in the transcript, and the record carries this
+	// command — every trigger phrase with it. Read as raw lines, the guard
+	// matches its own echo from then on and the session can never end.
+	echoed := writeGuardTranscriptEntries(t, dir, "echoed.jsonl", []map[string]any{
+		assistantTranscriptEntry("Filed it and opened the PR. Both are verified."),
+		{"type": "system", "content": "Stop hook feedback: " + orchestratorNoAskStopGuardCommand()},
+	})
+	// The operator asking a question is not the turn handing one back.
+	asked := writeGuardTranscriptEntries(t, dir, "asked.jsonl", []map[string]any{
+		{"type": "user", "message": map[string]any{"content": "would you like me to file it?"}},
+		assistantTranscriptEntry("Filed it and opened the PR. Both are verified."),
+	})
 
 	cases := []struct {
 		name  string
@@ -69,6 +108,8 @@ func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	}{
 		{"a turn ending on a consent gate is refused", guardHookInput(t, gate, false), 2},
 		{"a turn that decided is let go", guardHookInput(t, clean, false), 0},
+		{"the guard's own recorded firing is not the turn's last words", guardHookInput(t, echoed, false), 0},
+		{"the operator's own question is not the turn's last words", guardHookInput(t, asked, false), 0},
 		// Corrected once, never looped.
 		{"an already nudged turn is not refused again", guardHookInput(t, gate, true), 0},
 		// Fail-open: wedging a session costs more than the stalls this prevents.
