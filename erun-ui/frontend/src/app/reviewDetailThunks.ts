@@ -1,3 +1,4 @@
+import type { ReviewDetailState, TenantDashboardState } from '@/app/state';
 import type { UIReviewDetailInput, UITenant } from '@/types';
 
 import { reviewDetailApi } from './api/reviewDetailApi';
@@ -24,6 +25,41 @@ function reviewDetailInput(
   return { tenant, apiUrl, cloudProviderAlias, reviewId };
 }
 
+// reviewCallerContext resolves the caller context a write against reviewId
+// needs. Once the review has loaded once, its own stored caller fields win —
+// they survive closing the (modal) dialog to browse the diff panel, which the
+// operator may do after navigating away from the tenant dashboard entirely,
+// long past the point state.tenantDashboard still describes this review.
+function reviewCallerContext(
+  state: {
+    reviewDetail: ReviewDetailState;
+    tenantDashboard: TenantDashboardState;
+    tenants: { tenants: UITenant[] };
+  },
+  reviewId: string,
+): UIReviewDetailInput | null {
+  const detail = state.reviewDetail;
+  if (
+    detail.reviewId === reviewId &&
+    detail.callerTenant &&
+    detail.callerApiUrl &&
+    detail.callerCloudProviderAlias
+  ) {
+    return {
+      tenant: detail.callerTenant,
+      apiUrl: detail.callerApiUrl,
+      cloudProviderAlias: detail.callerCloudProviderAlias,
+      reviewId,
+    };
+  }
+  return reviewDetailInput(
+    state.tenantDashboard.tenant,
+    state.tenantDashboard.data?.apiUrl ?? '',
+    state.tenants.tenants,
+    reviewId,
+  );
+}
+
 export const openReviewDetail =
   (reviewId: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -34,6 +70,9 @@ export const openReviewDetail =
         loading: true,
         error: '',
         data: null,
+        callerTenant: '',
+        callerApiUrl: '',
+        callerCloudProviderAlias: '',
         replyingTo: '',
         draftBody: '',
         submitError: '',
@@ -43,9 +82,10 @@ export const openReviewDetail =
   };
 
 // closeReviewDetail hides the dialog but keeps the review as the diff
-// panel's active commenting context (reviewId/data), so closing it to browse
-// the diff and start a new thread from a line does not lose which review
-// that thread belongs to. Only the dialog's own transient UI state resets.
+// panel's active commenting context (reviewId/data/caller fields), so
+// closing it to browse the diff and start a new thread from a line does not
+// lose which review that thread belongs to. Only the dialog's own transient
+// UI state resets.
 export const closeReviewDetail = (): AppThunk => (dispatch) => {
   dispatch(
     patchReviewDetail({
@@ -65,9 +105,7 @@ export const closeReviewDetail = (): AppThunk => (dispatch) => {
 export const loadReviewDetail =
   (reviewId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const state = getState();
-    const { tenant, data } = state.tenantDashboard;
-    const input = reviewDetailInput(tenant, data?.apiUrl ?? '', state.tenants.tenants, reviewId);
+    const input = reviewCallerContext(getState(), reviewId);
     if (!input) {
       dispatch(
         patchReviewDetail({
@@ -86,7 +124,16 @@ export const loadReviewDetail =
       if (getState().reviewDetail.reviewId !== reviewId) {
         return;
       }
-      dispatch(patchReviewDetail({ loading: false, error: '', data }));
+      dispatch(
+        patchReviewDetail({
+          loading: false,
+          error: '',
+          data,
+          callerTenant: input.tenant,
+          callerApiUrl: input.apiUrl,
+          callerCloudProviderAlias: input.cloudProviderAlias,
+        }),
+      );
     } catch (error) {
       if (getState().reviewDetail.reviewId !== reviewId) {
         return;
@@ -121,13 +168,7 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
   if (!body || !parent) {
     return;
   }
-  const { tenant, data: dashboardData } = state.tenantDashboard;
-  const input = reviewDetailInput(
-    tenant,
-    dashboardData?.apiUrl ?? '',
-    state.tenants.tenants,
-    reviewId,
-  );
+  const input = reviewCallerContext(state, reviewId);
   if (!input) {
     dispatch(
       patchReviewDetail({ submitError: 'Reply requires an API URL and a primary cloud alias.' }),
@@ -174,13 +215,7 @@ export const cancelCloseReview = (): AppThunk => (dispatch) => {
 export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const { reviewId } = state.reviewDetail;
-  const { tenant, data: dashboardData } = state.tenantDashboard;
-  const input = reviewDetailInput(
-    tenant,
-    dashboardData?.apiUrl ?? '',
-    state.tenants.tenants,
-    reviewId,
-  );
+  const input = reviewCallerContext(state, reviewId);
   if (!input) {
     dispatch(
       patchReviewDetail({ closeError: 'Closing requires an API URL and a primary cloud alias.' }),
@@ -240,13 +275,7 @@ export const submitReviewComment = (): AppThunk<Promise<void>> => async (dispatc
   if (!body || !newCommentAnchor) {
     return;
   }
-  const { tenant, data: dashboardData } = state.tenantDashboard;
-  const input = reviewDetailInput(
-    tenant,
-    dashboardData?.apiUrl ?? '',
-    state.tenants.tenants,
-    reviewId,
-  );
+  const input = reviewCallerContext(state, reviewId);
   if (!input) {
     dispatch(
       patchReviewDetail({

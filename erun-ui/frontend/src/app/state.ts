@@ -162,6 +162,15 @@ export interface ReviewDetailState {
   loading: boolean;
   error: string;
   data: UIReviewDetail | null;
+  // callerTenant/callerApiUrl/callerCloudProviderAlias are the caller context
+  // resolved when the review loaded, captured here rather than re-derived
+  // from state.tenantDashboard on every write: closing this dialog keeps the
+  // review as the diff panel's active commenting context (see
+  // closeReviewDetail), and by then the operator may have navigated away
+  // from the tenant dashboard entirely.
+  callerTenant: string;
+  callerApiUrl: string;
+  callerCloudProviderAlias: string;
   replyingTo: string;
   draftBody: string;
   submitting: boolean;
@@ -425,6 +434,9 @@ export const defaultReviewDetail = (): ReviewDetailState => ({
   loading: false,
   error: '',
   data: null,
+  callerTenant: '',
+  callerApiUrl: '',
+  callerCloudProviderAlias: '',
   replyingTo: '',
   draftBody: '',
   submitting: false,

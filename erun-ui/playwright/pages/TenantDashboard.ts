@@ -75,4 +75,32 @@ export class TenantDashboard {
   async openReview(name: string): Promise<void> {
     await this.page.getByRole('button', { name: `Open review ${name}` }).click();
   }
+
+  newReviewButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'New review' });
+  }
+
+  reviewsRestrictedNote(): Locator {
+    return this.activePanel().getByText('You do not have access to open reviews.');
+  }
+
+  mergeQueueTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  mergeQueueRows(): Locator {
+    return this.mergeQueueTable().locator('tbody tr');
+  }
+
+  advanceMergeQueueButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Advance queue' });
+  }
+
+  advanceMergeQueueConfirmButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Confirm' });
+  }
+
+  advanceMergeQueueRestrictedNote(): Locator {
+    return this.activePanel().getByText('You do not have access to advance the merge queue.');
+  }
 }
