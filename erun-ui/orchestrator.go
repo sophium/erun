@@ -1585,7 +1585,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	}
 	a.mu.Unlock()
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 	// Record what is open now rather than on the way out: the desktop is just as
 	// likely to be killed or to crash as to be quit cleanly, and only a record
 	// written here survives that. A transient (Investigate) session has no
@@ -1705,7 +1705,7 @@ func (a *App) stopOrchestratorSession(id string) bool {
 	}
 	a.mu.Unlock()
 	if managed != nil {
-		_ = managed.Close()
+		_ = a.closeManaged(managed)
 	}
 	// Stopping is the operator saying this orchestrator should not come back, so
 	// it stays closed on every later launch. A restart clears and re-records in

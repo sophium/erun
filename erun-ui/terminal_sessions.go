@@ -107,7 +107,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 	a.recordTerminalActivity(selection)
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
 
@@ -193,7 +193,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 		})
 	}
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
@@ -297,7 +297,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.mu.Unlock()
 
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 
 	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))
 	_ = ctx
@@ -633,7 +633,7 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	a.sessions[key] = managed
 	a.mu.Unlock()
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 
 	return startSessionResult{SessionID: serial}, nil
 }
@@ -679,7 +679,7 @@ func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResul
 	a.sessions[key] = managed
 	a.mu.Unlock()
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 
 	return startSessionResult{SessionID: serial}, nil
 }
@@ -1182,6 +1182,21 @@ func decodePastedFilePayload(payload pastedFilePayload) ([]byte, string, error) 
 		return nil, "", fmt.Errorf("pasted file data is empty")
 	}
 	return data, mimeType, nil
+}
+
+// spawnStreamSession runs streamSession in its own goroutine, tracked on
+// a.sessionWG so shutdown (and tests via t.Cleanup) can wait for every
+// spawned reader to actually exit instead of just asking its session to
+// close. Without that wait, a goroutine left mid-Read races whatever a
+// caller's next teardown step touches — the failure mode that surfaced as a
+// race on the adrg/xdg package's globals between a still-running session and
+// a later t.Cleanup's xdg.Reload.
+func (a *App) spawnStreamSession(managed *managedTerminal) {
+	a.sessionWG.Add(1)
+	go func() {
+		defer a.sessionWG.Done()
+		a.streamSession(managed)
+	}()
 }
 
 func (a *App) streamSession(managed *managedTerminal) {
@@ -1935,12 +1950,41 @@ func (a *App) emitEvent(name string, payload any) {
 	a.emit(name, payload)
 }
 
+// closeManagedLocked marks managed closed and hands back its underlying
+// session for the caller to tear down. The `closed` field (and `session`,
+// which callers read alongside it) is read everywhere else in this file under
+// a.mu — currentSessionFor, tryReconnect, finalizeSessionExit, and more all
+// take the lock before touching either. This is the one place that mutates
+// them, so it must take the same lock rather than grow a second one; every
+// caller here already holds a.mu.
+func (a *App) closeManagedLocked(managed *managedTerminal) terminalSession {
+	if managed == nil || managed.session == nil {
+		return nil
+	}
+	managed.closed = true
+	return managed.session
+}
+
+// closeManaged is closeManagedLocked for callers that do not already hold
+// a.mu. The session's real teardown (session.Close(), a file/process
+// operation) happens outside the lock, matching every other place in this
+// file that only holds a.mu around the field mutation and not around the
+// blocking I/O that follows it.
+func (a *App) closeManaged(managed *managedTerminal) error {
+	a.mu.Lock()
+	session := a.closeManagedLocked(managed)
+	a.mu.Unlock()
+	if session == nil {
+		return nil
+	}
+	return session.Close()
+}
+
 func (a *App) closeAllSessionsLocked() {
-	for _, session := range a.sessions {
-		if session == nil {
-			continue
+	for _, managed := range a.sessions {
+		if session := a.closeManagedLocked(managed); session != nil {
+			_ = session.Close()
 		}
-		_ = session.Close()
 	}
 	a.sessions = make(map[string]*managedTerminal)
 }
@@ -1957,8 +2001,8 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for key, session := range a.sessions {
-		if session == nil {
+	for key, managed := range a.sessions {
+		if managed == nil {
 			continue
 		}
 		matches := false
@@ -1971,7 +2015,9 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 		if !matches {
 			continue
 		}
-		_ = session.Close()
+		if session := a.closeManagedLocked(managed); session != nil {
+			_ = session.Close()
+		}
 		delete(a.sessions, key)
 	}
 }
@@ -2126,14 +2172,6 @@ const (
 	sessionKindCommand      sessionKind = "command"
 	sessionKindOrchestrator sessionKind = "orchestrator"
 )
-
-func (s *managedTerminal) Close() error {
-	if s == nil || s.session == nil {
-		return nil
-	}
-	s.closed = true
-	return s.session.Close()
-}
 
 func selectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
