@@ -7,6 +7,7 @@ export { ManageDialog, type ManageTab } from './ManageDialog';
 export { TenantDashboard, type TenantDashboardTab } from './TenantDashboard';
 export { TenantDialog } from './TenantDialog';
 export { ReviewDetailDialog } from './ReviewDetailDialog';
+export { CreateReviewDialog } from './CreateReviewDialog';
 export { ReviewPanel } from './ReviewPanel';
 export { DebugPanel } from './DebugPanel';
 export { ActivityQueueDrawer } from './ActivityQueueDrawer';

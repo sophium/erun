@@ -4,6 +4,7 @@ import './api/environmentApi';
 import './api/tenantApi';
 import './api/kubernetesApi';
 import './api/cloudApi';
+import './api/execApi';
 import './api/reviewApi';
 import './api/reviewDetailApi';
 import './api/idleApi';
@@ -25,6 +26,7 @@ import aiOccupancyPromptReducer from './slices/aiOccupancyPromptSlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import closeGateReducer from './slices/closeGateSlice';
 import contributeReducer from './slices/contributeSlice';
+import createReviewDialogReducer from './slices/createReviewDialogSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import envStatusReducer from './slices/envStatusSlice';
@@ -32,6 +34,7 @@ import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
 import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
 import manageDialogReducer from './slices/manageDialogSlice';
+import mergeQueueActionReducer from './slices/mergeQueueActionSlice';
 import notificationReducer from './slices/notificationSlice';
 import orchestratorShellActivityReducer from './slices/orchestratorShellActivitySlice';
 import orchestratorsReducer from './slices/orchestratorsSlice';
@@ -85,6 +88,8 @@ export const store = configureStore({
     pinVersion: pinVersionReducer,
     orchestrators: orchestratorsReducer,
     orchestratorShellActivity: orchestratorShellActivityReducer,
+    mergeQueueAction: mergeQueueActionReducer,
+    createReviewDialog: createReviewDialogReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

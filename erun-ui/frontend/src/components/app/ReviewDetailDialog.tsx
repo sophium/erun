@@ -1,4 +1,5 @@
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -11,17 +12,23 @@ import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { closeReviewDetail } from '@/app/reviewDetailThunks';
+import {
+  cancelCloseReview,
+  closeReviewDetail,
+  confirmCloseReview,
+  submitCloseReview,
+} from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
 import { formatDashboardDate, reviewStatusTone } from '@/app/tenantDashboardPanels';
-import type { UITenantDashboardBuild } from '@/types';
+import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
 
 // ReviewDetailDialog is the review object's own detail surface, opened from a
-// row in the tenant dashboard's Reviews tab (#1199). Named "review detail" —
-// not "review panel" — because that name already belongs to the local diff
-// panel (ReviewPanel.tsx); this dialog shows the hosted platform review.
+// row in the tenant dashboard's Reviews tab. Named "review detail" — not
+// "review panel" — because that name already belongs to the local diff panel
+// (ReviewPanel.tsx); this dialog shows the hosted platform review.
 export function ReviewDetailDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const detail = useAppSelector((state) => state.reviewDetail);
@@ -52,8 +59,8 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
   }
   if (detail.error) {
     return (
-      <div role="alert" className="py-4 text-sm text-destructive">
-        {detail.error}
+      <div className="py-4">
+        <InlineAlert>{detail.error}</InlineAlert>
       </div>
     );
   }
@@ -63,8 +70,8 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
   }
   if (data.apiError) {
     return (
-      <div role="alert" className="py-4 text-sm text-destructive">
-        {data.apiError}
+      <div className="py-4">
+        <InlineAlert>{data.apiError}</InlineAlert>
       </div>
     );
   }
@@ -78,8 +85,8 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
   }
   if (data.error || !data.review) {
     return (
-      <div role="alert" className="py-4 text-sm text-destructive">
-        {data.error ?? 'This review could not be loaded.'}
+      <div className="py-4">
+        <InlineAlert>{data.error ?? 'This review could not be loaded.'}</InlineAlert>
       </div>
     );
   }
@@ -107,11 +114,85 @@ function ReviewDetailLoaded({
           {data.queuePosition ? ` · queue position ${String(data.queuePosition)}` : ''}
         </DialogDescription>
       </DialogHeader>
+      <CloseReviewAction review={review} data={data} detail={detail} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <ReviewDetailBuilds data={data} />
         <ReviewDetailComments detail={detail} />
       </div>
     </>
+  );
+}
+
+const reviewOpenStatuses = new Set(['OPEN', 'READY', 'FAILED', 'MERGE']);
+
+// CloseReviewAction degrades by permission (no access, named rather than
+// discovered from a failed submit) and gives Close a visible commitment
+// boundary: a confirm step before the write, and the write's own
+// busy/error state.
+function CloseReviewAction({
+  review,
+  data,
+  detail,
+}: {
+  review: UITenantDashboardReview;
+  data: NonNullable<ReviewDetailState['data']>;
+  detail: ReviewDetailState;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  if (!reviewOpenStatuses.has(review.status)) {
+    return null;
+  }
+  if (!data.canClose) {
+    return (
+      <p className="text-[13px] text-muted-foreground">
+        You do not have access to close this review.
+      </p>
+    );
+  }
+  if (detail.closeConfirming) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px] text-foreground">Close this review without merging it?</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={detail.closing}
+            onClick={() => {
+              dispatch(cancelCloseReview());
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={detail.closing}
+            onClick={() => {
+              void dispatch(submitCloseReview());
+            }}
+          >
+            {detail.closing && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+            Confirm close
+          </Button>
+        </div>
+        {detail.closeError && <InlineAlert>{detail.closeError}</InlineAlert>}
+      </div>
+    );
+  }
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="w-fit"
+      onClick={() => {
+        dispatch(confirmCloseReview());
+      }}
+    >
+      Close review
+    </Button>
   );
 }
 
@@ -129,15 +210,12 @@ function ReviewDetailBuilds({
     );
   }
   if (data.buildsError) {
-    return <p className="text-sm text-destructive">{data.buildsError}</p>;
+    return <InlineAlert>{data.buildsError}</InlineAlert>;
   }
   const builds = data.builds ?? [];
   if (builds.length === 0) {
     return (
-      <EmptyState
-        heading="OPEN — no build yet"
-        body="Nothing has recorded a build for this review yet."
-      />
+      <EmptyState heading="No build yet" body="Nothing has recorded a build for this review yet." />
     );
   }
   return (

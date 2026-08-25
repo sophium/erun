@@ -10,7 +10,9 @@ import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
 import { diffPathKey } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
-import type { DiffFile, DiffHunk } from '@/types';
+import type { DiffFile, DiffHunk, DiffResult } from '@/types';
+
+import { DiffLineCommentAction } from './DiffList.CommentAction';
 
 export function DiffList(): React.ReactElement {
   const targets = useAppSelector(selectReviewEnvTargets);
@@ -92,6 +94,7 @@ function DiffEnvSection({
     if (files.length === 0) {
       return <ReviewStatus>No matching files</ReviewStatus>;
     }
+    const commitHash = resolveDiffCommitHash(slot.diff);
     return (
       <>
         {files.map((file) => (
@@ -99,6 +102,7 @@ function DiffEnvSection({
             key={file.path}
             file={file}
             selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
+            commitHash={commitHash}
           />
         ))}
       </>
@@ -111,6 +115,19 @@ function DiffEnvSection({
       {body}
     </>
   );
+}
+
+// resolveDiffCommitHash is the commit a new diff-line thread anchors to: the
+// specific commit when one is selected, otherwise the newest commit the
+// diff's own range covers. Empty when the range covers only uncommitted
+// worktree changes, which have no commit id to anchor a comment to yet.
+function resolveDiffCommitHash(diff: DiffResult | null | undefined): string {
+  const selected = diff?.selectedCommit?.trim();
+  if (selected) {
+    return selected;
+  }
+  const commits = diff?.reviewCommits ?? [];
+  return commits[commits.length - 1]?.hash ?? '';
 }
 
 // diffErrorCopy resolves the title/body/technical-detail text and whether this
@@ -289,9 +306,11 @@ function CopyErrorButton({ text }: { text: string }): React.ReactElement {
 function DiffFileView({
   file,
   selected,
+  commitHash,
 }: {
   file: DiffFile;
   selected: boolean;
+  commitHash: string;
 }): React.ReactElement {
   return (
     <section
@@ -310,7 +329,12 @@ function DiffFileView({
         <ReviewStatus>Binary file changed</ReviewStatus>
       ) : (
         (file.hunks ?? []).map((hunk) => (
-          <DiffHunkView key={hunk.header} hunk={hunk} filePath={file.path} />
+          <DiffHunkView
+            key={hunk.header}
+            hunk={hunk}
+            filePath={file.path}
+            commitHash={commitHash}
+          />
         ))
       )}
     </section>
@@ -320,9 +344,11 @@ function DiffFileView({
 function DiffHunkView({
   hunk,
   filePath,
+  commitHash,
 }: {
   hunk: DiffHunk;
   filePath: string;
+  commitHash: string;
 }): React.ReactElement {
   const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
   const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
@@ -343,12 +369,16 @@ function DiffHunkView({
           <div
             key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
             className={cn(
-              'grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
+              'group grid min-h-5 w-max min-w-full grid-cols-[22px_48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
               line.kind === 'add' && 'bg-diff-add',
               line.kind === 'delete' && 'bg-diff-delete',
               line.kind === 'meta' && 'bg-muted text-muted-foreground',
             )}
           >
+            {/* Leads the row: a trailing column sits past the content width, so
+                on any diff wider than the panel the affordance was only
+                reachable by scrolling right. */}
+            <DiffLineCommentAction filePath={filePath} line={line} commitHash={commitHash} />
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
               {line.oldLine ?? ''}
             </span>

@@ -33,6 +33,8 @@ export interface UIReviewDetail {
   // canComment reports whether the signed-in user may reply at all, so the
   // composer can be hidden rather than rendered to fail on submit.
   canComment: boolean;
+  // canClose mirrors canComment for the close action.
+  canClose: boolean;
 }
 
 export interface UIReviewComment {
@@ -61,4 +63,72 @@ export interface UICreateReviewReplyInput {
   filePath: string;
   line: number;
   body: string;
+}
+
+// UICreateReviewInput opens a review. sourceBranch must already be pushed to
+// the remote (see UIExecPushInput) before the platform can reference it.
+export interface UICreateReviewInput {
+  tenant: string;
+  apiUrl: string;
+  cloudProviderAlias: string;
+  name: string;
+  targetBranch: string;
+  sourceBranch: string;
+}
+
+export interface UICloseReviewInput {
+  tenant: string;
+  apiUrl: string;
+  cloudProviderAlias: string;
+  reviewId: string;
+}
+
+export interface UIAdvanceMergeQueueInput {
+  tenant: string;
+  apiUrl: string;
+  cloudProviderAlias: string;
+  targetBranch: string;
+}
+
+// UICreateReviewCommentInput starts a new top-level thread anchored to a diff
+// line — the sibling of UICreateReviewReplyInput, which replies within an
+// existing thread. Every field but body is the anchor the operator picked by
+// clicking a line in the diff panel, not a value they typed.
+export interface UICreateReviewCommentInput {
+  tenant: string;
+  apiUrl: string;
+  cloudProviderAlias: string;
+  reviewId: string;
+  commitId: string;
+  filePath: string;
+  line: number;
+  body: string;
+}
+
+// UIExecCommitInput commits every change in the selected environment's
+// working tree. branch is the caller's belief about the current branch,
+// verified server-side and refused loudly on mismatch.
+export interface UIExecCommitInput {
+  branch: string;
+  message: string;
+}
+
+export interface UIExecPushInput {
+  branch: string;
+  remote?: string;
+}
+
+// UICommitWorkingTreeResult/UIPushWorkingTreeBranchResult mirror
+// eruncommon.CommitWorkingTreeResult/PushWorkingTreeBranchResult — passed
+// through the Wails boundary unwrapped, the same way diff results are.
+export interface UICommitWorkingTreeResult {
+  branch: string;
+  commit: string;
+  files: string[];
+}
+
+export interface UIPushWorkingTreeBranchResult {
+  branch: string;
+  remote: string;
+  commit: string;
 }

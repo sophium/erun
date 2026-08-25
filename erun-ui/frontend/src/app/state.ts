@@ -162,10 +162,32 @@ export interface ReviewDetailState {
   loading: boolean;
   error: string;
   data: UIReviewDetail | null;
+  // callerTenant/callerApiUrl/callerCloudProviderAlias are the caller context
+  // resolved when the review loaded, captured here rather than re-derived
+  // from state.tenantDashboard on every write: closing this dialog keeps the
+  // review as the diff panel's active commenting context (see
+  // closeReviewDetail), and by then the operator may have navigated away
+  // from the tenant dashboard entirely.
+  callerTenant: string;
+  callerApiUrl: string;
+  callerCloudProviderAlias: string;
   replyingTo: string;
   draftBody: string;
   submitting: boolean;
   submitError: string;
+  // closeConfirming is the inline "are you sure" step Close goes through
+  // before the write fires — the same cancel-before-commitment boundary every
+  // other side-effecting dashboard action gets.
+  closeConfirming: boolean;
+  closing: boolean;
+  closeError: string;
+  // newCommentAnchor is the diff line the operator clicked to start a new
+  // top-level thread (as opposed to replyingTo, which continues an existing
+  // one). Null means no diff-line composer is open.
+  newCommentAnchor: { commitId: string; filePath: string; line: number } | null;
+  newCommentDraft: string;
+  newCommentSubmitting: boolean;
+  newCommentSubmitError: string;
 }
 
 export interface GlobalConfigDialogState {
@@ -412,10 +434,20 @@ export const defaultReviewDetail = (): ReviewDetailState => ({
   loading: false,
   error: '',
   data: null,
+  callerTenant: '',
+  callerApiUrl: '',
+  callerCloudProviderAlias: '',
   replyingTo: '',
   draftBody: '',
   submitting: false,
   submitError: '',
+  closeConfirming: false,
+  closing: false,
+  closeError: '',
+  newCommentAnchor: null,
+  newCommentDraft: '',
+  newCommentSubmitting: false,
+  newCommentSubmitError: '',
 });
 
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({

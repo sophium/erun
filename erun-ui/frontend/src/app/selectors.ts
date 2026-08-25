@@ -1,3 +1,5 @@
+import { createSelector } from '@reduxjs/toolkit';
+
 import type { UISelection } from '@/types';
 
 import type { SidebarFocus } from './model';
@@ -230,3 +232,24 @@ export const selectReviewEnvTargets = (state: RootState): ReviewEnvTarget[] => {
     },
   ];
 };
+
+// selectReviewTargetBranches lists the branches this tenant's reviews and
+// merge queue already target, so opening a review offers the branches that
+// exist rather than asking the operator to retype one from memory. Memoized:
+// the dialog re-reads it on every store change.
+export const selectReviewTargetBranches = createSelector(
+  [
+    (state: RootState) => state.tenantDashboard.data?.reviews,
+    (state: RootState) => state.tenantDashboard.data?.mergeQueue,
+  ],
+  (reviews, mergeQueue): string[] => {
+    const branches = new Set<string>();
+    for (const review of [...(reviews ?? []), ...(mergeQueue ?? [])]) {
+      const branch = review.targetBranch.trim();
+      if (branch) {
+        branches.add(branch);
+      }
+    }
+    return [...branches].sort((left, right) => left.localeCompare(right));
+  },
+);

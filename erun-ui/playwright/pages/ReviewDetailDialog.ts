@@ -42,4 +42,16 @@ export class ReviewDetailDialog {
   async cancelReply(): Promise<void> {
     await this.locator().getByRole('button', { name: 'Cancel' }).click();
   }
+
+  closeReviewButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Close review' });
+  }
+
+  confirmCloseButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Confirm close' });
+  }
+
+  closeRestrictedNote(): Locator {
+    return this.locator().getByText('You do not have access to close this review.');
+  }
 }

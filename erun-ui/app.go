@@ -76,6 +76,8 @@ type erunUIDeps struct {
 	listAgentOutputs          func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput       func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
 	loadDiff                  func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
+	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
 	loadIdleStatus            func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
 	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
@@ -409,6 +411,7 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.loadDiff == nil {
 		deps.loadDiff = loadDiffFromMCP
 	}
+	deps = withDefaultExecWriteDeps(deps)
 	if deps.loadIdleStatus == nil {
 		deps.loadIdleStatus = loadIdleStatusFromMCP
 	}

@@ -1,8 +1,10 @@
+import type { ReviewDetailState, TenantDashboardState } from '@/app/state';
 import type { UIReviewDetailInput, UITenant } from '@/types';
 
 import { reviewDetailApi } from './api/reviewDetailApi';
 import { readError } from './errors';
-import { patchReviewDetail, resetReviewDetail } from './slices/reviewDetailSlice';
+import { showNotification } from './notificationThunks';
+import { patchReviewDetail } from './slices/reviewDetailSlice';
 import type { AppThunk } from './store';
 
 // reviewDetailInput resolves the same tenant API URL + cloud alias the
@@ -23,6 +25,41 @@ function reviewDetailInput(
   return { tenant, apiUrl, cloudProviderAlias, reviewId };
 }
 
+// reviewCallerContext resolves the caller context a write against reviewId
+// needs. Once the review has loaded once, its own stored caller fields win —
+// they survive closing the (modal) dialog to browse the diff panel, which the
+// operator may do after navigating away from the tenant dashboard entirely,
+// long past the point state.tenantDashboard still describes this review.
+function reviewCallerContext(
+  state: {
+    reviewDetail: ReviewDetailState;
+    tenantDashboard: TenantDashboardState;
+    tenants: { tenants: UITenant[] };
+  },
+  reviewId: string,
+): UIReviewDetailInput | null {
+  const detail = state.reviewDetail;
+  if (
+    detail.reviewId === reviewId &&
+    detail.callerTenant &&
+    detail.callerApiUrl &&
+    detail.callerCloudProviderAlias
+  ) {
+    return {
+      tenant: detail.callerTenant,
+      apiUrl: detail.callerApiUrl,
+      cloudProviderAlias: detail.callerCloudProviderAlias,
+      reviewId,
+    };
+  }
+  return reviewDetailInput(
+    state.tenantDashboard.tenant,
+    state.tenantDashboard.data?.apiUrl ?? '',
+    state.tenants.tenants,
+    reviewId,
+  );
+}
+
 export const openReviewDetail =
   (reviewId: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -33,6 +70,9 @@ export const openReviewDetail =
         loading: true,
         error: '',
         data: null,
+        callerTenant: '',
+        callerApiUrl: '',
+        callerCloudProviderAlias: '',
         replyingTo: '',
         draftBody: '',
         submitError: '',
@@ -41,16 +81,31 @@ export const openReviewDetail =
     await dispatch(loadReviewDetail(reviewId));
   };
 
+// closeReviewDetail hides the dialog but keeps the review as the diff
+// panel's active commenting context (reviewId/data/caller fields), so
+// closing it to browse the diff and start a new thread from a line does not
+// lose which review that thread belongs to. Only the dialog's own transient
+// UI state resets.
 export const closeReviewDetail = (): AppThunk => (dispatch) => {
-  dispatch(resetReviewDetail());
+  dispatch(
+    patchReviewDetail({
+      open: false,
+      replyingTo: '',
+      draftBody: '',
+      submitError: '',
+      closeConfirming: false,
+      closeError: '',
+      newCommentAnchor: null,
+      newCommentDraft: '',
+      newCommentSubmitError: '',
+    }),
+  );
 };
 
 export const loadReviewDetail =
   (reviewId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const state = getState();
-    const { tenant, data } = state.tenantDashboard;
-    const input = reviewDetailInput(tenant, data?.apiUrl ?? '', state.tenants.tenants, reviewId);
+    const input = reviewCallerContext(getState(), reviewId);
     if (!input) {
       dispatch(
         patchReviewDetail({
@@ -69,7 +124,16 @@ export const loadReviewDetail =
       if (getState().reviewDetail.reviewId !== reviewId) {
         return;
       }
-      dispatch(patchReviewDetail({ loading: false, error: '', data }));
+      dispatch(
+        patchReviewDetail({
+          loading: false,
+          error: '',
+          data,
+          callerTenant: input.tenant,
+          callerApiUrl: input.apiUrl,
+          callerCloudProviderAlias: input.cloudProviderAlias,
+        }),
+      );
     } catch (error) {
       if (getState().reviewDetail.reviewId !== reviewId) {
         return;
@@ -104,13 +168,7 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
   if (!body || !parent) {
     return;
   }
-  const { tenant, data: dashboardData } = state.tenantDashboard;
-  const input = reviewDetailInput(
-    tenant,
-    dashboardData?.apiUrl ?? '',
-    state.tenants.tenants,
-    reviewId,
-  );
+  const input = reviewCallerContext(state, reviewId);
   if (!input) {
     dispatch(
       patchReviewDetail({ submitError: 'Reply requires an API URL and a primary cloud alias.' }),
@@ -140,5 +198,118 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
     await dispatch(loadReviewDetail(reviewId));
   } catch (error) {
     dispatch(patchReviewDetail({ submitting: false, submitError: readError(error) }));
+  }
+};
+
+// confirmCloseReview/cancelCloseReview give Close a visible commitment
+// boundary: the operator sees the confirm step before the write fires and can
+// back out of it, matching every other side-effecting dashboard action.
+export const confirmCloseReview = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeConfirming: true, closeError: '' }));
+};
+
+export const cancelCloseReview = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeConfirming: false, closeError: '' }));
+};
+
+export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId } = state.reviewDetail;
+  const input = reviewCallerContext(state, reviewId);
+  if (!input) {
+    dispatch(
+      patchReviewDetail({ closeError: 'Closing requires an API URL and a primary cloud alias.' }),
+    );
+    return;
+  }
+  dispatch(patchReviewDetail({ closing: true, closeError: '' }));
+  try {
+    const review = await dispatch(
+      reviewDetailApi.endpoints.closeReview.initiate({
+        tenant: input.tenant,
+        apiUrl: input.apiUrl,
+        cloudProviderAlias: input.cloudProviderAlias,
+        reviewId,
+      }),
+    ).unwrap();
+    dispatch(patchReviewDetail({ closing: false, closeConfirming: false, closeError: '' }));
+    dispatch(showNotification('success', `Closed ${review.name || review.reviewId}.`));
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(patchReviewDetail({ closing: false, closeError: readError(error) }));
+  }
+};
+
+// startReviewComment/cancelReviewComment/setReviewCommentDraft/
+// submitReviewComment mirror the reply flow above, but for opening a brand
+// new top-level thread anchored to a diff line the operator clicked — the
+// gap ReviewDetailDialog.Comments.tsx used to call out as deferred.
+export const startReviewComment =
+  (anchor: { commitId: string; filePath: string; line: number }): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      patchReviewDetail({
+        newCommentAnchor: anchor,
+        newCommentDraft: '',
+        newCommentSubmitError: '',
+      }),
+    );
+  };
+
+export const cancelReviewComment = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ newCommentAnchor: null, newCommentDraft: '', newCommentSubmitError: '' }),
+  );
+};
+
+export const setReviewCommentDraft =
+  (body: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ newCommentDraft: body }));
+  };
+
+export const submitReviewComment = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId, newCommentAnchor, newCommentDraft } = state.reviewDetail;
+  const body = newCommentDraft.trim();
+  if (!body || !newCommentAnchor) {
+    return;
+  }
+  const input = reviewCallerContext(state, reviewId);
+  if (!input) {
+    dispatch(
+      patchReviewDetail({
+        newCommentSubmitError: 'Commenting requires an API URL and a primary cloud alias.',
+      }),
+    );
+    return;
+  }
+  dispatch(patchReviewDetail({ newCommentSubmitting: true, newCommentSubmitError: '' }));
+  try {
+    await dispatch(
+      reviewDetailApi.endpoints.createReviewComment.initiate({
+        tenant: input.tenant,
+        apiUrl: input.apiUrl,
+        cloudProviderAlias: input.cloudProviderAlias,
+        reviewId,
+        commitId: newCommentAnchor.commitId,
+        filePath: newCommentAnchor.filePath,
+        line: newCommentAnchor.line,
+        body,
+      }),
+    ).unwrap();
+    dispatch(
+      patchReviewDetail({
+        newCommentSubmitting: false,
+        newCommentAnchor: null,
+        newCommentDraft: '',
+        newCommentSubmitError: '',
+      }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(
+      patchReviewDetail({ newCommentSubmitting: false, newCommentSubmitError: readError(error) }),
+    );
   }
 };

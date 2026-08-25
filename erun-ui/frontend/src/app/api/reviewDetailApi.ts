@@ -1,11 +1,19 @@
 import type {
+  UICloseReviewInput,
+  UICreateReviewCommentInput,
   UICreateReviewReplyInput,
   UIReviewComment,
   UIReviewDetail,
   UIReviewDetailInput,
+  UITenantDashboardReview,
 } from '@/types';
 
-import { CreateReviewReply, LoadReviewDetail } from '../../../wailsjs/go/main/App';
+import {
+  CloseReview,
+  CreateReviewComment,
+  CreateReviewReply,
+  LoadReviewDetail,
+} from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
 
@@ -26,6 +34,21 @@ export const reviewDetailApi = wailsApi.injectEndpoints({
       ),
       invalidatesTags: (_result, _error, input) => [{ type: 'ReviewDetail', id: input.reviewId }],
     }),
+    createReviewComment: builder.mutation<UIReviewComment, UICreateReviewCommentInput>({
+      queryFn: wailsQueryFn<UICreateReviewCommentInput, UIReviewComment>((input) =>
+        CreateReviewComment(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [{ type: 'ReviewDetail', id: input.reviewId }],
+    }),
+    closeReview: builder.mutation<UITenantDashboardReview, UICloseReviewInput>({
+      queryFn: wailsQueryFn<UICloseReviewInput, UITenantDashboardReview>((input) =>
+        CloseReview(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [
+        { type: 'ReviewDetail', id: input.reviewId },
+        { type: 'TenantDashboard', id: input.tenant },
+      ],
+    }),
   }),
 });
 
@@ -33,4 +56,6 @@ export const {
   useGetReviewDetailQuery,
   useLazyGetReviewDetailQuery,
   useCreateReviewReplyMutation,
+  useCreateReviewCommentMutation,
+  useCloseReviewMutation,
 } = reviewDetailApi;

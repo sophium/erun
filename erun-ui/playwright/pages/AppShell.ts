@@ -3,6 +3,7 @@ import { ActivityQueueDrawer } from './ActivityQueueDrawer';
 import { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
+import { CreateReviewDialog } from './CreateReviewDialog';
 import { DebugPanel } from './DebugPanel';
 import { EnvironmentInitDialog } from './EnvironmentInitDialog';
 import { GlobalConfigDialog } from './GlobalConfigDialog';
@@ -104,6 +105,10 @@ export class AppShell {
 
   get reviewDetailDialog(): ReviewDetailDialog {
     return new ReviewDetailDialog(this.page);
+  }
+
+  get createReviewDialog(): CreateReviewDialog {
+    return new CreateReviewDialog(this.page);
   }
 
   get activityDrawer(): ActivityQueueDrawer {

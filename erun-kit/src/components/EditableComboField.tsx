@@ -5,7 +5,7 @@ import { cn } from '../lib/utils';
 import { FieldLabel } from './FieldLabel';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from './ui/popover';
 
 function EditableComboChoices({
   id,
@@ -23,7 +23,10 @@ function EditableComboChoices({
   return (
     <PopoverContent
       id={`${id}-choices`}
-      className="w-96 max-w-[calc(100vw-4rem)] p-1"
+      // Sized and aligned to the field itself, not to the chevron that opens
+      // it: anchored to a 28px button the list hung off to one side, which
+      // inside a dialog put it half outside the dialog it belongs to.
+      className="w-(--radix-popover-trigger-width) min-w-64 max-w-[calc(100vw-4rem)] p-1"
       align="start"
       collisionPadding={12}
     >
@@ -90,52 +93,54 @@ export function EditableComboField({
       <FieldLabel htmlFor={id} required={required}>
         {label}
       </FieldLabel>
-      <div className="relative">
-        <Input
+      <Popover open={open} onOpenChange={openPopover}>
+        <PopoverAnchor asChild>
+          <div className="relative">
+            <Input
+              id={id}
+              ref={inputRef}
+              className="pr-10"
+              value={value}
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              required={required}
+              disabled={disabled}
+              role="combobox"
+              aria-expanded={open}
+              aria-controls={`${id}-choices`}
+              onChange={(event) => {
+                setDirty(true);
+                onValueChange(event.target.value);
+              }}
+              onFocus={() => {
+                if (!disabled && suggestions.length > 0) {
+                  openPopover(true);
+                }
+              }}
+            />
+            <PopoverTrigger asChild>
+              <Button
+                className="absolute top-1 right-1 size-7 text-muted-foreground"
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={`Show ${label.toLowerCase()} choices`}
+                disabled={disabled === true || suggestions.length === 0}
+              >
+                <ChevronsUpDown />
+              </Button>
+            </PopoverTrigger>
+          </div>
+        </PopoverAnchor>
+        <EditableComboChoices
           id={id}
-          ref={inputRef}
-          className="pr-10"
+          visibleSuggestions={visibleSuggestions}
           value={value}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          required={required}
-          disabled={disabled}
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={`${id}-choices`}
-          onChange={(event) => {
-            setDirty(true);
-            onValueChange(event.target.value);
-          }}
-          onFocus={() => {
-            if (!disabled && suggestions.length > 0) {
-              openPopover(true);
-            }
-          }}
+          onValueChange={onValueChange}
+          setOpen={setOpen}
         />
-        <Popover open={open} onOpenChange={openPopover}>
-          <PopoverTrigger asChild>
-            <Button
-              className="absolute top-1 right-1 size-7 text-muted-foreground"
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={`Show ${label.toLowerCase()} choices`}
-              disabled={disabled === true || suggestions.length === 0}
-            >
-              <ChevronsUpDown />
-            </Button>
-          </PopoverTrigger>
-          <EditableComboChoices
-            id={id}
-            visibleSuggestions={visibleSuggestions}
-            value={value}
-            onValueChange={onValueChange}
-            setOpen={setOpen}
-          />
-        </Popover>
-      </div>
+      </Popover>
     </div>
   );
 }

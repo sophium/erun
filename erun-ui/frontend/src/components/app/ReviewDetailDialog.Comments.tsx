@@ -13,6 +13,8 @@ import type { ReviewDetailState } from '@/app/state';
 import { formatDashboardDate } from '@/app/tenantDashboardPanels';
 import type { UIReviewComment } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
+
 // ReviewDetailComments renders the review's threads (root comments with their
 // replies nested under them) and, per thread, a reply composer. Starting a
 // new top-level thread needs a diff-line anchor this dialog does not have —
@@ -33,7 +35,7 @@ export function ReviewDetailComments({
     );
   }
   if (detail.data?.commentsError) {
-    return <p className="text-sm text-destructive">{detail.data.commentsError}</p>;
+    return <InlineAlert>{detail.data.commentsError}</InlineAlert>;
   }
   const roots = comments.filter((comment) => !comment.parentCommentId);
   if (roots.length === 0) {
@@ -133,7 +135,7 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
           }
         }}
       />
-      {detail.submitError && <p className="text-[13px] text-destructive">{detail.submitError}</p>}
+      {detail.submitError && <InlineAlert>{detail.submitError}</InlineAlert>}
       <div className="flex justify-end gap-2">
         <Button
           type="button"
