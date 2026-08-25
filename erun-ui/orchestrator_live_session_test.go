@@ -214,3 +214,26 @@ func hookGroupContainsMarker(t *testing.T, block map[string]any, marker string) 
 	}
 	return false
 }
+
+// The recorder hook keys purely on $ERUN_ORCHESTRATOR_ID, so a conversation
+// that ever ran under the wrong id leaves a record claiming another
+// orchestrator's session. Adopting it would resume somebody else's history.
+func TestPreferLiveOrchestratorSessionIDRefusesAConversationAnotherOrchestratorClaims(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+
+	stageOrchestratorConversation(t, "shared-conversation")
+	stageOrchestratorLiveSession(t, "petios-admin", "shared-conversation")
+	stageOrchestratorLiveSession(t, "erun", "shared-conversation")
+
+	if got := preferLiveOrchestratorSessionID("erun", "erun-spawn"); got != "erun-spawn" {
+		t.Fatalf("a conversation another orchestrator claims must not be adopted: got %q", got)
+	}
+
+	// Once the other orchestrator moves on, the conversation is adoptable.
+	stageOrchestratorLiveSession(t, "petios-admin", "petios-own-conversation")
+	if got := preferLiveOrchestratorSessionID("erun", "erun-spawn"); got != "shared-conversation" {
+		t.Fatalf("with the conflict gone the live record should win: got %q", got)
+	}
+}

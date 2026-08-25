@@ -96,7 +96,43 @@ func preferLiveOrchestratorSessionID(orchestratorID, spawnConversationID string)
 	if !orchestratorSessionExists(live) {
 		return spawnConversationID
 	}
+	// A conversation belongs to one orchestrator. The recorder hook keys purely
+	// on $ERUN_ORCHESTRATOR_ID, so a session that ever ran under the wrong id
+	// leaves a record claiming somebody else's conversation — and adopting it
+	// here would hand this orchestrator the other's history and return note.
+	if orchestratorLiveSessionClaimedByOther(orchestratorID, live) {
+		return spawnConversationID
+	}
 	return live
+}
+
+// orchestratorLiveSessionClaimedByOther reports whether some OTHER
+// orchestrator's live-session record already names this conversation. Read
+// errors answer false: the guard exists to refuse a provable conflict, and a
+// directory it cannot list is not proof of one.
+func orchestratorLiveSessionClaimedByOther(orchestratorID, sessionID string) bool {
+	orchestratorID = strings.TrimSpace(orchestratorID)
+	sessionID = strings.TrimSpace(sessionID)
+	if orchestratorID == "" || sessionID == "" {
+		return false
+	}
+	entries, err := os.ReadDir(orchestratorLiveSessionDir())
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		other := strings.TrimSuffix(entry.Name(), ".json")
+		if other == orchestratorID {
+			continue
+		}
+		if claimed, ok := readOrchestratorLiveSessionID(other); ok && claimed == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 // orchestratorSessionRecordHookCommand is the hook command that keeps one
