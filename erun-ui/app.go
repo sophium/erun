@@ -485,6 +485,7 @@ func (a *App) startup(ctx context.Context) {
 	// state the user's terminal does.
 	importLoginShellEnv()
 	configureAppIdentity("ERun")
+	observeAppActivation()
 	a.startActivityPollers()
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
