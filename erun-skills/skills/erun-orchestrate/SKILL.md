@@ -106,12 +106,15 @@ Read what you control from erun's config store — never infer it from what happ
 - **An error message is judged against the user's state, not against the code that produced it.** A
   tenant-dashboard identity error was well-written, correctly humanised, and traceable to a real
   `ErrPlatformUnauthorized` — a reviewer read it and approved it. It was still a dead end, because the
-  state it was shown in was "this tenant was never connected to the platform", a state in which
-  signing in again is impossible. The message was good prose about the wrong situation. The check
-  that catches this is not "is this sentence clear" but "if I were actually in this state, could I
-  get out?" — which requires knowing what state the user is actually in, not merely which error
-  constant was returned. A single API status can stand for several genuinely different user
-  situations, and reviewing the string in isolation cannot tell them apart.
+  state it was shown in was: the desktop had signed the platform with the tenant's primary cloud
+  alias — an AWS alias — instead of the erun-platform alias, so the platform refused the identity and
+  the surface said "Sign in to the tenant's cloud provider again." The operator did exactly that, the
+  AWS sign-in succeeded, and it could never help, because AWS was never an identity the platform would
+  accept. The message was good prose about the wrong situation. The check that catches this is not "is
+  this sentence clear" but "if I were actually in this state, could I get out?" — which requires
+  knowing what state the user is actually in, not merely which error constant was returned. A single
+  API status can stand for several genuinely different user situations, and reviewing the string in
+  isolation cannot tell them apart.
 - **Before accepting that a surface cannot offer something, check whether the product already can.**
   A desktop had no way to connect a tenant or enrol a user, and this read as an inherent limit until
   someone grepped for the verbs: the platform enrolment, tenant-creation, and provisioning commands
