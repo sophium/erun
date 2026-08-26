@@ -35,8 +35,13 @@ function reviewCallerContext(
   return { tenant, platformAlias: state.tenantDashboard.data?.platformAlias ?? '' };
 }
 
+// callerTenant carries the tenant this review was opened for when the
+// caller cannot rely on the tenant dashboard having ever loaded — the diff
+// panel's "Start a review" affordance reaches this after creating a review
+// without the operator ever opening the Reviews tab this session, so
+// reviewCallerContext's tenantDashboard.tenant fallback would find nothing.
 export const openReviewDetail =
-  (reviewId: string): AppThunk<Promise<void>> =>
+  (reviewId: string, callerTenant = ''): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(
       patchReviewDetail({
@@ -45,7 +50,7 @@ export const openReviewDetail =
         loading: true,
         error: '',
         data: null,
-        callerTenant: '',
+        callerTenant,
         callerPlatformAlias: '',
         replyingTo: '',
         draftBody: '',

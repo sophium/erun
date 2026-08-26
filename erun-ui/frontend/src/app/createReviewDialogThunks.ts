@@ -1,11 +1,11 @@
-import { EnvironmentWorkingIssue } from '../../wailsjs/go/main/App';
+import { EnvironmentWorkingIssue, TenantReviewCreateCapability } from '../../wailsjs/go/main/App';
 import { execApi } from './api/execApi';
 import { tenantApi } from './api/tenantApi';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
 import { openReviewDetail } from './reviewDetailThunks';
 import { patchCreateReviewDialog, resetCreateReviewDialog } from './slices/createReviewDialogSlice';
-import type { AppThunk } from './store';
+import type { AppThunk, RootState } from './store';
 
 // createReviewDialogThunks drives the "Open a review" dialog: pushing the
 // selected environment's branch (commit, then push — the precondition
@@ -14,24 +14,104 @@ import type { AppThunk } from './store';
 // none of this fires implicitly on open (Professional UX: side-effecting
 // actions need a visible boundary, not an on-open side effect).
 
-export const openCreateReviewDialog = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-  const state = getState();
-  const { tenant, data } = state.tenantDashboard;
-  const environment = data?.environment?.trim() ?? '';
-  dispatch(
-    patchCreateReviewDialog({
-      ...resetCreateReviewDialogState(),
-      open: true,
-      tenant,
-      environment,
-      branchLoading: Boolean(environment),
-    }),
-  );
-  if (!environment) {
-    return;
+// CreateReviewDialogContext is what a caller already knows and the dialog
+// should never ask the operator to retype: the diff panel's own entry point
+// (DiffList.StartReviewAction) already knows which environment it is showing
+// and which branch the diff is based on, so it passes both. The Reviews tab's
+// New review button has neither — it derives tenant/environment from the
+// tenant dashboard the way it always has, and target branch defaults to
+// 'main' the way it always has.
+export interface CreateReviewDialogContext {
+  tenant: string;
+  environment: string;
+  targetBranch?: string;
+}
+
+// resolveCreateReviewDialogContext fills in whatever the caller did not
+// already know (the Reviews tab's tenant/environment come from the tenant
+// dashboard; its target branch has no diff to read one from) — split out so
+// openCreateReviewDialog's own branching stays under the module's complexity
+// cap.
+function resolveCreateReviewDialogContext(
+  context: CreateReviewDialogContext | undefined,
+  state: RootState,
+): { tenant: string; environment: string; targetBranch: string } {
+  const tenant = (context?.tenant ?? state.tenantDashboard.tenant).trim();
+  const environment = (
+    context?.environment ??
+    state.tenantDashboard.data?.environment ??
+    ''
+  ).trim();
+  return { tenant, environment, targetBranch: normalizeTargetBranch(context?.targetBranch) };
+}
+
+// normalizeTargetBranch falls back to 'main' for a blank hint. Written as an
+// early return rather than `hint || 'main'` / `hint ? hint : 'main'` because
+// both trip eslint's prefer-nullish-coalescing (neither is a true nullish
+// check, since a blank string is falsy but not nullish).
+function normalizeTargetBranch(hint: string | undefined): string {
+  const trimmed = hint?.trim();
+  if (!trimmed) {
+    return 'main';
   }
-  await dispatch(loadCreateReviewDialogBranch(tenant, environment));
-};
+  return trimmed;
+}
+
+export const openCreateReviewDialog =
+  (context?: CreateReviewDialogContext): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const { tenant, environment, targetBranch } = resolveCreateReviewDialogContext(
+      context,
+      getState(),
+    );
+    dispatch(
+      patchCreateReviewDialog({
+        ...resetCreateReviewDialogState(),
+        open: true,
+        tenant,
+        environment,
+        targetBranch,
+        branchLoading: Boolean(environment),
+        capabilityLoading: Boolean(tenant),
+      }),
+    );
+    await Promise.all([
+      tenant ? dispatch(loadCreateReviewDialogCapability(tenant)) : Promise.resolve(),
+      environment ? dispatch(loadCreateReviewDialogBranch(tenant, environment)) : Promise.resolve(),
+    ]);
+  };
+
+// loadCreateReviewDialogCapability resolves whether the signed-in user may
+// open a review for tenant at all, independent of the tenant dashboard —
+// the diff panel's own "Start a review" affordance can be clicked before the
+// dashboard has ever loaded, so the dialog resolves its own answer rather
+// than assuming one is already known (Degrade by permission,
+// erun-ui/AGENTS.md).
+const loadCreateReviewDialogCapability =
+  (tenant: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    try {
+      const capability = await TenantReviewCreateCapability(tenant);
+      const dialog = getState().createReviewDialog;
+      if (!dialog.open || dialog.tenant !== tenant) {
+        return;
+      }
+      dispatch(
+        patchCreateReviewDialog({
+          capabilityLoading: false,
+          capabilityRestricted: capability.canCreate ? '' : (capability.restricted ?? ''),
+        }),
+      );
+    } catch (error) {
+      const dialog = getState().createReviewDialog;
+      if (!dialog.open || dialog.tenant !== tenant) {
+        return;
+      }
+      dispatch(
+        patchCreateReviewDialog({ capabilityLoading: false, capabilityError: readError(error) }),
+      );
+    }
+  };
 
 // loadCreateReviewDialogBranch reads the environment's current branch to
 // prefill sourceBranch — split out of openCreateReviewDialog so that
@@ -73,6 +153,9 @@ function resetCreateReviewDialogState() {
     pushError: '',
     creating: false,
     createError: '',
+    capabilityLoading: false,
+    capabilityRestricted: '',
+    capabilityError: '',
   };
 }
 
@@ -170,7 +253,7 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
     ).unwrap();
     dispatch(resetCreateReviewDialog());
     dispatch(showNotification('success', `Opened ${review.name || review.reviewId}.`));
-    void dispatch(openReviewDetail(review.reviewId));
+    void dispatch(openReviewDetail(review.reviewId, dialog.tenant));
   } catch (error) {
     dispatch(patchCreateReviewDialog({ creating: false, createError: readError(error) }));
   }

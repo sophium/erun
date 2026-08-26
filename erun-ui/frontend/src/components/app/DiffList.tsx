@@ -13,6 +13,7 @@ import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
+import { StartReviewFromDiffAction } from './DiffList.StartReviewAction';
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 export function DiffList(): React.ReactElement {
@@ -57,11 +58,27 @@ function DiffEnvSection({
   // sticky wrapper stays: it is a real functional need (this header keeps the
   // active environment identity visible while a long diff scrolls), unlike
   // the label styling it wraps.
-  const header = showHeader ? (
-    <div className="sticky top-0 z-10 border-b border-border bg-background px-3 py-1">
-      <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />
+  //
+  // Unlike the label, the "Start a review" action renders unconditionally —
+  // one persistent affordance per environment section rather than one that
+  // only appears once files have loaded, so it never flickers in and out as
+  // the diff itself loads, errors, or comes back empty.
+  const targetBranchHint = slot.diff?.reviewBase?.branch?.trim() ?? '';
+  const header = (
+    <div
+      className={cn(
+        'sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background px-3 py-1',
+        showHeader ? 'justify-between' : 'justify-end',
+      )}
+    >
+      {showHeader && <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />}
+      <StartReviewFromDiffAction
+        tenant={target.tenant}
+        environment={target.environment}
+        targetBranch={targetBranchHint}
+      />
     </div>
-  ) : null;
+  );
 
   const body = ((): React.ReactElement => {
     if (slot.loading) {
