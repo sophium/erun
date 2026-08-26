@@ -141,6 +141,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
+    await dialog.screenshot({
+      path: '/home/erun/.erun/outputs/1351-visual/ports-empty-configured.png',
+    });
 
     await dialog.locator('#expose-service-name').fill('api');
     await dialog.locator('#expose-target-ip').fill('203.0.113.10');
@@ -168,9 +171,19 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const copyReq = await clipboardWrite;
     expect(copyReq.postData() ?? '').toContain('https://api.pw-alpha.services.test');
 
+    // The hostname is a fake test domain with no real DNS, so stub it rather
+    // than let the popup hit the network and land on chrome-error:// --
+    // mirrors diagnostics-orchestrator-context.spec.ts's github.com stub for
+    // the same reason.
+    await page
+      .context()
+      .route('https://api.pw-alpha.services.test/**', (route) =>
+        route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
+      );
     const popupPromise = page.context().waitForEvent('page');
     await dialog.getByRole('button', { name: /Open the address for api/ }).click();
     const popup = await popupPromise;
+    await popup.waitForLoadState();
     expect(popup.url()).toBe('https://api.pw-alpha.services.test/');
     await popup.close();
 
@@ -231,6 +244,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(confirm).toBeVisible();
     expect(unexposeCalls).toBe(0);
 
+    await confirm.scrollIntoViewIfNeeded();
     await dialog.screenshot({
       path: '/home/erun/.erun/outputs/1351-visual/ports-remove-confirm.png',
     });
