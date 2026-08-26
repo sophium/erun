@@ -18,6 +18,8 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     shellRunning: false,
     shellCommand: '',
     shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    nudgeCapped: false,
     ...overrides,
   };
 }

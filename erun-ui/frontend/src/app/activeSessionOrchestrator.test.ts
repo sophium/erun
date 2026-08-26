@@ -19,6 +19,8 @@ function orchestrator(id: string, sessionId: number): OrchestratorInfo {
     shellRunning: false,
     shellCommand: '',
     shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    nudgeCapped: false,
   };
 }
 

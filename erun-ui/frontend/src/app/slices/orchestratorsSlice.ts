@@ -1,9 +1,17 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
+import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
+
 export interface OrchestratorEnvRef {
   tenant: string;
   environment: string;
   directory: string;
+  // activity is the environment-activity poller's last observation for this
+  // env (see uiEnvironment.Activity), joined onto the link rather than
+  // collected separately — the same reused shape, so this card and the
+  // sidebar row for the same environment can never disagree about what
+  // "busy" or "outage" means. Undefined until the poller has observed it.
+  activity?: UIEnvironmentActivity;
 }
 
 // OrchestratorInfo mirrors the Go orchestratorInfo JSON contract: a host-side
@@ -38,6 +46,14 @@ export interface OrchestratorInfo {
   shellRunning: boolean;
   shellCommand: string;
   shellStartedAtUnix: number;
+  // nudgeCount/nudgeCapped/lastNudgeAtUnix mirror orchestratorSession's own
+  // pacing state (orchestrator_pacing.go): how many consecutive un-answered
+  // pacing nudges erun has sent this session, and whether it gave up after
+  // the cap. Zero/false for a stopped orchestrator, whose pacing state does
+  // not survive past its session.
+  nudgeCount: number;
+  nudgeCapped: boolean;
+  lastNudgeAtUnix?: number;
 }
 
 export interface OrchestratorsState {

@@ -23,6 +23,8 @@ function orchestrator(
     shellRunning: false,
     shellCommand: '',
     shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    nudgeCapped: false,
   } satisfies OrchestratorInfo;
 }
 
