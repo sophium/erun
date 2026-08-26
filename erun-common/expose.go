@@ -404,16 +404,18 @@ func exposePlatformConfigured(params ExposeServiceParams) bool {
 	if strings.TrimSpace(params.ServicesZone) != "" && strings.TrimSpace(params.PlatformNamespace) != "" {
 		return true
 	}
-	return projectHasExposablePlatform(params.ProjectRoot)
+	return ProjectHasExposablePlatform(params.ProjectRoot)
 }
 
-// projectHasExposablePlatform reports whether projectRoot declares enough of a
+// ProjectHasExposablePlatform reports whether projectRoot declares enough of a
 // platform block for expose to resolve a hostname: the same three conditions
 // resolveExposeServicePlan otherwise fails on (missing block, missing base
 // domain, missing platform.env). Mirrors those checks rather than calling
 // resolveExposeServicePlan, since that also validates the store's env config —
-// SkipIfUnconfigured only asks "is this a platform deployment at all".
-func projectHasExposablePlatform(projectRoot string) bool {
+// SkipIfUnconfigured only asks "is this a platform deployment at all". Exported
+// so a caller can decide up front whether an environment is even eligible for
+// exposure, before offering the action at all (e.g. the desktop's Ports tab).
+func ProjectHasExposablePlatform(projectRoot string) bool {
 	platform := resolveProjectPlatform(projectRoot)
 	return !platform.IsZero() && strings.TrimSpace(platform.ServicesZone) != "" && strings.TrimSpace(platform.Env) != ""
 }
