@@ -27,18 +27,19 @@ const password = process.env.E2E_LOGIN_PASSWORD ?? 'E2eOperator1!';
 // yields an id_token, and the API verifies that token against Zitadel's live
 // JWKS and — on an empty database — bootstraps the operations tenant, which
 // GET /v1/config then renders.
-test('operator signs in through Zitadel OIDC, registers an environment, and sees the deploy-executor-unconfigured response', async ({ page }) => {
+test('operator signs in through Zitadel OIDC, registers an environment, and sees the deploy-executor-unconfigured response', async ({
+  page,
+}) => {
   test.skip(
     gated,
     'opt-in: set ERUN_E2E_CONSOLE_OIDC=1 (./run.sh brings up the stack and sets it)',
   );
 
-  // 1. The signed-out console offers the real OIDC sign-in, not the dev-token
-  //    fallback: a Sign in button only renders when the issuer is configured.
+  // 1. The signed-out console is the landing page (erun#1327), offering the
+  //    real OIDC sign-in, not the dev-token fallback: a Sign in button only
+  //    renders when the issuer is configured.
   await page.goto('/');
-  await expect(
-    page.getByText('Sign in with your organization identity to view and manage your environments.'),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   // 2. The browser lands on Zitadel's own Login V2 UI — loginname step.

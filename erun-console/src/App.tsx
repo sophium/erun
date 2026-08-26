@@ -12,6 +12,7 @@ import { fetchPlatformConfig } from './config/platform';
 import { AppShell } from './shell/AppShell';
 import { LandingScreen } from './shell/LandingScreen';
 import { ErrorScreen, LoadingScreen, NotEnrolledScreen } from './shell/PreShellScreens';
+import { applyTheme, initialTheme } from './shell/theme';
 
 type LoadState =
   | { status: 'loading' }
@@ -165,6 +166,14 @@ export function App(): React.ReactElement {
   const platform = usePlatformInfo();
   const dispatch = useAppDispatch();
   const auth = useAppSelector((s) => s.auth);
+
+  // The `.dark` class only gets applied here, once, so every pre-shell screen
+  // (including the signed-out landing page) honors a stored or OS-level dark
+  // preference from first paint — not only after AppShell's own toggle (whose
+  // useTheme() re-reads the same preference) has mounted post-sign-in.
+  React.useEffect(() => {
+    applyTheme(initialTheme());
+  }, []);
 
   // Resolves the OIDC config from platform discovery (GET /v1/platform), then
   // the bearer token (an OIDC callback exchange, a token held this session,
