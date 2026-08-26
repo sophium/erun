@@ -170,6 +170,36 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		http.Error(w, "empty queue", http.StatusConflict)
 	})
 
+	// override-advance is the CLI plumbing's own concern here (the real
+	// unresolved-thread gate and its bypass are covered by
+	// erun-backend-api's service tests); this stub only proves the wire
+	// round trip and that a blank reason is refused.
+	mux.HandleFunc("POST /v1/reviews/merge-queue/override-advance", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if strings.TrimSpace(body["reason"]) == "" {
+			http.Error(w, "invalid input", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		for _, id := range reviewOrder {
+			review := reviews[id]
+			if review["targetBranch"] != body["targetBranch"] {
+				continue
+			}
+			if review["status"] == "READY" || review["status"] == "MERGE" {
+				review["status"] = "MERGED"
+				_ = json.NewEncoder(w).Encode(review)
+				return
+			}
+		}
+		http.Error(w, "empty queue", http.StatusConflict)
+	})
+
 	mux.HandleFunc("GET /v1/reviews/{review_id}/comments", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
@@ -559,6 +589,51 @@ func TestReview(t *testing.T) {
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
 		result := erun.Run(t, []string{"review", "queue", "advance", "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty merge queue, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "empty queue") {
+			t.Fatalf("expected the stub's empty-queue error to surface, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("merge_queue_override_advance_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"review", "queue", "override-advance", "--target-branch", "main", "--reason", "hotfix, reviewers unavailable", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/merge_queue_override_advance_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("merge_queue_override_advance_requires_reason", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"review", "queue", "override-advance", "--target-branch", "main", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a blank --reason, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "a reason is required") {
+			t.Fatalf("expected the missing-reason error, got:\n%s", result.Combined)
+		}
+	})
+
+	// merge_queue_override_advance_empty_queue_real_run mirrors
+	// merge_queue_advance_empty_queue_real_run: the stub server has no CLI-only
+	// path to READY a review (that requires a build result, which this
+	// double does not model), so this proves the override's real request/
+	// response round trip — reason included — reaches the server rather than
+	// only exercising --dry-run's trace branch.
+	t.Run("merge_queue_override_advance_empty_queue_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{
+			"review", "queue", "override-advance", "--target-branch", "main", "--reason", "hotfix, reviewers unavailable",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for an empty merge queue, got:\n%s", result.Combined)
 		}

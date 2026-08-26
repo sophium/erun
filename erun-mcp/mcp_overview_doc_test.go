@@ -24,7 +24,7 @@ func repoRootForOverviewDocTest(t *testing.T) string {
 	return filepath.Dir(filepath.Dir(file))
 }
 
-var overviewIndexToolPattern = regexp.MustCompile("`([a-z][a-z_]*)`")
+var overviewIndexToolPattern = regexp.MustCompile("`([a-z][a-z_-]*)`")
 
 // fullToolIndexBody returns the lines between the "### Full tool index"
 // heading and the next heading of any level, exclusive of both.

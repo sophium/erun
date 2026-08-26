@@ -233,3 +233,24 @@ func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *m
 		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: normalizeTraceLines(traceOutput.String())}, nil
 	}
 }
+
+type ReviewMergeQueueOverrideAdvanceInput struct {
+	platformAliasInput
+	TargetBranch string `json:"targetBranch" jsonschema:"target branch whose merge queue to advance"`
+	Reason       string `json:"reason" jsonschema:"why the unresolved-thread gate is being bypassed; required, and recorded in the platform's audit trail"`
+}
+
+func reviewMergeQueueOverrideAdvanceTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueOverrideAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewMergeQueueOverrideAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
+		if strings.TrimSpace(input.TargetBranch) == "" || strings.TrimSpace(input.Reason) == "" {
+			return nil, ReviewResult{}, fmt.Errorf("targetBranch and reason are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, input.TargetBranch, input.Reason, cloudDependencies())
+		if err != nil {
+			return nil, ReviewResult{}, err
+		}
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
