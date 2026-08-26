@@ -22,6 +22,8 @@ type IdentityAdminClient interface {
 	ReactivateUser(ctx context.Context, userID string) error
 	GetOrgSettings(ctx context.Context) (zitadel.OrgSettings, error)
 	UpdateOrgSettings(ctx context.Context, params zitadel.UpdateOrgSettingsParams) (zitadel.OrgSettings, error)
+	GetSMTPStatus(ctx context.Context) (zitadel.SMTPStatus, error)
+	UpdateSMTPConfig(ctx context.Context, params zitadel.SetSMTPConfigParams) (zitadel.SMTPStatus, error)
 }
 
 // IdentityEnroller creates an IdP identity and its erun user mapping as one
@@ -54,6 +56,12 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	register(http.MethodPost, "/v1/identity/users/{external_id}/reactivate", http.HandlerFunc(routes.reactivateUser))
 	register(http.MethodGet, "/v1/identity/org-settings", http.HandlerFunc(routes.getOrgSettings))
 	register(http.MethodPatch, "/v1/identity/org-settings", http.HandlerFunc(routes.updateOrgSettings))
+	// The platform's honest answer to "can this instance send mail at all"
+	// (issue #1168): every flow that reaches a user out of band -- signup
+	// verification, password reset, invitation -- depends on it, and until
+	// this the only signal was Zitadel's own unhandled 404.
+	register(http.MethodGet, "/v1/identity/smtp-settings", http.HandlerFunc(routes.getSMTPSettings))
+	register(http.MethodPatch, "/v1/identity/smtp-settings", http.HandlerFunc(routes.updateSMTPSettings))
 }
 
 var errIdentityAdminForbidden = errors.New("identity administration is restricted to an operations tenant")
@@ -107,10 +115,37 @@ type enrollIdentityUserRequest struct {
 // failed after the IdP user was created — the "which half landed" report
 // the enrollment flow must give rather than either silently swallowing the
 // failure or claiming full success.
+//
+// MailDeliveryConfigured/TemporaryPassword/Warning report the other half of
+// what actually landed (issue #1168): a caller cannot tell "invited, check
+// your inbox" apart from "invited, but nothing could ever be sent" from
+// IdPUser alone, and the difference is exactly which action the operator
+// needs to take next.
 type enrollIdentityUserResponse struct {
-	IdPUser  zitadel.User `json:"idpUser"`
-	ErunUser *model.User  `json:"erunUser,omitempty"`
-	Error    string       `json:"error,omitempty"`
+	IdPUser                zitadel.User `json:"idpUser"`
+	ErunUser               *model.User  `json:"erunUser,omitempty"`
+	Error                  string       `json:"error,omitempty"`
+	MailDeliveryConfigured bool         `json:"mailDeliveryConfigured"`
+	TemporaryPassword      string       `json:"temporaryPassword,omitempty"`
+	Warning                string       `json:"warning,omitempty"`
+}
+
+// newEnrollIdentityUserResponse fills the mail-delivery half of the
+// response from an EnrollIdentityResult. When mail delivery was not
+// configured, Enroll already minted a temporary password instead of the
+// usual invite email; this is what tells the caller the invite link they
+// might otherwise expect will never arrive, and gives them the credential
+// to hand over instead.
+func newEnrollIdentityUserResponse(result service.EnrollIdentityResult) enrollIdentityUserResponse {
+	resp := enrollIdentityUserResponse{
+		IdPUser:                result.IdPUser,
+		MailDeliveryConfigured: result.MailDeliveryConfigured,
+		TemporaryPassword:      result.TemporaryPassword,
+	}
+	if !result.MailDeliveryConfigured {
+		resp.Warning = "This platform's identity provider has no SMTP configured, so no invitation email was sent. Share temporaryPassword with " + result.IdPUser.Username + " directly; they must sign in and change it."
+	}
+	return resp
 }
 
 func (r IdentityRoutes) createUser(w http.ResponseWriter, req *http.Request) {
@@ -143,13 +178,17 @@ func (r IdentityRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 			// both halves rather than a bare 500, so the operator can see the
 			// orphaned IdP user id and retry the mapping (POST /v1/users with
 			// that id as subject) instead of enrolling a duplicate.
-			writeJSON(w, http.StatusCreated, enrollIdentityUserResponse{IdPUser: result.IdPUser, Error: err.Error()})
+			resp := newEnrollIdentityUserResponse(result)
+			resp.Error = err.Error()
+			writeJSON(w, http.StatusCreated, resp)
 			return
 		}
 		writeIdentityAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, enrollIdentityUserResponse{IdPUser: result.IdPUser, ErunUser: &result.ErunUser})
+	resp := newEnrollIdentityUserResponse(result)
+	resp.ErunUser = &result.ErunUser
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (r IdentityRoutes) deactivateUser(w http.ResponseWriter, req *http.Request) {
@@ -221,6 +260,66 @@ func (r IdentityRoutes) updateOrgSettings(w http.ResponseWriter, req *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// getSMTPSettings answers "can this instance send mail at all" (issue
+// #1168) directly, rather than leaving Zitadel's own unhandled 404 as the
+// only signal.
+func (r IdentityRoutes) getSMTPSettings(w http.ResponseWriter, req *http.Request) {
+	if _, ok := r.securityContext(w, req); !ok {
+		return
+	}
+	status, err := r.admin.GetSMTPStatus(req.Context())
+	if err != nil {
+		writeIdentityAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+// updateSMTPSettingsRequest is the declarative desired state for the
+// platform's outbound mail (issue #1168), provider-agnostic and sourced
+// from wherever the operator holds the credential out of band; Password is
+// omitted on an update that only changes non-secret fields.
+type updateSMTPSettingsRequest struct {
+	Host           string `json:"host"`
+	Username       string `json:"username"`
+	Password       string `json:"password,omitempty"`
+	SenderAddress  string `json:"senderAddress"`
+	SenderName     string `json:"senderName,omitempty"`
+	ReplyToAddress string `json:"replyToAddress,omitempty"`
+	TLS            bool   `json:"tls"`
+}
+
+func (r IdentityRoutes) updateSMTPSettings(w http.ResponseWriter, req *http.Request) {
+	if _, ok := r.securityContext(w, req); !ok {
+		return
+	}
+	var body updateSMTPSettingsRequest
+	if err := decodeJSON(req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	host := strings.TrimSpace(body.Host)
+	senderAddress := strings.TrimSpace(body.SenderAddress)
+	if host == "" || senderAddress == "" {
+		writeError(w, http.StatusBadRequest, "host and senderAddress are required")
+		return
+	}
+	status, err := r.admin.UpdateSMTPConfig(req.Context(), zitadel.SetSMTPConfigParams{
+		Host:           host,
+		User:           strings.TrimSpace(body.Username),
+		Password:       body.Password,
+		SenderAddress:  senderAddress,
+		SenderName:     strings.TrimSpace(body.SenderName),
+		ReplyToAddress: strings.TrimSpace(body.ReplyToAddress),
+		TLS:            body.TLS,
+	})
+	if err != nil {
+		writeIdentityAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 // writeIdentityAdminError forwards a Zitadel Management API error's real
