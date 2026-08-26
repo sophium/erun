@@ -1,0 +1,5 @@
+audit: erun app restart --dry-run
+app restart: orchestrator=""
+app restart: resolving the running desktop app from <TMP>
+app restart: status=refused pid=<PID> controlPort=0
+restart refused: no desktop app is currently running

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -102,6 +103,7 @@ type erunUIDeps struct {
 	orchestratorOpenPath      string
 	relaunchApp               func() error
 	quitApp                   func()
+	desktopControlMarkerPath  string
 }
 
 type App struct {
@@ -203,6 +205,11 @@ type App struct {
 	// streamers among them) are already emitting through it.
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
+
+	// restartControl is the loopback server a CLI-triggered restart talks
+	// to (see restart_control.go). nil when the bind failed or startup has not
+	// run yet (unit tests that construct an App directly).
+	restartControl *restartControlServer
 }
 
 // SetEmitter overrides how the App emits frontend events; the headless server
@@ -500,6 +507,9 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.orchestratorOpenPath == "" {
 		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
 	}
+	if deps.desktopControlMarkerPath == "" {
+		deps.desktopControlMarkerPath = eruncommon.DefaultDesktopControlMarkerPath()
+	}
 	return deps
 }
 
@@ -515,10 +525,30 @@ func (a *App) startup(ctx context.Context) {
 	a.startActivityPollers()
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
+	a.startRestartControl()
 	// Populate and keep live every linked orchestrator mirror, not only envs
 	// opened this session. Off the startup path so config/network I/O per env
 	// does not delay first paint.
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
+}
+
+// startRestartControl binds the loopback restart-trigger server and records
+// how to reach it, so a CLI-triggered restart can find and verify this
+// exact process before asking it to restart. A bind failure is logged and
+// left without a marker (see startRestartControlServer): a desktop that
+// cannot expose a restart trigger this launch still works for everything
+// else, and an absent marker is exactly what an external trigger correctly
+// reads as "no running desktop to restart".
+func (a *App) startRestartControl() {
+	server, port := startRestartControlServer(a)
+	if server == nil {
+		return
+	}
+	a.restartControl = server
+	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
+	if err := eruncommon.WriteDesktopControlMarker(a.deps.desktopControlMarkerPath, marker); err != nil {
+		log.Printf("erun-app: write restart control marker: %v", err)
+	}
 }
 
 func (a *App) shutdown(context.Context) {
@@ -527,6 +557,10 @@ func (a *App) shutdown(context.Context) {
 	a.stopCloudContextStatusPoller()
 	a.stopActionRunners()
 	a.investigations.stopTimers()
+	a.restartControl.Close()
+	if err := eruncommon.RemoveDesktopControlMarker(a.deps.desktopControlMarkerPath); err != nil {
+		log.Printf("erun-app: remove restart control marker: %v", err)
+	}
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()
 	a.stopAllCloudCredentialsRefreshersLocked()

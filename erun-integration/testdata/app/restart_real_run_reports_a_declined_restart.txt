@@ -1,0 +1,5 @@
+audit: erun app restart
+app restart: orchestrator=""
+app restart: resolving the running desktop app from <TMP>
+app restart: status=failed pid=<PID> controlPort=26150
+restart failed: persist restart target: disk full

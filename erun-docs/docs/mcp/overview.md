@@ -10,6 +10,8 @@ ERun's conventions reach the Agent through a separate mechanism — [skill bundl
 
 Every open environment exposes an MCP server in its runtime pod. It runs **inside the runtime container** — the same image the in-pod Agent and an `erun open` shell use — so a tool call executes with the environment's own toolchain, including anything a custom runtime image adds. The desktop app port-forwards it to localhost so any MCP-compatible client — the Claude Code desktop app, the Codex desktop app, custom agents, any other JSON-RPC client — can connect directly.
 
+Because it always runs inside a runtime pod, MCP has no reach into the machine the desktop app itself runs on — a distinct host, even for a builds-here (local-agent) environment. An operation the desktop process alone can perform, such as [restarting the desktop app in place](/cli/app#erun-app-restart) to pick up a rebuild, is therefore a CLI verb with no MCP counterpart: an Agent running as a terminal session on that same machine already has a shell, and reaches it there.
+
 **A server acts only on its own environment.** Many tools take `tenant` and
 `environment` arguments, but those are how a caller *states* which environment it
 believes it is talking to — not a way to redirect the work. The server runs every

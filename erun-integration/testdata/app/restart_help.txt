@@ -1,0 +1,19 @@
+Restart the already-running erun-app desktop process: it asks that process to run the exact rebuild+restart its own Restart button runs — write the resume hand-off (naming the conversation the orchestrator was actually live on, per --orchestrator), relaunch a fresh copy of itself, then quit. It never spawns a second desktop instance or signals a process directly; it only ever asks the one already running to restart itself, so it cannot leave two instances up or a process half-killed. It resolves the running desktop from a marker that process wrote at startup and verifies that process is still alive before doing anything — a stale marker (the desktop already exited) or no marker at all (nothing running) is refused outright rather than guessed at, since a relaunch armed against a dead target would silently do nothing.
+
+Usage:
+  erun app restart [flags]
+
+Examples:
+  erun app restart
+  erun app restart --orchestrator my-orchestrator
+  erun app restart --dry-run
+
+Flags:
+      --dry-run               Resolve and trace mutating actions without executing them.
+  -h, --help                  help for restart
+      --orchestrator string   Orchestrator id to resume after the restart (defaults to $ERUN_ORCHESTRATOR_ID; a bare restart with neither set reopens whatever was last open, idle)
+      --output string         Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
