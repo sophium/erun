@@ -37,14 +37,35 @@ LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun
 
 # Run golangci-lint across the gated modules, each against its own
 # .golangci.yml (erun-integration has none, so it uses the default linters).
-# Stops at the first module with findings so the build fails with a clear,
-# scoped error. golangci-lint must be on PATH (the image test stage installs
-# it; locally, install the pinned version or run `make integration-test`).
+# Runs every module even when an earlier one has findings, then fails once at
+# the end, so one red module never hides the rest -- reporting a subset of
+# findings as if it were the whole answer is worse than reporting nothing.
+# golangci-lint must be on PATH (the image test stage installs it; locally,
+# install the version pinned in the repo-root GOLANGCI_LINT_VERSION file), and
+# it must actually be that pinned version: a newer install's vendored
+# analyzers can flag things the pinned one does not (and vice versa), so
+# `make lint` and the image build would otherwise silently disagree.
 lint:
-	@for m in $(LINT_MODULES); do \
+	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
+	pin_num=$${pin#v}; \
+	installed=$$(golangci-lint --version 2>&1); \
+	case "$$installed" in \
+		*"version $$pin_num "*) ;; \
+		*) echo "error: golangci-lint version mismatch: pinned $$pin, found: $$installed" >&2; \
+		   echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$pin" >&2; \
+		   exit 1 ;; \
+	esac
+	@failed=""; \
+	for m in $(LINT_MODULES); do \
 		echo ">> golangci-lint $$m"; \
-		(cd $$m && golangci-lint run ./...) || exit 1; \
-	done
+		if ! (cd $$m && golangci-lint run ./...); then \
+			failed="$$failed $$m"; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo "lint failed in:$$failed" >&2; \
+		exit 1; \
+	fi
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
 # a separate step rather than folded into integration-test or a contributor's

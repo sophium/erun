@@ -67,8 +67,10 @@ brew install go
 
 ## Install linter
 
+Install the version pinned in the repo-root `GOLANGCI_LINT_VERSION` file (a `brew install` with no version drifts from the pin the build and pre-commit hook both enforce):
+
 ```
-brew install golangci-lint
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat GOLANGCI_LINT_VERSION)
 ```
 
 ## Enable git hooks

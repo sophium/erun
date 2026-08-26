@@ -21,15 +21,21 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
 WORKDIR /src
 
+# GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
+# builder stage below install from, so the repo-root pin and the image's
+# installed binary cannot drift the way a Dockerfile-only default did.
+COPY GOLANGCI_LINT_VERSION /src/GOLANGCI_LINT_VERSION
+
 # Build golangci-lint from source against this stage's Go toolchain — same
 # reason as the builder stage: a prebuilt binary's embedded analyzer libraries
 # (go/ast, go/types, go/parser) drift behind erun's go.mod Go version and abort
 # with "go language version used to build golangci-lint is lower than the
 # targeted Go version". Installed before the source COPYs (stable, expensive)
 # so source changes do not invalidate this layer. Pinned repo-wide.
-ARG GOLANGCI_LINT_VERSION=v2.2.2
+ARG GOLANGCI_LINT_VERSION
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '\n' < /src/GOLANGCI_LINT_VERSION)}" && \
     GOBIN=/usr/local/bin go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
@@ -92,6 +98,7 @@ COPY erun-cli/go.mod erun-cli/go.sum erun-cli/go.work erun-cli/go.work.sum /src/
 COPY erun-common/go.mod /src/erun-common/go.mod
 COPY erun-mcp/go.mod erun-mcp/go.sum /src/erun-mcp/
 COPY erun-devops/VERSION /src/erun-devops/VERSION
+COPY GOLANGCI_LINT_VERSION /src/GOLANGCI_LINT_VERSION
 
 WORKDIR /src/erun-cli
 
@@ -100,7 +107,7 @@ ARG TARGETARCH
 ARG ERUN_VERSION
 ARG ERUN_COMMIT=""
 ARG ERUN_DATE=""
-ARG GOLANGCI_LINT_VERSION=v2.2.2
+ARG GOLANGCI_LINT_VERSION
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -133,6 +140,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # when cross-compiling or directly in bin/ when it matches the host.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '\n' < /src/GOLANGCI_LINT_VERSION)}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}" && \
     mkdir -p /out && \

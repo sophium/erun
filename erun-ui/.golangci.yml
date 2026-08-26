@@ -3,6 +3,14 @@ version: "2"
 run:
   timeout: 3m
   tests: true
+# The default uniq-by-line:true keys findings by file+line only, ignoring
+# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
+# silently drops all but one finding on a function that trips more than one
+# of them. Report everything found.
+issues:
+  uniq-by-line: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
 linters:
   exclusions:
     paths:
