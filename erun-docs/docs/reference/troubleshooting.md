@@ -154,6 +154,26 @@ erun cloud refresh <tenant> <env>         # re-inject, nothing secret passes thr
 
 `erun open` performs the same refresh, so reopening the environment also fixes it. See [Acting as your AWS identity](/deployment/cloud-setup#host-credentials).
 
+## Runtime pod stuck in `ImagePullBackOff`, image and chart pull from different registries {#runtime-image-registry-mismatch}
+
+**Symptoms:** the runtime pod's container shows `ImagePullBackOff` / `ErrImagePull` even though the helm release itself installed fine, and `kubectl describe pod` names a registry you don't recognize as the failing pull.
+
+**Diagnose:**
+
+```bash
+erun doctor <tenant> <env>       # names both registries when they disagree
+```
+
+**Cause:** the environment's `runtimeimage` names a registry other than its `runtimeregistry` — for example a runtime image built into ECR while the chart itself resolves from `ghcr.io`. `erun deploy` refreshes a pull-secret credential for each registry in play independently, so a credential missing for the image's own registry — not the chart's — is what leaves the pod unable to pull.
+
+**Fix:** either confirm a credential for the image's registry resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it), or realign the two so `runtimeregistry` matches the image:
+
+```bash
+erun init <tenant> <env> --runtime-registry <image's registry>
+```
+
+See [`erun doctor`](/cli/doctor) and [Configuration · private image pull secrets](/reference/configuration#advanced-image-pull-secrets).
+
 ## AWS calls fail with `Invalid endpoint: https://sts..amazonaws.com` {#aws-region-empty}
 
 **Symptoms:** every AWS call in the environment fails with an endpoint that has an empty region in it, and passing `--region <region>` by hand makes the same call succeed.
