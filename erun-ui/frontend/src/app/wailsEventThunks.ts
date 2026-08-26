@@ -400,6 +400,13 @@ const dropExitedSessionFromTabs =
     if (getState().terminal.sessionId !== sessionId) {
       return;
     }
+    if (getState().sessions.closingEnvs[key]) {
+      // closeEnvironment is tearing this env's tabs down; its own default
+      // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
+      // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
+      // would respawn a tab the user just deliberately closed.
+      return;
+    }
     const next = remaining[remaining.length - 1];
     if (next) {
       dispatch(selectTerminalTab(next.sessionId));
