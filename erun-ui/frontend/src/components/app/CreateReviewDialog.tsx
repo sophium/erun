@@ -27,7 +27,7 @@ import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
 import type { CreateReviewDialogState } from '@/app/reviewWriteState';
 import { selectReviewTargetBranches } from '@/app/selectors';
 
-import { InlineAlert } from './InlineAlert';
+import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
 // CreateReviewDialog opens a review from the desktop. Push is the precondition
@@ -40,6 +40,8 @@ export function CreateReviewDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.createReviewDialog);
   const missing = missingToCreate(dialog);
+  const restricted = !dialog.capabilityLoading ? dialog.capabilityRestricted : '';
+  const createDisabled = Boolean(missing) || Boolean(restricted) || dialog.creating;
   return (
     <Dialog
       open={dialog.open}
@@ -58,13 +60,12 @@ export function CreateReviewDialog(): React.ReactElement {
             proposing it merge into a target branch.
           </DialogDescription>
         </DialogHeader>
+        {restricted && <PermissionNotice>{restricted}</PermissionNotice>}
         <div className="flex flex-col gap-4">
           <PushBranchStep dialog={dialog} />
           <ReviewDetailsStep dialog={dialog} />
         </div>
-        {missing && !dialog.creating && (
-          <p className="text-[13px] text-muted-foreground">{missing}</p>
-        )}
+        <CreateReviewDialogNotes dialog={dialog} missing={missing} />
         <DialogFooter>
           <Button
             type="button"
@@ -78,7 +79,7 @@ export function CreateReviewDialog(): React.ReactElement {
           </Button>
           <Button
             type="button"
-            disabled={Boolean(missing) || dialog.creating}
+            disabled={createDisabled}
             onClick={() => {
               void dispatch(submitCreateReview());
             }}
@@ -90,6 +91,30 @@ export function CreateReviewDialog(): React.ReactElement {
       </DialogContent>
     </Dialog>
   );
+}
+
+// CreateReviewDialogNotes carries the two footer notes that are mutually
+// exclusive in practice (a known-missing field vs. an unresolved capability
+// probe) but each independently gated, split out of CreateReviewDialog to
+// keep that component's own branching under the module's complexity cap.
+function CreateReviewDialogNotes({
+  dialog,
+  missing,
+}: {
+  dialog: CreateReviewDialogState;
+  missing: string;
+}): React.ReactElement | null {
+  if (missing && !dialog.creating) {
+    return <p className="text-[13px] text-muted-foreground">{missing}</p>;
+  }
+  if (dialog.capabilityError) {
+    return (
+      <p className="text-[13px] text-muted-foreground">
+        Could not confirm access to create reviews ({dialog.capabilityError}). You can still try.
+      </p>
+    );
+  }
+  return null;
 }
 
 function environmentLabel(dialog: CreateReviewDialogState): string {

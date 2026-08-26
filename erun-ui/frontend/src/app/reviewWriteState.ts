@@ -58,6 +58,15 @@ export interface CreateReviewDialogState {
   pushError: string;
   creating: boolean;
   createError: string;
+  // capabilityLoading/capabilityRestricted resolve independently of the
+  // pushed-environment lookup above: they answer "may this caller open a
+  // review at all", which the diff panel's own entry point cannot assume the
+  // way the Reviews tab can (its New review button only renders once the
+  // tenant dashboard has already loaded that answer). capabilityError is a
+  // failed probe, not a known restriction, so it never blocks Create.
+  capabilityLoading: boolean;
+  capabilityRestricted: string;
+  capabilityError: string;
 }
 
 export const defaultCreateReviewDialog = (): CreateReviewDialogState => ({
@@ -77,4 +86,7 @@ export const defaultCreateReviewDialog = (): CreateReviewDialogState => ({
   pushError: '',
   creating: false,
   createError: '',
+  capabilityLoading: false,
+  capabilityRestricted: '',
+  capabilityError: '',
 });
