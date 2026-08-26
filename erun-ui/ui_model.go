@@ -475,6 +475,39 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
+// uiExposureList is the Ports tab's read model for an environment's public
+// exposures. Configured is false when the project has no platform block at
+// all, which the tab renders as "not applicable" rather than an empty list —
+// distinct from Restricted (the caller cannot see the answer) and from a
+// genuinely empty Services list (configured, nothing exposed yet). Error
+// carries a listing failure that is neither of those two named cases.
+type uiExposureList struct {
+	Configured bool               `json:"configured"`
+	Restricted bool               `json:"restricted"`
+	Error      string             `json:"error,omitempty"`
+	Services   []uiExposedService `json:"services"`
+}
+
+// uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
+type uiExposedService struct {
+	Service  string `json:"service"`
+	Hostname string `json:"hostname"`
+	Scheme   string `json:"scheme"`
+}
+
+// uiExposeServiceInput is the Ports tab's "Expose a service" form.
+type uiExposeServiceInput struct {
+	Service  string `json:"service"`
+	TargetIP string `json:"targetIP"`
+	Port     int    `json:"port,omitempty"`
+}
+
+// uiUnexposeResult confirms which DNS record un-exposing removed, so the
+// dialog can name it back to the operator.
+type uiUnexposeResult struct {
+	WildcardName string `json:"wildcardName"`
+}
+
 // uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
 // desktop registry-list editor. Roles carry the value set build/from/to/deploy
 // but ride as plain strings because RegistryRole is a string alias at the Wails
