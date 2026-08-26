@@ -1,4 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
+import { ManageDialog } from '../pages/ManageDialog.js';
 import type { Page } from '@playwright/test';
 
 // The runtime-unreachable warning used to linger while a deploy for that env was
@@ -66,6 +68,81 @@ test.describe('runtime-unreachable banner clears with the deploy lifecycle (#713
 
     await dismiss.click();
     await expect(banner(page)).toBeHidden();
+  });
+
+  // #1390: the message names "Deploy the environment" as its fix, and the
+  // app already has a control for that — the Manage dialog's Runtime tab,
+  // where the operator picks a version and clicks Deploy. The banner must
+  // offer that control directly rather than leaving the operator to find it
+  // themselves. Backed by a real seeded env (not the fabricated frs/prod
+  // used above) so opening the Manage dialog resolves real config instead of
+  // erroring on an unknown tenant/environment. The orchestrator's own
+  // "deploy or reopen that environment" edge-unreachable notice (#1390,
+  // wireOrchestratorMCP) renders through this exact same action field and
+  // component, covered on the Go side by
+  // TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo; this is the one
+  // rendering path both share.
+  test('a "Deploy" action opens the Manage dialog straight to Runtime, and dismisses the banner', async ({
+    app,
+  }) => {
+    const { page } = app;
+    const message = `Could not reach the runtime for ${SEED_TENANT}/${SEED_ENV_ALPHA}: timed out. Deploy the environment to bring it up.`;
+    await page.evaluate(
+      ({ msg, tenant, environment }) => {
+        (window as unknown as RuntimeShim).runtime.EventsEmit('app-notification', {
+          kind: 'warning',
+          message: msg,
+          tenant,
+          environment,
+          source: 'runtime-unreachable',
+          action: 'deploy',
+        });
+      },
+      { msg: message, tenant: SEED_TENANT, environment: SEED_ENV_ALPHA },
+    );
+
+    const deployBanner = page
+      .getByRole('status')
+      .filter({ hasText: 'Could not reach the runtime' });
+    await expect(deployBanner).toBeVisible();
+    // exact: true — the message itself contains the substring "Deploy" (the
+    // long-message trigger's accessible name is the whole sentence), which
+    // would otherwise also match this query.
+    const deployAction = deployBanner.getByRole('button', { name: 'Deploy', exact: true });
+    await expect(deployAction).toBeVisible();
+    await deployAction.click();
+
+    const dialog = new ManageDialog(page, `${SEED_TENANT}-${SEED_ENV_ALPHA}`);
+    await dialog.waitForOpen();
+    await expect.poll(() => dialog.getActiveTab()).toBe('Runtime');
+    await expect(deployBanner).toBeHidden();
+  });
+
+  // A message with no unambiguous env to target (the orchestrator's own
+  // multi-env case, or any other warning) must render with no Deploy
+  // control — manufacturing one would offer a click that cannot know which
+  // environment to open.
+  test('a runtime-unreachable-shaped message with no deploy action offers no Deploy button', async ({
+    app,
+  }) => {
+    const { page } = app;
+    const message = `Could not reach the runtime for ${SEED_TENANT}/${SEED_ENV_ALPHA}: timed out. Deploy the environment to bring it up.`;
+    await page.evaluate(
+      ({ msg, tenant, environment }) => {
+        (window as unknown as RuntimeShim).runtime.EventsEmit('app-notification', {
+          kind: 'warning',
+          message: msg,
+          tenant,
+          environment,
+          source: 'runtime-unreachable',
+        });
+      },
+      { msg: message, tenant: SEED_TENANT, environment: SEED_ENV_ALPHA },
+    );
+
+    const banner = page.getByRole('status').filter({ hasText: 'Could not reach the runtime' });
+    await expect(banner).toBeVisible();
+    await expect(banner.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
   });
 });
 

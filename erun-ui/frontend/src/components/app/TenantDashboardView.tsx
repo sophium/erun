@@ -12,6 +12,7 @@ import {
 import { refreshTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
 import type { UITenant } from '@/types';
 
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
 export function TenantDashboardView(): React.ReactElement | null {
@@ -22,6 +23,7 @@ export function TenantDashboardView(): React.ReactElement | null {
     return null;
   }
   const tenant = tenants.find((candidate) => candidate.name === dashboard.tenant);
+  const cloudProviderAlias = tenant?.primaryCloudProviderAlias?.trim() ?? '';
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
   const visibleTabs = visibleTenantDashboardTabs(dashboard.data);
   return (
@@ -70,7 +72,7 @@ export function TenantDashboardView(): React.ReactElement | null {
             </TabsList>
             <RestrictedAccessNote missing={restrictedTenantDashboardReads(dashboard.data)} />
           </div>
-          <TenantDashboardBody dashboard={dashboard} />
+          <TenantDashboardBody dashboard={dashboard} cloudProviderAlias={cloudProviderAlias} />
         </Tabs>
       </div>
     </section>
@@ -79,8 +81,10 @@ export function TenantDashboardView(): React.ReactElement | null {
 
 function TenantDashboardBody({
   dashboard,
+  cloudProviderAlias,
 }: {
   dashboard: AppState['tenantDashboard'];
+  cloudProviderAlias: string;
 }): React.ReactElement {
   if (dashboard.loading) {
     return (
@@ -95,9 +99,29 @@ function TenantDashboardBody({
   }
   const apiError = dashboard.data?.apiError ?? '';
   if (apiError) {
-    return <DashboardMessage message={apiError} destructive />;
+    return <TenantDashboardFailure message={apiError} alias={cloudProviderAlias} />;
   }
   return <TenantDashboardPanels data={dashboard.data} />;
+}
+
+// TenantDashboardFailure is the whole-dashboard failure's own layout: centered
+// in the panel's full height instead of DashboardMessage's small top-anchored
+// row, which used to leave the message adrift over a large empty area beneath
+// it (#1390). Carries the sign-in action when the failure is a stale identity.
+function TenantDashboardFailure({
+  message,
+  alias,
+}: {
+  message: string;
+  alias: string;
+}): React.ReactElement {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center">
+      <div className="w-full max-w-sm">
+        <PlatformErrorAlert message={message} alias={alias} />
+      </div>
+    </div>
+  );
 }
 
 // RestrictedAccessNote is why a short tab strip is not an empty tenant. Hiding

@@ -15,6 +15,7 @@ import type { ReviewDetailState } from '@/app/state';
 import type { UIReviewComment } from '@/types';
 
 import { InlineAlert } from './InlineAlert';
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { RelativeTime } from './TenantDashboardMessage';
 
 // commentAuthorDisplay prefers the resolved tenant-user-directory username
@@ -207,7 +208,7 @@ function ThreadResolveError({
   }
   return (
     <div className="mt-2">
-      <InlineAlert>{detail.resolveError}</InlineAlert>
+      <PlatformErrorAlert message={detail.resolveError} alias={detail.callerCloudProviderAlias} />
     </div>
   );
 }
@@ -287,7 +288,9 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
           }
         }}
       />
-      {detail.submitError && <InlineAlert>{detail.submitError}</InlineAlert>}
+      {detail.submitError && (
+        <PlatformErrorAlert message={detail.submitError} alias={detail.callerCloudProviderAlias} />
+      )}
       <div className="flex justify-end gap-2">
         <Button
           type="button"

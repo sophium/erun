@@ -227,6 +227,137 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
     }
   });
 
+  // #1390: operatorPlatformError's "sign-in expired" sentence used to be a
+  // dead end wherever a review write surfaced it. The alert must now offer
+  // the same "Log in" the sidebar's cloud alias row already uses, and
+  // clicking it must actually dispatch LoginCloudProvider for the tenant's
+  // primary alias — not just render inert text.
+  test('a stale-identity error on create offers to sign in, and clicking it does', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('review-create-stale-identity');
+    try {
+      let loginAlias = '';
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, dashboardResponse(environment, { canCreateReview: true }));
+          return;
+        }
+        if (body.method === 'EnvironmentWorkingIssue') {
+          await fulfillJSON(route, { available: true, branch: 'feature/1348-x' });
+          return;
+        }
+        if (body.method === 'ExecCommit') {
+          await fulfillJSON(route, { branch: 'feature/1348-x', commit: 'abc123', files: ['a.go'] });
+          return;
+        }
+        if (body.method === 'ExecPush') {
+          await fulfillJSON(route, {
+            branch: 'feature/1348-x',
+            remote: 'origin',
+            commit: 'abc123',
+          });
+          return;
+        }
+        if (body.method === 'CreateReview') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: 'Your sign-in is no longer valid for this tenant. Sign in again and retry.',
+            }),
+          });
+          return;
+        }
+        if (body.method === 'LoginCloudProvider') {
+          const args = (JSON.parse(request.postData() ?? '{}') as { args?: string[] }).args ?? [];
+          loginAlias = args[0] ?? '';
+          await fulfillJSON(route, { alias: 'pw-aws', provider: 'aws', status: 'active' });
+          return;
+        }
+        await route.continue();
+      });
+
+      await openDashboardReviewsTab(app, environment);
+      await app.tenantDashboard.newReviewButton().click();
+      const dialog = app.createReviewDialog;
+      await dialog.waitForOpen();
+      await dialog.fillCommitMessage('describe the change');
+      await dialog.commit();
+      await dialog.push();
+      await dialog.fillName('Add widget');
+      await dialog.create();
+
+      const alert = dialog
+        .locator()
+        .getByRole('alert')
+        .filter({ hasText: 'sign-in is no longer valid' });
+      await expect(alert).toBeVisible();
+      const signIn = dialog.locator().getByRole('button', { name: 'Log in' });
+      await expect(signIn).toBeVisible();
+      await signIn.click();
+      await expect.poll(() => loginAlias).toBe('pw-aws');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  // The regression this action must not create: an unrelated create failure
+  // (not the stale-identity sentence) must render as before — message only,
+  // no manufactured button.
+  test('an unrelated create failure offers no sign-in action', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('review-create-other-error');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, dashboardResponse(environment, { canCreateReview: true }));
+          return;
+        }
+        if (body.method === 'EnvironmentWorkingIssue') {
+          await fulfillJSON(route, { available: true, branch: 'feature/1348-x' });
+          return;
+        }
+        if (body.method === 'ExecCommit') {
+          await fulfillJSON(route, { branch: 'feature/1348-x', commit: 'abc123', files: ['a.go'] });
+          return;
+        }
+        if (body.method === 'ExecPush') {
+          await fulfillJSON(route, {
+            branch: 'feature/1348-x',
+            remote: 'origin',
+            commit: 'abc123',
+          });
+          return;
+        }
+        if (body.method === 'CreateReview') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'load tenant dashboard POST /v1/reviews: http 500' }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await openDashboardReviewsTab(app, environment);
+      await app.tenantDashboard.newReviewButton().click();
+      const dialog = app.createReviewDialog;
+      await dialog.waitForOpen();
+      await dialog.fillCommitMessage('describe the change');
+      await dialog.commit();
+      await dialog.push();
+      await dialog.fillName('Add widget');
+      await dialog.create();
+
+      await expect(dialog.locator().getByRole('alert')).toContainText('http 500');
+      await expect(dialog.locator().getByRole('button', { name: 'Log in' })).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
   test('hides the New review action and names the missing access when the caller cannot create one', async ({
     app,
     page,

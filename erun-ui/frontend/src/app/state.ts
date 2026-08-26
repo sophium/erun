@@ -177,6 +177,10 @@ export interface AppNotification {
   tenant?: string;
   environment?: string;
   source?: string;
+  // Action names a control TitlebarStatus can render beside the message that
+  // performs the message's own remedy directly — currently only 'deploy'
+  // (open the tagged env's deploy dialog). Undefined means no action (#1390).
+  action?: 'deploy';
 }
 
 export type TerminalStatusKind = 'info' | 'warning' | 'error';

@@ -122,7 +122,12 @@ export const showNotification =
   (
     kind: AppNotification['kind'],
     message: string,
-    meta?: { tenant?: string; environment?: string; source?: string },
+    meta?: {
+      tenant?: string;
+      environment?: string;
+      source?: string;
+      action?: AppNotification['action'];
+    },
   ): AppThunk =>
   (dispatch) => {
     const trimmed = message.trim();
@@ -138,6 +143,7 @@ export const showNotification =
         tenant: meta?.tenant,
         environment: meta?.environment,
         source: meta?.source,
+        action: meta?.action,
       }),
     );
     if (kind === 'success' || kind === 'info') {

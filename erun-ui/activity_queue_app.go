@@ -507,7 +507,7 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	if reason != "" {
 		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
 	}
-	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message)
+	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message, "")
 }
 
 // handleDoctorTraceLine dispatches the `erun doctor` lifecycle trace lines,

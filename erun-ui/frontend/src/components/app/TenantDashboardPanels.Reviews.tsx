@@ -12,6 +12,7 @@ import {
   confirmAdvanceMergeQueue,
   submitAdvanceMergeQueue,
 } from '@/app/mergeQueueThunks';
+import { resolveTenantCloudAlias } from '@/app/platformSignIn';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
   reviewAuthorInitials,
@@ -22,7 +23,8 @@ import {
 import { setReviewFilter } from '@/app/tenantDialogThunks';
 import type { UITenantDashboardReview } from '@/types';
 
-import { InlineAlert, PermissionNotice } from './InlineAlert';
+import { PermissionNotice } from './InlineAlert';
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 import {
   BranchArrow,
   DataCell,
@@ -265,6 +267,9 @@ function AdvanceMergeQueueAction({
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const action = useAppSelector((state) => state.mergeQueueAction);
+  const cloudProviderAlias = useAppSelector((state) =>
+    resolveTenantCloudAlias(state.tenants.tenants, data?.tenant ?? ''),
+  );
   if (!data) {
     return null;
   }
@@ -304,7 +309,7 @@ function AdvanceMergeQueueAction({
       )}
       {action.error && (
         <div className="max-w-sm">
-          <InlineAlert>{action.error}</InlineAlert>
+          <PlatformErrorAlert message={action.error} alias={cloudProviderAlias} />
         </div>
       )}
     </div>

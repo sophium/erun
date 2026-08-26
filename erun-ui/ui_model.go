@@ -972,6 +972,12 @@ type appNotificationPayload struct {
 	Tenant      string `json:"tenant,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	Source      string `json:"source,omitempty"`
+	// Action names a control the frontend can render beside the message that
+	// actually performs the remedy the message names, e.g. "deploy" opens the
+	// tagged env's deploy dialog. Empty means the message carries no action the
+	// app can perform — the operator-facing text is the whole of the recovery
+	// (#1390).
+	Action string `json:"action,omitempty"`
 }
 
 // appNotificationClearPayload dismisses an env-tagged notification. The frontend

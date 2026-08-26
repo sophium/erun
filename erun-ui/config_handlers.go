@@ -402,11 +402,24 @@ const notificationSourceForwardOutage = "port-forward-outage"
 // runtime becomes reachable.
 const notificationSourceDeployFailed = "deploy-failed"
 
+// notificationSourceOrchestratorEdgeUnreachable tags the "wired tools for …,
+// but its edge is not answering" warning an orchestrator launch posts when
+// exactly one linked environment's edge failed its reachability probe — the
+// only case with an unambiguous env to attach the deploy action to (#1390).
+const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
+
+// notificationActionDeploy tags a notification whose remedy the frontend can
+// perform directly — opening the tagged env's deploy dialog. Passed as the
+// action to emitEnvNotification; "" means the notification carries no action.
+const notificationActionDeploy = "deploy"
+
 // emitEnvNotification posts a notification tagged with the env it describes and
 // a stable source, so a later emitClearEnvNotification for the same
 // (source, tenant, environment) can dismiss it. Use it for env-scoped, state-
-// backed notifications (not one-shot toasts).
-func (a *App) emitEnvNotification(kind, tenant, environment, source, message string) {
+// backed notifications (not one-shot toasts). action names a control the
+// frontend can render to perform the message's own remedy directly ("" for
+// none — see notificationActionDeploy).
+func (a *App) emitEnvNotification(kind, tenant, environment, source, message, action string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
@@ -416,6 +429,7 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message str
 		Tenant:      tenant,
 		Environment: environment,
 		Source:      source,
+		Action:      action,
 	})
 }
 

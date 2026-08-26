@@ -13,6 +13,7 @@ import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-r
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { openManageDialog, setManageTab } from '@/app/manageDialogThunks';
 import {
   copyTerminalOutput,
   dismissNotification,
@@ -46,6 +47,13 @@ interface TitlebarStatusValue {
   // is, so dismissing it removes exactly this one even if another has been
   // queued behind it since render.
   notificationId?: string;
+  // envAction/envTenant/envEnvironment carry a notification's own remedy
+  // action (currently only 'deploy'), set only when the notification named
+  // one and an unambiguous env to target — see AppNotification['action']
+  // (#1390).
+  envAction?: AppNotification['action'];
+  envTenant?: string;
+  envEnvironment?: string;
 }
 
 const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
@@ -90,6 +98,13 @@ export function TitlebarStatus(): React.ReactElement | null {
         <StatusIcon status={status} />
         <StatusMessage status={status} />
         {status.action === 'wait-longer' && <StatusWaitAction />}
+        {status.envAction === 'deploy' && status.envTenant && status.envEnvironment && (
+          <StatusDeployAction
+            status={status}
+            tenant={status.envTenant}
+            environment={status.envEnvironment}
+          />
+        )}
         {status.copyOutput &&
           (status.source === 'notification' ? (
             <NotificationCopyAction text={status.copyOutput} />
@@ -130,6 +145,9 @@ function computeTitlebarStatus(
           : '',
       copyStatus: '',
       action: '',
+      envAction: notification.action,
+      envTenant: notification.tenant,
+      envEnvironment: notification.environment,
     };
   }
   if (terminal.terminalBusy && terminal.terminalMessage) {
@@ -250,6 +268,42 @@ function StatusWaitAction(): React.ReactElement {
       }}
     >
       Wait longer
+    </Button>
+  );
+}
+
+// StatusDeployAction is the toast's own version of #1390's rule: a runtime-
+// unreachable notification names "deploy" as its remedy, and the app already
+// has a control for that — the Manage dialog's Runtime tab, where the
+// operator picks a version and clicks Deploy. Opening straight to that tab
+// (rather than guessing a version and deploying blind) mirrors #1389's
+// navigate-to-the-control pattern. Dismisses the notification on click since
+// the operator is now looking at its actual recovery surface.
+function StatusDeployAction({
+  status,
+  tenant,
+  environment,
+}: {
+  status: TitlebarStatusValue;
+  tenant: string;
+  environment: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        dispatch(openManageDialog({ tenant, environment }));
+        dispatch(setManageTab('runtime'));
+        if (status.notificationId) {
+          dispatch(dismissNotification(status.notificationId));
+        }
+      }}
+    >
+      Deploy
     </Button>
   );
 }

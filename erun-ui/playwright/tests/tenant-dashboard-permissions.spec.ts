@@ -196,3 +196,107 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
     }
   });
 });
+
+// #1390: a stale signed-in identity fails the dashboard's own precondition
+// read (whoami) before any panel is even attempted, so it blocks the whole
+// dashboard — apiError, not a per-panel error. That message names "sign in"
+// as its fix, and the app already has a control for it (the same cloud-alias
+// login the sidebar offers), so it must render with that control rather than
+// as inert text in an empty panel.
+test.describe('tenant dashboard — a stale identity blocks the whole dashboard (#1390)', () => {
+  test('offers to sign in, and clicking it dispatches the login for the tenant primary alias', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('identity-stale');
+    try {
+      let loginAlias = '';
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: string[] };
+        if (body.method === 'LoadTenantDashboard') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                tenant: SEED_TENANT,
+                environment,
+                apiUrl: 'http://127.0.0.1:1/unreachable',
+                apiError:
+                  "This tenant's platform did not accept the signed-in identity. Sign in to the tenant's cloud provider again.",
+              },
+            }),
+          });
+          return;
+        }
+        if (body.method === 'LoginCloudProvider') {
+          loginAlias = body.args?.[0] ?? '';
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { alias: 'pw-aws', provider: 'aws', status: 'active' } }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+
+      const alert = page
+        .getByRole('alert')
+        .filter({ hasText: 'did not accept the signed-in identity' });
+      await expect(alert).toBeVisible();
+
+      const signIn = alert.locator('..').getByRole('button', { name: 'Log in' });
+      await expect(signIn).toBeVisible();
+      await signIn.click();
+      await expect.poll(() => loginAlias).toBe('pw-aws');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('a permission refusal blocking the whole dashboard offers no button', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('identity-forbidden');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+        if (body.method === 'LoadTenantDashboard') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                tenant: SEED_TENANT,
+                environment,
+                apiUrl: 'http://127.0.0.1:1/unreachable',
+                apiError:
+                  "You do not have access to this tenant's dashboard. Ask an administrator for access.",
+              },
+            }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'Ask an administrator for access' }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});

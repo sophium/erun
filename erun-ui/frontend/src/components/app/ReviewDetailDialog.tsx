@@ -27,6 +27,7 @@ import {
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
 import { InlineAlert, PermissionNotice } from './InlineAlert';
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
 import { BranchArrow, RelativeTime } from './TenantDashboardMessage';
 
@@ -76,7 +77,7 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
   if (data.apiError) {
     return (
       <div className="py-4">
-        <InlineAlert>{data.apiError}</InlineAlert>
+        <PlatformErrorAlert message={data.apiError} alias={detail.callerCloudProviderAlias} />
       </div>
     );
   }
@@ -208,7 +209,9 @@ function CloseReviewAction({
             Confirm close
           </Button>
         </div>
-        {detail.closeError && <InlineAlert>{detail.closeError}</InlineAlert>}
+        {detail.closeError && (
+          <PlatformErrorAlert message={detail.closeError} alias={detail.callerCloudProviderAlias} />
+        )}
       </div>
     );
   }

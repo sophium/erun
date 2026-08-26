@@ -156,7 +156,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
 		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
-	))
+	), notificationActionDeploy)
 }
 
 // surfaceEnvRuntimeStopped renders a stopped environment as stopped and names
@@ -170,7 +170,7 @@ func (a *App) surfaceEnvRuntimeStopped(selection uiSelection) {
 	a.emitEnvNotification("info", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
 		"%s/%s is stopped, so its sessions did not reconnect. Open it to start it again.",
 		selection.Tenant, selection.Environment,
-	))
+	), "")
 }
 
 // ensureFailureAlreadyNotified latches one notification per failure episode and
