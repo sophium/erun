@@ -294,21 +294,14 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 }
 
 // resolveReopenSessionID decides which conversation a reopened orchestrator
-// resumes: the one durably recorded as live for it, but only when that
-// conversation still exists on disk — never a re-derivation from the
-// orchestrator id, which can land on a different, older conversation that
-// happens to share the derived id. Absent or stale, it mints a fresh
-// id instead of guessing: resuming nothing is safer than resuming the wrong
-// conversation, and the fresh session gets recorded correctly the moment it
-// spawns.
+// resumes: its own, derived from its id. Nothing is read, because nothing is
+// stored -- a derivation is the same answer on every launch, so a second copy
+// on disk could only ever disagree with it. A transient orchestrator has no id
+// to derive from and gets a fresh conversation.
 func resolveReopenSessionID(entry orchestratorOpenEntry) string {
-	if entry.SessionID != "" && orchestratorSessionExists(entry.SessionID) {
-		return entry.SessionID
+	if id := strings.TrimSpace(entry.OrchestratorID); id != "" {
+		return orchestratorSessionID(id)
 	}
-	// A record that names a conversation which is gone, and a legacy record that
-	// names none, both start fresh on purpose: an orchestrator id is reusable, so
-	// silence must not be read as permission to resume whatever the derived id
-	// happens to name from an unrelated earlier run.
 	return uuid.NewString()
 }
 

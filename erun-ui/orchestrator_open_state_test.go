@@ -286,7 +286,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 		Environments:   []string{"frs/dev"},
 		ResumePrompt:   prompt,
 	}
-	if err := recordOpenOrchestrator(openPath, id, conversationID, []string{"frs/dev"}); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
@@ -311,84 +311,6 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 	stale := app.ResolveOrchestratorToReopen()
 	if stale.OrchestratorID != id || stale.ResumePrompt != "" {
 		t.Fatalf("expected a stale hand-off to be dropped and the durable record to answer, got %+v", stale)
-	}
-}
-
-// The bug: a plain launch used to re-derive a session id from the
-// orchestrator id (uuid5(namespace, id)) and resume THAT, rather than the
-// conversation actually recorded as running. A stale transcript that happens
-// to sit at the derived id — left over from before the live session diverged
-// from it, e.g. a resume that fell through to an unpinned launch — was
-// silently resumed while the real, divergent conversation was left behind.
-func TestPlainLaunchResumesTheRecordedConversationNotADerivedOne(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	staleDerived := orchestratorSessionID(id)
-	stageOrchestratorConversation(t, staleDerived)
-	liveConversation := "diverged-session-actually-running"
-	stageOrchestratorConversation(t, liveConversation)
-	if err := recordOpenOrchestrator(openPath, id, liveConversation, []string{"frs/dev"}); err != nil {
-		t.Fatalf("record open orchestrator: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id {
-		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
-	}
-	if target.ConversationID != liveConversation {
-		t.Fatalf("expected the recorded live conversation %q to be resumed, not the derived id %q, got %q",
-			liveConversation, staleDerived, target.ConversationID)
-	}
-}
-
-// An orchestrator whose recorded conversation no longer exists on disk (pruned,
-// deleted, never actually staged) starts fresh instead of falling back to
-// whatever the derived id happens to already name — resuming nothing is safer
-// than resuming a stale conversation.
-func TestPlainLaunchStartsFreshWhenTheRecordedConversationIsGone(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	staleDerived := orchestratorSessionID(id)
-	stageOrchestratorConversation(t, staleDerived)
-	if err := recordOpenOrchestrator(openPath, id, "vanished-session", []string{"frs/dev"}); err != nil {
-		t.Fatalf("record open orchestrator: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id {
-		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
-	}
-	if target.ConversationID == "" || target.ConversationID == staleDerived || target.ConversationID == "vanished-session" {
-		t.Fatalf("expected a fresh conversation, neither the stale derived id nor the vanished one, got %q",
-			target.ConversationID)
-	}
-}
-
-// An operator upgrading from a release that recorded only the orchestrator id
-// (an earlier shape, or the scalar one before it) must not have that silence
-// read as permission to resume whatever the derived id names. The very first
-// restore under the new record starts every such orchestrator fresh.
-func TestUpgradingFromARecordWithNoSessionIDStartsFresh(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	staleDerived := orchestratorSessionID(id)
-	stageOrchestratorConversation(t, staleDerived)
-	if err := os.WriteFile(openPath, []byte(`{"orchestratorIds":["`+id+`"]}`), 0o644); err != nil {
-		t.Fatalf("write legacy open file: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id {
-		t.Fatalf("expected %q to be reopened, got %q", id, target.OrchestratorID)
-	}
-	if target.ConversationID == "" || target.ConversationID == staleDerived {
-		t.Fatalf("expected a fresh conversation rather than the stale derived id, got %q", target.ConversationID)
 	}
 }
 
@@ -457,72 +379,47 @@ func TestAlsoReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 	}
 }
 
-// A conversation belongs to exactly one orchestrator. Recording a launch must
-// release any other orchestrator's claim on the same session, or every later
-// restart resolves both ids to one conversation and hands one orchestrator the
-// other's history, scope and return note.
-func TestRecordingALaunchReleasesAnotherOrchestratorsClaimOnTheSameSession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
+// The record says WHICH orchestrators to reopen; it does not say which
+// conversation each resumes, because that is derived from the orchestrator id.
+// A launch therefore lands on the same conversation every time, and there is no
+// stored copy that can disagree -- which is how three orchestrators previously
+// ended up on conversations that were not theirs and stayed there.
+func TestPlainLaunchResumesTheDerivedConversation(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
 
-	if err := recordOpenOrchestrator(path, "petios-admin", "shared-conversation", []string{"petios/rihards-develop"}); err != nil {
-		t.Fatalf("record petios-admin: %v", err)
-	}
-	if err := recordOpenOrchestrator(path, "erun", "shared-conversation", []string{"erun/build"}); err != nil {
-		t.Fatalf("record erun: %v", err)
+	id := createAndStartOrchestrator(t, app)
+	if err := recordOpenOrchestrator(openPath, id, []string{"frs/dev"}); err != nil {
+		t.Fatalf("record open orchestrator: %v", err)
 	}
 
-	entries := readOpenOrchestrators(path)
-	if len(entries) != 2 {
-		t.Fatalf("both orchestrators must stay open, got %d entries: %+v", len(entries), entries)
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id {
+		t.Fatalf("expected %q reopened, got %q", id, target.OrchestratorID)
 	}
-	claims := map[string]string{}
-	for _, entry := range entries {
-		claims[entry.OrchestratorID] = entry.SessionID
-	}
-	if claims["erun"] != "shared-conversation" {
-		t.Fatalf("the launch that just happened keeps the session, got %q", claims["erun"])
-	}
-	if claims["petios-admin"] != "" {
-		t.Fatalf("the stale claim must be released so that orchestrator starts fresh, got %q", claims["petios-admin"])
+	if target.ConversationID != orchestratorSessionID(id) {
+		t.Fatalf("expected the derived conversation %q, got %q", orchestratorSessionID(id), target.ConversationID)
 	}
 }
 
-// An already-crossed file heals on read: the operator hit this before the write
-// path was fixed, and a restart must not keep replaying the crossing.
-func TestReadingAnAlreadyCrossedOpenRecordReleasesTheOlderClaim(t *testing.T) {
-	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
-	crossed := `{"orchestrators":[` +
-		`{"orchestratorId":"petios-admin","sessionId":"b40e4de0","environments":["petios/rihards-develop"]},` +
-		`{"orchestratorId":"erun","sessionId":"b40e4de0","environments":["erun/build"]}]}`
-	if err := os.WriteFile(path, []byte(crossed), 0o644); err != nil {
-		t.Fatalf("write crossed record: %v", err)
+// Nothing a stray writer puts in the file can move an orchestrator off its own
+// conversation, because the conversation is not read from the file at all.
+func TestAForeignSessionIdInTheRecordIsIgnored(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	stranger := orchestratorSessionID("some-other-orchestrator")
+	stageOrchestratorConversation(t, stranger)
+	if err := os.WriteFile(openPath, []byte(`{"orchestrators":[{"orchestratorId":"`+id+`","sessionId":"`+stranger+`"}]}`), 0o644); err != nil {
+		t.Fatalf("write record: %v", err)
 	}
 
-	entries := readOpenOrchestrators(path)
-	if len(entries) != 2 {
-		t.Fatalf("expected both orchestrators, got %+v", entries)
+	target := app.ResolveOrchestratorToReopen()
+	if target.ConversationID == stranger {
+		t.Fatal("resumed a conversation the record named for someone else")
 	}
-	if entries[0].OrchestratorID != "petios-admin" || entries[0].SessionID != "" {
-		t.Fatalf("older claim must be released, got %+v", entries[0])
-	}
-	if entries[1].OrchestratorID != "erun" || entries[1].SessionID != "b40e4de0" {
-		t.Fatalf("most recent claim keeps the conversation, got %+v", entries[1])
-	}
-}
-
-// One orchestrator legitimately moving between conversations (a compaction fork
-// re-recorded under the same id) must not be mistaken for a crossing.
-func TestOneOrchestratorMovingConversationsKeepsItsOwnLatestSession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), orchestratorOpenFileName)
-
-	for _, session := range []string{"before-compact", "after-compact"} {
-		if err := recordOpenOrchestrator(path, "agent-1", session, []string{"frs/dev"}); err != nil {
-			t.Fatalf("record %s: %v", session, err)
-		}
-	}
-
-	entries := readOpenOrchestrators(path)
-	if len(entries) != 1 || entries[0].SessionID != "after-compact" {
-		t.Fatalf("expected the one orchestrator to hold its newest session, got %+v", entries)
+	if target.ConversationID != orchestratorSessionID(id) {
+		t.Fatalf("expected its own derived conversation, got %q", target.ConversationID)
 	}
 }
