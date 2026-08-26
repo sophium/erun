@@ -23,6 +23,14 @@ export {
   updateManageSSHDConfig,
 } from './manageDialogThunks';
 export {
+  cancelUnexposeConfirm,
+  refreshManageExposures,
+  startUnexposeConfirm,
+  submitExposeService,
+  submitUnexposeEnvironment,
+  updateExposeForm,
+} from './manageExposureThunks';
+export {
   checkManageEnvironmentHealth,
   deployFromHealthCheck,
   focusRegistryFieldFromHealthCheck,

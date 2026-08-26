@@ -20,6 +20,7 @@ import {
   nextPendingRedeploy,
   versionSourceSignature,
 } from './manageDialogHelpers';
+import { refreshManageExposures } from './manageExposureThunks';
 import { showTerminalError } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
@@ -69,11 +70,20 @@ export const openManageDialog =
         runtimeChartPlan: null,
         health: null,
         healthLoading: false,
+        exposures: { configured: false, restricted: false, services: [] },
+        exposuresLoading: true,
+        exposeForm: { service: '', targetIP: '', port: '' },
+        exposeBusy: false,
+        exposeError: '',
+        unexposeConfirming: false,
+        unexposeBusy: false,
+        unexposeError: '',
       }),
     );
     void dispatch(refreshManageVersionSuggestions(false));
     void dispatch(loadManageConfig());
     void dispatch(refreshManageDeployComponents());
+    void dispatch(refreshManageExposures());
   };
 
 export const closeManageDialog = (): AppThunk => (dispatch, getState, extra) => {

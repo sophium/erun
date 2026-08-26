@@ -585,6 +585,10 @@ export * from './reviewTypes';
 // same reason.
 export * from './tenantDashboardTypes';
 
+// Ports tab public-exposure read-model types live in ./uiExposureTypes for
+// the same reason.
+export * from './uiExposureTypes';
+
 // A retained job in an environment's job store. exitCode is null unless the job
 // reached exited, so a missing outcome is never read as a successful zero, and
 // progress is absent for a command job rather than a fabricated zero state.

@@ -122,5 +122,5 @@ func unexposePlatformConfigured(params UnexposeParams) bool {
 	if strings.TrimSpace(params.ServicesZone) != "" && strings.TrimSpace(params.PlatformNamespace) != "" {
 		return true
 	}
-	return projectHasExposablePlatform(params.ProjectRoot)
+	return ProjectHasExposablePlatform(params.ProjectRoot)
 }

@@ -1,6 +1,7 @@
 import type {
   DiffResult,
   EnvironmentType,
+  ExposeServiceFormState,
   ManageTab,
   UICloudContextInitInput,
   UICloudProviderStatus,
@@ -8,6 +9,7 @@ import type {
   UIEnvironmentConfig,
   UIEnvironmentLease,
   UIERunConfig,
+  UIExposureList,
   UIIdleStatus,
   UIRuntimeResourceStatus,
   UISelection,
@@ -134,6 +136,19 @@ export interface ManageDialogState {
   // operator runs it. healthLoading gates the in-flight indicator.
   health: UIEnvironmentHealth | null;
   healthLoading: boolean;
+  // The Ports tab's public-exposure surface (issue #1351). Exposures is loaded
+  // automatically alongside the rest of the dialog's read models, matching
+  // deployComponents; exposeForm/exposeBusy/exposeError track the "Expose a
+  // service" form, and unexposeConfirming/unexposeBusy/unexposeError track the
+  // two-step "Remove public access" confirm below the list.
+  exposures: UIExposureList;
+  exposuresLoading: boolean;
+  exposeForm: ExposeServiceFormState;
+  exposeBusy: boolean;
+  exposeError: string;
+  unexposeConfirming: boolean;
+  unexposeBusy: boolean;
+  unexposeError: string;
 }
 
 export interface TenantDialogState {
@@ -369,6 +384,14 @@ export const defaultManageDialog = (): ManageDialogState => ({
   runtimeChartPlan: null,
   health: null,
   healthLoading: false,
+  exposures: { configured: false, restricted: false, services: [] },
+  exposuresLoading: false,
+  exposeForm: { service: '', targetIP: '', port: '' },
+  exposeBusy: false,
+  exposeError: '',
+  unexposeConfirming: false,
+  unexposeBusy: false,
+  unexposeError: '',
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({
