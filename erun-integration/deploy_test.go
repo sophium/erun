@@ -1167,6 +1167,49 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secret_refreshed_from_host_credential", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_image_pull_secret_covers_runtime_image_override_registry", func(t *testing.T) {
+		// #1328: a runtimeimage pinned to a registry other than the env's
+		// containerRegistry (e.g. built into one registry, deployed from
+		// another) left the refreshed pull secret uncovered for the registry
+		// the pod actually pulls from — before this fix, resolution only ever
+		// tried containerRegistry's host, so a credential known for the
+		// image's own registry was never even attempted. Here DOCKER_CONFIG
+		// carries a credential for the runtimeimage's own registry
+		// (otherregistry.example) but NOT for the fixture's containerregistry
+		// (registry.example): before the fix this applied no secret at all
+		// ("no host credential resolved for registry.example; leaving
+		// ecr-pull untouched" and nothing else tried); after the fix the
+		// image's own registry still resolves and the secret is applied.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\nruntimeimage: otherregistry.example/team-devops\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"otherregistry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secret_covers_runtime_image_override_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", func(t *testing.T) {
 		// Migration hardening: when a tenant rode the shared erun-devops chart and
 		// later moved to its own team-devops umbrella, a leftover

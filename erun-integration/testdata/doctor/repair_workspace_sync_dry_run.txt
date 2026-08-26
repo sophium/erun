@@ -5,6 +5,8 @@ Target: team/dev
 audit: erun doctor --dry-run --repair-workspace-sync team dev
 trace-log: would append the full trace to <TMP>
 ==> Doctor team/dev
+helm status team-devops --namespace team-dev --kube-context test-context
+kubectl --context test-context --namespace team-dev get pods -o wide
 workspace-sync: would resolve the SSH public key and the local ssh config alias
 ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR erun-team-dev true
 workspace-sync: write ssh config host erun-team-dev for team/dev

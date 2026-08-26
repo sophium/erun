@@ -20,7 +20,17 @@ When the deploy diagnosis shows a stuck pending release or a failed image pull, 
 
 For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 
-For an environment carrying an AWS cloud alias, `doctor` also reports the **host AWS credentials** it acts with: whether the pod's `erun-host` profile exists, when it expires (or that it has already **expired**), and the AWS region the environment resolves — or that none does. Both failures otherwise surface far from their cause, as an SDK `ExpiredToken` or an image pull rejected with `no basic auth credentials`, so this is the check that names them. The fix in either case is [`erun cloud refresh`](/cli/cloud#cloud-refresh); see [Troubleshooting](/reference/troubleshooting#host-credentials-expired).
+For an environment carrying an AWS cloud alias, `doctor` also reports the **host AWS credentials** it acts with: whether the pod's `erun-host` profile exists, when it expires (or that it has already **expired**), and the AWS region the environment resolves — or that none does. Both failures otherwise surface far from their cause, as an SDK `ExpiredToken` or an image pull rejected with `no basic auth credentials`, so this is the check that names them. The fix in either case is [`erun cloud refresh`](/cli/cloud#cloud-refresh); see [Troubleshooting](/reference/troubleshooting#host-credentials-expired). Reading it requires the runtime pod: when the pod isn't reachable, `doctor` reports **could not read** for this check instead of aborting, pointing back at the helm release status and pod state it already reported above, and carries on to the rest of the run — retry the check once the pod is running again.
+
+`doctor` also compares the environment's `runtimeimage` against its `runtimeregistry` and flags a mismatch by name — a runtime image pinned to a different registry than the one credentials refresh for is exactly the split that leaves a redeployed pod stuck in `ImagePullBackOff`. This check reads only local config, so it runs identically whether or not the pod is up. On a mismatch it names both registries and points to two fixes: confirm a credential for the image's registry resolves where `erun deploy`/`erun open --deploy` runs, or realign the two with `erun init <tenant> <env> --runtime-registry <registry>` so `runtimeregistry` matches the image. For example:
+
+```
+== Runtime image registry ==
+runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
+The deploy that installs this env sets imageOverrides.erun-devops from 123456789012.dkr.ecr.eu-west-2.amazonaws.com while runtimeRegistry stays ghcr.io/sophium; the runtime pod can only pull if a credential for 123456789012.dkr.ecr.eu-west-2.amazonaws.com also resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is available there, or realign the two with `erun init team dev --runtime-registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com` to match the image.
+```
+
+See [Troubleshooting](/reference/troubleshooting#runtime-image-registry-mismatch).
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
@@ -111,6 +121,7 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | `--restore-env-config-from-backup` without an explicit tenant and environment. | Aborts with `--restore-env-config-from-backup needs an explicit tenant and environment`; exit code 1; nothing is changed. |
 | `--restore-env-config-from-backup <date>` with no matching backup. | Aborts naming the unmatched selector and the target env (`no env config backup matches "<date>" for <tenant>/<env>`); exit code 1; nothing is changed. |
 | Helm release missing or cluster unreachable during deploy diagnosis. | The helm/pod probe output (including the error) is shown as part of the diagnosis and `doctor` continues; the diagnosis is read-only, so nothing is changed. |
+| Host AWS credentials or docker-storage check needs the runtime pod, but it isn't reachable. | `doctor` reports `could not read` for that check, points back at the helm release status and pod state already shown, and continues the rest of the run instead of aborting. Any requested prune action (`--prune-images`, `--prune-build-cache`, `--prune-containers`) is skipped with the same reason. |
 | Deploy recovery (`--clear-pending-helm` / `--rollback`) fails. | The failing helm/kubectl output is surfaced and `doctor` aborts with that error; the release is left as helm leaves it (a failed rollback does not partially apply). Re-run the diagnosis to see the new state, then retry or `erun deploy --force`. |
 | `--rollback` with no prior successful revision. | `helm rollback` reports it has no revision to roll back to; nothing changes. Use `--clear-pending-helm` then `erun deploy --force` instead. |
 | Both `--clear-pending-helm` and `--rollback` passed. | Aborts immediately with `--clear-pending-helm and --rollback are alternative recoveries; pass only one`; exit code 1; nothing runs. |
