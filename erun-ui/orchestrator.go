@@ -97,10 +97,17 @@ type orchestratorEnvCandidate struct {
 	Mirrored         bool   `json:"mirrored"`
 }
 
+// orchestratorEnvInfo is the JSON-safe view of one linked environment.
+// Activity is nil until the environment-activity poller (environment_activity.go)
+// has observed this environment at least once — the same "nil means not yet
+// observed" contract uiEnvironment.Activity already carries, reused here
+// rather than duplicated so the two surfaces cannot drift on what "not yet
+// observed" means.
 type orchestratorEnvInfo struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Directory   string `json:"directory"`
+	Tenant      string                         `json:"tenant"`
+	Environment string                         `json:"environment"`
+	Directory   string                         `json:"directory"`
+	Activity    *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
 }
 
 // orchestratorInfo is the JSON-safe view the frontend renders and attaches to.
@@ -118,6 +125,12 @@ type orchestratorEnvInfo struct {
 // running shell was reported started, unix seconds, 0 when ShellRunning is
 // false — the frontend derives elapsed time from it rather than the desktop
 // formatting a string that immediately goes stale.
+//
+// NudgeCount/NudgeCapped/LastNudgeAtUnix carry orchestratorSession's pacing
+// state (orchestrator_pacing.go) the same way: read directly rather than left
+// to the operator to infer from the pane, so a hover can tell a session erun
+// has given up nudging from one that has never needed a nudge. Zero/false for
+// a stopped orchestrator, whose pacing state does not survive past its session.
 type orchestratorInfo struct {
 	ID                 string                `json:"id"`
 	Name               string                `json:"name"`
@@ -132,6 +145,9 @@ type orchestratorInfo struct {
 	ShellRunning       bool                  `json:"shellRunning"`
 	ShellCommand       string                `json:"shellCommand,omitempty"`
 	ShellStartedAtUnix int64                 `json:"shellStartedAtUnix,omitempty"`
+	NudgeCount         int                   `json:"nudgeCount"`
+	NudgeCapped        bool                  `json:"nudgeCapped"`
+	LastNudgeAtUnix    int64                 `json:"lastNudgeAtUnix,omitempty"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -883,10 +899,26 @@ func copyDirTree(src, dst string) error {
 	})
 }
 
-func envInfos(envs []eruncommon.OrchestratorEnvConfig) []orchestratorEnvInfo {
+// envInfos joins each linked env against the environment-activity poller's
+// last observation for it, keyed the same way the poller itself keys the
+// sidebar's per-env state (selectionKey) — so an orchestrator's card and the
+// sidebar row for the same environment can never disagree about what "busy"
+// or "outage" means, because both read the one map the poller writes.
+func envInfos(envs []eruncommon.OrchestratorEnvConfig, envActivity map[string]environmentActivityState) []orchestratorEnvInfo {
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
-		out = append(out, orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory})
+		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory}
+		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})
+		if state, ok := envActivity[key]; ok {
+			info.Activity = &uiEnvironmentActivitySnapshot{
+				Reachable: state.reachable,
+				Observed:  state.observed,
+				Outage:    state.outage,
+				Busy:      state.busy,
+				Detail:    state.detail,
+			}
+		}
+		out = append(out, info)
 	}
 	return out
 }
@@ -933,11 +965,22 @@ type orchestratorBusySnapshot struct {
 	AtUnix int64
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot) orchestratorInfo {
+// orchestratorPacingSnapshot is the pacing/nudge half of orchestratorInfo,
+// grouped for the same reason orchestratorBusySnapshot and
+// orchestratorShellSnapshot are: read from orchestratorSession's own pacing
+// fields (orchestrator_pacing.go) rather than left for the frontend to infer
+// from the pane.
+type orchestratorPacingSnapshot struct {
+	NudgeCount      int
+	Capped          bool
+	LastNudgeAtUnix int64
+}
+
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                 id,
 		Name:               name,
-		Environments:       envInfos(envs),
+		Environments:       envInfos(envs, envActivity),
 		Tenants:            tenantsFromEnvs(envs),
 		Directories:        directoriesFromEnvs(envs),
 		SessionID:          sessionID,
@@ -948,6 +991,9 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		ShellCommand:       shell.Command,
 		ShellStartedAtUnix: shell.StartedAtUnix,
 		Transient:          transient,
+		NudgeCount:         pacing.NudgeCount,
+		NudgeCapped:        pacing.Capped,
+		LastNudgeAtUnix:    pacing.LastNudgeAtUnix,
 	}
 }
 
@@ -1289,7 +1335,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}), nil
+	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot()), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments and
@@ -1328,13 +1374,15 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	sessionID := 0
 	busy := orchestratorBusySnapshot{}
 	shell := orchestratorShellSnapshot{}
+	pacing := orchestratorPacingSnapshot{}
 	if info, ok := a.runningOrchestratorInfo(id); ok {
 		status = "running"
 		sessionID = info.SessionID
 		busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
 		shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
+		pacing = orchestratorPacingSnapshot{NudgeCount: info.NudgeCount, Capped: info.NudgeCapped, LastNudgeAtUnix: info.LastNudgeAtUnix}
 	}
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell), nil
+	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot()), nil
 }
 
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
@@ -1423,7 +1471,8 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 		return orchestratorInfo{}, false
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell), true
+	pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity), true
 }
 
 // runningOrchestratorConversation returns the conversation a live session is
@@ -1623,7 +1672,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot()), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -1681,15 +1730,17 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		sessionID := 0
 		busy := orchestratorBusySnapshot{}
 		shell := orchestratorShellSnapshot{}
+		pacing := orchestratorPacingSnapshot{}
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
 				sessionID = session.serial
 				busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
 				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
+				pacing = orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -1701,7 +1752,8 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 			continue
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell))
+		pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

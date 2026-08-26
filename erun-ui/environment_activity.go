@@ -251,6 +251,23 @@ func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
 	}
 }
 
+// envActivitySnapshot copies the poller's per-environment observations under
+// lock, for callers assembling a read model outside any a.mu section of their
+// own (a.mu is not reentrant, so a caller already holding it must read
+// a.envActivity directly instead of calling this).
+func (a *App) envActivitySnapshot() map[string]environmentActivityState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.envActivity) == 0 {
+		return nil
+	}
+	out := make(map[string]environmentActivityState, len(a.envActivity))
+	for k, v := range a.envActivity {
+		out[k] = v
+	}
+	return out
+}
+
 func (a *App) emitEnvActivity(observation environmentActivity) {
 	a.emitEvent(envActivityEvent, envActivityPayload{
 		Tenant:      observation.selection.Tenant,

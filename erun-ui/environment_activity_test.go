@@ -135,6 +135,32 @@ func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 	}
 }
 
+// TestEnvActivitySnapshotCopiesRatherThanAliases guards the reason this
+// method exists at all: a caller assembling a read model outside any a.mu
+// section of its own (orchestratorInfoFor's unlocked call sites) must not
+// hold a live reference into a.envActivity, or a concurrent poller write
+// would race with that caller's later reads.
+func TestEnvActivitySnapshotCopiesRatherThanAliases(t *testing.T) {
+	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
+
+	snapshot := app.envActivitySnapshot()
+	if len(snapshot) != 1 || !snapshot[key].busy {
+		t.Fatalf("expected the snapshot to carry the observation, got %+v", snapshot)
+	}
+	app.envActivity[key] = environmentActivityState{}
+	if !snapshot[key].busy {
+		t.Fatalf("expected the snapshot to be a copy, unaffected by a later mutation of a.envActivity")
+	}
+}
+
+func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
+	app := &App{}
+	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+		t.Fatalf("expected a nil snapshot for an empty poller state, got %+v", snapshot)
+	}
+}
+
 // TestLoadStateSeedsEnvironmentActivityFromThePoller exercises the full
 // wiring: LoadState (what the frontend's boot() thunk actually calls) must
 // carry the poller's last observation onto the env it just reloaded from
