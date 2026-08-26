@@ -38,7 +38,8 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
 | `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`. |
 | `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge for a target branch (status `READY`, not yet promoted). Optional `?targetBranch=<name>`. |
-| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE` and dispatch its merge-queue gate. Body: `targetBranch`. Does not itself produce `MERGED` — see [Merge queue](#merge-queue). |
+| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE` and dispatch its merge-queue gate. Body: `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads — see [Merge queue](#merge-queue). Does not itself produce `MERGED`. |
+| `POST` | `/v1/reviews/merge-queue/override-advance` | Bypass the unresolved-thread refusal and advance anyway. Body: `targetBranch`, `reason`. A distinct, separately-authorized route — see [Overriding the gate](#overriding-the-gate). |
 | `GET` | `/v1/reviews/{reviewId}/reviewers` | List the review's reviewers. |
 | `POST` | `/v1/reviews/{reviewId}/reviewers` | Add a reviewer. Body: `userId`. |
 | `DELETE` | `/v1/reviews/{reviewId}/reviewers/{userId}` | Remove a reviewer. `204 No Content` on success. |
@@ -117,11 +118,35 @@ Content-Type: application/json
 { "targetBranch": "main" }
 ```
 
-The server picks the head of the waiting line for that target branch, transitions it to `MERGE`, and dispatches the merge queue's gate for it: fetch the review's target and source branches, build the prospective merge of the source onto the *current* target, run a real build against that prospective merge, and push it only if the build passes. The response to `advance` is the promoted (now `MERGE`) review, not the merged one — poll `GET /v1/reviews/{reviewId}` for the terminal `MERGED` or `FAILED` outcome. If the waiting line is empty, or another review is already `MERGE` for that target branch, the API returns an error.
+Before promoting, the server checks the head review's comment threads: if any thread is still `OPEN` (its root comment unresolved), `advance` refuses with `409 Conflict` and a structured body naming the count and the review, rather than the plain-text body every other error on this API returns —
+
+```jsonc
+{
+  "error": "unresolved_threads",
+  "message": "review rev_01H... has 3 unresolved comment thread(s); resolve them before advancing the merge queue",
+  "reviewId": "rev_01H...",
+  "unresolvedThreads": 3
+}
+```
+
+— so a caller can act on the refusal (open the review, resolve the threads, or use [`override-advance`](#overriding-the-gate)) instead of parsing a sentence. Once every thread is resolved (or there are none), `advance` picks the head of the waiting line for that target branch, transitions it to `MERGE`, and dispatches the merge queue's gate for it: fetch the review's target and source branches, build the prospective merge of the source onto the *current* target, run a real build against that prospective merge, and push it only if the build passes. The response to `advance` is the promoted (now `MERGE`) review, not the merged one — poll `GET /v1/reviews/{reviewId}` for the terminal `MERGED` or `FAILED` outcome. If the waiting line is empty, or another review is already `MERGE` for that target branch, the API returns an error.
 
 This is what catches two reviews that are each green on their own but broken together: the second review promoted onto a target branch is always gated against whatever the first one just landed, not against a stale snapshot, so their combination is tested before the target branch ever sees it.
 
 If a `MERGE` review's gate never reaches a terminal state (an operator-diagnosed stuck run), `PATCH /v1/reviews/{reviewId}/status` with `{"status": "READY"}` and no `buildId` requeues it: it moves back to `READY` and rejoins the waiting line at the tail rather than being promoted again immediately.
+
+### Overriding the gate
+
+`POST /v1/reviews/merge-queue/override-advance` promotes the head of the waiting line exactly as `advance` does, but skips the unresolved-thread check:
+
+```
+POST /v1/reviews/merge-queue/override-advance
+Content-Type: application/json
+
+{ "targetBranch": "main", "reason": "hotfix, reviewers unavailable" }
+```
+
+`reason` is required — a blank or missing one is refused with `400 Bad Request` before anything is promoted — and is recorded in the [audit trail](/agent-reference/audit-log) alongside the caller's identity, as an `API`-type event whose `apiPath` is `/v1/reviews/merge-queue/override-advance`. This is the one legitimate escape from the thread gate: it is deliberate (a distinct call, not a flag on `advance`), accountable (the reason and the caller are both durably recorded), and separately authorized — a tenant's `role_permissions` can grant `advance` without granting `override-advance`, since they are different API paths. A caller with no permission for this path gets the same `403 Forbidden` any unauthorized route returns.
 
 ## Errors
 
@@ -137,11 +162,11 @@ All endpoints return JSON error bodies:
 
 | Status | When | Example |
 |---|---|---|
-| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result. |
+| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly; `override-advance` with a blank or missing `reason`. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result; `override-advance` with `reason` omitted. |
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
 | `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller. | `GET /v1/reviews/rev_unknown`. |
-| `409 Conflict` | Invalid state transition or queue-state mismatch; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review. | `POST /v1/reviews/merge-queue/advance` while another review is already `MERGE` for that target branch; `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does. |
+| `409 Conflict` | Invalid state transition or queue-state mismatch; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews/merge-queue/advance` while another review is already `MERGE` for that target branch; `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](#merge-queue) for that response's structured body. |
 | `422 Unprocessable Entity` | Structurally valid but semantically invalid. | `PATCH status` to `READY` without a successful build. |
 | `429 Too Many Requests` | Rate limit exceeded. | Burst of `POST /comments`. |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |

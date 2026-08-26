@@ -48,7 +48,7 @@ A `CLI` row would carry `cliCommand` instead of `apiMethod`/`apiPath`; an `MCP` 
 
 ### What the read API never returns
 
-The write path also has `cliParameters` and `mcpToolParameters` columns for serialized call arguments, but `GET /v1/audit-events` (below) never selects them and the response has no field for them, regardless of what a write path stores there. An MCP tool such as `cloud_inject_aws_credentials` takes credentials as call arguments — the tool name (`mcpTool`) is exactly the kind of thing an audit trail should surface, but the argument payload is exactly the kind of thing it must not leak back out through a read endpoint. The same holds for `cliParameters` once CLI audit logging lands.
+The write path also has `cliParameters`, `mcpToolParameters`, and `apiParameters` columns for serialized call arguments, but `GET /v1/audit-events` (below) never selects any of them and the response has no field for them, regardless of what a write path stores there. An MCP tool such as `cloud_inject_aws_credentials` takes credentials as call arguments — the tool name (`mcpTool`) is exactly the kind of thing an audit trail should surface, but the argument payload is exactly the kind of thing it must not leak back out through a read endpoint. The same holds for `cliParameters` once CLI audit logging lands, and for `apiParameters` today: the one API caller that populates it, `POST /v1/reviews/merge-queue/override-advance`, writes the overriding operator's reason there specifically so it is durably captured, not so it becomes readable back through this endpoint.
 
 ## Query API
 

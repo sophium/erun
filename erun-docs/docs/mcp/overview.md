@@ -298,9 +298,10 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
 | `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
-| `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGED` — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`. |
+| `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
+| `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
-All nine support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_queue_advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All ten support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -425,6 +426,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_close` | `erun review close` | Work |
 | review | `review_queue_list` | `erun review queue list` | Read |
 | review | `review_queue_advance` | `erun review queue advance` | Work |
+| review | `review_queue_override-advance` | `erun review queue override-advance` | Work |
 | idle | `idle` | `erun idle` | Read |
 | idle | `idle_stop_history` | *(MCP-only)* | Read |
 | idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |

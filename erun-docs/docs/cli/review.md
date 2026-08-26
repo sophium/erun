@@ -22,6 +22,7 @@ erun review unresolve REVIEW_ID COMMENT_ID [flags]
 erun review close REVIEW_ID [flags]
 erun review queue list --target-branch <branch> [flags]
 erun review queue advance --target-branch <branch> [flags]
+erun review queue override-advance --target-branch <branch> --reason <text> [flags]
 ```
 
 Every subcommand accepts `--erun-alias` (defaults to the sole configured erun-type alias when only one is set up), `--dry-run` (trace the resolved HTTP call without sending it), and the global `--output json` for structured results.
@@ -69,9 +70,11 @@ Closes a review without merging it.
 
 ### `review queue list` / `review queue advance`
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGED` and fails if the queue is empty or its head is not `READY`.
+Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty, its head is not `READY`, or the head still has unresolved comment threads. On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`.
 
-Until [the merge queue's executor](/collaboration/builds) lands, `MERGED` is a status only — nothing yet performs the actual git merge.
+### `review queue override-advance`
+
+Bypasses `review queue advance`'s unresolved-thread check and advances anyway. `--reason` is required and is recorded in the platform's [audit trail](/collaboration/operator-in-the-loop) alongside your identity — this is a deliberate, accountable escape hatch for a genuine exception, not a routine way to advance the queue. A tenant can grant this separately from ordinary `advance`, so it may be unavailable even to operators who can otherwise advance the queue.
 
 ## Examples
 
@@ -95,6 +98,7 @@ erun review close 018f...
 
 erun review queue list --target-branch main
 erun review queue advance --target-branch main
+erun review queue override-advance --target-branch main --reason "hotfix, reviewers unavailable"
 ```
 
 ## Error behaviour
@@ -109,3 +113,5 @@ erun review queue advance --target-branch main
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
 | `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `409 Conflict`. |
+| `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
+| `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
