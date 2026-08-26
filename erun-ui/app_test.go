@@ -90,6 +90,36 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 	}
 }
 
+// TestLoadStateFirstRunNeverRendersBareCLIInstruction is the red-then-green
+// regression for the first-run dead end: a genuinely fresh install (no tool
+// config at all) must resolve to the same renderable, non-nil-tenants shape
+// as "initialized with zero tenants", never a bare CLI instruction the
+// desktop cannot carry out and never a shape that crashes the frontend's
+// unconditional tenants iteration on boot.
+func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			listTenantsErr: eruncommon.ErrNotInitialized,
+		},
+		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInitialized },
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+	})
+
+	state, err := app.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+	if state.Tenants == nil {
+		t.Fatal("expected a non-nil Tenants slice so the frontend's boot-time iteration and JSON marshaling both stay safe")
+	}
+	if len(state.Tenants) != 0 {
+		t.Fatalf("expected zero tenants for a fresh install, got: %+v", state.Tenants)
+	}
+	if strings.Contains(state.Message, "`") || strings.Contains(state.Message, "erun init") {
+		t.Fatalf("expected no bare CLI instruction in the first-run message, got: %q", state.Message)
+	}
+}
+
 func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
@@ -4177,6 +4207,10 @@ type stubUIStore struct {
 	projectConfigs map[string]eruncommon.ProjectConfig
 	tenants        map[string]eruncommon.TenantConfig
 	envs           map[string]eruncommon.EnvConfig
+	// listTenantsErr lets a test simulate a genuinely fresh install, where
+	// ResolveListResult's ListTenantConfigs call itself fails with
+	// ErrNotInitialized rather than succeeding with zero tenants.
+	listTenantsErr error
 }
 
 func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
@@ -4271,6 +4305,9 @@ func (s stubUIStore) DeleteEnvConfig(tenant, environment string) error {
 }
 
 func (s stubUIStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
+	if s.listTenantsErr != nil {
+		return nil, s.listTenantsErr
+	}
 	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenants))
 	for _, tenant := range s.tenants {
 		tenants = append(tenants, tenant)
