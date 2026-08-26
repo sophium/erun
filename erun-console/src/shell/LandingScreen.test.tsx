@@ -75,7 +75,7 @@ describe('LandingScreen content', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders no docs link anywhere, and no placeholder host, when docsUrl is unset', () => {
+  it('falls back to the public docs site in the footer when docsUrl is unset, in the signed-out state', () => {
     render(
       <LandingScreen
         brand="Acme"
@@ -87,9 +87,37 @@ describe('LandingScreen content', () => {
       />,
     );
 
-    expect(screen.queryByRole('link', { name: 'Read the docs' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/docs\./)).not.toBeInTheDocument();
-    expect(document.body.innerHTML).not.toMatch(/erunpaas\.com/);
+    // The hero's primary "Read the docs" CTA still renders only when an
+    // instance configures a real docsUrl (never a hardcoded fallback host),
+    // but the footer is the one link every visitor can always reach, so it
+    // falls back rather than disappearing.
+    const docsLinks = screen.getAllByRole('link', { name: 'Read the docs' });
+    expect(docsLinks).toHaveLength(1);
+    expect(docsLinks[0]).toHaveAttribute('href', 'https://docs.erunpaas.com');
+  });
+
+  it('gives the no-OIDC state a docs link too, in both the footer and the configure-OIDC copy', () => {
+    render(
+      <LandingScreen
+        brand="Acme"
+        logoUrl={undefined}
+        tagline={undefined}
+        docsUrl={undefined}
+        oidc={undefined}
+        fallbackReason={undefined}
+      />,
+    );
+
+    // No Sign in button can work with no OIDC configured, so the state must
+    // still offer a way forward: the footer's docs link, and the
+    // explanation's own link to the page that walks through configuring one.
+    expect(screen.getByRole('link', { name: 'Read the docs' })).toHaveAttribute(
+      'href',
+      'https://docs.erunpaas.com',
+    );
+    expect(
+      screen.getByRole('link', { name: 'configure OIDC sign-in for this instance' }),
+    ).toHaveAttribute('href', 'https://docs.erunpaas.com/deployment/deploy-platform#hosted-idp');
   });
 
   it('shows the bearer-token fallback note, not a Sign in button, when OIDC is unconfigured', () => {

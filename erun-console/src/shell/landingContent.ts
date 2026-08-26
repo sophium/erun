@@ -11,6 +11,17 @@ export const DEFAULT_TAGLINE =
 export const DEFAULT_DESCRIPTION =
   'Every task — a feature, a peer review, a hotfix — gets its own isolated environment with the full stack inside, so an Operator and an AI Agent can work side by side without fighting over one shared dev stack.';
 
+// The public product documentation site, mirrored from
+// erun-ui/frontend/src/app/documentationThunks.ts's ERUN_DOCS_URL. An
+// instance's own docsUrl (GET /v1/platform) is preferred when set; this is
+// the floor so an unconfigured instance's landing page still has a docs exit
+// instead of rendering no link at all.
+export const PUBLIC_DOCS_URL = 'https://docs.erunpaas.com';
+
+// Every erun-docs deploy is the same Docusaurus site shape, so this path
+// resolves under an instance's own docsUrl as well as the public fallback.
+export const CONFIGURE_OIDC_DOCS_PATH = '/deployment/deploy-platform#hosted-idp';
+
 export interface Differentiator {
   key: string;
   label: string;

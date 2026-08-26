@@ -7,13 +7,15 @@ import { LandingDifferentiators } from './LandingDifferentiators';
 import { LandingFooter } from './LandingFooter';
 import { LandingHero } from './LandingHero';
 
-// LandingScreen is the signed-out route's front door (#1327), replacing the
-// bare 384px SignInScreen card: a real <header>/<main>/<footer> landmark
+// LandingScreen is the signed-out route's front door, replacing the bare
+// 384px SignInScreen card: a real <header>/<main>/<footer> landmark
 // structure with an <h1> lead, so a first-time visitor learns what the
 // product is and can reach the docs before ever being asked to sign in.
-// `docsUrl`/`logoUrl` are per-instance platform config and render nothing
-// when unset; `tagline` falls back to a bundled product-level default the
-// same way BrandMark falls back to a generic mark.
+// `docsUrl`/`logoUrl` are per-instance platform config; `logoUrl` renders
+// nothing when unset (BrandMark falls back to a generic mark), but the
+// footer's docs link always resolves to something — the public docs site
+// when no instance docsUrl is configured — so there is no state with no way
+// out. `tagline` falls back to a bundled product-level default.
 export function LandingScreen({
   brand,
   logoUrl,

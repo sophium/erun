@@ -4,6 +4,7 @@ import type * as React from 'react';
 
 import type { OidcConfig } from '../auth/auth';
 import { beginLogin } from '../auth/auth';
+import { CONFIGURE_OIDC_DOCS_PATH, PUBLIC_DOCS_URL } from './landingContent';
 import { LandingHeroVisual } from './LandingHeroVisual';
 
 // The hero carries the pitch and both calls to action. Sign in stays the
@@ -29,6 +30,8 @@ export function LandingHero({
   fallbackReason: string | undefined;
 }): React.ReactElement {
   const hasDocsUrl = docsUrl !== undefined && docsUrl.length > 0;
+  const docsBase = docsUrl !== undefined && docsUrl.length > 0 ? docsUrl : PUBLIC_DOCS_URL;
+  const configureOidcHref = `${docsBase}${CONFIGURE_OIDC_DOCS_PATH}`;
   return (
     <section className="border-b border-border bg-gradient-to-b from-muted/40 to-background px-6 py-12 sm:py-16">
       <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
@@ -54,8 +57,16 @@ export function LandingHero({
               </Button>
             ) : (
               <p className="max-w-sm text-xs text-muted-foreground">
-                A bearer token is required to view your environments. Ask an operator for one, or
-                configure OIDC sign-in for this instance.
+                A bearer token is required to view your environments. Ask an operator for one, or{' '}
+                <a
+                  href={configureOidcHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                >
+                  configure OIDC sign-in for this instance
+                </a>
+                .
               </p>
             )}
             {hasDocsUrl && (

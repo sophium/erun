@@ -163,11 +163,12 @@ describe('ConfigView via App', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(
-          'A bearer token is required to view your environments. Ask an operator for one, or configure OIDC sign-in for this instance.',
-        ),
+        screen.getByText(/A bearer token is required to view your environments\./),
       ).toBeInTheDocument();
     });
+    expect(
+      screen.getByRole('link', { name: 'configure OIDC sign-in for this instance' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
   });
 });
