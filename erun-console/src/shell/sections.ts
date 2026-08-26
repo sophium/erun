@@ -1,5 +1,5 @@
 import type { TenantConfigView } from 'erun-kit';
-import { Cloud, KeyRound, LayoutDashboard, Server, Settings, Users } from 'lucide-react';
+import { Cloud, KeyRound, LayoutDashboard, Mail, Server, Settings, Users } from 'lucide-react';
 
 // Identity administration (issue #1209) is restricted server-side to an
 // OPERATIONS tenant; gating the nav entries here too keeps a COMPANY-tenant
@@ -12,7 +12,8 @@ export type ConsoleSectionId =
   | 'provisioning'
   | 'mcp-access'
   | 'users'
-  | 'org-settings';
+  | 'org-settings'
+  | 'smtp-settings';
 
 export interface ConsoleSection {
   id: ConsoleSectionId;
@@ -30,6 +31,7 @@ const BASE_SECTIONS: ConsoleSection[] = [
 const OPERATIONS_SECTIONS: ConsoleSection[] = [
   { id: 'users', label: 'Users', icon: Users },
   { id: 'org-settings', label: 'Org settings', icon: Settings },
+  { id: 'smtp-settings', label: 'Outbound mail', icon: Mail },
 ];
 
 // The nav mirrors the backend's own OPERATIONS-only restriction on identity

@@ -5,6 +5,7 @@ import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
+import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
@@ -48,6 +49,8 @@ function SectionContent({
       return <UsersPanel token={token} />;
     case 'org-settings':
       return <OrgSettingsPanel token={token} />;
+    case 'smtp-settings':
+      return <SmtpSettingsPanel token={token} />;
   }
 }
 

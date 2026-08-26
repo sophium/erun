@@ -6,7 +6,7 @@ title: Identity administration
 
 > For the Operator view, see [Administering identity](/collaboration/identity-administration).
 
-`/v1/identity/*` drives the platform's own IdP (Zitadel) Management API server-side, using an org-owner service-account credential the `erun-zitadel` chart provisions on every deployment and never exposes to a browser. It is the console's IdP-identity administration surface (issue #1209): enroll, list, deactivate, and reactivate identities, and read/update the org's login and password policy.
+`/v1/identity/*` drives the platform's own IdP (Zitadel) Management/Admin API server-side, using an org-owner service-account credential the `erun-zitadel` chart provisions on every deployment and never exposes to a browser. It is the console's IdP-identity administration surface (issue #1209): enroll, list, deactivate, and reactivate identities, read/update the org's login and password policy, and read/update the platform's outbound-mail (SMTP) configuration.
 
 ## Restricted to an OPERATIONS tenant
 
@@ -42,7 +42,12 @@ Lists every identity (human and machine) the platform's IdP knows about.
 
 ## `POST /v1/identity/users`
 
-Enrolls a new identity: creates it in the IdP (Zitadel's invite flow — no password is set here, so the enrollee receives an email to complete sign-in) and, only once that succeeds, creates the matching erun user and its `user_external_ids` mapping using the IdP's own returned id as `subject` and the caller's own token issuer as `issuer`.
+Enrolls a new identity, and creates it differently depending on whether the platform can actually send mail (issue #1168):
+
+- **Mail delivery configured** (see [`GET /v1/identity/smtp-settings`](#smtp-settings-get) below): the identity is created via Zitadel's invite flow — no password is set, so the enrollee receives an email to complete sign-in, and the IdP identity starts `USER_STATE_INITIAL`.
+- **Mail delivery not configured** (including when the check itself fails — treated the same as unconfigured, since assuming mail works when it might not risks the same dead end): Zitadel would still create the identity, but the invite email it depends on can never arrive, leaving the account stuck in `USER_STATE_INITIAL` forever. Instead, the identity is created with a random, generated password and its email marked verified (both required together — Zitadel only skips its own initialization email when *both* conditions hold), landing it `USER_STATE_ACTIVE` immediately. The generated password is returned once, in `temporaryPassword`, for the operator to hand to the enrollee out of band; it is never stored or logged.
+
+Only once the IdP half succeeds does this create the matching erun user and its `user_external_ids` mapping, using the IdP's own returned id as `subject` and the caller's own token issuer as `issuer`.
 
 ```jsonc
 // request body
@@ -53,20 +58,31 @@ Enrolls a new identity: creates it in the IdP (Zitadel's invite flow — no pass
   "lastName": "Operator"        // optional
 }
 
-// 201 response — both halves landed
+// 201 response — mail delivery configured, both halves landed
 {
   "idpUser": { "id": "387728445393600515", "username": "bob", "state": "USER_STATE_INITIAL" },
-  "erunUser": { "userId": "019a…", "username": "bob" }
+  "erunUser": { "userId": "019a…", "username": "bob" },
+  "mailDeliveryConfigured": true
+}
+
+// 201 response — mail delivery NOT configured: a temporary password stands in for the invite email
+{
+  "idpUser": { "id": "387728445393600515", "username": "bob", "state": "USER_STATE_ACTIVE" },
+  "erunUser": { "userId": "019a…", "username": "bob" },
+  "mailDeliveryConfigured": false,
+  "temporaryPassword": "Er7hK2mQ9xL4nP6z!",
+  "warning": "This platform's identity provider has no SMTP configured, so no invitation email was sent. Share temporaryPassword with bob directly; they must sign in and change it."
 }
 
 // 201 response — the IdP identity was created, but the erun mapping failed
 {
   "idpUser": { "id": "387728445393600515", "username": "bob", "state": "USER_STATE_INITIAL" },
+  "mailDeliveryConfigured": true,
   "error": "identity created in the identity provider but the erun user mapping failed: idp user id 387728445393600515: a user with this username already exists in the target tenant"
 }
 ```
 
-The IdP half is created first, since the erun mapping needs the subject the IdP assigns; a failure there means nothing was created and the response is an error (below), not a `201`. A failure in the erun half after the IdP identity exists is **not** an error response — it is a `201` with `error` set and no `erunUser`, naming the orphaned IdP user id so the operator can retry the mapping (`POST /v1/users` with that id as `subject`) rather than enroll a duplicate identity.
+The IdP half is created first, since the erun mapping needs the subject the IdP assigns; a failure there means nothing was created and the response is an error (below), not a `201`. A failure in the erun half after the IdP identity exists is **not** an error response — it is a `201` with `error` set and no `erunUser`, naming the orphaned IdP user id so the operator can retry the mapping (`POST /v1/users` with that id as `subject`) rather than enroll a duplicate identity. `mailDeliveryConfigured`/`temporaryPassword`/`warning` are reported the same way regardless of which of the two failure/success shapes above applies.
 
 **Error behaviour.**
 
@@ -123,6 +139,66 @@ Applies only the fields present in the body; every other current value is preser
 | `400` | Body is not valid JSON. | Send a valid JSON object; every field is optional. |
 | `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
 | Forwarded from Zitadel | The policy write itself failed. | The response body carries Zitadel's own message. |
+
+## `GET /v1/identity/smtp-settings` {#smtp-settings-get}
+
+Reports whether the platform's IdP can send mail at all (issue #1168) — every flow that reaches a person out of band (signup verification, password reset, the invitation flow above) depends on it. Zitadel answers a plain `404` when no SMTP config is active; this translates that into an explicit, checkable field rather than leaving the `404` as the only signal.
+
+```jsonc
+// 200 response — configured
+{
+  "configured": true,
+  "config": {
+    "host": "smtp.example.com:587",
+    "user": "erun",
+    "senderAddress": "noreply@example.com",
+    "senderName": "Erun Platform",
+    "replyToAddress": "",
+    "tls": true
+  }
+}
+
+// 200 response — not configured
+{ "configured": false, "config": {} }
+```
+
+The password is never included, in either direction — Zitadel does not return it, and this endpoint only ever forwards what Zitadel itself reports.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
+| Forwarded from Zitadel | A transport-level failure reaching Zitadel (not the same as "no config" above, which is `200`). | The response body carries Zitadel's own message. |
+
+## `PATCH /v1/identity/smtp-settings` {#smtp-settings-patch}
+
+Converges the platform's outbound-mail configuration to the request body — provider-agnostic (any SMTP host), declarative (send the full desired state, not a diff). `host` and `senderAddress` are required; `password` is sourced by the caller from wherever it holds the mail provider's credential out of band, and is required the first time (there is nothing yet to leave unchanged), optional afterward (omit it to leave Zitadel's stored password untouched — there is no way to read it back to diff against).
+
+```jsonc
+// request body — first-time configuration
+{
+  "host": "smtp.example.com:587",
+  "username": "erun",
+  "password": "the-provider-issued-credential",
+  "senderAddress": "noreply@example.com",
+  "senderName": "Erun Platform",
+  "tls": true
+}
+
+// 200 response, same shape as GET /v1/identity/smtp-settings above
+{ "configured": true, "config": { "host": "smtp.example.com:587", "...": "..." } }
+```
+
+Internally this creates-and-activates Zitadel's SMTP config when none exists yet (a freshly created config defaults to inactive and is invisible to the `GET` above until explicitly activated), or read-modify-writes the existing one otherwise — always activating before writing a changed password, since Zitadel's password-update command refuses an inactive config.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `host`/`senderAddress` empty, the body is not valid JSON, or no config exists yet and `password` was omitted. | Send `host`, `senderAddress`, and (for a first-time configuration) `password`. |
+| `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
+| Forwarded from Zitadel | The config write itself failed. | The response body carries Zitadel's own message. |
 
 ## Audit
 

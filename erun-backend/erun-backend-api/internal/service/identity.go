@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 
@@ -14,6 +15,7 @@ import (
 // needs. *zitadel.Client satisfies it; tests supply a stub.
 type IdentityAdmin interface {
 	CreateHumanUser(ctx context.Context, params zitadel.CreateHumanUserParams) (zitadel.User, error)
+	GetSMTPStatus(ctx context.Context) (zitadel.SMTPStatus, error)
 }
 
 // IdentityUserCreator is the erun-side half of enrollment: creating the
@@ -61,9 +63,20 @@ type EnrollIdentityParams struct {
 // value when the erun-side mapping failed after the IdP user was created;
 // IdPUser is still populated so the caller can report the orphaned IdP
 // identity precisely rather than as an opaque failure.
+//
+// MailDeliveryConfigured and TemporaryPassword report the other half of
+// what actually landed (issue #1168): when the platform's IdP has no SMTP
+// configured, Zitadel's own invitation email can never arrive, so Enroll
+// does not create the usual passwordless, email-pending account -- it mints
+// a random initial password instead and reports it here, once, for the
+// caller to hand to the enrollee out of band. TemporaryPassword is empty
+// whenever MailDeliveryConfigured is true (the normal invite-email flow
+// ran instead).
 type EnrollIdentityResult struct {
-	IdPUser  zitadel.User
-	ErunUser model.User
+	IdPUser                zitadel.User
+	ErunUser               model.User
+	MailDeliveryConfigured bool
+	TemporaryPassword      string
 }
 
 // Enroll creates the IdP identity first — the erun mapping needs the
@@ -72,13 +85,34 @@ type EnrollIdentityResult struct {
 // external-identity mapping using that subject. A failure after the IdP
 // user exists is reported as ErrIdentityMappingFailed with the created
 // IdPUser still attached, rather than as an opaque enrollment failure.
+//
+// Before creating the IdP identity, it checks whether the platform can
+// actually send mail at all (issue #1168). When it cannot, Zitadel's usual
+// invite-by-email flow would create an account stuck in USER_STATE_INITIAL
+// forever, waiting on a link nothing will ever send -- a success response
+// that silently does nothing, exactly the dead end this checks for. A
+// failed or inconclusive SMTP status check is treated the same as
+// "unconfigured": assuming mail works when it might not risks the exact
+// same dead end, while the temporary-password fallback always leaves the
+// account usable regardless.
 func (s *IdentityService) Enroll(ctx context.Context, params EnrollIdentityParams) (EnrollIdentityResult, error) {
-	idpUser, err := s.admin.CreateHumanUser(ctx, zitadel.CreateHumanUserParams{
+	mailStatus, _ := s.admin.GetSMTPStatus(ctx)
+
+	createParams := zitadel.CreateHumanUserParams{
 		Username:  params.Username,
 		Email:     params.Email,
 		FirstName: params.FirstName,
 		LastName:  params.LastName,
-	})
+	}
+	if !mailStatus.Configured {
+		temporaryPassword, err := generateTemporaryPassword()
+		if err != nil {
+			return EnrollIdentityResult{}, fmt.Errorf("generate temporary password for a no-mail enrollment: %w", err)
+		}
+		createParams.InitialPassword = temporaryPassword
+	}
+
+	idpUser, err := s.admin.CreateHumanUser(ctx, createParams)
 	if err != nil {
 		return EnrollIdentityResult{}, fmt.Errorf("create identity provider user: %w", err)
 	}
@@ -89,7 +123,34 @@ func (s *IdentityService) Enroll(ctx context.Context, params EnrollIdentityParam
 		Subject:  idpUser.ID,
 	})
 	if err != nil {
-		return EnrollIdentityResult{IdPUser: idpUser}, fmt.Errorf("%w: idp user id %s: %w", ErrIdentityMappingFailed, idpUser.ID, err)
+		return EnrollIdentityResult{IdPUser: idpUser, MailDeliveryConfigured: mailStatus.Configured, TemporaryPassword: createParams.InitialPassword}, fmt.Errorf("%w: idp user id %s: %w", ErrIdentityMappingFailed, idpUser.ID, err)
 	}
-	return EnrollIdentityResult{IdPUser: idpUser, ErunUser: erunUser}, nil
+	return EnrollIdentityResult{
+		IdPUser:                idpUser,
+		ErunUser:               erunUser,
+		MailDeliveryConfigured: mailStatus.Configured,
+		TemporaryPassword:      createParams.InitialPassword,
+	}, nil
+}
+
+// temporaryPasswordAlphabet excludes visually ambiguous characters (0/O,
+// 1/l/I) since this password is meant to be read aloud or retyped by an
+// operator handing it to an enrollee out of band.
+const temporaryPasswordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+// generateTemporaryPassword mints a random password satisfying Zitadel's
+// default complexity policy (upper, lower, digit, symbol), the same shape
+// the erun-zitadel chart already generates for its own bootstrap admin
+// password.
+func generateTemporaryPassword() (string, error) {
+	const randomLength = 20
+	raw := make([]byte, randomLength)
+	if _, err := cryptorand.Read(raw); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	chars := make([]byte, randomLength)
+	for i, b := range raw {
+		chars[i] = temporaryPasswordAlphabet[int(b)%len(temporaryPasswordAlphabet)]
+	}
+	return fmt.Sprintf("Er%s!", string(chars)), nil
 }

@@ -71,13 +71,14 @@ describe('UsersPanel', () => {
     expect(screen.getByText('USER_STATE_ACTIVE')).toBeInTheDocument();
   });
 
-  it('enrolls a user and reports the erun mapping', async () => {
+  it('enrolls a user and reports the erun mapping, mail path: invite email', async () => {
     let listedAfterEnroll = false;
     mockFetch((req) => {
       if (req.method === 'POST' && req.url === '/v1/identity/users') {
         return jsonResponse({
           idpUser: { id: 'idp-2', username: 'bob', state: 'USER_STATE_INITIAL' },
           erunUser: { userId: 'erun-2', username: 'bob' },
+          mailDeliveryConfigured: true,
         });
       }
       if (req.url === '/v1/identity/users') {
@@ -98,7 +99,53 @@ describe('UsersPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/Enrolled bob/)).toBeInTheDocument();
+    expect(screen.getByText(/An invite email is on its way/)).toBeInTheDocument();
     expect(listedAfterEnroll).toBe(true);
+    // The invite-email path never mints a credential to show.
+    expect(screen.queryByText(/Temporary password/)).not.toBeInTheDocument();
+  });
+
+  it('shows a one-time, copyable temporary password when mail is not configured', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockFetch((req) => {
+      if (req.method === 'POST' && req.url === '/v1/identity/users') {
+        return jsonResponse({
+          idpUser: { id: 'idp-4', username: 'dana', state: 'USER_STATE_ACTIVE' },
+          erunUser: { userId: 'erun-4', username: 'dana' },
+          mailDeliveryConfigured: false,
+          temporaryPassword: 'Er7hK2mQ9xL4nP6z!',
+          warning: "This platform's identity provider has no SMTP configured.",
+        });
+      }
+      return jsonResponse([]);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('No users enrolled yet.');
+
+    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+      target: { value: 'dana' },
+    });
+    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+      target: { value: 'dana@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
+
+    expect(await screen.findByText(/Outbound mail is not configured/)).toBeInTheDocument();
+    expect(screen.getByText('Temporary password for dana')).toBeInTheDocument();
+    const passwordField = screen.getByLabelText<HTMLInputElement>('Temporary password');
+    expect(passwordField.value).toBe('Er7hK2mQ9xL4nP6z!');
+    expect(screen.getByText(/shown once and will not be shown again/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith('Er7hK2mQ9xL4nP6z!');
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByText('Temporary password for dana')).not.toBeInTheDocument();
+    // The enrolled-user status message stays; only the one-time credential
+    // itself is gone from the controller's state.
+    expect(screen.getByText(/Enrolled dana/)).toBeInTheDocument();
   });
 
   it('reports the orphaned IdP identity when the erun mapping fails', async () => {
