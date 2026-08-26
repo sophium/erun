@@ -1,4 +1,5 @@
 Target: team/dev
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 No cached JetBrains Gateway backend metadata found for this environment.
 audit: erun doctor --repair-jetbrains-gateway team dev
 trace-log: appending the full trace to <TMP>

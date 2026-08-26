@@ -281,6 +281,26 @@ func (c EnvConfig) HasAWSCloudAlias() bool {
 	return strings.TrimSpace(c.ResolvedCloudAliases()[CloudProviderAWS]) != ""
 }
 
+// RuntimeImageRegistryMismatch reports the registries `erun doctor` compares
+// to catch a pod that can never pull: a persisted RuntimeImage naming a
+// registry other than the env's own RuntimeRegistry. The pull secret erun
+// refreshes on every deploy is keyed off exactly the registries in play
+// (containerRegistry, which follows RuntimeRegistry when the env records one,
+// plus each imageOverrides registry) — but a credential still has to resolve
+// for both at deploy time, so a RuntimeImage on a different registry than
+// RuntimeRegistry is worth flagging even when the refresh above already
+// tries to cover it. mismatched is false when the image carries no registry
+// of its own (a bare name follows RuntimeRegistry, nothing to compare) or the
+// env records no RuntimeRegistry to compare against.
+func (c EnvConfig) RuntimeImageRegistryMismatch() (imageRegistry, runtimeRegistry string, mismatched bool) {
+	imageRegistry = runtimeImageRegistry(c.RuntimeImage)
+	runtimeRegistry = strings.TrimSpace(c.RuntimeRegistry)
+	if imageRegistry == "" || runtimeRegistry == "" {
+		return imageRegistry, runtimeRegistry, false
+	}
+	return imageRegistry, runtimeRegistry, !strings.EqualFold(imageRegistry, runtimeRegistry)
+}
+
 // legacyEnvTypeFromRemoteSnapshot migrates configs written before the `type`
 // field existed, mapping the old remote+snapshot pair to a concrete type. It must
 // reproduce the old deciders exactly: a missing snapshot key meant "does not build

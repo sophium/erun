@@ -1184,6 +1184,24 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_aws_alias_env_plans_host_credential_check", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_runtime_image_registry_mismatch", func(t *testing.T) {
+		// #1328: a runtimeimage pinned to one registry (an ECR build host)
+		// while runtimeregistry names another (the deploy/chart registry)
+		// leaves the pod unable to pull unless a credential happens to
+		// resolve for the image's own registry at deploy time. This is a
+		// pure config comparison — no exec, no live read — so doctor reports
+		// it identically in --dry-run and for real, naming both registries
+		// and the fix.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: 123456789012.dkr.ecr.eu-west-2.amazonaws.com/team-devops\nruntimeregistry: ghcr.io/sophium\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_runtime_image_registry_mismatch", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as
@@ -1254,6 +1272,30 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_reports_unrecorded_expiry_and_unresolved_region", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_pod_down_degrades_host_credentials_instead_of_aborting", func(t *testing.T) {
+		// #1325: the runtime pod is up but its erun-devops container has
+		// terminated (phase Running, reason Error) — exactly the situation
+		// doctor exists to diagnose, and the one case where its first check
+		// used to exec into that same down container and abort before
+		// reporting anything else. The helm/pod diagnosis must print first
+		// (it needs no exec and is safe on a down pod), then the
+		// host-credentials read must degrade to a "could not read" report
+		// instead of failing the whole command, and every check after it
+		// (the docker-storage inspection, prune) must still run against the
+		// dind sidecar rather than being skipped.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlHostCredentialsExecFails(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_pod_down_degrades_host_credentials_instead_of_aborting", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_prune_images_and_build_cache_via_stubs", func(t *testing.T) {
 		// Real-run doctor cleanup with a healthy release: covers the
 		// non-dry-run arms of runDeployDiagnosis (helm status + pods
@@ -1309,9 +1351,12 @@ func TestDoctor(t *testing.T) {
 		// kubectl wait fails with a disk i/o error: doctor must fold the
 		// stderr into the storage-unhealthy diagnostic
 		// (normalizeDoctorKubectlError → doctorKubectlDiagnostic's
-		// unhealthy-storage arm) instead of surfacing a bare exit-status
-		// error. Only reachable in a real run — dry-run never executes
-		// the wait.
+		// unhealthy-storage arm) and degrade the docker-storage check instead
+		// of aborting the whole command (#1325) — the helm/pod diagnosis
+		// above already reported the cluster is reachable, so this failure is
+		// specific to the docker inspection alone, and the requested prune is
+		// skipped for the same reason rather than attempted and failing too.
+		// Only reachable in a real run — dry-run never executes the wait.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := filepath.Join(setup.Cwd, "stubs")
@@ -1319,8 +1364,8 @@ func TestDoctor(t *testing.T) {
 		stubDoctorKubectl(t, stubs, `echo 'Error from server: disk i/o error' >&2; exit 1`)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
 		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_storage_unhealthy_diagnostic_error", normalize.Apply(result.Combined))
 	})
@@ -1418,7 +1463,9 @@ func TestDoctor(t *testing.T) {
 		// broken. Covers doctorNamespaceLookupFailed +
 		// doctorNamespaceIsListed and the second diagnostic arm of
 		// doctorKubectlDiagnostic; the probe-then-diagnose sequence only
-		// runs on a real wait failure.
+		// runs on a real wait failure. Degrades the docker-storage check
+		// rather than aborting the command (#1325), same as the storage
+		// scenario above.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := filepath.Join(setup.Cwd, "stubs")
@@ -1426,8 +1473,8 @@ func TestDoctor(t *testing.T) {
 		stubDoctorKubectl(t, stubs, `echo 'Error from server (NotFound): namespaces "team-dev" not found' >&2; exit 1`)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
 		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_namespace_listed_but_api_failing_error", normalize.Apply(result.Combined))
 	})
@@ -1755,6 +1802,30 @@ func stubDoctorKubectlWithHostCredentials(t *testing.T, stubsDir, presence, expi
 		`case "$*" in`,
 		`  *"x_erun_expiration"*) printf 'profile=` + presence + `\nexpiration=` + expiration + `\n' ;;`,
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlHostCredentialsExecFails reproduces #1325: the runtime pod
+// is up but its erun-devops container is down, so the host-credentials exec
+// fails with the same "container not found" shape kubectl reports for a
+// missing container, while every other kubectl surface (the pod listing for
+// the diagnosis, docker storage) stays healthy.
+func stubDoctorKubectlHostCredentialsExecFails(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"x_erun_expiration"*)`,
+		`    echo 'Defaulted container "erun-devops" out of: erun-devops, erun-dind, prepare-volumes (init)' >&2`,
+		`    echo 'error: Internal error occurred: unable to upgrade connection: container not found ("erun-devops")' >&2`,
+		`    exit 1`,
+		`    ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   0/2     Error   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
 		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
