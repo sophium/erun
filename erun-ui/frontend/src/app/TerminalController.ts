@@ -9,6 +9,7 @@ import { boot } from './bootThunks';
 import { decodeBase64Bytes } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
+import { reconcileSidebarForViewport } from './layoutThunks';
 import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
 import { showTerminalError } from './notificationThunks';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
@@ -410,6 +411,10 @@ export class TerminalController {
   }
 
   applyLayoutVars(): void {
+    // Re-derive the sidebar's collapsed state on every layout pass (mount,
+    // window resize, any panel toggle) — a window resized rather than dragged
+    // needs the same auto-collapse a narrow launch already gets.
+    store.dispatch(reconcileSidebarForViewport());
     applyTerminalLayoutVars({
       reviewView: this._reviewView,
       terminalPane: this._terminalPane,

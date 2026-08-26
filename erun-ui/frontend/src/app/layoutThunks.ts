@@ -2,6 +2,7 @@ import type * as React from 'react';
 
 import { WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import {
+  reconcileSidebarForViewport as reconcileSidebarForViewportPanel,
   setDebugOpen as applyDebugOpen,
   setFilesOpen as applyFilesOpen,
   startDebugResize as startDebugPanelResize,
@@ -22,6 +23,10 @@ import { requireController } from './thunkExtra';
 export const toggleSidebar = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
   toggleSidebarPanel(dispatch, getState, controller.layoutCallbacks());
+};
+
+export const reconcileSidebarForViewport = (): AppThunk => (dispatch, getState) => {
+  reconcileSidebarForViewportPanel(dispatch, getState);
 };
 
 export const toggleReview = (): AppThunk => (dispatch, getState, extra) => {
