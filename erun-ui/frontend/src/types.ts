@@ -168,6 +168,10 @@ export interface UITenantDashboardInput {
   mcpUrl?: string;
   kubernetesContext?: string;
   cloudProviderAlias: string;
+  // reviewFilterMine/reviewFilterWaitingOnMe are the Reviews tab's one-click
+  // discovery filters, resolved server-side to the signed-in user's own id.
+  reviewFilterMine?: boolean;
+  reviewFilterWaitingOnMe?: boolean;
 }
 
 export interface UITenantDashboard {
@@ -215,10 +219,15 @@ export interface UITenantDashboardUser {
 export interface UITenantDashboardReview {
   reviewId: string;
   tenantId: string;
+  authorUserId?: string;
   name: string;
   targetBranch: string;
   sourceBranch: string;
   status: string;
+  // unresolvedThreads is undefined when it was not computed for this row
+  // (e.g. the caller cannot read comments) — distinct from 0, which means
+  // every thread is resolved.
+  unresolvedThreads?: number;
   lastFailedBuildId?: string;
   lastReadyBuildId?: string;
   lastMergedBuildId?: string;

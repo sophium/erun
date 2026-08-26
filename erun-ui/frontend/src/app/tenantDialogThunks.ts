@@ -11,7 +11,13 @@ import { setSelected } from './slices/selectionSlice';
 import { patchTenantDashboard, setTenantDashboard } from './slices/tenantDashboardSlice';
 import { patchTenantDialog, setTenantDialog } from './slices/tenantDialogSlice';
 import { setCloudProviders, setTenants } from './slices/tenantsSlice';
-import { defaultTenantDialog, type TenantDashboardTab, type TenantDialogState } from './state';
+import {
+  defaultReviewFilter,
+  defaultTenantDialog,
+  type ReviewFilterState,
+  type TenantDashboardTab,
+  type TenantDialogState,
+} from './state';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
@@ -242,15 +248,17 @@ export const openTenantDashboard =
       return;
     }
     const currentDashboard = getState().tenantDashboard;
+    const sameTenant = currentDashboard.tenant === tenant;
     dispatch(setSelected(null));
     dispatch(setIdleStatus(null));
     dispatch(
       setTenantDashboard({
         tenant,
-        tab: currentDashboard.tenant === tenant ? currentDashboard.tab : 'users',
+        tab: sameTenant ? currentDashboard.tab : 'users',
         loading: true,
         error: '',
         data: null,
+        reviewFilter: sameTenant ? currentDashboard.reviewFilter : defaultReviewFilter(),
       }),
     );
     dispatch(setReviewOpen(false));
@@ -264,6 +272,18 @@ export const setTenantDashboardTab =
     dispatch(patchTenantDashboard({ tab }));
   };
 
+// setReviewFilter applies a Reviews-tab discovery filter and reloads the
+// dashboard so the new filter reaches the platform read, not just local
+// state — matching every other tenant-dashboard filter's the-list-is-the-
+// state-of-the-world contract.
+export const setReviewFilter =
+  (next: Partial<ReviewFilterState>): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const reviewFilter = { ...getState().tenantDashboard.reviewFilter, ...next };
+    dispatch(patchTenantDashboard({ reviewFilter }));
+    await dispatch(loadTenantDashboard());
+  };
+
 export const loadTenantDashboard =
   (tenant?: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -273,7 +293,7 @@ export const loadTenantDashboard =
       return;
     }
     const tenantState = state.tenants.tenants.find((candidate) => candidate.name === target);
-    const input = tenantDashboardInput(tenantState);
+    const input = tenantDashboardInput(tenantState, state.tenantDashboard.reviewFilter);
     if (!input) {
       dispatch(
         patchTenantDashboard({
@@ -331,7 +351,10 @@ export const refreshTenantDashboard = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardInput | null {
+function tenantDashboardInput(
+  tenant: UITenant | undefined,
+  reviewFilter: ReviewFilterState,
+): UITenantDashboardInput | null {
   if (!tenant) {
     return null;
   }
@@ -348,6 +371,8 @@ function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardIn
     mcpUrl: trimOptional(environment?.mcpUrl),
     kubernetesContext: trimOptional(environment?.kubernetesContext),
     cloudProviderAlias,
+    reviewFilterMine: reviewFilter.mine,
+    reviewFilterWaitingOnMe: reviewFilter.waitingOnMe,
   };
 }
 

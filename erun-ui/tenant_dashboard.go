@@ -48,7 +48,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		return dashboard, nil
 	}
 	defer cancel()
-	loadTenantDashboardData(requestCtx, client, &dashboard)
+	loadTenantDashboardData(requestCtx, client, &dashboard, input)
 	return dashboard, nil
 }
 
@@ -101,7 +101,7 @@ const (
 // loadTenantDashboardData resolves every panel independently. One panel the
 // caller may not read, or one call that fails, must not blank the panels that
 // worked — and a panel the caller may not read must not read as an empty one.
-func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard) {
+func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
 		// Identity is the dashboard's own precondition: without it there is no
@@ -119,9 +119,17 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	}
 	dashboard.Panels = []uiTenantDashboardPanel{{Tab: tenantDashboardTabUsers}}
 	capabilities := whoami.Capabilities
-	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard)
+	reviewFilter := eruncommon.PlatformReviewFilter{}
+	if input.ReviewFilterMine {
+		reviewFilter.AuthorUserID = whoami.UserID
+	}
+	if input.ReviewFilterWaitingOnMe {
+		reviewFilter.ReviewerUserID = whoami.UserID
+	}
+	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard, reviewFilter)
 	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard)
 	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard, reviewsOutcome)
+	loadTenantDashboardReviewThreadCounts(ctx, client, capabilities, dashboard, reviewsOutcome)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
 	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
 	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
@@ -137,14 +145,14 @@ type reviewsLoadOutcome struct {
 	restricted string
 }
 
-func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) reviewsLoadOutcome {
+func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, filter eruncommon.PlatformReviewFilter) reviewsLoadOutcome {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return reviewsLoadOutcome{restricted: restricted}
 	}
-	reviews, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{})
+	reviews, err := client.ListReviews(ctx, filter)
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
 		dashboard.Panels = append(dashboard.Panels, panel)
@@ -199,6 +207,67 @@ func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformC
 		}
 	}
 	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+// loadTenantDashboardReviewThreadCounts enriches each review row with its
+// unresolved-thread count, so "is this review actually finished" is readable
+// from the list itself, not only inside the detail dialog. A review is left
+// without a count (rather than a false zero) when the caller cannot read
+// comments at all, or when its own comment read failed — supplemental detail
+// on a row, not worth a panel error the way the Reviews/Builds panels get.
+func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
+	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
+		return
+	}
+	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) != "" {
+		return
+	}
+	counts := fetchReviewThreadCountsConcurrently(ctx, client, reviewsOutcome.reviews)
+	for i := range dashboard.Reviews {
+		count, ok := counts[dashboard.Reviews[i].ReviewID]
+		if !ok {
+			continue
+		}
+		dashboard.Reviews[i].UnresolvedThreads = &count
+	}
+}
+
+// maxConcurrentReviewCommentReads mirrors maxConcurrentReviewBuildReads for
+// the same reason: bound the per-review /comments reads a big tenant's
+// listing pays for, inside the one dashboard load's shared timeout.
+const maxConcurrentReviewCommentReads = 8
+
+// fetchReviewThreadCountsConcurrently reads every review's comments in
+// parallel, bounded by maxConcurrentReviewCommentReads, mirroring
+// fetchReviewBuildsConcurrently's shape. A review whose comment read fails is
+// simply absent from the returned map rather than reported as zero.
+func fetchReviewThreadCountsConcurrently(ctx context.Context, client *eruncommon.PlatformClient, reviews []eruncommon.PlatformReview) map[string]int {
+	counts := make(map[string]int, len(reviews))
+	semaphore := make(chan struct{}, maxConcurrentReviewCommentReads)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, review := range reviews {
+		reviewID := strings.TrimSpace(review.ReviewID)
+		if reviewID == "" {
+			continue
+		}
+		wg.Add(1)
+		semaphore <- struct{}{}
+		go func(reviewID string) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+			comments, err := client.ListComments(ctx, reviewID)
+			if err != nil {
+				return
+			}
+			count := eruncommon.CountUnresolvedThreads(comments)
+			mu.Lock()
+			counts[reviewID] = count
+			mu.Unlock()
+		}(reviewID)
+	}
+	wg.Wait()
+	return counts
 }
 
 // maxConcurrentReviewBuildReads bounds how many /builds requests run at once,
@@ -325,6 +394,7 @@ func tenantDashboardReview(review eruncommon.PlatformReview) uiTenantDashboardRe
 	return uiTenantDashboardReview{
 		ReviewID:          review.ReviewID,
 		TenantID:          review.TenantID,
+		AuthorUserID:      review.AuthorUserID,
 		Name:              review.Name,
 		TargetBranch:      review.TargetBranch,
 		SourceBranch:      review.SourceBranch,

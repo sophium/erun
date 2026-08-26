@@ -138,13 +138,15 @@ func RunReviewShow(ctx Context, store CloudReadStore, alias, reviewID string, de
 	if err != nil {
 		return ReviewDetail{}, err
 	}
-	return ReviewDetail{Review: review, Comments: comments, Builds: builds, UnresolvedThreads: countUnresolvedThreads(comments)}, nil
+	return ReviewDetail{Review: review, Comments: comments, Builds: builds, UnresolvedThreads: CountUnresolvedThreads(comments)}, nil
 }
 
-// countUnresolvedThreads counts root comments (parentCommentId unset) whose
+// CountUnresolvedThreads counts root comments (parentCommentId unset) whose
 // status is still OPEN. A thread's status lives entirely on its root; replies
 // never carry their own (comments_validate in erun-backend-db enforces this).
-func countUnresolvedThreads(comments []PlatformComment) int {
+// Exported so other transports (erun-ui's tenant dashboard) can compute the
+// same count from a comment list without re-deriving the rule.
+func CountUnresolvedThreads(comments []PlatformComment) int {
 	count := 0
 	for _, comment := range comments {
 		if strings.TrimSpace(comment.ParentCommentID) == "" && comment.Status == "OPEN" {

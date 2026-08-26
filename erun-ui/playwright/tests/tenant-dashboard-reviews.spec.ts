@@ -258,3 +258,117 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
     }
   });
 });
+
+// Discovery (#1378): an author column and unresolved-thread count readable
+// from the row, plus the Mine/Waiting-on-me one-click filters and their own
+// distinct "nothing matches this filter" empty state.
+test.describe('tenant dashboard — reviews discovery (#1378)', () => {
+  test('the row shows the signed-in author as "You" and the unresolved-thread count without opening the review', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-author-threads');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [{ ...REVIEW, authorUserId: 'u1', unresolvedThreads: 2 }],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('You');
+      await expect(row).toContainText('2 unresolved');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('Mine and Waiting on me apply as one-click filters and reload the dashboard with them', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-filter');
+    try {
+      const filterCalls: { authorUserId?: string; reviewerUserId?: string }[] = [];
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as {
+          method: string;
+          args?: [{ reviewFilterMine?: boolean; reviewFilterWaitingOnMe?: boolean }];
+        };
+        if (body.method === 'LoadTenantDashboard') {
+          const input = body.args?.[0];
+          const mine = Boolean(input?.reviewFilterMine);
+          const waitingOnMe = Boolean(input?.reviewFilterWaitingOnMe);
+          filterCalls.push({
+            authorUserId: mine ? 'u1' : undefined,
+            reviewerUserId: waitingOnMe ? 'u1' : undefined,
+          });
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            // Filtering is proven by the request the desktop makes (the
+            // stub cannot re-filter server-side), not by which reviews come
+            // back — so it always returns the same review and the assertion
+            // is on filterCalls plus the distinct empty state below.
+            reviews: mine || waitingOnMe ? [] : [REVIEW],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+
+      await app.tenantDashboard.mineFilterButton().click();
+      await expect(app.tenantDashboard.reviewsFilteredEmptyState()).toBeVisible();
+      await expect(app.tenantDashboard.reviewsEmptyState()).toHaveCount(0);
+      await expect(app.tenantDashboard.mineFilterButton()).toHaveAttribute('aria-pressed', 'true');
+
+      await app.tenantDashboard.clearReviewFilterButton().click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      await expect(app.tenantDashboard.mineFilterButton()).toHaveAttribute('aria-pressed', 'false');
+
+      await app.tenantDashboard.waitingOnMeFilterButton().click();
+      await expect(app.tenantDashboard.reviewsFilteredEmptyState()).toBeVisible();
+
+      expect(filterCalls).toEqual(
+        expect.arrayContaining([
+          { authorUserId: 'u1', reviewerUserId: undefined },
+          { authorUserId: undefined, reviewerUserId: undefined },
+          { authorUserId: undefined, reviewerUserId: 'u1' },
+        ]),
+      );
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
+

@@ -208,6 +208,12 @@ type uiTenantDashboardInput struct {
 	MCPURL             string `json:"mcpUrl,omitempty"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string `json:"cloudProviderAlias"`
+	// ReviewFilterMine/ReviewFilterWaitingOnMe are the Reviews tab's one-click
+	// discovery filters. Both resolve to the signed-in user's own id (already
+	// known from this same load's whoami call) rather than asking the
+	// frontend to carry a user id it has no other reason to know.
+	ReviewFilterMine        bool `json:"reviewFilterMine,omitempty"`
+	ReviewFilterWaitingOnMe bool `json:"reviewFilterWaitingOnMe,omitempty"`
 
 	// mcpBearer is the per-env MCP edge token for the dashboard's MCP API-log
 	// read. Set server-side from the desktop identity, never by the frontend;
@@ -263,12 +269,19 @@ type uiTenantDashboardUser struct {
 }
 
 type uiTenantDashboardReview struct {
-	ReviewID          string `json:"reviewId"`
-	TenantID          string `json:"tenantId"`
-	Name              string `json:"name"`
-	TargetBranch      string `json:"targetBranch"`
-	SourceBranch      string `json:"sourceBranch"`
-	Status            string `json:"status"`
+	ReviewID     string `json:"reviewId"`
+	TenantID     string `json:"tenantId"`
+	AuthorUserID string `json:"authorUserId,omitempty"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+	Status       string `json:"status"`
+	// UnresolvedThreads is the review's "still being discussed" signal at a
+	// glance, from the row rather than only inside the detail dialog. Left
+	// unset (rather than 0) when it was not computed for this listing (see
+	// tenant_dashboard.go's reviewThreadCounts) so a caller can tell "zero
+	// unresolved" apart from "not read for this row".
+	UnresolvedThreads *int   `json:"unresolvedThreads,omitempty"`
 	LastFailedBuildID string `json:"lastFailedBuildId,omitempty"`
 	LastReadyBuildID  string `json:"lastReadyBuildId,omitempty"`
 	LastMergedBuildID string `json:"lastMergedBuildId,omitempty"`
@@ -324,11 +337,18 @@ type uiReviewDetail struct {
 	// QueuePosition is 1-based; 0 means the review is not in its target
 	// branch's merge queue right now.
 	QueuePosition int `json:"queuePosition,omitempty"`
+	// UnresolvedThreads counts root comments still OPEN, valid whenever
+	// Comments loaded (CommentsRestricted and CommentsError both empty).
+	UnresolvedThreads int `json:"unresolvedThreads,omitempty"`
 	// CanComment reports whether the signed-in user may reply at all, so the
 	// composer can be hidden rather than rendered to fail on submit.
 	CanComment bool `json:"canComment"`
 	// CanClose mirrors CanComment for the close action.
 	CanClose bool `json:"canClose"`
+	// CanResolveComments mirrors CanComment for the resolve/unresolve action,
+	// gated on its own write route since resolving a thread and posting to it
+	// are different permissions on the platform.
+	CanResolveComments bool `json:"canResolveComments"`
 }
 
 type uiReviewComment struct {
@@ -341,6 +361,17 @@ type uiReviewComment struct {
 	Line            int    `json:"line"`
 	Body            string `json:"body"`
 	CreatedAt       string `json:"createdAt,omitempty"`
+}
+
+// uiUpdateReviewCommentStatusInput resolves or unresolves a comment thread.
+// CommentID must be a thread's root; the frontend never offers the action on
+// a reply, so there is no reply-rejection path to surface here.
+type uiUpdateReviewCommentStatusInput struct {
+	Tenant             string `json:"tenant"`
+	APIURL             string `json:"apiUrl"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	ReviewID           string `json:"reviewId"`
+	CommentID          string `json:"commentId"`
 }
 
 // uiCreateReviewReplyInput replies to an existing comment thread. CommitID,

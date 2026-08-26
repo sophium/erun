@@ -30,11 +30,17 @@ export interface UIReviewDetail {
   buildsError?: string;
   // queuePosition is 1-based; 0 means the review is not queued right now.
   queuePosition?: number;
+  // unresolvedThreads counts root comments still OPEN; valid whenever
+  // comments loaded (commentsRestricted and commentsError both unset).
+  unresolvedThreads?: number;
   // canComment reports whether the signed-in user may reply at all, so the
   // composer can be hidden rather than rendered to fail on submit.
   canComment: boolean;
   // canClose mirrors canComment for the close action.
   canClose: boolean;
+  // canResolveComments mirrors canComment for the resolve/unresolve action —
+  // a distinct write route on the platform, gated separately.
+  canResolveComments: boolean;
 }
 
 export interface UIReviewComment {
@@ -81,6 +87,17 @@ export interface UICloseReviewInput {
   apiUrl: string;
   cloudProviderAlias: string;
   reviewId: string;
+}
+
+// UIUpdateReviewCommentStatusInput resolves or unresolves a comment thread.
+// commentId must be a thread's root — the dialog only ever offers the action
+// there, never on a reply.
+export interface UIUpdateReviewCommentStatusInput {
+  tenant: string;
+  apiUrl: string;
+  cloudProviderAlias: string;
+  reviewId: string;
+  commentId: string;
 }
 
 export interface UIAdvanceMergeQueueInput {

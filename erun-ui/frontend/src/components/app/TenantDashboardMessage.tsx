@@ -1,4 +1,47 @@
+import { EmptyState } from 'erun-kit';
 import * as React from 'react';
+
+import type { AppState } from '@/app/state';
+import { tenantDashboardPanel } from '@/app/tenantDashboardPanels';
+
+export type TenantDashboardData = AppState['tenantDashboard']['data'];
+
+// PanelBody renders one panel's three distinguishable outcomes: it failed,
+// there is nothing in it, or here it is. "You may not read this" never
+// reaches here — a restricted panel has no tab to open. Shared by every
+// TenantDashboardPanels* file rather than duplicated per panel, and kept in
+// this message-focused module (not TenantDashboardPanels.tsx) so the panel
+// files can both depend on it without importing each other.
+export function PanelBody({
+  data,
+  tab,
+  empty,
+  children,
+}: {
+  data: TenantDashboardData;
+  tab: 'users' | 'reviews' | 'queue' | 'builds' | 'audit';
+  empty: React.ReactElement;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const panel = tenantDashboardPanel(data, tab);
+  if (panel?.restricted) {
+    return (
+      <div className="mt-4">
+        <EmptyState
+          heading="You do not have access to this panel"
+          body={`It needs ${panel.restricted}. Ask an administrator for access.`}
+        />
+      </div>
+    );
+  }
+  if (panel?.error) {
+    return <DashboardMessage message={panel.error} destructive />;
+  }
+  if (!children) {
+    return <div className="mt-4">{empty}</div>;
+  }
+  return <>{children}</>;
+}
 
 // DashboardMessage carries a status line or a failure for one dashboard surface.
 // It is deliberately not input-shaped: an empty panel uses EmptyState instead,

@@ -9,12 +9,10 @@ import type {
   UIEnvironmentLease,
   UIERunConfig,
   UIIdleStatus,
-  UIReviewDetail,
   UIRuntimeResourceStatus,
   UISelection,
   UITenant,
   UITenantConfig,
-  UITenantDashboard,
   UIVersionSuggestion,
   UIVersionSuggestionNotice,
 } from '@/types';
@@ -22,6 +20,9 @@ import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosti
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
 import type { ReachabilityKind } from './reconnectCopy';
+import type { TenantDashboardState } from './reviewDetailState';
+
+export * from './reviewDetailState';
 
 export const MIN_SIDEBAR_WIDTH = 248;
 export const MAX_SIDEBAR_WIDTH = 520;
@@ -144,53 +145,6 @@ export interface TenantDialogState {
   busyAction: '' | 'save' | 'cloud-oidc';
   busyTarget: string;
   error: string;
-}
-
-export type TenantDashboardTab = 'users' | 'reviews' | 'queue' | 'builds' | 'audit' | 'api-log';
-
-export interface TenantDashboardState {
-  tenant: string;
-  tab: TenantDashboardTab;
-  loading: boolean;
-  error: string;
-  data: UITenantDashboard | null;
-}
-
-// ReviewDetailState backs the dialog a Reviews-tab row opens. draftBody
-// survives a failed reply submit (Nielsen #3, user control) — a submit error
-// clears submitError but never the text the operator already typed.
-export interface ReviewDetailState {
-  open: boolean;
-  reviewId: string;
-  loading: boolean;
-  error: string;
-  data: UIReviewDetail | null;
-  // callerTenant/callerApiUrl/callerCloudProviderAlias are the caller context
-  // resolved when the review loaded, captured here rather than re-derived
-  // from state.tenantDashboard on every write: closing this dialog keeps the
-  // review as the diff panel's active commenting context (see
-  // closeReviewDetail), and by then the operator may have navigated away
-  // from the tenant dashboard entirely.
-  callerTenant: string;
-  callerApiUrl: string;
-  callerCloudProviderAlias: string;
-  replyingTo: string;
-  draftBody: string;
-  submitting: boolean;
-  submitError: string;
-  // closeConfirming is the inline "are you sure" step Close goes through
-  // before the write fires — the same cancel-before-commitment boundary every
-  // other side-effecting dashboard action gets.
-  closeConfirming: boolean;
-  closing: boolean;
-  closeError: string;
-  // newCommentAnchor is the diff line the operator clicked to start a new
-  // top-level thread (as opposed to replyingTo, which continues an existing
-  // one). Null means no diff-line composer is open.
-  newCommentAnchor: { commitId: string; filePath: string; line: number } | null;
-  newCommentDraft: string;
-  newCommentSubmitting: boolean;
-  newCommentSubmitError: string;
 }
 
 export interface GlobalConfigDialogState {
@@ -422,36 +376,6 @@ export const defaultTenantDialog = (): TenantDialogState => ({
   busyAction: '',
   busyTarget: '',
   error: '',
-});
-
-export const defaultTenantDashboard = (): TenantDashboardState => ({
-  tenant: '',
-  tab: 'users',
-  loading: false,
-  error: '',
-  data: null,
-});
-
-export const defaultReviewDetail = (): ReviewDetailState => ({
-  open: false,
-  reviewId: '',
-  loading: false,
-  error: '',
-  data: null,
-  callerTenant: '',
-  callerApiUrl: '',
-  callerCloudProviderAlias: '',
-  replyingTo: '',
-  draftBody: '',
-  submitting: false,
-  submitError: '',
-  closeConfirming: false,
-  closing: false,
-  closeError: '',
-  newCommentAnchor: null,
-  newCommentDraft: '',
-  newCommentSubmitting: false,
-  newCommentSubmitError: '',
 });
 
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({

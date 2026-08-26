@@ -83,6 +83,20 @@ export function reviewStatusTone(status: string): StatusBadgeTone {
   return reviewStatusTones[status.trim().toUpperCase()] ?? 'warning';
 }
 
+// unresolvedThreadsTone renders the count as a quantity, not just a colour:
+// zero reads as done (success), any other count as still-open (warning) —
+// WCAG 1.4.1 again, so the label carries the fact even without colour.
+export function unresolvedThreadsTone(count: number): StatusBadgeTone {
+  return count === 0 ? 'success' : 'warning';
+}
+
+export function unresolvedThreadsLabel(count: number): string {
+  if (count === 0) {
+    return 'All resolved';
+  }
+  return count === 1 ? '1 unresolved' : `${String(count)} unresolved`;
+}
+
 // formatDashboardDate renders a timestamp in the operator's own locale, and
 // falls back to the raw value rather than hiding one the API sent in a shape
 // this build does not recognise.
