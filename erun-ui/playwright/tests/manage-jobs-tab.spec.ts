@@ -1,5 +1,6 @@
 import type { Page, Request, Route } from '@playwright/test';
 
+import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
@@ -48,6 +49,23 @@ const UNKNOWN_JOB = {
   exitCode: null,
   startedAtUnix: 1700000000,
   endedAtUnix: 1700003600,
+};
+
+// Every orchestrator-driven job is an agent job, and an agent job's argv
+// always carries the whole prompt as one argument -- this is the shape a real
+// `claude -p '<prompt>' --output-format stream-json --verbose` job takes.
+const LONG_PROMPT = 'Investigate the flaky occupancy banner test and land a fix. '.repeat(90);
+
+const AGENT_JOB_WITH_LONG_PROMPT = {
+  id: 'agent-42',
+  name: 'automated fix',
+  state: 'exited',
+  kind: 'agent',
+  agentTool: 'claude',
+  command: ['claude', '-p', LONG_PROMPT, '--output-format', 'stream-json', '--verbose'],
+  exitCode: 0,
+  startedAtUnix: 1700000000,
+  endedAtUnix: 1700000600,
 };
 
 async function stubJobs(
@@ -151,6 +169,35 @@ test.describe('manage dialog jobs tab', () => {
     }));
     expect(clientWidth).toBeGreaterThan(0);
     expect(scrollWidth).toBeGreaterThan(clientWidth);
+
+    await app.manageDialog.cancel();
+  });
+
+  // An agent job's argv always carries the full prompt as one argument, so
+  // rendering it raw would flood the row and push every other job below the
+  // fold. The row must show an operator-readable summary instead, bounded to
+  // one line, regardless of how long the underlying command is.
+  test('an agent job with a multi-kilobyte prompt does not flood the row', async ({
+    app,
+    page,
+  }) => {
+    expect(AGENT_JOB_WITH_LONG_PROMPT.command.join(' ').length).toBeGreaterThan(5000);
+
+    await stubJobs(page, [AGENT_JOB_WITH_LONG_PROMPT]);
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    const row = app.manageDialog.jobRows().nth(0);
+    await expect(row).toBeVisible();
+
+    const rowText = await row.innerText();
+    expect(rowText.length).toBeLessThan(500);
+    expect(rowText).not.toContain('flaky occupancy banner');
+    expect(rowText).toContain('Claude agent');
+
+    const box = await boundingBoxOf(row, 'agent job row');
+    expect(box.height).toBeLessThan(150);
 
     await app.manageDialog.cancel();
   });

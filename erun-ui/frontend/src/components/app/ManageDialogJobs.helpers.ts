@@ -5,12 +5,14 @@ export interface JobView {
   id: string;
   name: string;
   state: string;
+  kind?: string;
+  agentTool?: string;
   command?: string[];
   dir?: string;
   exitCode: number | null;
   startedAtUnix?: number;
   endedAtUnix?: number;
-  progress?: { activity?: string };
+  progress?: { activity?: string; lastMessage?: string; turns: number; toolsRun: number };
 }
 
 // How a job's outcome reads to an operator. A job that is gone without an
@@ -76,9 +78,35 @@ export function formatDuration(seconds: number): string {
   return restMinutes === 0 ? `${String(hours)}h` : `${String(hours)}h${String(restMinutes)}m`;
 }
 
-// What the row shows as the job's own description. An agent job's current
-// activity is more useful than its argv, which is always the same tool.
+function agentToolLabel(tool: string | undefined): string {
+  if (tool === 'claude') {
+    return 'Claude';
+  }
+  if (tool === 'codex') {
+    return 'Codex';
+  }
+  return 'Agent';
+}
+
+// An agent job's argv is always the same tool invocation carrying the whole
+// prompt as an argument, so it is never shown -- the operator-readable answer
+// is what the agent is doing (its current activity, or its last reported
+// message), falling back to naming the tool when neither has arrived yet.
+function agentJobDetailLine(job: JobView): string {
+  if (job.progress?.activity) {
+    return job.progress.activity;
+  }
+  if (job.progress?.lastMessage) {
+    return job.progress.lastMessage;
+  }
+  return `${agentToolLabel(job.agentTool)} agent`;
+}
+
+// What the row shows as the job's own description.
 export function jobDetailLine(job: JobView): string {
+  if (job.kind === 'agent') {
+    return agentJobDetailLine(job);
+  }
   if (job.progress?.activity) {
     return job.progress.activity;
   }

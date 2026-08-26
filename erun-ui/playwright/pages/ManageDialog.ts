@@ -327,6 +327,10 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-row-name').nth(index);
   }
 
+  jobRowDetail(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-detail').nth(index);
+  }
+
   jobOutcome(index: number): Locator {
     return this.locator().getByTestId('manage-jobs-row-outcome').nth(index);
   }

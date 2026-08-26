@@ -311,8 +311,9 @@ function JobRow({
       </header>
       {detail && (
         <div
-          className="text-[12px] leading-[1.4] text-muted-foreground [overflow-wrap:anywhere]"
+          className="min-w-0 truncate text-[12px] leading-[1.4] text-muted-foreground"
           data-testid="manage-jobs-row-detail"
+          title={detail}
         >
           {detail}
         </div>
