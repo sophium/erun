@@ -394,6 +394,21 @@ func TestBuildOrchestratorMCPConfigReportsNoUnreachableEdgeWhenAllAnswer(t *test
 	}
 }
 
+func TestSingleOrchestratorMCPUnreachableEnv(t *testing.T) {
+	if _, _, ok := singleOrchestratorMCPUnreachableEnv(nil); ok {
+		t.Fatal("expected no match for zero unreachable envs")
+	}
+	if _, _, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{
+		{Label: "frs/dev"}, {Label: "frs/staging"},
+	}); ok {
+		t.Fatal("expected no match for more than one unreachable env")
+	}
+	tenant, environment, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{{Label: "frs/dev"}})
+	if !ok || tenant != "frs" || environment != "dev" {
+		t.Fatalf("got tenant=%q environment=%q ok=%v, want frs/dev/true", tenant, environment, ok)
+	}
+}
+
 func TestOrchestratorMCPUnreachableNoticeNamesTheEnvironments(t *testing.T) {
 	if got := orchestratorMCPUnreachableNotice("Petios", nil); got != "" {
 		t.Fatalf("expected no notice when nothing is unreachable, got %q", got)
@@ -438,6 +453,47 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(payload.Message, "frs/dev") || !strings.Contains(payload.Message, "not answering") {
 		t.Fatalf("notice does not name the environment and the reason: %q", payload.Message)
+	}
+	// Exactly one unreachable env is the unambiguous case: the notice can only
+	// mean this env, so it carries the deploy action and is tagged with it
+	// (#1390) rather than leaving the "deploy or reopen" remedy unreachable.
+	if payload.Tenant != "frs" || payload.Environment != "dev" {
+		t.Fatalf("notice tenant/environment = %q/%q, want frs/dev", payload.Tenant, payload.Environment)
+	}
+	if payload.Source != notificationSourceOrchestratorEdgeUnreachable {
+		t.Fatalf("notice source = %q, want %q", payload.Source, notificationSourceOrchestratorEdgeUnreachable)
+	}
+	if payload.Action != notificationActionDeploy {
+		t.Fatalf("notice action = %q, want %q", payload.Action, notificationActionDeploy)
+	}
+}
+
+// TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction locks the
+// ambiguous case: when more than one linked env's edge is unreachable, no
+// single env can own the notice's action, so it falls back to the plain
+// app-level notice with no action rather than guessing which env to deploy.
+func TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+		{Tenant: "frs", Environment: "dev"},
+		{Tenant: "frs", Environment: "laptop"},
+	})
+
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected exactly one notice about the unreachable edges, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if payload.Tenant != "" || payload.Environment != "" || payload.Action != "" {
+		t.Fatalf("notice = %+v, want no tenant/environment/action tag when several envs are unreachable", payload)
 	}
 }
 

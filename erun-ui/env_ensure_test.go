@@ -275,6 +275,12 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	if note.Kind != "warning" || note.Source != notificationSourceRuntimeUnreachable {
 		t.Fatalf("notification = %+v, want kind=warning source=%q", note, notificationSourceRuntimeUnreachable)
 	}
+	// The message names "Deploy the environment ..." as the fix, and the app
+	// can perform it, so the notification must carry the action the frontend
+	// renders a button for (#1390) rather than leaving the remedy unreachable.
+	if note.Action != notificationActionDeploy {
+		t.Fatalf("notification action = %q, want %q", note.Action, notificationActionDeploy)
+	}
 }
 
 // TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped locks the outcome an
@@ -307,6 +313,12 @@ func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 	}
 	if !strings.Contains(note.Message, "Open it to start it again") {
 		t.Fatalf("notification must name the way back, got %q", note.Message)
+	}
+	// The remedy here is opening the env, which the row itself already offers
+	// on click — not a deploy — so this notification must carry no action
+	// (#1390: an action-less remedy must not get a manufactured button).
+	if note.Action != "" {
+		t.Fatalf("notification action = %q, want none", note.Action)
 	}
 }
 
