@@ -631,8 +631,8 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 //
 // childPID is the process cmd.Wait just reaped. detachEnvironmentJobChild put
 // it in a process group named after its own pid, so a live process still in
-// that group after the leader is gone (erun#1374: work the leader backgrounded
-// and never waited for) is answered here, not left for the exit code alone to
+// that group after the leader is gone — work the leader backgrounded and
+// never waited for — is answered here, not left for the exit code alone to
 // misreport as a clean success.
 func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
 	// Fold the stream's tail before the outcome lands, so the finished record

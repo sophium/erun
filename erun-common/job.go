@@ -46,10 +46,10 @@ const (
 	// EnvironmentJobStateAbandoned means the job's own process exited and its
 	// exit status was captured, but it left other processes it spawned still
 	// running in its process group — background work it started and never
-	// waited for (erun#1374: a gate backgrounded and the job that started it
-	// exiting anyway). It is never success, whatever the captured exit code
-	// says: something the job started continues unsupervised, and nothing
-	// further will ever be reported for it.
+	// waited for, e.g. a gate backgrounded and the job that started it exiting
+	// anyway. It is never success, whatever the captured exit code says:
+	// something the job started continues unsupervised, and nothing further
+	// will ever be reported for it.
 	EnvironmentJobStateAbandoned = "abandoned"
 
 	// UnknownReasonKind values are what an orchestrator branches on instead of

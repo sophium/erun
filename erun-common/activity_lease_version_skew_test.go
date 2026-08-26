@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// #1329: an exclusive lease take against an environment whose MCP edge
-// predates erun#1245 (the exclusive-claim mechanism) gets the go-sdk's own
-// raw JSON-schema rejection of "exclusive"/"orchestrator" as unknown
-// arguments -- indistinguishable from a caller typo. This is the exact wire
-// text reported against erun 1.0.201.
+// An exclusive lease take against an environment whose MCP edge predates the
+// exclusive-claim mechanism gets the go-sdk's own raw JSON-schema rejection
+// of "exclusive"/"orchestrator" as unknown arguments -- indistinguishable
+// from a caller typo. This is the exact wire text reported against erun
+// 1.0.201.
 const rawExclusiveLeaseSchemaError = `MCP tools/call failed: invalid params: validating "arguments": validating root: unexpected additional properties ["orchestrator" "exclusive"] (code -32602)`
 
 func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *testing.T) {
@@ -20,7 +20,7 @@ func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *tes
 		t.Fatal("described error is nil")
 	}
 	message := described.Error()
-	for _, want := range []string{"petios/rihards-develop", "erun#1245", "--exclusive", "activity_lease_take"} {
+	for _, want := range []string{"petios/rihards-develop", "older than the one that added --exclusive", "activity_lease_take"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("described error %q does not mention %q", message, want)
 		}

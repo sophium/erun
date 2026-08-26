@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // detachEnvironmentJobSupervisor puts the supervisor in its own session, so it
@@ -73,7 +74,7 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 // been waited on. detachEnvironmentJobChild always gives the work a fresh
 // process group named after its own pid, so this is how a supervisor tells
 // "the work exited clean" from "the work exited but left something it
-// spawned still running" (erun#1374).
+// spawned still running".
 //
 // A raw `kill(-pgid, 0)` is not enough on its own: it also answers true for a
 // zombie -- a process that already exited and is only waiting for its parent
@@ -83,10 +84,35 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 // work nobody has reaped yet, not abandoned background work, so it must not
 // read as a survivor. `ps`'s STAT column tells the two apart; the signal
 // probe is only the fallback for when `ps` itself cannot be consulted.
+//
+// The same SIGTERM that just ended the leader reaches every other group
+// member at once, but the kernel does not process it atomically across
+// processes -- a sibling can still read as alive for a few milliseconds
+// while it finishes dying from that same signal, before it settles into the
+// zombie state above. A reading taken the instant the leader is reaped can
+// catch that transient window, so this gives a genuinely alive member a
+// short settle budget to either exit or become a reapable zombie before it
+// is trusted as a survivor.
 func environmentJobProcessGroupSurvivors(pgid int) bool {
 	if pgid <= 0 {
 		return false
 	}
+	deadline := time.Now().Add(environmentJobProcessGroupSurvivorSettleWindow)
+	for {
+		alive := environmentJobProcessGroupHasLiveMember(pgid)
+		if !alive || !time.Now().Before(deadline) {
+			return alive
+		}
+		time.Sleep(environmentJobProcessGroupSurvivorSettlePoll)
+	}
+}
+
+const (
+	environmentJobProcessGroupSurvivorSettleWindow = 300 * time.Millisecond
+	environmentJobProcessGroupSurvivorSettlePoll   = 20 * time.Millisecond
+)
+
+func environmentJobProcessGroupHasLiveMember(pgid int) bool {
 	if alive, ok := psProcessGroupHasLiveMember(pgid); ok {
 		return alive
 	}

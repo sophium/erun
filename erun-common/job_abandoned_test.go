@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// #1374: an agent job that backgrounds its gate and exits reports nothing --
-// the supervisor waits on its immediate child, the immediate child exits 0
+// An agent job that backgrounds its gate and exits reports nothing -- the
+// supervisor waits on its immediate child, the immediate child exits 0
 // having left a process it spawned still running, and the record reads as a
 // clean success. This is the reproduction: a command that redirects a
 // long-lived child's output to a file and backgrounds it before exiting, the
