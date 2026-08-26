@@ -9,6 +9,7 @@ import {
   startReviewComment,
   submitReviewComment,
 } from '@/app/reviewDetailThunks';
+import { openTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
 import type { DiffLine } from '@/types';
 
 import { InlineAlert } from './InlineAlert';
@@ -28,10 +29,12 @@ export function DiffLineCommentAction({
   filePath,
   line,
   commitHash,
+  tenant,
 }: {
   filePath: string;
   line: DiffLine;
   commitHash: string;
+  tenant: string;
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   // The active commenting context is the last-opened review, which survives
@@ -85,12 +88,53 @@ export function DiffLineCommentAction({
       </PopoverAnchor>
       <PopoverContent side="right" align="start" className="w-72">
         {blockedReason ? (
-          <p className="text-[13px] text-muted-foreground">{blockedReason}</p>
+          <DiffLineCommentBlocked
+            reason={blockedReason}
+            tenant={tenant}
+            showOpenReviewsTab={!hasActiveReview}
+          />
         ) : (
           <DiffLineCommentComposer />
         )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+// DiffLineCommentBlocked renders the explanatory sentence every blocked
+// reason gets, plus the one action that actually resolves a reason: the
+// no-active-review case names the Reviews tab, which lives in the tenant
+// dashboard — a different surface from this diff panel — so the popover
+// navigates there in one click rather than leaving the reader to find it on
+// their own (#1388). The other two reasons are actionable exactly where the
+// operator already stands (commit the change, request access), so they stay
+// message-only.
+function DiffLineCommentBlocked({
+  reason,
+  tenant,
+  showOpenReviewsTab,
+}: {
+  reason: string;
+  tenant: string;
+  showOpenReviewsTab: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <div className="grid gap-2">
+      <p className="text-[13px] text-muted-foreground">{reason}</p>
+      {showOpenReviewsTab && (
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            dispatch(openTenantDashboard(tenant));
+            dispatch(setTenantDashboardTab('reviews'));
+          }}
+        >
+          Open Reviews tab
+        </Button>
+      )}
+    </div>
   );
 }
 
