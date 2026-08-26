@@ -329,7 +329,7 @@ function ReviewsTable({
     headers.push('Threads');
   }
   return (
-    <DataTable headers={headers}>
+    <DataTable headers={headers} minWidthClassName="min-w-[820px]">
       {reviews.map((review) => (
         <tr key={review.reviewId}>
           <DataCell strong>

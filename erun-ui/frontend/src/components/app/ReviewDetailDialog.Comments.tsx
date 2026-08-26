@@ -191,7 +191,9 @@ function CommentLine({ comment }: { comment: UIReviewComment }): React.ReactElem
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2 text-[13px]">
-        <span className="font-medium text-foreground">{comment.creatorUserId ?? 'Unknown'}</span>
+        <span className="flex-none font-medium text-foreground">
+          {comment.creatorUserId ?? 'Unknown'}
+        </span>
         <span className="min-w-0 truncate text-muted-foreground">
           {comment.filePath}:{comment.line}
         </span>

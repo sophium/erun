@@ -68,12 +68,21 @@ export function DashboardMessage({
 export function DataTable({
   headers,
   children,
+  minWidthClassName,
 }: {
   headers: string[];
   children: React.ReactNode;
+  // minWidthClassName floors a wide table (many columns, e.g. the reviews
+  // table's Review/Status/Author/Target/Source/Updated/Threads) so a narrow
+  // viewport scrolls the table horizontally (the panel around it is already
+  // overflow-auto) instead of table-fixed shrinking every column past
+  // readability — a status badge missing its last letter is unreadable, not
+  // truncated. Omitted for narrower tables (Users, Builds, Audit), which fit
+  // without it.
+  minWidthClassName?: string;
 }): React.ReactElement {
   return (
-    <table className="mt-4 w-full table-fixed border-collapse text-sm">
+    <table className={`mt-4 w-full table-fixed border-collapse text-sm ${minWidthClassName ?? ''}`}>
       <thead>
         <tr className="border-b border-border text-left text-xs font-medium uppercase text-muted-foreground">
           {headers.map((header) => (
