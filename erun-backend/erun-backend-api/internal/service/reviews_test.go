@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 // fakeReviewRepo models reviews + review_merge_queue in memory, closely enough
@@ -97,12 +100,45 @@ func (f *fakeReviewBuilds) Get(_ context.Context, buildID string) (model.Build, 
 	return b, nil
 }
 
+// fakeReviewComments is the narrow ReviewCommentRepository dependency:
+// AdvanceMergeQueue's unresolved-thread gate lists a review's comments and
+// counts open root comments.
+type fakeReviewComments struct {
+	byReview map[string][]model.Comment
+}
+
+func (f *fakeReviewComments) List(_ context.Context, filter repository.CommentFilter) ([]model.Comment, error) {
+	return f.byReview[filter.ReviewID], nil
+}
+
+// fakeReviewAudit is the narrow ReviewAuditLogger dependency:
+// OverrideAdvanceMergeQueue's one required side effect. Tests that want "no
+// audit logger configured" pass a literal nil for the ReviewAuditLogger
+// parameter instead of a typed *fakeReviewAudit nil, which would not compare
+// equal to nil through the interface.
+type fakeReviewAudit struct {
+	events []model.AuditEvent
+}
+
+func (f *fakeReviewAudit) LogAuditEvent(_ context.Context, event model.AuditEvent) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
+// newTestReviewService wires a ReviewService with fakes sized for the common
+// case: no comments recorded anywhere (so no test accidentally trips the
+// unresolved-thread gate by omission) and a working audit logger.
+func newTestReviewService(reviews ReviewRepository, builds ReviewBuildRepository) (*ReviewService, *fakeReviewAudit) {
+	audit := &fakeReviewAudit{}
+	return NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit), audit
+}
+
 // TestUpdateStatusRefusesMergeAndMerged is the API hole the issue reports:
 // MERGED (and MERGE) must never be settable by a caller's PATCH. Only the
 // merge queue's own gate result (MergeQueueService) may write them.
 func TestUpdateStatusRefusesMergeAndMerged(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
-	svc := NewReviewService(reviews, &fakeReviewBuilds{})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
 	for _, status := range []model.ReviewStatus{model.ReviewStatusMerge, model.ReviewStatusMerged} {
 		if _, err := svc.UpdateStatus(context.Background(), "review-1", status, "build-1"); err != repository.ErrInvalidInput {
@@ -127,7 +163,7 @@ func TestMarkBuildResultPromotesTheQueueHeadNotTheBuiltReview(t *testing.T) {
 	// review-head is already queued, ahead of the review this build is for.
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-head"}}
 	reviews.nextID = 1
-	svc := NewReviewService(reviews, &fakeReviewBuilds{})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
 	promoted, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
 	if err != nil {
@@ -152,7 +188,7 @@ func TestMarkBuildResultPromotesTheQueueHeadNotTheBuiltReview(t *testing.T) {
 func TestMarkBuildResultFailureDequeuesAndPromotesNothing(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
 	_, ok, err := svc.MarkBuildResult(context.Background(), "review-1", "build-1", false)
 	if err != nil {
@@ -178,12 +214,190 @@ func TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 		model.Review{ReviewID: "review-queued", TargetBranch: "main", Status: model.ReviewStatusReady},
 	)
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-queued"}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
 	if _, err := svc.AdvanceMergeQueue(context.Background(), "main"); err != repository.ErrNotFound {
 		t.Fatalf("AdvanceMergeQueue while another review is merging: err = %v, want ErrNotFound", err)
 	}
 	if reviews.reviews["review-queued"].Status != model.ReviewStatusReady {
 		t.Fatalf("review-queued status = %s, want unchanged READY", reviews.reviews["review-queued"].Status)
+	}
+}
+
+// TestAdvanceMergeQueueRefusesUnresolvedThreads: a review with an open
+// comment thread must not advance, and the refusal must name how many threads
+// and which review, not just "cannot advance".
+func TestAdvanceMergeQueueRefusesUnresolvedThreads(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
+		"review-1": {{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusOpen}},
+	}}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+
+	_, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	var blocked *UnresolvedThreadsError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("AdvanceMergeQueue error = %v, want *UnresolvedThreadsError", err)
+	}
+	if blocked.ReviewID != "review-1" || blocked.UnresolvedThreads != 1 {
+		t.Fatalf("blocked = %+v, want {ReviewID: review-1, UnresolvedThreads: 1}", blocked)
+	}
+	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-1 status = %s, want unchanged READY", reviews.reviews["review-1"].Status)
+	}
+	if len(reviews.queue) != 1 {
+		t.Fatalf("queue = %+v, want review-1 still queued", reviews.queue)
+	}
+}
+
+// TestAdvanceMergeQueuePromotesWhenAllThreadsResolved is the regression the
+// gate is most likely to introduce: a review with every thread resolved (or
+// whose only open comment is a reply, which never carries its own status)
+// must still advance exactly as it did before the gate existed.
+func TestAdvanceMergeQueuePromotesWhenAllThreadsResolved(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
+		"review-1": {
+			{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusClosed},
+			// A reply on the resolved thread; replies never carry their own
+			// status, so an OPEN one here must not count as unresolved.
+			{CommentID: "c2", ReviewID: "review-1", ParentCommentID: "c1", Status: model.CommentStatusOpen},
+		},
+	}}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("AdvanceMergeQueue with all threads resolved: %v", err)
+	}
+	if promoted.Status != model.ReviewStatusMerge {
+		t.Fatalf("promoted status = %s, want MERGE", promoted.Status)
+	}
+	if len(reviews.queue) != 0 {
+		t.Fatalf("queue = %+v, want review-1 dequeued", reviews.queue)
+	}
+}
+
+// TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads guards the
+// regression the gate would otherwise introduce into build reporting: the
+// queue head being blocked belongs to a different review than the one whose
+// build just succeeded, so reporting that build must not fail.
+func TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-head", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-built", TargetBranch: "main", Status: model.ReviewStatusOpen},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-head"}}
+	reviews.nextID = 1
+	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
+		"review-head": {{CommentID: "c1", ReviewID: "review-head", Status: model.CommentStatusOpen}},
+	}}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+
+	_, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
+	if err != nil {
+		t.Fatalf("MarkBuildResult: %v, want no error even though the queue head is gated", err)
+	}
+	if ok {
+		t.Fatal("MarkBuildResult reported a promotion despite the queue head being blocked by unresolved threads")
+	}
+	if reviews.reviews["review-head"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-head status = %s, want unchanged READY (still blocked, still queued)", reviews.reviews["review-head"].Status)
+	}
+	if reviews.reviews["review-built"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-built status = %s, want READY (its own build succeeded and it queued normally)", reviews.reviews["review-built"].Status)
+	}
+}
+
+// TestOverrideAdvanceMergeQueueRequiresReason: the override is the one
+// deliberate escape from the gate, and a blank reason is a quiet bypass, not
+// a deliberate one.
+func TestOverrideAdvanceMergeQueueRequiresReason(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	audit := &fakeReviewAudit{}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit)
+
+	for _, reason := range []string{"", "   "} {
+		if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", reason); !errors.Is(err, repository.ErrInvalidInput) {
+			t.Fatalf("OverrideAdvanceMergeQueue(reason=%q) error = %v, want ErrInvalidInput", reason, err)
+		}
+	}
+	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-1 status = %s, want unchanged: a refused override must not promote", reviews.reviews["review-1"].Status)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("audit events = %d, want 0 for a refused override", len(audit.events))
+	}
+}
+
+// TestOverrideAdvanceMergeQueueBypassesGateAndAudits proves the override
+// actually gets past the gate the previous tests confirm is otherwise
+// enforced, and that doing so leaves a durable, reason-carrying audit record
+// rather than a quiet bypass.
+func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
+		"review-1": {{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusOpen}},
+	}}
+	audit := &fakeReviewAudit{}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, audit)
+	ctx := security.WithContext(context.Background(), security.Context{
+		TenantID: "tenant-1", ErunUserID: "user-1", ExternalIssuer: "https://issuer.example", ExternalUserID: "sub-1",
+	})
+
+	promoted, err := svc.OverrideAdvanceMergeQueue(ctx, "main", "hotfix, reviewers unavailable")
+	if err != nil {
+		t.Fatalf("OverrideAdvanceMergeQueue: %v", err)
+	}
+	if promoted.Status != model.ReviewStatusMerge {
+		t.Fatalf("promoted status = %s, want MERGE despite the unresolved thread", promoted.Status)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want exactly 1", len(audit.events))
+	}
+	event := audit.events[0]
+	if event.Type != model.AuditEventTypeAPI || event.APIPath != overrideAdvanceMergeQueueAPIPath {
+		t.Fatalf("audit event type/path = %s %s, want API %s", event.Type, event.APIPath, overrideAdvanceMergeQueueAPIPath)
+	}
+	if event.TenantID != "tenant-1" || event.ErunUserID != "user-1" {
+		t.Fatalf("audit event identity = tenant=%s user=%s, want the overriding caller's own", event.TenantID, event.ErunUserID)
+	}
+	if !strings.Contains(event.APIParameters, "hotfix, reviewers unavailable") || !strings.Contains(event.APIParameters, "review-1") {
+		t.Fatalf("audit event parameters = %q, want the reason and the review id", event.APIParameters)
+	}
+}
+
+// TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger: an override with
+// nowhere to record its reason must refuse, not promote unaudited.
+func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, nil)
+
+	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); err == nil {
+		t.Fatal("OverrideAdvanceMergeQueue with no audit logger configured: want an error, got nil")
+	}
+	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-1 status = %s, want unchanged: an unauditable override must not promote", reviews.reviews["review-1"].Status)
+	}
+}
+
+// TestOverrideAdvanceMergeQueueRequiresSecurityContext: the audit record needs
+// a caller identity to be worth anything; a request that somehow reached the
+// service with none must refuse rather than log an anonymous override.
+func TestOverrideAdvanceMergeQueueRequiresSecurityContext(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{})
+
+	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); !errors.Is(err, repository.ErrMissingSecurityContext) {
+		t.Fatalf("error = %v, want ErrMissingSecurityContext", err)
+	}
+	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-1 status = %s, want unchanged", reviews.reviews["review-1"].Status)
 	}
 }

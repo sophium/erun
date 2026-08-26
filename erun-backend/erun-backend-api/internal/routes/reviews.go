@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -25,6 +26,11 @@ type ReviewReviewerRepository interface {
 type ReviewService interface {
 	PrepareCreate(review model.Review) model.Review
 	AdvanceMergeQueue(ctx context.Context, targetBranch string) (model.Review, error)
+	// OverrideAdvanceMergeQueue is the one deliberate, audited escape from
+	// AdvanceMergeQueue's unresolved-thread gate: it refuses a blank reason and
+	// fails closed if audit logging is not configured, rather than promoting
+	// anyway.
+	OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (model.Review, error)
 	UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string) (model.Review, error)
 }
 
@@ -32,10 +38,11 @@ type ReviewRoutes struct {
 	reviews   ReviewRepository
 	reviewers ReviewReviewerRepository
 	service   ReviewService
-	// dispatcher starts the merge queue's gate build for whichever review the
-	// manual /merge-queue/advance call promotes. Nil when the merge executor is
-	// not wired: the review still moves to MERGE, just with nothing to advance
-	// it further until an operator does so by hand.
+	// dispatcher starts the merge queue's gate build for whichever review a
+	// manual /merge-queue/advance or /merge-queue/override-advance call
+	// promotes. Nil when the merge executor is not wired: the review still
+	// moves to MERGE, just with nothing to advance it further until an
+	// operator does so by hand.
 	dispatcher service.MergeQueueDispatcher
 }
 
@@ -45,6 +52,11 @@ func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewReposi
 	register(http.MethodPost, "/v1/reviews", http.HandlerFunc(routes.createReview))
 	register(http.MethodGet, "/v1/reviews/merge-queue", http.HandlerFunc(routes.listMergeQueue))
 	register(http.MethodPost, "/v1/reviews/merge-queue/advance", http.HandlerFunc(routes.advanceMergeQueue))
+	// A distinct path (rather than a `force` flag on /advance) so a tenant can
+	// grant the override to a narrower set of roles than ordinary advance
+	// through the same permission-by-path mechanism every other route uses —
+	// see AGENTS.md "Merge Queue".
+	register(http.MethodPost, "/v1/reviews/merge-queue/override-advance", http.HandlerFunc(routes.overrideAdvanceMergeQueue))
 	register(http.MethodGet, "/v1/reviews/{review_id}", http.HandlerFunc(routes.getReview))
 	register(http.MethodPatch, "/v1/reviews/{review_id}/status", http.HandlerFunc(routes.updateReviewStatus))
 	register(http.MethodGet, "/v1/reviews/{review_id}/reviewers", http.HandlerFunc(routes.listReviewers))
@@ -59,6 +71,21 @@ type updateReviewStatusRequest struct {
 
 type advanceMergeQueueRequest struct {
 	TargetBranch string `json:"targetBranch"`
+}
+
+type overrideAdvanceMergeQueueRequest struct {
+	TargetBranch string `json:"targetBranch"`
+	Reason       string `json:"reason"`
+}
+
+// unresolvedThreadsResponse is what a blocked /merge-queue/advance reports: not
+// just that it refused, but how many threads and on which review, so a caller
+// can route the operator straight to them instead of a dead end.
+type unresolvedThreadsResponse struct {
+	Error             string `json:"error"`
+	Message           string `json:"message"`
+	ReviewID          string `json:"reviewId"`
+	UnresolvedThreads int    `json:"unresolvedThreads"`
 }
 
 type addReviewerRequest struct {
@@ -148,13 +175,49 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 	}
 	review, err := r.service.AdvanceMergeQueue(req.Context(), input.TargetBranch)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeAdvanceMergeQueueError(w, err)
 		return
 	}
-	if r.dispatcher != nil {
-		r.dispatcher.Dispatch(req.Context(), review)
-	}
+	r.dispatchMergeQueue(req.Context(), review)
 	writeJSON(w, http.StatusOK, review)
+}
+
+func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http.Request) {
+	var input overrideAdvanceMergeQueueRequest
+	if err := decodeJSON(req, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.TargetBranch, input.Reason)
+	if err != nil {
+		writeAdvanceMergeQueueError(w, err)
+		return
+	}
+	r.dispatchMergeQueue(req.Context(), review)
+	writeJSON(w, http.StatusOK, review)
+}
+
+func (r ReviewRoutes) dispatchMergeQueue(ctx context.Context, review model.Review) {
+	if r.dispatcher != nil {
+		r.dispatcher.Dispatch(ctx, review)
+	}
+}
+
+// writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
+// the count and the review to route the operator to, rather than the bare
+// status text writeRepositoryError gives every other conflict.
+func writeAdvanceMergeQueueError(w http.ResponseWriter, err error) {
+	var blocked *service.UnresolvedThreadsError
+	if errors.As(err, &blocked) {
+		writeJSON(w, http.StatusConflict, unresolvedThreadsResponse{
+			Error:             "unresolved_threads",
+			Message:           blocked.Error(),
+			ReviewID:          blocked.ReviewID,
+			UnresolvedThreads: blocked.UnresolvedThreads,
+		})
+		return
+	}
+	writeRepositoryError(w, err)
 }
 
 func (r ReviewRoutes) getReview(w http.ResponseWriter, req *http.Request) {

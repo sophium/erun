@@ -9,10 +9,11 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// auditEventColumns deliberately omits cli_parameters and mcp_tool_parameters:
-// those columns are where a future CLI/MCP audit caller would serialize tool
-// arguments, and a tool such as cloud_inject_aws_credentials takes credentials
-// as arguments. The read path must never select them.
+// auditEventColumns deliberately omits cli_parameters, mcp_tool_parameters,
+// and api_parameters: those columns are where a CLI/MCP/API audit caller
+// serializes caller-supplied text, and a tool such as
+// cloud_inject_aws_credentials takes credentials as arguments. The read path
+// must never select them.
 const auditEventColumns = `audit_event_id, tenant_id, erun_user_id, external_user_id, external_issuer_id, external_org_id, type, api_method, api_path, cli_command, mcp_tool, created_at`
 
 const (
@@ -108,12 +109,13 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 				type,
 				api_method,
 				api_path,
+				api_parameters,
 				cli_command,
 				cli_parameters,
 				mcp_tool,
 				mcp_tool_parameters,
 				created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 			event.TenantID,
 			event.ErunUserID,
@@ -123,6 +125,7 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 			string(event.Type),
 			nullString(event.APIMethod),
 			nullString(event.APIPath),
+			nullString(event.APIParameters),
 			nullString(event.CLICommand),
 			nullString(event.CLIParameters),
 			nullString(event.MCPTool),
