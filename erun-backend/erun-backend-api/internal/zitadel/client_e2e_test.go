@@ -200,6 +200,15 @@ func e2eConfiguresSMTPAndSkipsTheEmailFlow(t *testing.T, ctx context.Context, cl
 		t.Fatal("GetSMTPStatus never reported the just-activated config within the deadline")
 	}
 
+	e2eVerifiesSMTPSinkDelivery(t, ctx, client)
+}
+
+// e2eVerifiesSMTPSinkDelivery proves an actual message was produced and
+// accepted, not merely that a config object was written: it creates a real
+// invite and polls the sink's own message API for the resulting message.
+// Skips cleanly when ERUN_E2E_ZITADEL_SMTP_SINK_API is unset.
+func e2eVerifiesSMTPSinkDelivery(t *testing.T, ctx context.Context, client *Client) {
+	t.Helper()
 	sinkAPI := strings.TrimSpace(os.Getenv("ERUN_E2E_ZITADEL_SMTP_SINK_API"))
 	if sinkAPI == "" {
 		t.Log("ERUN_E2E_ZITADEL_SMTP_SINK_API unset; not verifying actual message delivery")

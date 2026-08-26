@@ -108,9 +108,7 @@ type smtpConfigSearchResponse struct {
 // no-op SMTP PUT without a "NotChanged" error (also confirmed live), so this
 // does not need that convergence guard.
 func (c *Client) UpdateSMTPConfig(ctx context.Context, params SetSMTPConfigParams) (SMTPStatus, error) {
-	host := strings.TrimSpace(params.Host)
-	senderAddress := strings.TrimSpace(params.SenderAddress)
-	if host == "" || senderAddress == "" {
+	if strings.TrimSpace(params.Host) == "" || strings.TrimSpace(params.SenderAddress) == "" {
 		return SMTPStatus{}, fmt.Errorf("smtp host and sender address are required")
 	}
 
@@ -120,40 +118,53 @@ func (c *Client) UpdateSMTPConfig(ctx context.Context, params SetSMTPConfigParam
 	}
 
 	if len(existing) == 0 {
-		if strings.TrimSpace(params.Password) == "" {
-			return SMTPStatus{}, fmt.Errorf("smtp password is required to configure mail delivery for the first time")
-		}
-		id, err := c.createSMTPConfig(ctx, params)
-		if err != nil {
-			return SMTPStatus{}, fmt.Errorf("create zitadel smtp config: %w", err)
-		}
-		if err := c.activateSMTPConfig(ctx, id); err != nil {
-			return SMTPStatus{}, fmt.Errorf("activate zitadel smtp config: %w", err)
+		if err := c.createAndActivateSMTPConfig(ctx, params); err != nil {
+			return SMTPStatus{}, err
 		}
 		return smtpStatusFromParams(params), nil
 	}
+	if err := c.convergeExistingSMTPConfig(ctx, existing[0], params); err != nil {
+		return SMTPStatus{}, err
+	}
+	return smtpStatusFromParams(params), nil
+}
 
-	// Activate before writing the password: Zitadel's password-update command
-	// refuses an inactive config with the same "SMTP configuration not
-	// found" error GetSMTPStatus's 404 uses, even though the same config
-	// happily accepts a plain field update while inactive (confirmed live
-	// against a real v4.15.3 instance) -- so activation has to come first,
-	// not last, whenever the existing config is not already active.
-	current := existing[0]
+func (c *Client) createAndActivateSMTPConfig(ctx context.Context, params SetSMTPConfigParams) error {
+	if strings.TrimSpace(params.Password) == "" {
+		return fmt.Errorf("smtp password is required to configure mail delivery for the first time")
+	}
+	id, err := c.createSMTPConfig(ctx, params)
+	if err != nil {
+		return fmt.Errorf("create zitadel smtp config: %w", err)
+	}
+	if err := c.activateSMTPConfig(ctx, id); err != nil {
+		return fmt.Errorf("activate zitadel smtp config: %w", err)
+	}
+	return nil
+}
+
+// convergeExistingSMTPConfig activates before writing the password:
+// Zitadel's password-update command refuses an inactive config with the
+// same "SMTP configuration not found" error GetSMTPStatus's 404 uses, even
+// though the same config happily accepts a plain field update while
+// inactive (confirmed live against a real v4.15.3 instance) -- so
+// activation has to come first, not last, whenever the existing config is
+// not already active.
+func (c *Client) convergeExistingSMTPConfig(ctx context.Context, current smtpConfigSearchResult, params SetSMTPConfigParams) error {
 	if current.State != "SMTP_CONFIG_ACTIVE" {
 		if err := c.activateSMTPConfig(ctx, current.ID); err != nil {
-			return SMTPStatus{}, fmt.Errorf("activate zitadel smtp config: %w", err)
+			return fmt.Errorf("activate zitadel smtp config: %w", err)
 		}
 	}
 	if err := c.updateSMTPConfigFields(ctx, current.ID, params); err != nil {
-		return SMTPStatus{}, fmt.Errorf("update zitadel smtp config: %w", err)
+		return fmt.Errorf("update zitadel smtp config: %w", err)
 	}
 	if strings.TrimSpace(params.Password) != "" {
 		if err := c.updateSMTPConfigPassword(ctx, current.ID, params.Password); err != nil {
-			return SMTPStatus{}, fmt.Errorf("update zitadel smtp password: %w", err)
+			return fmt.Errorf("update zitadel smtp password: %w", err)
 		}
 	}
-	return smtpStatusFromParams(params), nil
+	return nil
 }
 
 func smtpStatusFromParams(params SetSMTPConfigParams) SMTPStatus {
