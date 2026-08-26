@@ -149,6 +149,54 @@ func TestCreateReviewReplyRequiresABody(t *testing.T) {
 	}
 }
 
+// usernameResolutionFixedResponses backs
+// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames: user-2 (the
+// review's author and comment-1's creator) resolves to "pat"; user-1 (the
+// signed-in caller, comment-2's creator) is deliberately absent, so it stays
+// unresolved.
+var usernameResolutionFixedResponses = map[string]string{
+	"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"reader","capabilities":null}`,
+	"/v1/users":                   `[{"userId":"user-2","tenantId":"tenant-1","username":"pat"}]`,
+	"/v1/reviews/review-1":        `{"reviewId":"review-1","tenantId":"tenant-1","authorUserId":"user-2","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}`,
+	reviewDetailCommentsPath:      reviewDetailThreadJSON,
+	"/v1/reviews/review-1/builds": `[]`,
+	"/v1/reviews/merge-queue":     `[]`,
+}
+
+func usernameResolutionAPI(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, ok := usernameResolutionFixedResponses[req.URL.Path]
+		if !ok {
+			http.NotFound(w, req)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+}
+
+// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames is the review
+// detail dialog's half of the #1378 "u2 in the UI" fix: the review's author
+// and each comment's creator resolve to the tenant user directory's display
+// name when the caller can read /v1/users.
+func TestLoadReviewDetailResolvesAuthorAndCommenterUsernames(t *testing.T) {
+	server := usernameResolutionAPI(t)
+	defer server.Close()
+
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+
+	if detail.Review == nil || detail.Review.AuthorUsername != "pat" {
+		t.Fatalf("expected the review's author to resolve to its username, got %+v", detail.Review)
+	}
+	if len(detail.Comments) != 2 || detail.Comments[0].CreatorUsername != "pat" {
+		t.Fatalf("expected comment-1's creator (user-2) to resolve to its username, got %+v", detail.Comments)
+	}
+	if detail.Comments[1].CreatorUsername != "" {
+		t.Fatalf("expected comment-2's creator (user-1, absent from the /v1/users stub) to stay unresolved, got %+v", detail.Comments[1])
+	}
+}
+
 // TestFetchReviewBuildsConcurrentlyReturnsPartialResultsOnFailure locks the
 // concurrency fix's behavior: a failing review's builds read must not lose
 // the builds already fetched for the reviews that succeeded, matching the

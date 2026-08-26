@@ -243,6 +243,13 @@ type uiTenantDashboard struct {
 	// already gives the reply composer.
 	CanCreateReview      bool `json:"canCreateReview"`
 	CanAdvanceMergeQueue bool `json:"canAdvanceMergeQueue"`
+	// MineReviewCount/WaitingOnMeReviewCount are the Reviews tab's filter
+	// buttons' own discovery signal: how many reviews match each filter,
+	// visible before the caller clicks either one. Unset (rather than 0) when
+	// the caller cannot read reviews at all, or has no signed-in user id to
+	// filter by.
+	MineReviewCount        *int `json:"mineReviewCount,omitempty"`
+	WaitingOnMeReviewCount *int `json:"waitingOnMeReviewCount,omitempty"`
 }
 
 // uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab
@@ -272,10 +279,15 @@ type uiTenantDashboardReview struct {
 	ReviewID     string `json:"reviewId"`
 	TenantID     string `json:"tenantId"`
 	AuthorUserID string `json:"authorUserId,omitempty"`
-	Name         string `json:"name"`
-	TargetBranch string `json:"targetBranch"`
-	SourceBranch string `json:"sourceBranch"`
-	Status       string `json:"status"`
+	// AuthorUsername is the tenant user directory's display name for
+	// AuthorUserID, resolved best-effort (see tenant_dashboard.go's
+	// tenantDashboardUsernames). Empty when it could not be resolved, so the
+	// frontend falls back to the raw id rather than showing nothing (#1378).
+	AuthorUsername string `json:"authorUsername,omitempty"`
+	Name           string `json:"name"`
+	TargetBranch   string `json:"targetBranch"`
+	SourceBranch   string `json:"sourceBranch"`
+	Status         string `json:"status"`
 	// UnresolvedThreads is the review's "still being discussed" signal at a
 	// glance, from the row rather than only inside the detail dialog. Left
 	// unset (rather than 0) when it was not computed for this listing (see
@@ -352,8 +364,12 @@ type uiReviewDetail struct {
 }
 
 type uiReviewComment struct {
-	CommentID       string `json:"commentId"`
-	CreatorUserID   string `json:"creatorUserId,omitempty"`
+	CommentID     string `json:"commentId"`
+	CreatorUserID string `json:"creatorUserId,omitempty"`
+	// CreatorUsername mirrors uiTenantDashboardReview.AuthorUsername: the
+	// tenant user directory's display name for CreatorUserID, resolved
+	// best-effort, empty when it could not be resolved (#1378).
+	CreatorUsername string `json:"creatorUsername,omitempty"`
 	Status          string `json:"status"`
 	ParentCommentID string `json:"parentCommentId,omitempty"`
 	CommitID        string `json:"commitId"`

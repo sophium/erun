@@ -46,6 +46,10 @@ export interface UIReviewDetail {
 export interface UIReviewComment {
   commentId: string;
   creatorUserId?: string;
+  // creatorUsername mirrors UITenantDashboardReview.authorUsername: the
+  // tenant user directory's display name for creatorUserId, resolved
+  // best-effort. Undefined when it could not be resolved.
+  creatorUsername?: string;
   status: string;
   parentCommentId?: string;
   commitId: string;

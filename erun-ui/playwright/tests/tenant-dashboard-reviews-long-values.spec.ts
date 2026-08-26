@@ -96,21 +96,23 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       await expect(row).toBeVisible();
       const rowBox = await boundingBoxOf(row, 'review row');
 
-      // table-fixed + truncate: the cell's full text is wider than what is
-      // shown, proving the long title/branch clip instead of wrapping the
-      // table wide or tall.
-      const titleCell = row.locator('td').first();
+      // The title carries a `title` attribute with the untruncated text
+      // (#1378) — getByTitle finds it whether or not it is visually clipped,
+      // and the element's own scrollWidth > clientWidth proves it actually is.
+      const titleElement = row.getByTitle(LONG_TITLE);
+      await expect(titleElement).toBeVisible();
       const { clientWidth: titleClientWidth, scrollWidth: titleScrollWidth } =
-        await titleCell.evaluate((el) => ({
+        await titleElement.evaluate((el) => ({
           clientWidth: el.clientWidth,
           scrollWidth: el.scrollWidth,
         }));
       expect(titleClientWidth).toBeGreaterThan(0);
       expect(titleScrollWidth).toBeGreaterThan(titleClientWidth);
 
-      // A single row of a table-fixed table stays roughly one line tall
-      // (~40px per DataCell's own padding) even though the underlying values
-      // are hundreds of characters long.
+      // The row stays a compact two-line block (title + metadata) even
+      // though the underlying values are hundreds of characters long —
+      // proof the branch names middle-ellipsis rather than wrapping the row
+      // tall.
       expect(rowBox.height).toBeLessThan(80);
 
       await expect(row).toContainText('FAILED');
@@ -180,19 +182,17 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       }));
       expect(scrollHeight).toBeGreaterThan(clientHeight);
 
-      // The long comment body on the first thread is bounded by its own
-      // max-h-48 overflow-y-auto rather than pushing every later thread off
-      // the fold.
-      const longBody = app.reviewDetailDialog.locator().getByText('End of the long comment body.');
-      await expect(longBody).toBeVisible();
-      const bodyBox = await longBody.evaluate((el) => {
-        const scrollBox = el.closest('p');
-        if (!scrollBox) {
-          throw new Error('comment body paragraph not found');
-        }
-        return { scrollHeight: scrollBox.scrollHeight, clientHeight: scrollBox.clientHeight };
-      });
-      expect(bodyBox.scrollHeight).toBeGreaterThan(bodyBox.clientHeight);
+      // The long comment body on the first thread is bounded by a preview
+      // plus an explicit "Show more" control (#1378) — never an invisible
+      // scroll region with no affordance that more text exists — so the tail
+      // of the body is absent until the control is used, then present.
+      const dialog = app.reviewDetailDialog.locator();
+      await expect(dialog.getByText('End of the long comment body.')).toHaveCount(0);
+      const showMore = dialog.getByRole('button', { name: 'Show more' }).first();
+      await expect(showMore).toBeVisible();
+      await showMore.click();
+      await expect(dialog.getByText('End of the long comment body.')).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Show less' }).first()).toBeVisible();
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

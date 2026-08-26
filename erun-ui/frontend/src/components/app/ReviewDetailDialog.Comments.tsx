@@ -12,10 +12,30 @@ import {
   submitUnresolveComment,
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
-import { formatDashboardDate } from '@/app/tenantDashboardPanels';
 import type { UIReviewComment } from '@/types';
 
 import { InlineAlert } from './InlineAlert';
+import { RelativeTime } from './TenantDashboardMessage';
+
+// commentAuthorDisplay prefers the resolved tenant-user-directory username
+// over the raw creator id (#1378) — the same fallback order
+// displayReviewAuthor uses in the reviews list, minus the "You" special case:
+// the dialog has no signed-in user id threaded down to it, and the raw id is
+// still a meaningful fallback rather than nothing.
+function commentAuthorDisplay(comment: UIReviewComment): string {
+  const id = comment.creatorUserId?.trim() ?? '';
+  if (!id) {
+    return 'Unknown';
+  }
+  return comment.creatorUsername?.trim() ?? id;
+}
+
+// COMMENT_PREVIEW_LENGTH bounds a comment body before it needs an explicit
+// "Show more" — long enough that ordinary comments never see it, short
+// enough that a very long one doesn't push Reply/Resolve off without warning
+// (#1378: a review tool that cannot display a long comment has failed at its
+// core job).
+const COMMENT_PREVIEW_LENGTH = 400;
 
 // ReviewDetailComments renders the review's threads (root comments with their
 // replies nested under them) and, per thread, a reply composer. Starting a
@@ -153,10 +173,15 @@ function ResolveThreadAction({
     return null;
   }
   const busy = detail.resolvingCommentId === root.commentId;
+  // Resolving is the action that moves the review forward, so it carries the
+  // primary button weight — Reply stays outline (secondary) beside it,
+  // matching how the repo already distinguishes primary from secondary
+  // actions elsewhere (#1378). Reopening a thread is a correction, not the
+  // forward action, so it keeps the outline treatment.
   return (
     <Button
       type="button"
-      variant="outline"
+      variant={resolved ? 'outline' : 'default'}
       disabled={busy}
       onClick={() => {
         void dispatch(
@@ -192,18 +217,50 @@ function CommentLine({ comment }: { comment: UIReviewComment }): React.ReactElem
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2 text-[13px]">
         <span className="flex-none font-medium text-foreground">
-          {comment.creatorUserId ?? 'Unknown'}
+          {commentAuthorDisplay(comment)}
         </span>
-        <span className="min-w-0 truncate text-muted-foreground">
-          {comment.filePath}:{comment.line}
+        {/* The anchor is commit + file + line — the line stays flex-none so it
+            is never the part truncation eats; only the file path shrinks. */}
+        <span className="flex-none font-mono text-muted-foreground">
+          {comment.commitId.slice(0, 7)}
         </span>
-        <span className="flex-none text-muted-foreground">
-          {formatDashboardDate(comment.createdAt)}
+        <span className="min-w-0 truncate text-muted-foreground" title={comment.filePath}>
+          {comment.filePath}
         </span>
+        <span className="flex-none font-mono text-muted-foreground">:{comment.line}</span>
+        <RelativeTime value={comment.createdAt} className="flex-none text-muted-foreground" />
       </div>
-      <p className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-foreground">
-        {comment.body}
-      </p>
+      <CommentBody body={comment.body} />
+    </div>
+  );
+}
+
+// CommentBody gives a long comment a visible way to read the rest instead of
+// relying on an invisible scroll region (#1378): a native scrollbar inside a
+// max-height box gave no affordance that more text existed, so a long
+// comment read as silently clipped. Collapsed text still shows a preview
+// (not just "click to reveal a blank box"), and the toggle is a real control
+// rather than a hover-only scrollbar a keyboard user cannot discover.
+function CommentBody({ body }: { body: string }): React.ReactElement {
+  const [expanded, setExpanded] = React.useState(false);
+  const isLong = body.length > COMMENT_PREVIEW_LENGTH;
+  const shown = !isLong || expanded ? body : `${body.slice(0, COMMENT_PREVIEW_LENGTH)}…`;
+  return (
+    <div className="mt-1">
+      <p className="max-w-[640px] whitespace-pre-wrap text-foreground">{shown}</p>
+      {isLong && (
+        <Button
+          type="button"
+          variant="link"
+          size="xs"
+          className="h-auto px-0"
+          onClick={() => {
+            setExpanded((value) => !value);
+          }}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </Button>
+      )}
     </div>
   );
 }

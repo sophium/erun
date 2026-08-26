@@ -99,7 +99,9 @@ export function unresolvedThreadsLabel(count: number): string {
 
 // formatDashboardDate renders a timestamp in the operator's own locale, and
 // falls back to the raw value rather than hiding one the API sent in a shape
-// this build does not recognise.
+// this build does not recognise. Used as the absolute value behind
+// relativeDashboardDate's hover/title, and directly wherever a full
+// timestamp (not a scannable relative one) is what's needed.
 export function formatDashboardDate(value: string | undefined): string {
   if (!value) {
     return '-';
@@ -109,4 +111,64 @@ export function formatDashboardDate(value: string | undefined): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+const relativeTimeUnits: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
+  { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+  { unit: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
+  { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+  { unit: 'hour', ms: 60 * 60 * 1000 },
+  { unit: 'minute', ms: 60 * 1000 },
+];
+
+// relativeDashboardDate renders "2 days ago" instead of a raw locale string —
+// nobody scans absolute timestamps in a column of rows (#1378). Callers pair
+// this with formatDashboardDate as the hover/title value so the exact moment
+// is still one hover away, never lost.
+export function relativeDashboardDate(value: string | undefined): string {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const diffMs = date.getTime() - Date.now();
+  for (const { unit, ms } of relativeTimeUnits) {
+    if (Math.abs(diffMs) >= ms) {
+      return relativeTimeFormatter.format(Math.round(diffMs / ms), unit);
+    }
+  }
+  return relativeTimeFormatter.format(Math.round(diffMs / 1000), 'second');
+}
+
+// reviewAuthorInitials derives an avatar's letters from a display name (a
+// resolved username, "You", or a raw id fallback) — up to two characters, so
+// the avatar is still a meaningful scan key when no username resolved.
+export function reviewAuthorInitials(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return '?';
+  }
+  if (trimmed === 'You') {
+    return 'Y';
+  }
+  const tokens = trimmed.split(/[\s._-]+/).filter(Boolean);
+  const first = tokens[0]?.[0] ?? '';
+  const second = tokens[1]?.[0] ?? tokens[0]?.[1] ?? '';
+  const initials = (first + second).toUpperCase();
+  return initials || '?';
+}
+
+// middleEllipsis keeps both ends of an identifier visible — a branch name's
+// prefix and suffix both carry meaning, unlike prose, where a trailing "…"
+// would drop the more identifying half (#1378).
+export function middleEllipsis(value: string, keep = 20): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= keep * 2 + 1) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, keep)}…${trimmed.slice(-keep)}`;
 }

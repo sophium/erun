@@ -53,6 +53,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 		return detail, nil
 	}
 	capabilities := whoami.Capabilities
+	usernames := tenantDashboardUsernames(requestCtx, client, capabilities)
 
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReview); restricted != "" {
 		detail.Restricted = restricted
@@ -63,10 +64,10 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 		detail.Error = tenantDashboardReadError(tenantDashboardReadReview, err)
 		return detail, nil
 	}
-	converted := tenantDashboardReview(review)
+	converted := tenantDashboardReviewWithUsername(review, usernames)
 	detail.Review = &converted
 
-	loadReviewDetailComments(requestCtx, client, capabilities, reviewID, &detail)
+	loadReviewDetailComments(requestCtx, client, capabilities, reviewID, usernames, &detail)
 	loadReviewDetailBuilds(requestCtx, client, capabilities, reviewID, review.Name, &detail)
 	detail.QueuePosition = loadReviewDetailQueuePosition(requestCtx, client, capabilities, review, reviewID)
 	detail.CanComment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteComment) == ""
@@ -75,7 +76,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	return detail, nil
 }
 
-func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, detail *uiReviewDetail) {
+func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments); restricted != "" {
 		detail.CommentsRestricted = restricted
 		return
@@ -85,7 +86,7 @@ func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformCl
 		detail.CommentsError = tenantDashboardReadError(tenantDashboardReadComments, err)
 		return
 	}
-	detail.Comments = tenantDashboardComments(comments)
+	detail.Comments = tenantDashboardComments(comments, usernames)
 	detail.UnresolvedThreads = eruncommon.CountUnresolvedThreads(comments)
 }
 
@@ -189,11 +190,17 @@ func tenantDashboardBuildsForReview(builds []eruncommon.PlatformBuild, reviewNam
 	return converted
 }
 
-func tenantDashboardComments(comments []eruncommon.PlatformComment) []uiReviewComment {
+func tenantDashboardComments(comments []eruncommon.PlatformComment, usernames map[string]string) []uiReviewComment {
 	converted := make([]uiReviewComment, 0, len(comments))
 	for _, comment := range comments {
-		converted = append(converted, tenantDashboardComment(comment))
+		converted = append(converted, tenantDashboardCommentWithUsername(comment, usernames))
 	}
+	return converted
+}
+
+func tenantDashboardCommentWithUsername(comment eruncommon.PlatformComment, usernames map[string]string) uiReviewComment {
+	converted := tenantDashboardComment(comment)
+	converted.CreatorUsername = usernames[comment.CreatorUserID]
 	return converted
 }
 

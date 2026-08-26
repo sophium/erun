@@ -1,8 +1,7 @@
 // Reviews and merge-queue panels, split out of TenantDashboardPanels.tsx
-// because that file crossed eslint's 500-line max-lines cap. Nothing here
-// changes shape or behaviour — the two tabs still share PanelBody and
-// TenantDashboardData from the main file.
-import { Button, EmptyState, StatusBadge, TabsContent } from 'erun-kit';
+// because that file crossed eslint's 500-line max-lines cap. The two tabs
+// still share PanelBody and TenantDashboardData from the main file.
+import { Button, cn, EmptyState, StatusBadge, TabsContent } from 'erun-kit';
 import { LoaderCircle, Plus } from 'lucide-react';
 import * as React from 'react';
 
@@ -15,7 +14,7 @@ import {
 } from '@/app/mergeQueueThunks';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
-  formatDashboardDate,
+  reviewAuthorInitials,
   reviewStatusTone,
   unresolvedThreadsLabel,
   unresolvedThreadsTone,
@@ -23,8 +22,15 @@ import {
 import { setReviewFilter } from '@/app/tenantDialogThunks';
 import type { UITenantDashboardReview } from '@/types';
 
-import { InlineAlert } from './InlineAlert';
-import { DataCell, DataTable, PanelBody, type TenantDashboardData } from './TenantDashboardMessage';
+import { InlineAlert, PermissionNotice } from './InlineAlert';
+import {
+  BranchArrow,
+  DataCell,
+  DataTable,
+  PanelBody,
+  RelativeTime,
+  type TenantDashboardData,
+} from './TenantDashboardMessage';
 
 // ReviewsPanel is the review object's own home: status, branches, and — via
 // each row — its builds, comment threads, and merge-queue position. The
@@ -37,21 +43,19 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   return (
     <TabsContent value="reviews" className="min-h-0 overflow-auto">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-[13px] text-muted-foreground">
             {reviews.length} review{reviews.length === 1 ? '' : 's'}
           </span>
-          <ReviewFilterToggle
-            label="Mine"
-            active={reviewFilter.mine}
-            onClick={() => {
+          <ReviewFilterSegmentedControl
+            mine={reviewFilter.mine}
+            waitingOnMe={reviewFilter.waitingOnMe}
+            mineCount={data?.mineReviewCount}
+            waitingOnMeCount={data?.waitingOnMeReviewCount}
+            onToggleMine={() => {
               void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
             }}
-          />
-          <ReviewFilterToggle
-            label="Waiting on me"
-            active={reviewFilter.waitingOnMe}
-            onClick={() => {
+            onToggleWaitingOnMe={() => {
               void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
             }}
           />
@@ -78,29 +82,81 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   );
 }
 
+// ReviewFilterSegmentedControl is one grouped control, not two independent
+// buttons (#1378): Mine and Waiting-on-me visually merge into a single pill,
+// matching the DiffSourceButton segmented-toggle pattern the review panel's
+// Env/ERun source switch already uses (Nielsen #4, consistency). Each side
+// still toggles independently — a review can be both — so this is a grouped
+// filter chip pair, not a mutually-exclusive tab strip. The count on each
+// side is the discovery signal itself: which pile has work in it is visible
+// before either is clicked, rather than only after.
+function ReviewFilterSegmentedControl({
+  mine,
+  waitingOnMe,
+  mineCount,
+  waitingOnMeCount,
+  onToggleMine,
+  onToggleWaitingOnMe,
+}: {
+  mine: boolean;
+  waitingOnMe: boolean;
+  mineCount: number | undefined;
+  waitingOnMeCount: number | undefined;
+  onToggleMine: () => void;
+  onToggleWaitingOnMe: () => void;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center gap-1 rounded-[var(--radius)] border border-input bg-background p-1 text-[13px]">
+      <ReviewFilterToggle label="Mine" count={mineCount} active={mine} onClick={onToggleMine} />
+      <ReviewFilterToggle
+        label="Waiting on me"
+        count={waitingOnMeCount}
+        active={waitingOnMe}
+        onClick={onToggleWaitingOnMe}
+      />
+    </div>
+  );
+}
+
 // ReviewFilterToggle is a one-click discovery affordance, not a form field:
-// clicking answers "which are mine" or "which are waiting on me" directly,
-// matching the DiffSourceButton toggle-button pattern already used for the
-// review panel's Env/ERun source switch.
+// clicking answers "which are mine" or "which are waiting on me" directly.
+// The count renders inside the button's own accessible name (e.g. "Mine 2")
+// so a screen reader announces the same distribution a sighted operator sees.
 function ReviewFilterToggle({
   label,
+  count,
   active,
   onClick,
 }: {
   label: string;
+  count: number | undefined;
   active: boolean;
   onClick: () => void;
 }): React.ReactElement {
   return (
-    <Button
+    <button
       type="button"
-      size="sm"
-      variant={active ? 'default' : 'outline'}
       aria-pressed={active}
       onClick={onClick}
+      className={cn(
+        'flex cursor-pointer items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-2.5 py-1 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none',
+        active
+          ? 'bg-primary text-primary-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+      )}
     >
       {label}
-    </Button>
+      {count !== undefined && (
+        <span
+          className={cn(
+            'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[11px] leading-4 font-semibold',
+            active ? 'bg-primary-foreground/20' : 'bg-muted text-foreground',
+          )}
+        >
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -147,9 +203,9 @@ function NewReviewAction({ data }: { data: TenantDashboardData }): React.ReactEl
   }
   if (!data.canCreateReview) {
     return (
-      <span className="text-[13px] text-muted-foreground">
-        You do not have access to open reviews.
-      </span>
+      <div className="max-w-sm">
+        <PermissionNotice>You do not have access to create reviews.</PermissionNotice>
+      </div>
     );
   }
   return (
@@ -214,9 +270,9 @@ function AdvanceMergeQueueAction({
   }
   if (!data.canAdvanceMergeQueue) {
     return (
-      <span className="text-[13px] text-muted-foreground">
-        You do not have access to advance the merge queue.
-      </span>
+      <div className="max-w-sm">
+        <PermissionNotice>You do not have access to advance the merge queue.</PermissionNotice>
+      </div>
     );
   }
   if (mergeQueue.length === 0) {
@@ -297,22 +353,51 @@ function AdvanceMergeQueueConfirm({
   );
 }
 
-// displayReviewAuthor renders "You" for the signed-in user's own reviews and
-// the raw author id otherwise — the same treatment the Audit panel's Actor
-// column already gives an external user id, since the desktop has no user
-// directory to resolve a name from (Nielsen #4, consistency with a
-// comparable flow already in this dashboard).
+// displayReviewAuthor renders "You" for the signed-in user's own reviews,
+// then the resolved tenant-user-directory username, then the raw author id
+// as a last resort (#1378) — never a bare implementation-facing id when a
+// human name is available.
 function displayReviewAuthor(
-  authorUserId: string | undefined,
+  review: UITenantDashboardReview,
   currentUserId: string | undefined,
 ): string {
-  const author = authorUserId?.trim() ?? '';
+  const author = review.authorUserId?.trim() ?? '';
   if (!author) {
     return '-';
   }
-  return currentUserId && author === currentUserId ? 'You' : author;
+  if (currentUserId && author === currentUserId) {
+    return 'You';
+  }
+  return review.authorUsername?.trim() ?? author;
 }
 
+// ReviewAuthorAvatar is the row's fastest scan key: an initials avatar for
+// the author display name already computed for the row, styled filled for
+// the signed-in user's own reviews so "mine" is recognizable at a glance
+// even before reading the text next to it.
+function ReviewAuthorAvatar({ name }: { name: string }): React.ReactElement {
+  const isSelf = name === 'You';
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'flex size-7 flex-none items-center justify-center rounded-full text-[11px] font-semibold',
+        isSelf ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary',
+      )}
+    >
+      {reviewAuthorInitials(name)}
+    </span>
+  );
+}
+
+// ReviewsTable renders one row per review. The Review column is deliberately
+// the only one DataTable's shared truncate/DataCell treatment doesn't own: it
+// carries the avatar plus a two-line title/metadata stack so the title can
+// dominate the row (larger, heavier, full-strength foreground) while author,
+// branches, updated time, and thread count read as a subordinate second line
+// — a dense grid of eight equal columns gave nothing for the eye to land on
+// (#1378). Status and Threads stay their own narrow columns so their badges
+// keep a fixed, predictable width.
 function ReviewsTable({
   reviews,
   currentUserId,
@@ -324,51 +409,79 @@ function ReviewsTable({
   showThreads?: boolean;
   onSelect?: (review: UITenantDashboardReview) => void;
 }): React.ReactElement {
-  const headers = ['Review', 'Status', 'Author', 'Target', 'Source', 'Updated'];
+  const headers = ['Review', 'Status'];
+  const columnWidths = ['', 'w-[110px]'];
   if (showThreads) {
     headers.push('Threads');
+    columnWidths.push('w-[130px]');
   }
   return (
-    <DataTable headers={headers} minWidthClassName="min-w-[820px]">
-      {reviews.map((review) => (
-        <tr key={review.reviewId}>
-          <DataCell strong>
-            {onSelect ? (
-              <button
-                type="button"
-                className="text-left text-foreground underline-offset-2 hover:underline focus-visible:underline"
-                onClick={() => {
-                  onSelect(review);
-                }}
-                aria-label={`Open review ${review.name || review.reviewId}`}
-              >
-                {review.name || review.reviewId}
-              </button>
-            ) : (
-              review.name || review.reviewId
-            )}
-          </DataCell>
-          <DataCell>
-            <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
-          </DataCell>
-          <DataCell>{displayReviewAuthor(review.authorUserId, currentUserId)}</DataCell>
-          <DataCell>{review.targetBranch}</DataCell>
-          <DataCell>{review.sourceBranch}</DataCell>
-          <DataCell>{formatDashboardDate(review.updatedAt)}</DataCell>
-          {showThreads && (
+    <DataTable headers={headers} columnWidths={columnWidths} minWidthClassName="min-w-[760px]">
+      {reviews.map((review) => {
+        const title = review.name || review.reviewId;
+        const author = displayReviewAuthor(review, currentUserId);
+        return (
+          <tr key={review.reviewId}>
+            <td className="px-2 py-2.5">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <ReviewAuthorAvatar name={author} />
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  {onSelect ? (
+                    <button
+                      type="button"
+                      title={title}
+                      className="min-w-0 truncate text-left text-[14px] font-semibold text-foreground underline-offset-2 hover:underline focus-visible:underline"
+                      onClick={() => {
+                        onSelect(review);
+                      }}
+                      aria-label={`Open review ${title}`}
+                    >
+                      {title}
+                    </button>
+                  ) : (
+                    <span
+                      title={title}
+                      className="min-w-0 truncate text-[14px] font-semibold text-foreground"
+                    >
+                      {title}
+                    </span>
+                  )}
+                  <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="flex-none">{author}</span>
+                    <span aria-hidden="true" className="flex-none">
+                      ·
+                    </span>
+                    <BranchArrow
+                      source={review.sourceBranch}
+                      target={review.targetBranch}
+                      className="min-w-0 flex-1"
+                    />
+                    <span aria-hidden="true" className="flex-none">
+                      ·
+                    </span>
+                    <RelativeTime value={review.updatedAt} className="flex-none" />
+                  </div>
+                </div>
+              </div>
+            </td>
             <DataCell>
-              {review.unresolvedThreads === undefined ? (
-                '-'
-              ) : (
-                <StatusBadge
-                  tone={unresolvedThreadsTone(review.unresolvedThreads)}
-                  label={unresolvedThreadsLabel(review.unresolvedThreads)}
-                />
-              )}
+              <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
             </DataCell>
-          )}
-        </tr>
-      ))}
+            {showThreads && (
+              <DataCell>
+                {review.unresolvedThreads === undefined ? (
+                  '-'
+                ) : (
+                  <StatusBadge
+                    tone={unresolvedThreadsTone(review.unresolvedThreads)}
+                    label={unresolvedThreadsLabel(review.unresolvedThreads)}
+                  />
+                )}
+              </DataCell>
+            )}
+          </tr>
+        );
+      })}
     </DataTable>
   );
 }

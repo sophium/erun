@@ -1,7 +1,6 @@
 import { EmptyState, StatusBadge, TabsContent } from 'erun-kit';
 import * as React from 'react';
 
-import { formatDashboardDate } from '@/app/tenantDashboardPanels';
 import type {
   UITenantDashboardAudit,
   UITenantDashboardBuild,
@@ -13,6 +12,7 @@ import {
   DataCell,
   DataTable,
   PanelBody,
+  RelativeTime,
   type TenantDashboardData,
 } from './TenantDashboardMessage';
 import { MergeQueuePanel, ReviewsPanel } from './TenantDashboardPanels.Reviews';
@@ -111,7 +111,9 @@ function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.Re
           </DataCell>
           <DataCell>{build.commitId}</DataCell>
           <DataCell>{build.version}</DataCell>
-          <DataCell>{formatDashboardDate(build.createdAt)}</DataCell>
+          <DataCell>
+            <RelativeTime value={build.createdAt} />
+          </DataCell>
         </tr>
       ))}
     </DataTable>
@@ -123,7 +125,9 @@ function AuditEventsTable({ events }: { events: UITenantDashboardAudit[] }): Rea
     <DataTable headers={['Time', 'Type', 'Actor', 'Action']}>
       {events.map((event, index) => (
         <tr key={`${event.createdAt ?? ''}-${String(index)}`}>
-          <DataCell>{formatDashboardDate(event.createdAt)}</DataCell>
+          <DataCell>
+            <RelativeTime value={event.createdAt} />
+          </DataCell>
           <DataCell>{event.type}</DataCell>
           <DataCell>{event.actor}</DataCell>
           <DataCell strong>{event.action}</DataCell>

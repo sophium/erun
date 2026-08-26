@@ -1,8 +1,13 @@
-import { EmptyState } from 'erun-kit';
+import { cn, EmptyState } from 'erun-kit';
 import * as React from 'react';
 
 import type { AppState } from '@/app/state';
-import { tenantDashboardPanel } from '@/app/tenantDashboardPanels';
+import {
+  formatDashboardDate,
+  middleEllipsis,
+  relativeDashboardDate,
+  tenantDashboardPanel,
+} from '@/app/tenantDashboardPanels';
 
 export type TenantDashboardData = AppState['tenantDashboard']['data'];
 
@@ -69,6 +74,7 @@ export function DataTable({
   headers,
   children,
   minWidthClassName,
+  columnWidths,
 }: {
   headers: string[];
   children: React.ReactNode;
@@ -80,13 +86,19 @@ export function DataTable({
   // truncated. Omitted for narrower tables (Users, Builds, Audit), which fit
   // without it.
   minWidthClassName?: string;
+  // columnWidths sets each header's width class, same length/order as
+  // headers; a header left without one shares the width table-fixed leaves
+  // over once the sized columns are subtracted. Lets a table give most of its
+  // width to one dominant column (the reviews table's Review cell) instead of
+  // table-fixed's default equal split.
+  columnWidths?: string[];
 }): React.ReactElement {
   return (
     <table className={`mt-4 w-full table-fixed border-collapse text-sm ${minWidthClassName ?? ''}`}>
       <thead>
         <tr className="border-b border-border text-left text-xs font-medium uppercase text-muted-foreground">
-          {headers.map((header) => (
-            <th key={header} className="px-2 py-2">
+          {headers.map((header, index) => (
+            <th key={header} className={cn('px-2 py-2', columnWidths?.[index])}>
               {header}
             </th>
           ))}
@@ -94,6 +106,53 @@ export function DataTable({
       </thead>
       <tbody className="divide-y divide-border">{children}</tbody>
     </table>
+  );
+}
+
+// RelativeTime renders a scannable relative phrase ("2 days ago") with the
+// exact timestamp one hover away — nobody scans a column of absolute
+// timestamps, but the exact moment still matters and must not be lost (#1378).
+export function RelativeTime({
+  value,
+  className,
+}: {
+  value: string | undefined;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span className={className} title={formatDashboardDate(value)}>
+      {relativeDashboardDate(value)}
+    </span>
+  );
+}
+
+// BranchArrow is the review object's "where it's headed" line — source →
+// target — shared by the reviews list row and the review detail dialog's
+// header (#1378) so the two read as one treatment. Each side middle-ellipses
+// on its own (keeping both the identifying prefix and suffix, unlike a
+// trailing "…") with the full value one hover away, so a long branch name
+// never pushes the arrow off-row or wraps the header into several lines.
+export function BranchArrow({
+  source,
+  target,
+  className,
+}: {
+  source: string;
+  target: string;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span className={cn('inline-flex min-w-0 items-center gap-1.5', className)}>
+      <span className="min-w-0 truncate" title={source}>
+        {middleEllipsis(source)}
+      </span>
+      <span aria-hidden="true" className="flex-none text-muted-foreground/70">
+        →
+      </span>
+      <span className="min-w-0 truncate" title={target}>
+        {middleEllipsis(target)}
+      </span>
+    </span>
   );
 }
 

@@ -83,8 +83,10 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Clear filter' });
   }
 
+  // Mine's accessible name gains a count badge (e.g. "Mine 2"), so this
+  // matches the prefix rather than the exact former label (#1378).
   mineFilterButton(): Locator {
-    return this.activePanel().getByRole('button', { name: 'Mine', exact: true });
+    return this.activePanel().getByRole('button', { name: /^Mine\b/ });
   }
 
   waitingOnMeFilterButton(): Locator {
@@ -100,7 +102,7 @@ export class TenantDashboard {
   }
 
   reviewsRestrictedNote(): Locator {
-    return this.activePanel().getByText('You do not have access to open reviews.');
+    return this.activePanel().getByText('You do not have access to create reviews.');
   }
 
   mergeQueueTable(): Locator {
