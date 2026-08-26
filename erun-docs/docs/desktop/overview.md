@@ -36,6 +36,22 @@ Each orchestrator runs under two layers of guidance, and the dialog opens either
 
 For the exact files behind these two layers and how they're injected into a session, see [Agent reference · Skills spec](/agent-reference/skills-spec#host-orchestrator-desktop).
 
+### The conversation an orchestrator comes back to {#orchestrator-conversations}
+
+An orchestrator keeps one long conversation, and starting it — after a quit, a reboot, a crash, or a rebuild-and-restart — resumes that conversation rather than beginning a new one. ERun follows the conversation the session itself reports being in, so a session that ends up in a conversation of its own is still the one you get back.
+
+When it can't confirm which conversation that is, it says so instead of coming back looking healthy with hours of the work missing. The message names both conversations — the one it resumed and the one it couldn't vouch for — and the manage dialog is where you settle it.
+
+The dialog's **Conversation** section lists every conversation this orchestrator could resume, newest first, each with when it was last written, how large it is, the folder it was started in, and how it opens, so you can recognise the one holding your work. Each row says what it is to this orchestrator:
+
+- **Live** — its own session reported being in this one.
+- **Stranded** — recorded as live by a session ERun can no longer confirm. This is the row to look at when work has gone missing.
+- **Attached** — the one you chose.
+- **Default** — the conversation this orchestrator's name resolves to, used until anything else is known.
+- **Unclaimed** — a conversation on this machine that no orchestrator is using.
+
+**Attach** restarts the orchestrator in the conversation you picked and remembers the choice, so later starts honour it rather than going back to the default; **Use the default** clears it again. Conversations belonging to your other orchestrators are never offered here — the list says how many it left out — because handing one orchestrator another's history is worse than starting fresh.
+
 ## Diagnostics console {#diagnostics-console}
 
 The panel at the bottom of the terminal area follows whatever you're looking at, so it always has real evidence rather than a blank pane:
