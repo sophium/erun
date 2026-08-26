@@ -15,6 +15,7 @@ import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  clearCreateReviewError,
   closeCreateReviewDialog,
   commitCreateReviewBranch,
   pushCreateReviewBranch,
@@ -22,7 +23,7 @@ import {
   updateCreateReviewDialog,
 } from '@/app/createReviewDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { resolveTenantCloudAlias } from '@/app/platformSignIn';
+import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
 import type { CreateReviewDialogState } from '@/app/reviewWriteState';
 import { selectReviewTargetBranches } from '@/app/selectors';
 
@@ -208,7 +209,7 @@ function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): Rea
   const dispatch = useAppDispatch();
   const targetBranches = useAppSelector(selectReviewTargetBranches);
   const cloudProviderAlias = useAppSelector((state) =>
-    resolveTenantCloudAlias(state.tenants.tenants, dialog.tenant),
+    resolveTenantPlatformAlias(state.tenantDashboard.data),
   );
   return (
     <StepShell label="Review details">
@@ -238,7 +239,13 @@ function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): Rea
         }}
       />
       {dialog.createError && (
-        <PlatformErrorAlert message={dialog.createError} alias={cloudProviderAlias} />
+        <PlatformErrorAlert
+          message={dialog.createError}
+          alias={cloudProviderAlias}
+          onRecovered={() => {
+            dispatch(clearCreateReviewError());
+          }}
+        />
       )}
     </StepShell>
   );

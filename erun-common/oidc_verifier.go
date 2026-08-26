@@ -101,18 +101,10 @@ func (v *OIDCVerifier) provider(ctx context.Context, issuer string) (*oidc.Provi
 // alg-agnostic (never inspecting the JWS `alg` header) so issuer selection works
 // for any signing algorithm.
 func IssuerFromUnverifiedJWT(token string) (string, error) {
-	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) < 2 {
-		return "", errors.New("token is not a jwt")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", err
-	}
 	var claims struct {
 		Issuer string `json:"iss"`
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	if err := decodeUnverifiedJWTPayload(token, &claims); err != nil {
 		return "", err
 	}
 	issuer := strings.TrimSpace(claims.Issuer)
@@ -120,4 +112,34 @@ func IssuerFromUnverifiedJWT(token string) (string, error) {
 		return "", errors.New("token issuer is empty")
 	}
 	return issuer, nil
+}
+
+// SubjectFromUnverifiedJWT reads the `sub` claim from a JWT WITHOUT verifying
+// its signature, for prefilling an enrollment form with the identity already
+// in hand — never for an authorization decision, which must go through
+// OIDCVerifier.Verify against the issuer's JWKS.
+func SubjectFromUnverifiedJWT(token string) (string, error) {
+	var claims struct {
+		Subject string `json:"sub"`
+	}
+	if err := decodeUnverifiedJWTPayload(token, &claims); err != nil {
+		return "", err
+	}
+	subject := strings.TrimSpace(claims.Subject)
+	if subject == "" {
+		return "", errors.New("token subject is empty")
+	}
+	return subject, nil
+}
+
+func decodeUnverifiedJWTPayload(token string, claims any) error {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) < 2 {
+		return errors.New("token is not a jwt")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(payload, claims)
 }

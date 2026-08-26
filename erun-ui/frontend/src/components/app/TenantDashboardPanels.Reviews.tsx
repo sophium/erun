@@ -9,10 +9,11 @@ import { openCreateReviewDialog } from '@/app/createReviewDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   cancelAdvanceMergeQueue,
+  clearAdvanceMergeQueueError,
   confirmAdvanceMergeQueue,
   submitAdvanceMergeQueue,
 } from '@/app/mergeQueueThunks';
-import { resolveTenantCloudAlias } from '@/app/platformSignIn';
+import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
   reviewAuthorInitials,
@@ -268,7 +269,7 @@ function AdvanceMergeQueueAction({
   const dispatch = useAppDispatch();
   const action = useAppSelector((state) => state.mergeQueueAction);
   const cloudProviderAlias = useAppSelector((state) =>
-    resolveTenantCloudAlias(state.tenants.tenants, data?.tenant ?? ''),
+    resolveTenantPlatformAlias(state.tenantDashboard.data),
   );
   if (!data) {
     return null;
@@ -309,7 +310,13 @@ function AdvanceMergeQueueAction({
       )}
       {action.error && (
         <div className="max-w-sm">
-          <PlatformErrorAlert message={action.error} alias={cloudProviderAlias} />
+          <PlatformErrorAlert
+            message={action.error}
+            alias={cloudProviderAlias}
+            onRecovered={() => {
+              dispatch(clearAdvanceMergeQueueError());
+            }}
+          />
         </div>
       )}
     </div>

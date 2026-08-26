@@ -5,6 +5,7 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   cancelReviewComment,
+  clearReviewCommentError,
   setReviewCommentDraft,
   startReviewComment,
   submitReviewComment,
@@ -143,7 +144,7 @@ function DiffLineCommentComposer(): React.ReactElement {
   const draft = useAppSelector((state) => state.reviewDetail.newCommentDraft);
   const submitting = useAppSelector((state) => state.reviewDetail.newCommentSubmitting);
   const submitError = useAppSelector((state) => state.reviewDetail.newCommentSubmitError);
-  const cloudProviderAlias = useAppSelector((state) => state.reviewDetail.callerCloudProviderAlias);
+  const cloudProviderAlias = useAppSelector((state) => state.reviewDetail.callerPlatformAlias);
   return (
     <div className="grid gap-2">
       <Textarea
@@ -155,7 +156,15 @@ function DiffLineCommentComposer(): React.ReactElement {
           dispatch(setReviewCommentDraft(event.target.value));
         }}
       />
-      {submitError && <PlatformErrorAlert message={submitError} alias={cloudProviderAlias} />}
+      {submitError && (
+        <PlatformErrorAlert
+          message={submitError}
+          alias={cloudProviderAlias}
+          onRecovered={() => {
+            dispatch(clearReviewCommentError());
+          }}
+        />
+      )}
       <div className="flex justify-end gap-2">
         <Button
           type="button"

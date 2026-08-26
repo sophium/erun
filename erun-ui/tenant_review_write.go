@@ -30,14 +30,6 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	if tenant == "" {
 		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	name := strings.TrimSpace(input.Name)
 	targetBranch := strings.TrimSpace(input.TargetBranch)
 	sourceBranch := strings.TrimSpace(input.SourceBranch)
@@ -49,7 +41,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -72,14 +64,6 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	if tenant == "" {
 		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
 		return uiTenantDashboardReview{}, fmt.Errorf("review id is required")
@@ -89,7 +73,7 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -108,14 +92,6 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 	if tenant == "" {
 		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	targetBranch := strings.TrimSpace(input.TargetBranch)
 	if targetBranch == "" {
 		return uiTenantDashboardReview{}, fmt.Errorf("target branch is required")
@@ -125,7 +101,7 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -141,15 +117,9 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 // validateCreateReviewCommentInput checks CreateReviewComment's already-
 // trimmed input, kept apart from the call itself so that function's own
 // branching stays under the module's cyclomatic-complexity cap.
-func validateCreateReviewCommentInput(tenant, apiURL, alias, reviewID, commitID, filePath, body string) error {
+func validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body string) error {
 	if strings.TrimSpace(tenant) == "" {
 		return fmt.Errorf("tenant is required")
-	}
-	if apiURL == "" {
-		return fmt.Errorf("tenant API URL is required")
-	}
-	if alias == "" {
-		return fmt.Errorf("tenant primary cloud alias is required")
 	}
 	if reviewID == "" {
 		return fmt.Errorf("review id is required")
@@ -169,13 +139,12 @@ func validateCreateReviewCommentInput(tenant, apiURL, alias, reviewID, commitID,
 // reply path's own contract; this is the sibling entry point for opening a
 // thread the diff panel's line click provides the anchor for.
 func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewComment, error) {
-	apiURL := strings.TrimSpace(input.APIURL)
-	alias := strings.TrimSpace(input.CloudProviderAlias)
+	tenant := strings.TrimSpace(input.Tenant)
 	reviewID := strings.TrimSpace(input.ReviewID)
 	commitID := strings.TrimSpace(input.CommitID)
 	filePath := strings.TrimSpace(input.FilePath)
 	body := strings.TrimSpace(input.Body)
-	if err := validateCreateReviewCommentInput(input.Tenant, apiURL, alias, reviewID, commitID, filePath, body); err != nil {
+	if err := validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body); err != nil {
 		return uiReviewComment{}, err
 	}
 
@@ -183,7 +152,7 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err
 	}
@@ -219,14 +188,6 @@ func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, 
 	if tenant == "" {
 		return uiReviewComment{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
 		return uiReviewComment{}, fmt.Errorf("review id is required")
@@ -240,7 +201,7 @@ func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err
 	}

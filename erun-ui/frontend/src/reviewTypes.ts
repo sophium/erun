@@ -6,8 +6,6 @@ import type { UITenantDashboardBuild, UITenantDashboardReview } from './types';
 
 export interface UIReviewDetailInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   reviewId: string;
 }
 
@@ -65,8 +63,6 @@ export interface UIReviewComment {
 // body is the only field the operator actually authors.
 export interface UICreateReviewReplyInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   reviewId: string;
   parentCommentId: string;
   commitId: string;
@@ -79,8 +75,6 @@ export interface UICreateReviewReplyInput {
 // the remote (see UIExecPushInput) before the platform can reference it.
 export interface UICreateReviewInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   name: string;
   targetBranch: string;
   sourceBranch: string;
@@ -88,8 +82,6 @@ export interface UICreateReviewInput {
 
 export interface UICloseReviewInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   reviewId: string;
 }
 
@@ -98,16 +90,12 @@ export interface UICloseReviewInput {
 // there, never on a reply.
 export interface UIUpdateReviewCommentStatusInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   reviewId: string;
   commentId: string;
 }
 
 export interface UIAdvanceMergeQueueInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   targetBranch: string;
 }
 
@@ -117,8 +105,6 @@ export interface UIAdvanceMergeQueueInput {
 // clicking a line in the diff panel, not a value they typed.
 export interface UICreateReviewCommentInput {
   tenant: string;
-  apiUrl: string;
-  cloudProviderAlias: string;
   reviewId: string;
   commitId: string;
   filePath: string;

@@ -132,4 +132,63 @@ export class TenantDashboard {
       'These reviews target more than one branch, so there is no single queue head to advance.',
     );
   }
+
+  // Platform-readiness states. None of these render a tab strip, so
+  // waitForOpen/waitForOpenRestricted do not apply — assert on the heading
+  // text directly (EmptyState renders it as a plain div, no heading role).
+  notConnectedHeading(): Locator {
+    return this.page.getByText('Connect this tenant to erunpaas.com', { exact: true });
+  }
+
+  connectApiUrlInput(): Locator {
+    return this.page.getByLabel('Platform API URL');
+  }
+
+  connectButton(): Locator {
+    return this.page.getByRole('button', { name: 'Connect', exact: true });
+  }
+
+  chooseAliasHeading(): Locator {
+    return this.page.getByText('Choose which platform to use', { exact: true });
+  }
+
+  chooseAliasButton(alias: string): Locator {
+    return this.page.getByRole('button', { name: alias, exact: true });
+  }
+
+  notSignedInHeading(): Locator {
+    return this.page.getByText('Sign in to the erun platform', { exact: true });
+  }
+
+  signInButton(): Locator {
+    return this.page.getByRole('button', { name: 'Log in' });
+  }
+
+  notEnrolledHeading(): Locator {
+    return this.page.getByText("This identity isn't enrolled in this tenant yet", { exact: true });
+  }
+
+  // FieldLabel appends a visually-hidden "(required)" to the accessible
+  // name, so this intentionally does not use exact matching.
+  enrollUsernameInput(): Locator {
+    return this.page.getByLabel('Username');
+  }
+
+  tryEnrollButton(): Locator {
+    return this.page.getByRole('button', { name: 'Try to enroll myself' });
+  }
+
+  enrollAdminCommand(): Locator {
+    return this.page.locator('#enroll-admin-command');
+  }
+
+  noPermissionHeading(): Locator {
+    return this.page.getByText("You do not have access to this tenant's dashboard", {
+      exact: true,
+    });
+  }
+
+  platformContactLine(): Locator {
+    return this.page.getByText('Platform:', { exact: false });
+  }
 }

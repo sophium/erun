@@ -204,16 +204,39 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
 // login the sidebar offers), so it must render with that control rather than
 // as inert text in an empty panel.
 test.describe('tenant dashboard — a stale identity blocks the whole dashboard (#1390)', () => {
-  test('offers to sign in, and clicking it dispatches the login for the tenant primary alias', async ({
+  // #1392: a successful sign-in used to leave this exact alert and button on
+  // screen — the login dispatched and the sidebar's alias updated, but
+  // nothing re-fetched the dashboard, so the operator saw the identical
+  // stale-identity error next to a session that had just been fixed. The
+  // route stub answers LoadTenantDashboard differently on the re-fetch
+  // triggered by a successful login than it did on the initial load, so this
+  // proves the panel actually recovers rather than merely dispatching a
+  // login that changes nothing on screen.
+  test('offers to sign in, and a successful sign-in re-fetches the dashboard so the panel recovers', async ({
     app,
     page,
   }) => {
     const environment = seedDashboardEnvironment('identity-stale');
     try {
       let loginAlias = '';
+      let dashboardLoads = 0;
       await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
         const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: string[] };
         if (body.method === 'LoadTenantDashboard') {
+          dashboardLoads += 1;
+          if (dashboardLoads === 1) {
+            await route.fulfill({
+              contentType: 'application/json',
+              body: JSON.stringify({
+                data: {
+                  tenant: SEED_TENANT,
+                  platformState: 'not-signed-in',
+                  platformAlias: 'pw-aws',
+                },
+              }),
+            });
+            return;
+          }
           await route.fulfill({
             contentType: 'application/json',
             body: JSON.stringify({
@@ -221,8 +244,8 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
                 tenant: SEED_TENANT,
                 environment,
                 apiUrl: 'http://127.0.0.1:1/unreachable',
-                apiError:
-                  "This tenant's platform did not accept the signed-in identity. Sign in to the tenant's cloud provider again.",
+                platformState: '',
+                user: { tenantId: 't1', userId: 'u1', username: 'operator' },
               },
             }),
           });
@@ -245,15 +268,80 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
         .waitFor({ state: 'visible', timeout: 15_000 });
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
-      const alert = page
-        .getByRole('alert')
-        .filter({ hasText: 'did not accept the signed-in identity' });
-      await expect(alert).toBeVisible();
+      await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
 
-      const signIn = alert.locator('..').getByRole('button', { name: 'Log in' });
+      const signIn = app.tenantDashboard.signInButton();
       await expect(signIn).toBeVisible();
       await signIn.click();
       await expect.poll(() => loginAlias).toBe('pw-aws');
+
+      // The panel must recover: the not-signed-in state and its Log in
+      // button are gone, replaced by the freshly re-fetched dashboard.
+      await expect(app.tenantDashboard.notSignedInHeading()).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
+      await app.tenantDashboard.waitForOpen();
+      await expect.poll(() => dashboardLoads).toBe(2);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  // The mirror case: a sign-in that does not succeed must say so rather than
+  // silently re-rendering the identical message, which is the same trap one
+  // level down (#1392).
+  test('a failed sign-in reports the failure and leaves the error in place', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('identity-stale-login-fails');
+    try {
+      let dashboardLoads = 0;
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+        if (body.method === 'LoadTenantDashboard') {
+          dashboardLoads += 1;
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                tenant: SEED_TENANT,
+                platformState: 'not-signed-in',
+                platformAlias: 'pw-aws',
+              },
+            }),
+          });
+          return;
+        }
+        if (body.method === 'LoginCloudProvider') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'sign-in was refused' }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+
+      await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
+      const signIn = app.tenantDashboard.signInButton();
+      await signIn.click();
+
+      // The real reason, not a generic "Sign-in failed" sentence. Scoped to
+      // main: a toast notification carries the same message too, and both
+      // are role="alert".
+      await expect(
+        page.getByRole('main').getByRole('alert').filter({ hasText: 'sign-in was refused' }),
+      ).toBeVisible();
+      // The not-signed-in state is still there — the operator can try again —
+      // but no extra dashboard re-fetch happened.
+      await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
+      await expect.poll(() => dashboardLoads).toBe(1);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
@@ -273,10 +361,8 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
             body: JSON.stringify({
               data: {
                 tenant: SEED_TENANT,
-                environment,
-                apiUrl: 'http://127.0.0.1:1/unreachable',
-                apiError:
-                  "You do not have access to this tenant's dashboard. Ask an administrator for access.",
+                platformState: 'no-permission',
+                platformAlias: 'pw-aws',
               },
             }),
           });
@@ -291,9 +377,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
         .waitFor({ state: 'visible', timeout: 15_000 });
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
-      await expect(
-        page.getByRole('alert').filter({ hasText: 'Ask an administrator for access' }),
-      ).toBeVisible();
+      await expect(app.tenantDashboard.noPermissionHeading()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
