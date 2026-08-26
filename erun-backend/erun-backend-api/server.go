@@ -293,7 +293,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	// executor: the executor (via BuildService, below) already depends back on
 	// reviewService's own MarkBuildResult, and Go composition cannot wire the
 	// resulting cycle. See AGENTS.md "Merge Queue".
-	reviewService := service.NewReviewService(repos.reviews, repos.builds)
+	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents)
 	commentService := service.NewCommentService(repos.comments)
 	// releaseService records its build against the raw repository, not through
 	// BuildService: by the time a release runs, the review it recorded against

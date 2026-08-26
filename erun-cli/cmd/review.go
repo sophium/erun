@@ -343,6 +343,7 @@ func newReviewMergeQueueCmd(store common.CloudReadStore, alias *string, deps com
 		"Inspect and advance a target branch's merge queue",
 		newReviewMergeQueueListCmd(store, alias, deps),
 		newReviewMergeQueueAdvanceCmd(store, alias, deps),
+		newReviewMergeQueueOverrideAdvanceCmd(store, alias, deps),
 	)
 }
 
@@ -381,11 +382,12 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 	var targetBranch string
 	cmd := &cobra.Command{
 		Use:   "advance",
-		Short: "Advance a target branch's merge queue head to MERGED",
-		Long: "Advance a target branch's merge queue head to MERGED.\n\n" +
+		Short: "Advance a target branch's merge queue head to MERGE",
+		Long: "Advance a target branch's merge queue head to MERGE, which starts that review's merge-gate build.\n\n" +
 			"A real, immediate mutation of shared control-plane state: it fails if the queue is " +
-			"empty or its head is not READY. Until #1196's merge queue executor lands, MERGED is a " +
-			"status only — nothing yet performs the actual git merge.",
+			"empty or its head is not READY, and refuses with the unresolved comment thread count " +
+			"when the head still has open threads — resolve them first, or use " +
+			"`erun review queue override-advance`.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example:      "  erun review queue advance --target-branch main",
@@ -408,6 +410,43 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 		},
 	}
 	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "Target branch whose merge queue to advance")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewMergeQueueOverrideAdvanceCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var targetBranch, reason string
+	cmd := &cobra.Command{
+		Use:   "override-advance",
+		Short: "Bypass the unresolved-thread gate and advance the merge queue anyway",
+		Long: "Bypass `erun review queue advance`'s unresolved-thread gate and advance a target " +
+			"branch's merge queue head to MERGE anyway.\n\n" +
+			"--reason is required and is recorded in the platform's audit trail alongside the " +
+			"caller's identity — this is a deliberate, accountable escape hatch, not a routine " +
+			"way to advance the queue. A real, immediate mutation of shared control-plane state.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun review queue override-advance --target-branch main --reason \"hotfix, reviewers unavailable\"",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			review, err := common.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, targetBranch, reason, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue override-advance planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewLine(ctx, review); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(review)
+		},
+	}
+	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "Target branch whose merge queue to advance")
+	cmd.Flags().StringVar(&reason, "reason", "", "Why the unresolved-thread gate is being bypassed (required)")
 	addDryRunFlag(cmd)
 	return cmd
 }

@@ -8,6 +8,7 @@ CREATE TABLE audit_events (
   type TEXT NOT NULL,
   api_method TEXT,
   api_path TEXT,
+  api_parameters TEXT,
   cli_command TEXT,
   cli_parameters TEXT,
   mcp_tool TEXT,

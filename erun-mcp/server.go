@@ -449,8 +449,12 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewMergeQueueListTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
-		Description: "Advance a target branch's merge queue head to MERGED on the erun platform. A real, immediate mutation of shared control-plane state: fails if the queue is empty or its head is not READY. Until the merge queue executor lands, MERGED is a status only — nothing yet performs the actual git merge. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Advance a target branch's merge queue head to MERGE on the erun platform, which starts that review's merge-gate build. Refuses with the unresolved comment thread count when the queue head still has open threads — resolve them (review_resolve) or use review_queue_override_advance. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
 	}, reviewMergeQueueAdvanceTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_queue_override-advance",
+		Description: "Bypass review_queue_advance's unresolved-thread gate and advance a target branch's merge queue head to MERGE anyway. reason is required and is recorded in the platform's audit trail alongside the caller's identity — this is a deliberate, accountable escape hatch, not a routine way to advance the queue. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
+	}, reviewMergeQueueOverrideAdvanceTool(runtime))
 }
 
 func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {

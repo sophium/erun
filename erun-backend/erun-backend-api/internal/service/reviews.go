@@ -2,10 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type ReviewRepository interface {
@@ -21,13 +26,49 @@ type ReviewBuildRepository interface {
 	Get(ctx context.Context, buildID string) (model.Build, error)
 }
 
-type ReviewService struct {
-	reviews ReviewRepository
-	builds  ReviewBuildRepository
+// ReviewCommentRepository is the narrow read access AdvanceMergeQueue needs to
+// gate on a review's unresolved comment threads.
+type ReviewCommentRepository interface {
+	List(ctx context.Context, filter repository.CommentFilter) ([]model.Comment, error)
 }
 
-func NewReviewService(reviews ReviewRepository, builds ReviewBuildRepository) *ReviewService {
-	return &ReviewService{reviews: reviews, builds: builds}
+// ReviewAuditLogger records OverrideAdvanceMergeQueue's bypass. It is the raw
+// audit repository, not a transport-facing type, so the service stays free of
+// any HTTP dependency beyond the request-scoped security context it already
+// reads (see CommentService.PrepareCreate for the same pattern).
+type ReviewAuditLogger interface {
+	LogAuditEvent(ctx context.Context, event model.AuditEvent) error
+}
+
+// overrideAdvanceMergeQueueAPIPath is the canonical route template
+// routes.RegisterReviewRoutes registers OverrideAdvanceMergeQueue's HTTP
+// entrypoint at. It must match that registration exactly: it is what the
+// override's audit event records as api_path, and what the API's own
+// permission-by-path authorization keys the override on.
+const overrideAdvanceMergeQueueAPIPath = "/v1/reviews/merge-queue/override-advance"
+
+// UnresolvedThreadsError refuses AdvanceMergeQueue when the queue head still
+// has open comment threads. It carries what a caller needs both to report the
+// block and to route the operator to the threads, rather than a bare error
+// string a caller would have to parse.
+type UnresolvedThreadsError struct {
+	ReviewID          string
+	UnresolvedThreads int
+}
+
+func (e *UnresolvedThreadsError) Error() string {
+	return fmt.Sprintf("review %s has %d unresolved comment thread(s); resolve them before advancing the merge queue", e.ReviewID, e.UnresolvedThreads)
+}
+
+type ReviewService struct {
+	reviews  ReviewRepository
+	builds   ReviewBuildRepository
+	comments ReviewCommentRepository
+	audit    ReviewAuditLogger
+}
+
+func NewReviewService(reviews ReviewRepository, builds ReviewBuildRepository, comments ReviewCommentRepository, audit ReviewAuditLogger) *ReviewService {
+	return &ReviewService{reviews: reviews, builds: builds, comments: comments, audit: audit}
 }
 
 func (s *ReviewService) PrepareCreate(review model.Review) model.Review {
@@ -37,7 +78,54 @@ func (s *ReviewService) PrepareCreate(review model.Review) model.Review {
 	return review
 }
 
+// AdvanceMergeQueue promotes targetBranch's queue head to MERGE, refusing
+// (UnresolvedThreadsError) when that review still has open comment threads.
+// The check is authoritative here, not only in a client: a caller that skips
+// straight to this endpoint (the CLI, the API directly, a client bug) must
+// meet the same bar a careful desktop user would. OverrideAdvanceMergeQueue is
+// the one deliberate, audited way past it.
 func (s *ReviewService) AdvanceMergeQueue(ctx context.Context, targetBranch string) (model.Review, error) {
+	review, err := s.headOfMergeQueue(ctx, targetBranch)
+	if err != nil {
+		return model.Review{}, err
+	}
+	unresolved, err := s.unresolvedThreadCount(ctx, review.ReviewID)
+	if err != nil {
+		return model.Review{}, err
+	}
+	if unresolved > 0 {
+		return model.Review{}, &UnresolvedThreadsError{ReviewID: review.ReviewID, UnresolvedThreads: unresolved}
+	}
+	return s.promoteToMerge(ctx, review)
+}
+
+// OverrideAdvanceMergeQueue bypasses the unresolved-thread gate
+// AdvanceMergeQueue enforces. It is the one legitimate escape from that gate,
+// so it demands the two things that make a bypass accountable rather than a
+// quiet workaround: a caller-stated reason, and a durable audit record of it.
+// Both are required — a missing reason or an unconfigured audit logger fails
+// closed rather than silently promoting anyway.
+func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (model.Review, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return model.Review{}, repository.ErrInvalidInput
+	}
+	if s.audit == nil {
+		return model.Review{}, errors.New("merge queue override requires audit logging, which is not configured on this control plane")
+	}
+	review, err := s.headOfMergeQueue(ctx, targetBranch)
+	if err != nil {
+		return model.Review{}, err
+	}
+	if err := s.auditOverrideAdvance(ctx, review, reason); err != nil {
+		return model.Review{}, err
+	}
+	return s.promoteToMerge(ctx, review)
+}
+
+// headOfMergeQueue resolves targetBranch's next queued review, refusing when
+// another review is already merging on that branch.
+func (s *ReviewService) headOfMergeQueue(ctx context.Context, targetBranch string) (model.Review, error) {
 	if targetBranch == "" {
 		return model.Review{}, repository.ErrInvalidInput
 	}
@@ -46,16 +134,67 @@ func (s *ReviewService) AdvanceMergeQueue(ctx context.Context, targetBranch stri
 	} else if !errors.Is(err, repository.ErrNotFound) {
 		return model.Review{}, err
 	}
+	return s.reviews.FindNextMergeQueueReview(ctx, targetBranch)
+}
 
-	review, err := s.reviews.FindNextMergeQueueReview(ctx, targetBranch)
-	if err != nil {
-		return model.Review{}, err
-	}
+// promoteToMerge moves review from the queue to MERGE. Both AdvanceMergeQueue
+// and OverrideAdvanceMergeQueue reach here only once their own precondition
+// (the thread gate, or the reason+audit bypass) has already been satisfied.
+func (s *ReviewService) promoteToMerge(ctx context.Context, review model.Review) (model.Review, error) {
 	if err := s.reviews.DeleteMergeQueueEntryByReview(ctx, review.ReviewID); err != nil {
 		return model.Review{}, err
 	}
 	review.Status = model.ReviewStatusMerge
 	return s.reviews.Update(ctx, review)
+}
+
+// unresolvedThreadCount mirrors eruncommon.CountUnresolvedThreads's rule (a
+// root comment, ParentCommentID unset, whose Status is still OPEN) over the
+// backend's own model.Comment rather than importing the transport-facing
+// erun-common client type for a five-line loop.
+func (s *ReviewService) unresolvedThreadCount(ctx context.Context, reviewID string) (int, error) {
+	comments, err := s.comments.List(ctx, repository.CommentFilter{ReviewID: reviewID})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, comment := range comments {
+		if strings.TrimSpace(comment.ParentCommentID) == "" && comment.Status == model.CommentStatusOpen {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// auditOverrideParameters is the api_parameters payload shape for a
+// merge-queue override, so the field is machine-readable in the audit trail
+// rather than a hand-built string.
+type auditOverrideParameters struct {
+	ReviewID     string `json:"reviewId"`
+	TargetBranch string `json:"targetBranch"`
+	Reason       string `json:"reason"`
+}
+
+func (s *ReviewService) auditOverrideAdvance(ctx context.Context, review model.Review, reason string) error {
+	securityContext, err := security.RequiredFromContext(ctx)
+	if err != nil {
+		return repository.ErrMissingSecurityContext
+	}
+	parameters, err := json.Marshal(auditOverrideParameters{ReviewID: review.ReviewID, TargetBranch: review.TargetBranch, Reason: reason})
+	if err != nil {
+		return err
+	}
+	return s.audit.LogAuditEvent(ctx, model.AuditEvent{
+		TenantID:         securityContext.TenantID,
+		ErunUserID:       securityContext.ErunUserID,
+		ExternalUserID:   securityContext.ExternalUserID,
+		ExternalIssuerID: securityContext.ExternalIssuer,
+		ExternalOrgID:    securityContext.ExternalOrgID,
+		Type:             model.AuditEventTypeAPI,
+		APIMethod:        http.MethodPost,
+		APIPath:          overrideAdvanceMergeQueueAPIPath,
+		APIParameters:    string(parameters),
+	})
 }
 
 func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string) (model.Review, error) {
@@ -152,10 +291,14 @@ func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Rev
 		return model.Review{}, false, err
 	}
 	// Another review already merging on that branch is the normal case, not a
-	// failure of this build.
+	// failure of this build. Nor is the queue head having unresolved comment
+	// threads: that review is not necessarily the one this build belongs to, so
+	// its own gate blocking has nothing to do with whether reporting this build
+	// succeeded.
 	promoted, err := s.AdvanceMergeQueue(ctx, updated.TargetBranch)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+		var blocked *UnresolvedThreadsError
+		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) {
 			return model.Review{}, false, nil
 		}
 		return model.Review{}, false, err

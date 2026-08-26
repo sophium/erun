@@ -25,8 +25,12 @@ import (
 type PlatformTokenMinter func() (string, error)
 
 // Sentinel errors a caller can distinguish with errors.Is. erun-backend-api
-// returns a plain-text body (http.Error), never a JSON error envelope, so
-// these carry the response body as their message rather than parsing one.
+// usually returns a plain-text body (http.Error), so these carry the response
+// body as their message rather than parsing one; an endpoint whose refusal
+// carries structured detail (AdvanceMergeQueue's unresolved-thread block, for
+// example) returns a JSON body instead, and decorates the same sentinel with
+// a typed error a caller can pull out via errors.As — see
+// PlatformMergeQueueBlockedError.
 var (
 	ErrPlatformUnauthorized   = errors.New("platform api: unauthorized")
 	ErrPlatformForbidden      = errors.New("platform api: forbidden")
@@ -470,27 +474,57 @@ func decodePlatformResponse(method string, path string, respBody []byte, out any
 	return nil
 }
 
-// platformStatusError maps a non-2xx response to a sentinel a caller can
-// distinguish with errors.Is, carrying the server's plain-text body (see
-// writeError/http.Error in erun-backend-api) as detail.
-func platformStatusError(method, path string, status int, body []byte) error {
-	detail := strings.TrimSpace(string(body))
-	base := fmt.Sprintf("platform api %s %s: http %d", method, path, status)
+// PlatformStatusError is the structured form behind every non-2xx platform
+// api response. errors.Is still matches the mapped sentinel (ErrPlatformConflict
+// and friends) via Unwrap; a caller whose endpoint can return a structured
+// JSON body on top of the sentinel — AdvanceMergeQueue's unresolved-thread
+// block, for example — reaches it with errors.As against this type and
+// decodes Body itself, rather than re-parsing the formatted Error() string.
+type PlatformStatusError struct {
+	Method   string
+	Path     string
+	Status   int
+	Body     []byte
+	sentinel error
+}
+
+func (e *PlatformStatusError) Error() string {
+	detail := strings.TrimSpace(string(e.Body))
+	base := fmt.Sprintf("platform api %s %s: http %d", e.Method, e.Path, e.Status)
 	if detail != "" {
 		base += ": " + detail
 	}
+	if e.sentinel != nil {
+		base += ": " + e.sentinel.Error()
+	}
+	return base
+}
+
+func (e *PlatformStatusError) Unwrap() error {
+	return e.sentinel
+}
+
+// platformStatusError maps a non-2xx response to a sentinel a caller can
+// distinguish with errors.Is, carrying the response body (see
+// PlatformStatusError) so a caller whose endpoint returns structured detail
+// can decode it.
+func platformStatusError(method, path string, status int, body []byte) error {
+	return &PlatformStatusError{Method: method, Path: path, Status: status, Body: body, sentinel: platformStatusSentinel(status)}
+}
+
+func platformStatusSentinel(status int) error {
 	switch status {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("%s: %w", base, ErrPlatformUnauthorized)
+		return ErrPlatformUnauthorized
 	case http.StatusForbidden:
-		return fmt.Errorf("%s: %w", base, ErrPlatformForbidden)
+		return ErrPlatformForbidden
 	case http.StatusNotFound:
-		return fmt.Errorf("%s: %w", base, ErrPlatformNotFound)
+		return ErrPlatformNotFound
 	case http.StatusConflict:
-		return fmt.Errorf("%s: %w", base, ErrPlatformConflict)
+		return ErrPlatformConflict
 	case http.StatusNotImplemented:
-		return fmt.Errorf("%s: %w", base, ErrPlatformNotImplemented)
+		return ErrPlatformNotImplemented
 	default:
-		return errors.New(base)
+		return nil
 	}
 }

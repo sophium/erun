@@ -60,6 +60,10 @@ export interface UITenantDashboard {
   // rather than rendered to fail on submit.
   canCreateReview: boolean;
   canAdvanceMergeQueue: boolean;
+  // canOverrideMergeQueue is a distinct (usually narrower) grant from
+  // canAdvanceMergeQueue's: it gates the unresolved-thread gate's bypass,
+  // authorized on its own platform route.
+  canOverrideMergeQueue: boolean;
   // mineReviewCount/waitingOnMeReviewCount are the Reviews tab's Mine /
   // Waiting-on-me filter buttons' own discovery signal — how many reviews
   // match each, visible before either is clicked. Undefined when the caller
@@ -104,6 +108,11 @@ export interface UITenantDashboardReview {
   // (e.g. the caller cannot read comments) — distinct from 0, which means
   // every thread is resolved.
   unresolvedThreads?: number;
+  // blocked is AdvanceMergeQueue's own report that it refused to promote
+  // this review (unresolvedThreads then carries the count). Every other read
+  // path leaves it undefined — it describes that one call's outcome, not a
+  // property of the review itself.
+  blocked?: boolean;
   lastFailedBuildId?: string;
   lastReadyBuildId?: string;
   lastMergedBuildId?: string;

@@ -2,6 +2,9 @@ package eruncommon
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -152,10 +155,65 @@ func (c *PlatformClient) ListMergeQueue(ctx context.Context, targetBranch string
 	return reviews, err
 }
 
-// AdvanceMergeQueue advances targetBranch's merge queue head to MERGED.
+// AdvanceMergeQueue advances targetBranch's merge queue head to MERGE,
+// refusing with a *PlatformMergeQueueBlockedError (wrapping ErrPlatformConflict)
+// when that review still has unresolved comment threads.
+// OverrideAdvanceMergeQueue is the one deliberate, audited way past that
+// refusal.
 func (c *PlatformClient) AdvanceMergeQueue(ctx context.Context, targetBranch string) (PlatformReview, error) {
 	var review PlatformReview
 	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/advance", map[string]string{"targetBranch": targetBranch}, true, &review)
+	return review, decorateMergeQueueBlockedError(err)
+}
+
+// PlatformMergeQueueBlockedError decorates ErrPlatformConflict with the
+// review and unresolved-thread count AdvanceMergeQueue refused on, so a
+// caller can report both and route the operator to the review without
+// re-parsing the response body itself.
+type PlatformMergeQueueBlockedError struct {
+	ReviewID          string
+	UnresolvedThreads int
+	status            *PlatformStatusError
+}
+
+func (e *PlatformMergeQueueBlockedError) Error() string {
+	return fmt.Sprintf("review %s has %d unresolved comment thread(s); resolve them or use the merge queue override", e.ReviewID, e.UnresolvedThreads)
+}
+
+func (e *PlatformMergeQueueBlockedError) Unwrap() error {
+	return e.status
+}
+
+// unresolvedThreadsBody mirrors routes.unresolvedThreadsResponse in
+// erun-backend-api (the JSON body AdvanceMergeQueue's 409 carries).
+type unresolvedThreadsBody struct {
+	Error             string `json:"error"`
+	ReviewID          string `json:"reviewId"`
+	UnresolvedThreads int    `json:"unresolvedThreads"`
+}
+
+// decorateMergeQueueBlockedError recognizes AdvanceMergeQueue's structured
+// unresolved-thread refusal and wraps it as a PlatformMergeQueueBlockedError;
+// every other error (including a plain ErrPlatformConflict, and no error at
+// all) passes through unchanged.
+func decorateMergeQueueBlockedError(err error) error {
+	var statusErr *PlatformStatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusConflict {
+		return err
+	}
+	var body unresolvedThreadsBody
+	if jsonErr := json.Unmarshal(statusErr.Body, &body); jsonErr != nil || body.Error != "unresolved_threads" {
+		return err
+	}
+	return &PlatformMergeQueueBlockedError{ReviewID: body.ReviewID, UnresolvedThreads: body.UnresolvedThreads, status: statusErr}
+}
+
+// OverrideAdvanceMergeQueue bypasses AdvanceMergeQueue's unresolved-thread
+// gate. reason is required — the backend refuses a blank one — and is
+// recorded in the platform's audit trail alongside the caller's identity.
+func (c *PlatformClient) OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (PlatformReview, error) {
+	var review PlatformReview
+	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/override-advance", map[string]string{"targetBranch": targetBranch, "reason": reason}, true, &review)
 	return review, err
 }
 

@@ -3,6 +3,7 @@ import type {
   UICloudProviderStatus,
   UIConnectERunPlatformInput,
   UICreateReviewInput,
+  UIOverrideAdvanceMergeQueueInput,
   UIPlatformUser,
   UIPlatformUserEnrollInput,
   UITenantConfig,
@@ -18,6 +19,7 @@ import {
   EnrollERunPlatformUser,
   LoadTenantConfig,
   LoadTenantDashboard,
+  OverrideAdvanceMergeQueue,
   SaveTenantConfig,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
@@ -54,6 +56,18 @@ export const tenantApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<UIAdvanceMergeQueueInput, UITenantDashboardReview>((input) =>
         AdvanceMergeQueue(input),
       ),
+      // A blocked result changed nothing on the platform, so there is nothing
+      // to refetch; only a real promotion invalidates the dashboard.
+      invalidatesTags: (result, _error, input) =>
+        result && !result.blocked ? [{ type: 'TenantDashboard', id: input.tenant }] : [],
+    }),
+    overrideAdvanceMergeQueue: builder.mutation<
+      UITenantDashboardReview,
+      UIOverrideAdvanceMergeQueueInput
+    >({
+      queryFn: wailsQueryFn<UIOverrideAdvanceMergeQueueInput, UITenantDashboardReview>((input) =>
+        OverrideAdvanceMergeQueue(input),
+      ),
       invalidatesTags: (_result, _error, input) => [{ type: 'TenantDashboard', id: input.tenant }],
     }),
     connectERunPlatform: builder.mutation<UICloudProviderStatus, UIConnectERunPlatformInput>({
@@ -78,6 +92,7 @@ export const {
   useLazyGetTenantDashboardQuery,
   useCreateReviewMutation,
   useAdvanceMergeQueueMutation,
+  useOverrideAdvanceMergeQueueMutation,
   useConnectERunPlatformMutation,
   useEnrollERunPlatformUserMutation,
 } = tenantApi;

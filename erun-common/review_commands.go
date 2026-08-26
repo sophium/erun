@@ -289,7 +289,9 @@ func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias, targetBra
 }
 
 // RunReviewMergeQueueAdvance advances targetBranch's merge queue head to
-// MERGED.
+// MERGE, refusing with a *PlatformMergeQueueBlockedError when that review
+// still has unresolved comment threads. RunReviewMergeQueueOverrideAdvance is
+// the deliberate, audited way past that refusal.
 func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias, targetBranch string, deps CloudDependencies) (PlatformReview, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -300,4 +302,22 @@ func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias, target
 		return PlatformReview{}, nil
 	}
 	return client.AdvanceMergeQueue(context.Background(), targetBranch)
+}
+
+// RunReviewMergeQueueOverrideAdvance bypasses RunReviewMergeQueueAdvance's
+// unresolved-thread gate. reason is required and is recorded in the
+// platform's audit trail; a blank one is refused before the network call.
+func RunReviewMergeQueueOverrideAdvance(ctx Context, store CloudReadStore, alias, targetBranch, reason string, deps CloudDependencies) (PlatformReview, error) {
+	if strings.TrimSpace(reason) == "" {
+		return PlatformReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformReview{}, err
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", "targetBranch="+targetBranch, "reason="+reason)
+	if ctx.DryRun {
+		return PlatformReview{}, nil
+	}
+	return client.OverrideAdvanceMergeQueue(context.Background(), targetBranch, reason)
 }

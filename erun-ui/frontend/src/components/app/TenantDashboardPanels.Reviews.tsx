@@ -34,6 +34,7 @@ import {
   RelativeTime,
   type TenantDashboardData,
 } from './TenantDashboardMessage';
+import { MergeQueueBlockedAlert } from './TenantDashboardPanels.MergeQueueBlocked';
 
 // ReviewsPanel is the review object's own home: status, branches, and — via
 // each row — its builds, comment threads, and merge-queue position. The
@@ -290,6 +291,16 @@ function AdvanceMergeQueueAction({
       <span className="max-w-xs text-right text-[13px] text-muted-foreground">
         These reviews target more than one branch, so there is no single queue head to advance.
       </span>
+    );
+  }
+  if (action.blocked) {
+    return (
+      <MergeQueueBlockedAlert
+        canOverride={data.canOverrideMergeQueue}
+        mergeQueue={mergeQueue}
+        targetBranch={targetBranch}
+        action={action}
+      />
     );
   }
   return (

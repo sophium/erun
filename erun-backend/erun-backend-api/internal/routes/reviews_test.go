@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type stubReviewRepository struct {
@@ -64,15 +65,25 @@ func (s *stubReviewReviewerRepository) Delete(_ context.Context, reviewID, userI
 type stubReviewService struct {
 	review model.Review
 	err    error
+	// overrideReason/overrideTargetBranch record OverrideAdvanceMergeQueue's
+	// call so a test can assert the request body actually reached the service.
+	overrideReason       string
+	overrideTargetBranch string
 }
 
-func (s stubReviewService) PrepareCreate(review model.Review) model.Review { return review }
+func (s *stubReviewService) PrepareCreate(review model.Review) model.Review { return review }
 
-func (s stubReviewService) AdvanceMergeQueue(context.Context, string) (model.Review, error) {
+func (s *stubReviewService) AdvanceMergeQueue(context.Context, string) (model.Review, error) {
 	return s.review, s.err
 }
 
-func (s stubReviewService) UpdateStatus(context.Context, string, model.ReviewStatus, string) (model.Review, error) {
+func (s *stubReviewService) OverrideAdvanceMergeQueue(_ context.Context, targetBranch, reason string) (model.Review, error) {
+	s.overrideTargetBranch = targetBranch
+	s.overrideReason = reason
+	return s.review, s.err
+}
+
+func (s *stubReviewService) UpdateStatus(context.Context, string, model.ReviewStatus, string) (model.Review, error) {
 	return s.review, s.err
 }
 
@@ -99,7 +110,7 @@ func patchReviewStatus(t *testing.T, routes ReviewRoutes, body string) *httptest
 // directly) — this only proves the route surfaces whatever the service
 // decides.
 func TestUpdateReviewStatusReturnsTheServiceResult(t *testing.T) {
-	routes := ReviewRoutes{service: stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusReady}}}
+	routes := ReviewRoutes{service: &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusReady}}}
 	rec := patchReviewStatus(t, routes, `{"status":"READY","buildId":"build-1"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
@@ -116,7 +127,7 @@ func TestUpdateReviewStatusReturnsTheServiceResult(t *testing.T) {
 func TestAdvanceMergeQueueDispatchesThePromotedReview(t *testing.T) {
 	promoted := model.Review{ReviewID: "review-2", TargetBranch: "main", Status: model.ReviewStatusMerge}
 	dispatcher := &recordingDispatcher{}
-	routes := ReviewRoutes{service: stubReviewService{review: promoted}, dispatcher: dispatcher}
+	routes := ReviewRoutes{service: &stubReviewService{review: promoted}, dispatcher: dispatcher}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
 	rec := httptest.NewRecorder()
@@ -133,12 +144,77 @@ func TestAdvanceMergeQueueDispatchesThePromotedReview(t *testing.T) {
 // TestAdvanceMergeQueueWithoutADispatcherStillPromotes: an unwired merge
 // executor must not stop the promotion itself from being recorded.
 func TestAdvanceMergeQueueWithoutADispatcherStillPromotes(t *testing.T) {
-	routes := ReviewRoutes{service: stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusMerge}}}
+	routes := ReviewRoutes{service: &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusMerge}}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
 	rec := httptest.NewRecorder()
 	routes.advanceMergeQueue(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAdvanceMergeQueueBlockedReportsCountAndReview: a refusal that names
+// nothing an operator can act on is the dead end AGENTS.md's "Smooth,
+// Seamless, No Dead Ends" section refuses to accept — the body must carry the
+// unresolved count and the review id so a caller can route the operator
+// straight to the threads.
+func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{err: &service.UnresolvedThreadsError{ReviewID: "review-1", UnresolvedThreads: 3}}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"unresolvedThreads":3`) || !strings.Contains(body, `"reviewId":"review-1"`) {
+		t.Fatalf("body = %q, want the unresolved count and the review id", body)
+	}
+}
+
+// TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason: the route is a
+// thin adapter over the service, so its only job is getting both request
+// fields to OverrideAdvanceMergeQueue unchanged.
+func TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason(t *testing.T) {
+	promoted := model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge}
+	svc := &stubReviewService{review: promoted}
+	dispatcher := &recordingDispatcher{}
+	routes := ReviewRoutes{service: svc, dispatcher: dispatcher}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/override-advance", bytes.NewBufferString(`{"targetBranch":"main","reason":"hotfix"}`))
+	rec := httptest.NewRecorder()
+	routes.overrideAdvanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if svc.overrideTargetBranch != "main" || svc.overrideReason != "hotfix" {
+		t.Fatalf("service saw targetBranch=%q reason=%q, want main/hotfix", svc.overrideTargetBranch, svc.overrideReason)
+	}
+	if len(dispatcher.reviews) != 1 || dispatcher.reviews[0] != promoted {
+		t.Fatalf("dispatched %+v, want exactly the promoted review %+v", dispatcher.reviews, promoted)
+	}
+}
+
+// TestOverrideAdvanceMergeQueueRefusalIsNotDispatched: a refused override
+// (blank reason, no audit logger configured, ...) must not start a merge gate
+// build for a review that never actually promoted.
+func TestOverrideAdvanceMergeQueueRefusalIsNotDispatched(t *testing.T) {
+	svc := &stubReviewService{err: apirepository.ErrInvalidInput}
+	dispatcher := &recordingDispatcher{}
+	routes := ReviewRoutes{service: svc, dispatcher: dispatcher}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/override-advance", bytes.NewBufferString(`{"targetBranch":"main","reason":""}`))
+	rec := httptest.NewRecorder()
+	routes.overrideAdvanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if len(dispatcher.reviews) != 0 {
+		t.Fatalf("dispatched %+v, want nothing dispatched for a refused override", dispatcher.reviews)
 	}
 }
 

@@ -5,17 +5,35 @@
 
 // MergeQueueActionState backs the Merge Queue panel's "Advance queue"
 // action: an inline confirm step, then busy/error like every other
-// side-effecting dashboard write.
+// side-effecting dashboard write. blocked/blockedReviewId/unresolvedThreads
+// describe a refused advance (the queue head still has open comment
+// threads) as a distinct, named state rather than a bare error string — see
+// mergeQueueThunks.ts. overriding/overrideReason/overrideBusy/overrideError
+// back the reason-required override affordance offered from that state.
 export interface MergeQueueActionState {
   confirming: boolean;
   busy: boolean;
   error: string;
+  blocked: boolean;
+  blockedReviewId: string;
+  unresolvedThreads: number;
+  overriding: boolean;
+  overrideReason: string;
+  overrideBusy: boolean;
+  overrideError: string;
 }
 
 export const defaultMergeQueueAction = (): MergeQueueActionState => ({
   confirming: false,
   busy: false,
   error: '',
+  blocked: false,
+  blockedReviewId: '',
+  unresolvedThreads: 0,
+  overriding: false,
+  overrideReason: '',
+  overrideBusy: false,
+  overrideError: '',
 });
 
 // CreateReviewDialogState backs the "Open a review" dialog: pushing the

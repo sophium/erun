@@ -267,6 +267,10 @@ type uiTenantDashboard struct {
 	// already gives the reply composer.
 	CanCreateReview      bool `json:"canCreateReview"`
 	CanAdvanceMergeQueue bool `json:"canAdvanceMergeQueue"`
+	// CanOverrideMergeQueue reports whether the signed-in user may bypass the
+	// unresolved-thread gate, a distinct (usually narrower) grant from
+	// CanAdvanceMergeQueue's — see tenantDashboardWriteOverrideAdvanceMergeQueue.
+	CanOverrideMergeQueue bool `json:"canOverrideMergeQueue"`
 	// MineReviewCount/WaitingOnMeReviewCount are the Reviews tab's filter
 	// buttons' own discovery signal: how many reviews match each filter,
 	// visible before the caller clicks either one. Unset (rather than 0) when
@@ -317,7 +321,13 @@ type uiTenantDashboardReview struct {
 	// unset (rather than 0) when it was not computed for this listing (see
 	// tenant_dashboard.go's reviewThreadCounts) so a caller can tell "zero
 	// unresolved" apart from "not read for this row".
-	UnresolvedThreads *int   `json:"unresolvedThreads,omitempty"`
+	UnresolvedThreads *int `json:"unresolvedThreads,omitempty"`
+	// Blocked is AdvanceMergeQueue's own report that it refused to promote
+	// this review: the queue head still has unresolved comment threads
+	// (UnresolvedThreads then carries the count). Every other read path
+	// leaves it unset — it is not a property of the review itself, only of
+	// that one call's outcome.
+	Blocked           bool   `json:"blocked,omitempty"`
 	LastFailedBuildID string `json:"lastFailedBuildId,omitempty"`
 	LastReadyBuildID  string `json:"lastReadyBuildId,omitempty"`
 	LastMergedBuildID string `json:"lastMergedBuildId,omitempty"`
@@ -442,6 +452,14 @@ type uiCloseReviewInput struct {
 type uiAdvanceMergeQueueInput struct {
 	Tenant       string `json:"tenant"`
 	TargetBranch string `json:"targetBranch"`
+}
+
+type uiOverrideAdvanceMergeQueueInput struct {
+	Tenant       string `json:"tenant"`
+	TargetBranch string `json:"targetBranch"`
+	// Reason is required by the platform and is recorded in its audit trail
+	// alongside the caller's identity.
+	Reason string `json:"reason"`
 }
 
 // uiCreateReviewCommentInput starts a new top-level thread anchored to a diff

@@ -99,6 +99,15 @@ export interface UIAdvanceMergeQueueInput {
   targetBranch: string;
 }
 
+// UIOverrideAdvanceMergeQueueInput bypasses AdvanceMergeQueue's
+// unresolved-thread gate. reason is required by the platform and is recorded
+// in its audit trail alongside the caller's identity.
+export interface UIOverrideAdvanceMergeQueueInput {
+  tenant: string;
+  targetBranch: string;
+  reason: string;
+}
+
 // UICreateReviewCommentInput starts a new top-level thread anchored to a diff
 // line — the sibling of UICreateReviewReplyInput, which replies within an
 // existing thread. Every field but body is the anchor the operator picked by

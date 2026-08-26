@@ -191,6 +191,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - `api_path` must use the same canonical route template stored in `role_permissions.api_path`, such as `/v1/reviews/{review_id}` rather than a concrete request URL with IDs or query strings.
 - CLI audit events must set `cli_command` and may set `cli_parameters`.
 - MCP audit events must set `mcp_tool` and may set `mcp_tool_parameters`.
+- API audit events may set `api_parameters` when the action itself requires recording a caller-supplied justification, such as a merge-queue gate override's reason; ordinary API audit events leave it null.
 - Store CLI and MCP parameters as serialized text, preferably compact JSON when the caller has structured input.
 - Audit events are append-only. Do not update or delete audit rows as part of normal application behavior.
 - PostgreSQL audit events should be indexed for tenant/time/user/API access patterns.

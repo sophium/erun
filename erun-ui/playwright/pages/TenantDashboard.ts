@@ -133,6 +133,32 @@ export class TenantDashboard {
     );
   }
 
+  // mergeQueueBlockedAlert is AdvanceMergeQueue's unresolved-thread refusal,
+  // rendered as role="alert" (InlineAlert) rather than a bare error string.
+  mergeQueueBlockedAlert(): Locator {
+    return this.activePanel().getByRole('alert');
+  }
+
+  mergeQueueViewDiscussionButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'View discussion' });
+  }
+
+  mergeQueueOverrideAnywayButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Override anyway' });
+  }
+
+  mergeQueueOverrideReasonInput(): Locator {
+    return this.activePanel().getByLabel('Reason for overriding');
+  }
+
+  mergeQueueOverrideCancelButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Cancel' });
+  }
+
+  mergeQueueOverrideConfirmButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Confirm override' });
+  }
+
   // Platform-readiness states. None of these render a tab strip, so
   // waitForOpen/waitForOpenRestricted do not apply — assert on the heading
   // text directly (EmptyState renders it as a plain div, no heading role).

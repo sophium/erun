@@ -16,7 +16,13 @@ import {
 // at this" and "there is nothing here" identically. These pin the difference.
 
 function dashboard(panels: UITenantDashboardPanel[]): UITenantDashboard {
-  return { tenant: 'frs', panels, canCreateReview: false, canAdvanceMergeQueue: false };
+  return {
+    tenant: 'frs',
+    panels,
+    canCreateReview: false,
+    canAdvanceMergeQueue: false,
+    canOverrideMergeQueue: false,
+  };
 }
 
 test('a tab the user may not open does not render', () => {
@@ -47,6 +53,7 @@ test('a dashboard that reported no panels keeps every tab', () => {
       tenant: 'frs',
       canCreateReview: false,
       canAdvanceMergeQueue: false,
+      canOverrideMergeQueue: false,
     }).length,
     6,
   );

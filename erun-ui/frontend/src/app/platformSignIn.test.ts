@@ -35,6 +35,7 @@ const dashboard: UITenantDashboard = {
   tenant: 'frs',
   canCreateReview: false,
   canAdvanceMergeQueue: false,
+  canOverrideMergeQueue: false,
   platformAlias: 'erun+api.frs-prod.services.erunpaas.com@erun',
 };
 

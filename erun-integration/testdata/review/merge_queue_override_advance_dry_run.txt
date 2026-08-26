@@ -1,0 +1,3 @@
+Dry run: erun review queue override-advance planned.
+audit: erun review queue override-advance --dry-run --reason hotfix, reviewers unavailable --target-branch main
+platform: POST https://api.example.test/v1/reviews/merge-queue/override-advance (targetBranch=main, reason=hotfix, reviewers unavailable)

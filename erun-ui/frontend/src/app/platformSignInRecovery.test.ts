@@ -66,6 +66,7 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
         platformAlias: ALIAS,
         canCreateReview: false,
         canAdvanceMergeQueue: false,
+        canOverrideMergeQueue: false,
       },
       reviewFilter: { mine: false, waitingOnMe: false },
       platformAliasOverride: '',
