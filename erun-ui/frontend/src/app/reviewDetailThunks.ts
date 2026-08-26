@@ -240,6 +240,66 @@ export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch,
   }
 };
 
+// submitResolveComment/submitUnresolveComment resolve or reopen a thread by
+// its root comment id. The dialog only ever offers this on a root — never a
+// reply — so there is no reply-rejection error to translate here, unlike the
+// CLI/MCP paths that accept any comment id.
+export const submitResolveComment = (commentId: string): AppThunk<Promise<void>> =>
+  submitCommentStatus(commentId, 'resolveReviewComment');
+
+export const submitUnresolveComment = (commentId: string): AppThunk<Promise<void>> =>
+  submitCommentStatus(commentId, 'unresolveReviewComment');
+
+function submitCommentStatus(
+  commentId: string,
+  endpoint: 'resolveReviewComment' | 'unresolveReviewComment',
+): AppThunk<Promise<void>> {
+  return async (dispatch, getState) => {
+    const state = getState();
+    const { reviewId } = state.reviewDetail;
+    const input = reviewCallerContext(state, reviewId);
+    if (!input) {
+      dispatch(
+        patchReviewDetail({
+          resolveError: 'Resolving requires an API URL and a primary cloud alias.',
+          resolveErrorCommentId: commentId,
+        }),
+      );
+      return;
+    }
+    dispatch(
+      patchReviewDetail({
+        resolvingCommentId: commentId,
+        resolveError: '',
+        resolveErrorCommentId: '',
+      }),
+    );
+    try {
+      await dispatch(
+        reviewDetailApi.endpoints[endpoint].initiate({
+          tenant: input.tenant,
+          apiUrl: input.apiUrl,
+          cloudProviderAlias: input.cloudProviderAlias,
+          reviewId,
+          commentId,
+        }),
+      ).unwrap();
+      dispatch(
+        patchReviewDetail({ resolvingCommentId: '', resolveError: '', resolveErrorCommentId: '' }),
+      );
+      await dispatch(loadReviewDetail(reviewId));
+    } catch (error) {
+      dispatch(
+        patchReviewDetail({
+          resolvingCommentId: '',
+          resolveError: readError(error),
+          resolveErrorCommentId: commentId,
+        }),
+      );
+    }
+  };
+}
+
 // startReviewComment/cancelReviewComment/setReviewCommentDraft/
 // submitReviewComment mirror the reply flow above, but for opening a brand
 // new top-level thread anchored to a diff line the operator clicked — the

@@ -19,7 +19,12 @@ import {
   submitCloseReview,
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
-import { formatDashboardDate, reviewStatusTone } from '@/app/tenantDashboardPanels';
+import {
+  formatDashboardDate,
+  reviewStatusTone,
+  unresolvedThreadsLabel,
+  unresolvedThreadsTone,
+} from '@/app/tenantDashboardPanels';
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
 import { InlineAlert } from './InlineAlert';
@@ -114,12 +119,40 @@ function ReviewDetailLoaded({
           {data.queuePosition ? ` · queue position ${String(data.queuePosition)}` : ''}
         </DialogDescription>
       </DialogHeader>
+      <ReviewDetailThreadStatus data={data} />
       <CloseReviewAction review={review} data={data} detail={detail} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <ReviewDetailBuilds data={data} />
         <ReviewDetailComments detail={detail} />
       </div>
     </>
+  );
+}
+
+// ReviewDetailThreadStatus is the "is this review actually finished" signal
+// at the top of the dialog, visible without scrolling into the comments
+// list. Rendered only once at least one thread exists — a review with no
+// comments yet has nothing to call "all resolved".
+function ReviewDetailThreadStatus({
+  data,
+}: {
+  data: NonNullable<ReviewDetailState['data']>;
+}): React.ReactElement | null {
+  if (data.commentsRestricted || data.commentsError) {
+    return null;
+  }
+  const roots = (data.comments ?? []).filter((comment) => !comment.parentCommentId);
+  if (roots.length === 0) {
+    return null;
+  }
+  const unresolved = data.unresolvedThreads ?? 0;
+  return (
+    <div>
+      <StatusBadge
+        tone={unresolvedThreadsTone(unresolved)}
+        label={unresolvedThreadsLabel(unresolved)}
+      />
+    </div>
   );
 }
 

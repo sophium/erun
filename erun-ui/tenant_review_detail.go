@@ -71,6 +71,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	detail.QueuePosition = loadReviewDetailQueuePosition(requestCtx, client, capabilities, review, reviewID)
 	detail.CanComment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteComment) == ""
 	detail.CanClose = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewStatus) == ""
+	detail.CanResolveComments = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCommentStatus) == ""
 	return detail, nil
 }
 
@@ -85,6 +86,7 @@ func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformCl
 		return
 	}
 	detail.Comments = tenantDashboardComments(comments)
+	detail.UnresolvedThreads = eruncommon.CountUnresolvedThreads(comments)
 }
 
 func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {

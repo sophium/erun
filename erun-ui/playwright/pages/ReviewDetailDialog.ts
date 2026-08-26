@@ -43,6 +43,17 @@ export class ReviewDetailDialog {
     await this.locator().getByRole('button', { name: 'Cancel' }).click();
   }
 
+  // resolveButton/reopenButton are offered only on a thread's root; `threadIndex`
+  // is the thread's position among rendered threads (roots), matching reply()'s
+  // own indexing convention.
+  resolveButton(threadIndex: number): Locator {
+    return this.locator().getByRole('button', { name: 'Resolve' }).nth(threadIndex);
+  }
+
+  reopenButton(threadIndex: number): Locator {
+    return this.locator().getByRole('button', { name: 'Reopen' }).nth(threadIndex);
+  }
+
   closeReviewButton(): Locator {
     return this.locator().getByRole('button', { name: 'Close review' });
   }
