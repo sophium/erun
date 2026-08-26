@@ -1512,7 +1512,15 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
 	}
 	if len(unreachable) > 0 {
-		a.emitAppNotification("warning", orchestratorMCPUnreachableNotice(name, unreachable))
+		notice := orchestratorMCPUnreachableNotice(name, unreachable)
+		// A combined notice naming several environments has no single env to
+		// attach a deploy action to; only the common single-env case gets one.
+		if tenant, environment, ok := singleOrchestratorMCPUnreachableEnv(unreachable); ok {
+			a.emitEnvNotification("warning", tenant, environment,
+				notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
+		} else {
+			a.emitAppNotification("warning", notice)
+		}
 	}
 	return path
 }

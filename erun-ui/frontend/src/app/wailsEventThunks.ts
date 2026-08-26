@@ -168,6 +168,7 @@ export const handleAppNotification =
         tenant: payload.tenant,
         environment: payload.environment,
         source: payload.source,
+        action: payload.action,
       }),
     );
   };

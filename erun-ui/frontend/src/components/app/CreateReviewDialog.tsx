@@ -22,10 +22,12 @@ import {
   updateCreateReviewDialog,
 } from '@/app/createReviewDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { resolveTenantCloudAlias } from '@/app/platformSignIn';
 import type { CreateReviewDialogState } from '@/app/reviewWriteState';
 import { selectReviewTargetBranches } from '@/app/selectors';
 
 import { InlineAlert } from './InlineAlert';
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 
 // CreateReviewDialog opens a review from the desktop. Push is the precondition
 // of create — the platform can only reference a sourceBranch that already
@@ -205,6 +207,9 @@ function PushBranchActions({ dialog }: { dialog: CreateReviewDialogState }): Rea
 function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   const targetBranches = useAppSelector(selectReviewTargetBranches);
+  const cloudProviderAlias = useAppSelector((state) =>
+    resolveTenantCloudAlias(state.tenants.tenants, dialog.tenant),
+  );
   return (
     <StepShell label="Review details">
       <div className="grid gap-2">
@@ -232,7 +237,9 @@ function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): Rea
           dispatch(updateCreateReviewDialog({ targetBranch: next }));
         }}
       />
-      {dialog.createError && <InlineAlert>{dialog.createError}</InlineAlert>}
+      {dialog.createError && (
+        <PlatformErrorAlert message={dialog.createError} alias={cloudProviderAlias} />
+      )}
     </StepShell>
   );
 }

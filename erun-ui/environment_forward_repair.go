@@ -115,7 +115,8 @@ func (a *App) repairInterruptedPortForward(selection uiSelection, port int, heal
 		a.recordForwardRepairReported(selection)
 		a.emitEnvNotification("warning", selection.Tenant, selection.Environment,
 			notificationSourceForwardOutage,
-			eruncommon.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts, health))
+			eruncommon.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts, health),
+			"")
 	}
 	return true
 }

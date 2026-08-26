@@ -229,6 +229,22 @@ func orchestratorMCPUnreachableNotice(name string, unreachable []orchestratorMCP
 		label, strings.Join(names, ", "))
 }
 
+// singleOrchestratorMCPUnreachableEnv reports the one environment a deploy
+// action can unambiguously target: exactly one unreachable env, whose Label
+// is guaranteed "<tenant>/<environment>" (orchestratorEnvLabel's well-formed
+// case — the only shape probeOrchestratorMCPEdges ever wires). More than one
+// unreachable env has no single env to attach the action to.
+func singleOrchestratorMCPUnreachableEnv(unreachable []orchestratorMCPUnreachable) (tenant, environment string, ok bool) {
+	if len(unreachable) != 1 {
+		return "", "", false
+	}
+	tenant, environment, found := strings.Cut(unreachable[0].Label, "/")
+	if !found || tenant == "" || environment == "" {
+		return "", "", false
+	}
+	return tenant, environment, true
+}
+
 // writeOrchestratorMCPConfig writes a per-orchestrator Claude Code --mcp-config
 // file wiring each linked env's erun MCP into the orchestrator session, so it
 // drives its envs through the MCP rather than raw kubectl. Returns "" with an

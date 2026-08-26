@@ -12,7 +12,7 @@ import {
 import { openTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
 import type { DiffLine } from '@/types';
 
-import { InlineAlert } from './InlineAlert';
+import { PlatformErrorAlert } from './PlatformSignInAlert';
 
 // DiffLineCommentAction starts a new top-level review thread anchored to this
 // diff line — the gap ReviewDetailDialog.Comments.tsx used to call out as
@@ -143,6 +143,7 @@ function DiffLineCommentComposer(): React.ReactElement {
   const draft = useAppSelector((state) => state.reviewDetail.newCommentDraft);
   const submitting = useAppSelector((state) => state.reviewDetail.newCommentSubmitting);
   const submitError = useAppSelector((state) => state.reviewDetail.newCommentSubmitError);
+  const cloudProviderAlias = useAppSelector((state) => state.reviewDetail.callerCloudProviderAlias);
   return (
     <div className="grid gap-2">
       <Textarea
@@ -154,7 +155,7 @@ function DiffLineCommentComposer(): React.ReactElement {
           dispatch(setReviewCommentDraft(event.target.value));
         }}
       />
-      {submitError && <InlineAlert>{submitError}</InlineAlert>}
+      {submitError && <PlatformErrorAlert message={submitError} alias={cloudProviderAlias} />}
       <div className="flex justify-end gap-2">
         <Button
           type="button"
