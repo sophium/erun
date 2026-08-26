@@ -104,6 +104,61 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - When delegating analysis to sub-agents, use a capable model — not a lightweight locator model — for substantive reasoning.
 - Once the user authorizes a body of work (e.g. "do it all" / "carry on"), carry it through to completion across commits and PRs without re-asking permission between increments; surface only genuine blockers. This does not license unrequested expansion — still get plan sign-off before multi-module or public-surface diffs the user did not ask for.
 
+## Smooth, Seamless, No Dead Ends (Mandatory)
+
+**Anything less than a smooth, seamless end-to-end experience is a failure.**
+Not a nice-to-have missed, not polish deferred — a failure, on the same footing
+as a wrong result. Basic is never enough. A change is finished when the
+experience is right, not when the code path works.
+
+**Seamless means the user never has to do the product's work for it.** They
+should not have to guess what state they are in, refresh a panel by hand to see
+the outcome of something they just did, re-enter a value the product already
+holds, leave for a terminal to finish a task they started in the app, or notice
+the seam between two subsystems at all. Anywhere the user has to think about the
+product's internals to make progress, that is a defect to be filed and fixed,
+not the cost of doing business.
+
+**Smooth means the passage of time is handled, not ignored.** Anything that can
+take more than a moment shows that it is working, keeps the surface responsive
+while it does, and lands its result without a jolt. An action that leaves the
+app — an SSO sign-in that opens a browser, a deploy, a build — is the case that
+matters most: a frozen screen during it reads as broken, and so does a screen
+that snaps to a new state with no explanation of what happened.
+
+**Every state a user can reach must offer a way forward.** A message that names
+a problem must also name — and where it can, carry — the action that resolves
+it. A surface with no next action is a defect of the same severity as a crash:
+the user is stopped, and the product has told them nothing they can do about it.
+
+Three distinct failures, all of them dead ends:
+
+1. **Advice that cannot work.** An error whose suggested remedy does not apply
+   to the actual state. Diagnose precisely enough to be right, or say plainly
+   what is unknown — never emit a confident remedy for a cause that was not
+   checked.
+2. **An action that succeeds and changes nothing on screen.** If the surface
+   still shows the failure after the remedy succeeded, the user learns that the
+   product is broken. Whatever failed must be retried and its new result shown.
+   A button that appears to do nothing is worse than no button.
+3. **A capability that exists with no way in.** If the CLI or the API can do it
+   and the user's surface cannot, that surface has a dead end wherever that
+   capability is the answer. "Use the CLI" is not a resolution inside a GUI.
+
+**Distinguish causes before writing copy.** "Unauthorized" from the platform API
+is not one condition. *Session expired*, *identity never enrolled*, *tenant
+never connected*, and *permission genuinely refused* are four different user
+situations with four different next actions; collapsing them into one sentence
+guarantees the sentence is wrong for most of the people who read it.
+
+**Onboarding is where this is judged first.** The user who is not yet connected
+to the platform, or whose identity is not yet enrolled in a tenant, is the one
+most likely to be lost and least able to help themselves. Getting from "not set
+up" to "working" must be possible from inside the product, guided, and short.
+Where a step genuinely requires an administrator, the product still owns the
+handoff: say exactly who must do what, show the exact values they need, and make
+those values copyable — never leave the user to reconstruct them by hand.
+
 ## Code Comments
 
 - Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.
