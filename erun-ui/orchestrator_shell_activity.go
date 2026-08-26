@@ -40,9 +40,9 @@ type orchestratorShellActivity struct {
 	Running bool   `json:"running"`
 	Command string `json:"command,omitempty"`
 	TaskID  string `json:"taskId,omitempty"`
-	// SessionID is the id of the session that wrote this report (the hook's own
-	// stdin session_id, the same field orchestratorSessionRecordHookCommand
-	// reads). An orchestrator id is reused across restarts, so this is what lets
+	// SessionID is the id of the session that wrote this report, taken from the
+	// hook's own stdin. An orchestrator id is reused across restarts, so this is
+	// what lets
 	// a later read tell a report apart from one a since-replaced session left
 	// behind, instead of trusting "running" from whichever session happens to be
 	// live for the id now.
@@ -175,9 +175,9 @@ func isOrchestratorShellActivityHookBlock(block any) bool {
 // orchestratorShellActivityStartHookCommand recognizes a Bash call that
 // backgrounded a shell (tool_response.backgroundTaskId) and records it as
 // running, with the command it is running, the task id later needed to clear
-// it, and the id of the session that started it (session_id, the same
-// top-level hook stdin field orchestratorSessionRecordHookCommand reads) —
-// what later lets a stale report be told apart from one whose session is
+// it, and the id of the session that started it (the top-level session_id on
+// the hook's stdin) — what later lets a stale report be told apart from one
+// whose session is
 // still live. Any other Bash call — foreground, or one that never
 // backgrounds — leaves the previous report untouched: a foreground command
 // says nothing about whatever shell is already running.
