@@ -311,8 +311,20 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-empty');
   }
 
+  jobsUnreachable(): Locator {
+    return this.locator().getByTestId('manage-jobs-unreachable');
+  }
+
+  jobsUnreachableReconnectButton(): Locator {
+    return this.locator().getByTestId('manage-jobs-unreachable-reconnect');
+  }
+
   jobRows(): Locator {
     return this.locator().getByTestId('manage-jobs-row');
+  }
+
+  jobRowName(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-name').nth(index);
   }
 
   jobOutcome(index: number): Locator {

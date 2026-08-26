@@ -129,6 +129,84 @@ test.describe('manage dialog jobs tab', () => {
     await app.manageDialog.cancel();
   });
 
+  // A row's header is a fixed-width flex line (name + outcome badge); an
+  // unbounded name would push the badge off, or wrap and blow out row height.
+  // erun-ui/AGENTS.md requires evidence the CSS actually engages, not just
+  // that the element renders.
+  test('an extremely long job name truncates instead of overflowing the row', async ({
+    app,
+    page,
+  }) => {
+    const longName = 'extremely-long-job-name-'.repeat(20);
+    await stubJobs(page, [{ ...RUNNING_JOB, name: longName }]);
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    const name = app.manageDialog.jobRowName(0);
+    await expect(name).toBeVisible();
+    const { clientWidth, scrollWidth } = await name.evaluate((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+    }));
+    expect(clientWidth).toBeGreaterThan(0);
+    expect(scrollWidth).toBeGreaterThan(clientWidth);
+
+    await app.manageDialog.cancel();
+  });
+
+  // #4aecd83e darkened this badge's amber for WCAG AA contrast; pin the class
+  // so a future style pass cannot quietly lighten it back.
+  test('the unknown-outcome badge keeps its darkened, contrast-safe color', async ({
+    app,
+    page,
+  }) => {
+    await stubJobs(page, [UNKNOWN_JOB]);
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    await expect(app.manageDialog.jobOutcome(0)).toHaveClass(/\btext-amber-700\b/);
+    await expect(app.manageDialog.jobOutcome(0)).not.toHaveClass(/\btext-amber-600\b/);
+  });
+
+  // The desktop's job store is host-local; a remote-agent/runtime env's jobs
+  // run in its pod. A stale port-forward means a job may well be running
+  // behind it right now, so this must read as "cannot tell", never silently
+  // fall through to the same empty state a genuinely idle environment shows
+  // (erun-ui/environment_jobs_test.go covers the Go-side branch this drives).
+  test('a stale port-forward is reported as unreachable, never as no jobs', async ({
+    app,
+    page,
+  }) => {
+    const staleMessage =
+      'ERUN_MCP_UNREACHABLE_STALE: mcp unreachable: the port-forward for ' +
+      `${SEED_TENANT}/${SEED_ENV_ALPHA} on 127.0.0.1:17999 is not carrying traffic ` +
+      '(the local port is held but the edge never answers) — re-establishing it';
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const method = invokeMethod(request);
+      if (method === 'LoadEnvironmentJobs') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ error: staleMessage }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    const unreachable = app.manageDialog.jobsUnreachable();
+    await expect(unreachable).toBeVisible();
+    await expect(unreachable).toContainText('Cannot reach the environment runtime');
+    await expect(app.manageDialog.jobsUnreachableReconnectButton()).toContainText('Reconnect…');
+    await expect(app.manageDialog.jobsEmptyState()).toHaveCount(0);
+
+    await app.manageDialog.cancel();
+  });
+
   // The failure path: a refused cancel must say so beside the control and leave
   // the job listed, rather than silently doing nothing.
   test('a refused cancel is reported beside the job', async ({ app, page }) => {

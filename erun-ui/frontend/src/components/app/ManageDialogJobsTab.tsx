@@ -1,8 +1,24 @@
 import { Button } from 'erun-kit';
-import { AlertTriangle, Ban, CheckCircle2, ListChecks, LoaderCircle, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  ListChecks,
+  LoaderCircle,
+  PlugZap,
+  XCircle,
+} from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  mcpUnreachableKind,
+  reachabilityCopy,
+  type ReachabilityKind,
+  stripMcpUnreachableMarker,
+} from '@/app/reconnectCopy';
+import { requestReconnect } from '@/app/reviewThunks';
 import { InlineAlert } from '@/components/app/InlineAlert';
 import { JobCancelAction } from '@/components/app/ManageDialogJobCancel';
 import { JobOutputView } from '@/components/app/ManageDialogJobOutput';
@@ -30,6 +46,7 @@ export function JobsTab({
   const [jobs, setJobs] = React.useState<JobView[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [unreachable, setUnreachable] = React.useState<UnreachableJobsState | null>(null);
   const [nowUnix, setNowUnix] = React.useState(() => Math.floor(Date.now() / 1000));
 
   const reload = React.useCallback(() => {
@@ -38,13 +55,20 @@ export function JobsTab({
     }
     setLoading(true);
     setError('');
+    setUnreachable(null);
     LoadEnvironmentJobs(selection.tenant, selection.environment)
       .then((next) => {
         // The generated model claims a non-null exitCode; the wire sends null.
         setJobs(next as unknown as JobView[]);
       })
       .catch((err: unknown) => {
-        setError(readError(err));
+        const message = readError(err);
+        const kind = mcpUnreachableKind(message);
+        if (kind) {
+          setUnreachable({ kind, message: stripMcpUnreachableMarker(message) });
+        } else {
+          setError(message);
+        }
       })
       .finally(() => {
         setLoading(false);
@@ -80,6 +104,20 @@ export function JobsTab({
   if (loading && jobs.length === 0) {
     return <JobsEmptyState message="Loading jobs…" />;
   }
+  // Distinct from "no jobs yet": the pod that would answer is not reachable
+  // right now, so an empty list here would read as "nothing is running" when
+  // the truth is "cannot tell" -- a stopped environment's own jobs still read
+  // as empty above, since a stopped pod genuinely has none to miss.
+  if (unreachable) {
+    return (
+      <JobsUnreachableAlert
+        kind={unreachable.kind}
+        message={unreachable.message}
+        selection={selection}
+        onRetry={reload}
+      />
+    );
+  }
   if (error) {
     return <InlineAlert>Could not read this environment&apos;s jobs. {error}</InlineAlert>;
   }
@@ -96,6 +134,82 @@ export function JobsTab({
       {jobs.map((job) => (
         <JobRow key={job.id} job={job} selection={selection} nowUnix={nowUnix} onChanged={reload} />
       ))}
+    </div>
+  );
+}
+
+interface UnreachableJobsState {
+  kind: ReachabilityKind;
+  message: string;
+}
+
+// JobsUnreachableAlert names the same two reachability shapes the sidebar and
+// diff panel already distinguish (#1230): a stale port-forward is a fault
+// worth reconnecting, told apart from an environment nobody has opened. The
+// action reuses the shared reconnect flow (confirm dialog, then the same MCP
+// reconnect call) so recovering from here behaves exactly like recovering
+// from the diff panel.
+function JobsUnreachableAlert({
+  kind,
+  message,
+  selection,
+  onRetry,
+}: {
+  kind: UnreachableJobsState['kind'];
+  message: string;
+  selection: UISelection;
+  onRetry: () => void;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reconnect = useAppSelector((state) => state.review.reconnect);
+  const wasRunningRef = React.useRef(false);
+  const copy = reachabilityCopy[kind];
+  const targetingThis =
+    reconnect.tenant === selection.tenant && reconnect.environment === selection.environment;
+
+  React.useEffect(() => {
+    if (targetingThis && reconnect.status === 'running') {
+      wasRunningRef.current = true;
+      return;
+    }
+    if (wasRunningRef.current && reconnect.status === 'idle') {
+      wasRunningRef.current = false;
+      onRetry();
+    }
+  }, [reconnect.status, targetingThis, onRetry]);
+
+  return (
+    <div
+      role="status"
+      className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-muted/40 px-3 py-3 text-[13px]"
+      data-testid="manage-jobs-unreachable"
+    >
+      <div className="flex items-center gap-2 font-medium text-foreground">
+        <PlugZap className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {copy.errorTitle}
+      </div>
+      <p className="text-muted-foreground">{copy.errorBody}</p>
+      {message && (
+        <p className="font-mono text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
+          {message}
+        </p>
+      )}
+      <div className="flex justify-end gap-1.5">
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="manage-jobs-unreachable-reconnect"
+          onClick={() => {
+            dispatch(requestReconnect(selection.tenant, selection.environment, kind));
+          }}
+        >
+          {copy.action}
+        </Button>
+      </div>
     </div>
   );
 }

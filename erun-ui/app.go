@@ -79,6 +79,9 @@ type erunUIDeps struct {
 	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
 	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
 	loadIdleStatus            func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadEnvironmentJobs       func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
+	readEnvironmentJobOutput  func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
+	cancelEnvironmentJob      func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
 	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
 	syncWorkspace             func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
@@ -415,6 +418,7 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	if deps.loadIdleStatus == nil {
 		deps.loadIdleStatus = loadIdleStatusFromMCP
 	}
+	deps = withDefaultEnvironmentJobDeps(deps)
 	if deps.loadAPILog == nil {
 		deps.loadAPILog = loadAPILog
 	}
@@ -426,6 +430,19 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.workspaceSyncInterval <= 0 {
 		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
+	}
+	return deps
+}
+
+func withDefaultEnvironmentJobDeps(deps erunUIDeps) erunUIDeps {
+	if deps.loadEnvironmentJobs == nil {
+		deps.loadEnvironmentJobs = loadEnvironmentJobsFromMCP
+	}
+	if deps.readEnvironmentJobOutput == nil {
+		deps.readEnvironmentJobOutput = readEnvironmentJobOutputFromMCP
+	}
+	if deps.cancelEnvironmentJob == nil {
+		deps.cancelEnvironmentJob = cancelEnvironmentJobFromMCP
 	}
 	return deps
 }
