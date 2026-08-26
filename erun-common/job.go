@@ -632,3 +632,15 @@ func normalizeJobNow(now time.Time) time.Time {
 func environmentJobLeaseID(id string) string {
 	return environmentJobLeasePrefix + id
 }
+
+// EnvironmentJobIDFromLeaseID recovers the job a lease is held for, and reports
+// false for a lease held by anything else. Callers that want to act on the job
+// behind a lease need the inverse of the id scheme, and re-deriving the prefix
+// at each call site is how the two drift apart.
+func EnvironmentJobIDFromLeaseID(leaseID string) (string, bool) {
+	id := strings.TrimPrefix(leaseID, environmentJobLeasePrefix)
+	if id == leaseID || strings.TrimSpace(id) == "" {
+		return "", false
+	}
+	return id, true
+}

@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/ActiveState/termtest/conpty v0.5.0
+	github.com/adrg/xdg v0.5.3
 	github.com/creack/pty v1.1.21
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
@@ -15,7 +16,6 @@ require (
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20170929234023-d6e3b3328b78 // indirect
-	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect

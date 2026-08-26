@@ -17,7 +17,9 @@ const MCP_UNREACHABLE_MARKERS: Record<ReachabilityKind, string> = {
 };
 
 interface ReachabilityCopy {
-  // DiffErrorAlert / ChangedFilesAside status card.
+  // DiffErrorAlert / ChangedFilesAside / JobsTab status card. Kept
+  // surface-neutral (no "diff", no "jobs") so it reads correctly wherever a
+  // consumer shows it verbatim.
   errorTitle: string;
   errorBody: string;
   action: string;
@@ -30,12 +32,12 @@ interface ReachabilityCopy {
   errorStatusTitle: string;
 }
 
-// staleForward keeps the original #1178 copy verbatim: this is the genuine
-// fault case, and "Cannot reach the environment runtime" / "Reconnect…" was
-// never wrong for it.
+// staleForward is the genuine fault case: the port is held but the edge
+// never answers. "Cannot reach the environment runtime" / "Reconnect…" holds
+// regardless of which surface (diff, jobs) triggered the read.
 const STALE_FORWARD_COPY: ReachabilityCopy = {
   errorTitle: 'Cannot reach the environment runtime',
-  errorBody: 'The diff could not be loaded because the connection to your environment is down.',
+  errorBody: 'The connection to your environment is down.',
   action: 'Reconnect…',
   dialogTitle: 'Reconnect to environment?',
   dialogBody:
@@ -51,7 +53,7 @@ const STALE_FORWARD_COPY: ReachabilityCopy = {
 // probe never actually checked (#1230).
 const NOT_OPEN_COPY: ReachabilityCopy = {
   errorTitle: 'Environment not running',
-  errorBody: 'This environment is stopped — start it to review this diff.',
+  errorBody: 'This environment is stopped — open it to continue.',
   action: 'Open',
   dialogTitle: 'Open environment?',
   dialogBody: 'This runs `erun open` to start the environment.',
