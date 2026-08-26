@@ -110,6 +110,7 @@ function DiffEnvSection({
             file={file}
             selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
             commitHash={commitHash}
+            tenant={target.tenant}
           />
         ))}
       </>
@@ -314,10 +315,12 @@ function DiffFileView({
   file,
   selected,
   commitHash,
+  tenant,
 }: {
   file: DiffFile;
   selected: boolean;
   commitHash: string;
+  tenant: string;
 }): React.ReactElement {
   return (
     <section
@@ -341,6 +344,7 @@ function DiffFileView({
             hunk={hunk}
             filePath={file.path}
             commitHash={commitHash}
+            tenant={tenant}
           />
         ))
       )}
@@ -352,10 +356,12 @@ function DiffHunkView({
   hunk,
   filePath,
   commitHash,
+  tenant,
 }: {
   hunk: DiffHunk;
   filePath: string;
   commitHash: string;
+  tenant: string;
 }): React.ReactElement {
   const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
   const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
@@ -385,7 +391,12 @@ function DiffHunkView({
             {/* Leads the row: a trailing column sits past the content width, so
                 on any diff wider than the panel the affordance was only
                 reachable by scrolling right. */}
-            <DiffLineCommentAction filePath={filePath} line={line} commitHash={commitHash} />
+            <DiffLineCommentAction
+              filePath={filePath}
+              line={line}
+              commitHash={commitHash}
+              tenant={tenant}
+            />
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
               {line.oldLine ?? ''}
             </span>
