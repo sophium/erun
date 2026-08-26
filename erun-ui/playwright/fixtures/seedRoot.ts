@@ -174,6 +174,15 @@ export function backendEnv(): Record<string, string> {
       // its chart, so the seam has to say so or the Runtime tab would (correctly)
       // refuse to deploy them.
       '1.0.134=erun-devops;1.0.16=erun-devops',
+    // The seeded local-agent envs are always inert and never deployed, so no
+    // local port they compute should ever be treated as reachable. Unpinned,
+    // the port range is a plain host-wide TCP port number outside HOME/XDG
+    // isolation: a seeded env can land on the same range a real environment
+    // on the same host has genuinely bound (this host's own MCP/SSH
+    // forwards), and the occupancy/idle-status checks then read that real
+    // environment's live state as the seeded env's own (erun#1375, erun#1362,
+    // erun#1381). See erun-ui/app.go withDefaultReachabilityDeps.
+    ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE: '0',
   };
 }
 
