@@ -149,7 +149,7 @@ function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
   if (outcome === 'unknown') {
     return (
       <span
-        className={`${shared} text-amber-600 dark:text-amber-400`}
+        className={`${shared} text-amber-700 dark:text-amber-400`}
         data-testid="manage-jobs-row-outcome"
       >
         <AlertTriangle className="size-3.5" aria-hidden="true" />
