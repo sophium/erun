@@ -306,7 +306,7 @@ function ManageSaveBlocker({
       <AlertTriangle
         className={cn(
           'size-[18px] shrink-0',
-          isError ? 'text-destructive' : 'text-amber-600 dark:text-amber-400',
+          isError ? 'text-destructive' : 'text-amber-700 dark:text-amber-400',
         )}
         aria-hidden="true"
       />

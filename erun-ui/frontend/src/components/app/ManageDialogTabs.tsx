@@ -142,7 +142,7 @@ function DirtyAwareTabsTrigger({
         {blockingError ? (
           <AlertTriangle aria-hidden="true" className="size-3 text-destructive" />
         ) : capacityWarning ? (
-          <AlertTriangle aria-hidden="true" className="size-3 text-amber-600 dark:text-amber-400" />
+          <AlertTriangle aria-hidden="true" className="size-3 text-amber-700 dark:text-amber-400" />
         ) : dirty ? (
           <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />
         ) : null}
@@ -161,7 +161,7 @@ function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactE
       className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border-l-[3px] border-l-amber-500 border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[13px] leading-[1.35]"
     >
       <AlertTriangle
-        className="size-[18px] text-amber-600 dark:text-amber-400"
+        className="size-[18px] text-amber-700 dark:text-amber-400"
         aria-hidden="true"
       />
       <div className="min-w-0">

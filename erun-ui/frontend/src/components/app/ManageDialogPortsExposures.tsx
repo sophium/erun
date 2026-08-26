@@ -160,7 +160,7 @@ function ExposedServiceRow({
             <Lock className="size-3 shrink-0" aria-hidden="true" />
           ) : (
             <Unlock
-              className="size-3 shrink-0 text-amber-600 dark:text-amber-400"
+              className="size-3 shrink-0 text-amber-700 dark:text-amber-400"
               aria-hidden="true"
             />
           )}
@@ -183,7 +183,7 @@ function ExposedServiceRow({
         }}
       >
         {copied ? (
-          <Check className="text-green-600 dark:text-green-500" aria-hidden="true" />
+          <Check className="text-green-700 dark:text-green-400" aria-hidden="true" />
         ) : (
           <Copy aria-hidden="true" />
         )}

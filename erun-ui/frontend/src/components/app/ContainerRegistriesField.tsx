@@ -83,7 +83,7 @@ export function ContainerRegistriesField({
         </div>
       )}
       {hint ? (
-        <p role="alert" className="text-xs text-amber-600 dark:text-amber-500">
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
           {hint}
         </p>
       ) : null}

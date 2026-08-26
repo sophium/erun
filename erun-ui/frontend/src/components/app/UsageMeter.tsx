@@ -77,7 +77,7 @@ export function UsageMeter({
               aria-hidden="true"
               className={cn(
                 'size-3 shrink-0 self-center',
-                severity === 'danger' ? 'text-destructive' : 'text-amber-600 dark:text-amber-400',
+                severity === 'danger' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400',
               )}
             />
           )}
@@ -90,7 +90,7 @@ export function UsageMeter({
             severity === 'danger'
               ? 'text-destructive'
               : severity === 'warning'
-                ? 'text-amber-600 dark:text-amber-400'
+                ? 'text-amber-700 dark:text-amber-400'
                 : 'text-foreground',
           )}
         >

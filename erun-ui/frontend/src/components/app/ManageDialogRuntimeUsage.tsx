@@ -125,7 +125,7 @@ function RuntimeUsageSummary({
   }
   return (
     <p
-      className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-600 dark:text-amber-400"
+      className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400"
       role="status"
     >
       <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
@@ -147,7 +147,7 @@ function RuntimeUsageWarnings({
       {warnings.map((warning) => (
         <li
           key={warning}
-          className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-600 dark:text-amber-400"
+          className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400"
         >
           <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
           <span>{warning}</span>
@@ -225,7 +225,7 @@ function MemoryPeakAndKills({ memory }: { memory: UIRuntimeMemoryUsage }): React
       <dd
         className={
           peakOverThreshold
-            ? 'flex items-center gap-1 font-medium tabular-nums text-amber-600 dark:text-amber-400'
+            ? 'flex items-center gap-1 font-medium tabular-nums text-amber-700 dark:text-amber-400'
             : 'tabular-nums text-muted-foreground'
         }
       >

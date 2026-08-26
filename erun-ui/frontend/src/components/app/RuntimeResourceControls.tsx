@@ -85,7 +85,7 @@ export function RuntimeResourceControls({
             from a product limit unless the reading says why. role="status" so a
             screen reader hears the explanation with the figure, not instead of it. */}
         {bounds.notice && (
-          <div className="text-xs leading-[1.35] text-amber-600 dark:text-amber-400" role="status">
+          <div className="text-xs leading-[1.35] text-amber-700 dark:text-amber-400" role="status">
             {bounds.notice}
           </div>
         )}
@@ -149,7 +149,7 @@ function RuntimeResourceMessages({
       className={
         capacityBlocks
           ? 'text-xs leading-[1.35] text-destructive'
-          : 'text-xs leading-[1.35] text-amber-600 dark:text-amber-400'
+          : 'text-xs leading-[1.35] text-amber-700 dark:text-amber-400'
       }
       role={capacityBlocks ? 'alert' : 'status'}
     >

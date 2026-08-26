@@ -46,6 +46,14 @@ export class Titlebar {
     return this.page.getByRole('button', { name: /Contribute to ERun|Disable contribute mode/ });
   }
 
+  themeToggleButton(): Locator {
+    return this.page.getByRole('button', { name: /Switch to (light|dark) theme/ });
+  }
+
+  async toggleTheme(): Promise<void> {
+    await this.themeToggleButton().click();
+  }
+
   async openVSCode(): Promise<void> {
     // The aria-label is computed from the active selection, so there is no fixed name to match exactly.
     await this.page
