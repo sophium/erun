@@ -58,7 +58,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 		Name: name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
 	})
 	if err != nil {
-		return uiTenantDashboardReview{}, err
+		return uiTenantDashboardReview{}, operatorPlatformError(actionCreateReview, err)
 	}
 	return tenantDashboardReview(review), nil
 }
@@ -96,7 +96,7 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 
 	review, err := client.UpdateReviewStatus(requestCtx, reviewID, eruncommon.PlatformUpdateReviewStatusParams{Status: "CLOSED"})
 	if err != nil {
-		return uiTenantDashboardReview{}, err
+		return uiTenantDashboardReview{}, operatorPlatformError(actionCloseReview, err)
 	}
 	return tenantDashboardReview(review), nil
 }
@@ -132,7 +132,7 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 
 	review, err := client.AdvanceMergeQueue(requestCtx, targetBranch)
 	if err != nil {
-		return uiTenantDashboardReview{}, err
+		return uiTenantDashboardReview{}, operatorPlatformError(actionAdvanceQueue, err)
 	}
 	return tenantDashboardReview(review), nil
 }
@@ -195,7 +195,7 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 		Body:     body,
 	})
 	if err != nil {
-		return uiReviewComment{}, err
+		return uiReviewComment{}, operatorPlatformError(actionCommentReview, err)
 	}
 	return tenantDashboardComment(comment), nil
 }

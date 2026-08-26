@@ -164,7 +164,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 		ParentCommentID: parentCommentID,
 	})
 	if err != nil {
-		return uiReviewComment{}, err
+		return uiReviewComment{}, operatorPlatformError(actionCommentReview, err)
 	}
 	return tenantDashboardComment(comment), nil
 }
