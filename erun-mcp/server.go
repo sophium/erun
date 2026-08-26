@@ -432,6 +432,14 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Comment on a line of a review on the erun platform, or reply to an existing comment with parentCommentId. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewCommentTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "review_resolve",
+		Description: "Resolve a comment thread on a review by closing its root comment. commentId must be the thread's root comment (the first comment posted at a file/line, not one created with parentCommentId set); addressing a reply fails, naming the root comment to retry against. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewResolveTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_unresolve",
+		Description: "Reopen a comment thread on a review by marking its root comment OPEN again. commentId must be the thread's root comment (the first comment posted at a file/line, not one created with parentCommentId set); addressing a reply fails, naming the root comment to retry against. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewUnresolveTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_close",
 		Description: "Close a review on the erun platform without merging it. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewCloseTool(runtime))
