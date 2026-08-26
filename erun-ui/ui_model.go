@@ -131,11 +131,20 @@ type uiSelection struct {
 	// ClusterRegistry selects the in-cluster erun-registry (resolved from the
 	// env's kube-context) instead of the static ContainerRegistry string; the two
 	// are mutually exclusive and ClusterRegistry wins when set.
-	ClusterRegistry  bool   `json:"clusterRegistry,omitempty"`
-	Type             string `json:"type,omitempty"`
-	LocalRepoPath    string `json:"localRepoPath,omitempty"`
-	NoGit            bool   `json:"noGit,omitempty"`
-	SetDefaultTenant bool   `json:"setDefaultTenant,omitempty"`
+	ClusterRegistry bool `json:"clusterRegistry,omitempty"`
+	// ErunRegistry selects erun's hosted registry for the tenant. Mutually
+	// exclusive with both ContainerRegistry and ClusterRegistry, matching
+	// `erun init --erun-registry`.
+	ErunRegistry bool `json:"erunRegistry,omitempty"`
+	// RuntimeRegistry and ImagePullSecrets carry `erun init`'s
+	// --runtime-registry and --image-pull-secret, without which an env created
+	// here cannot pull a private runtime image.
+	RuntimeRegistry  string   `json:"runtimeRegistry,omitempty"`
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	LocalRepoPath    string   `json:"localRepoPath,omitempty"`
+	NoGit            bool     `json:"noGit,omitempty"`
+	SetDefaultTenant bool     `json:"setDefaultTenant,omitempty"`
 	// Components is the explicit one-shot deploy selection from the Runtime tab's
 	// "Components to deploy" checklist; empty leaves deploy to resolve the env's
 	// saved default. Values are chart directory names (plus the runtime release
@@ -472,7 +481,16 @@ type uiEnvironmentConfig struct {
 	// OCI reference that may carry its own version. Empty means "the chart
 	// published with the deployed version", which is right whenever the chart and
 	// the runtime image ride one release line. See EnvConfig.RuntimeChart.
-	RuntimeChart          string                  `json:"runtimeChart,omitempty"`
+	RuntimeChart string `json:"runtimeChart,omitempty"`
+	// RuntimeRegistry is where the env resolves erun's OWN artifacts from -- the
+	// runtime chart and platform images -- as distinct from the registry this
+	// project's images are pushed to. Set it when the deploy registry holds only
+	// the project's images, so erun's chart is not there to pull.
+	RuntimeRegistry string `json:"runtimeRegistry,omitempty"`
+	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
+	// pod pulls its image with. Without one a private runtime image leaves the
+	// pod in ImagePullBackOff, which the app could previously cause and not fix.
+	ImagePullSecrets      []string                `json:"imagePullSecrets,omitempty"`
 	RuntimePod            uiRuntimePodConfig      `json:"runtimePod"`
 	SSHD                  uiSSHDConfig            `json:"sshd"`
 	Idle                  uiIdleConfig            `json:"idle"`

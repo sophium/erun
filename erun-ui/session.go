@@ -433,9 +433,13 @@ func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
 		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
 	}
-	// The cluster registry and a static container registry are mutually exclusive
-	// (`erun init` rejects both); cluster wins when selected.
-	if !selection.ClusterRegistry {
+	// Where erun's own chart is pulled from is a separate coordinate from where
+	// the project's images go, so it is not part of the mutually exclusive set
+	// below.
+	pairs = append(pairs, struct{ flag, value string }{"--runtime-registry", strings.TrimSpace(selection.RuntimeRegistry)})
+	// The three registry choices are mutually exclusive (`erun init` rejects any
+	// pair); the explicit hosted and cluster selections win over a static string.
+	if !selection.ClusterRegistry && !selection.ErunRegistry {
 		pairs = append(pairs, struct{ flag, value string }{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)})
 	}
 	for _, pair := range pairs {
@@ -443,8 +447,18 @@ func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 			args = append(args, pair.flag, pair.value)
 		}
 	}
+	// Repeated rather than comma-joined: a secret name may legally contain no
+	// comma, but repeating is what the flag documents and never needs escaping.
+	for _, secret := range selection.ImagePullSecrets {
+		if name := strings.TrimSpace(secret); name != "" {
+			args = append(args, "--image-pull-secret", name)
+		}
+	}
 	if selection.ClusterRegistry {
 		args = append(args, "--cluster-registry")
+	}
+	if selection.ErunRegistry {
+		args = append(args, "--erun-registry")
 	}
 	return args
 }

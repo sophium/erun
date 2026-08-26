@@ -17,6 +17,7 @@ import { EnvironmentHealthSection } from '@/components/app/EnvironmentHealthSect
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
 import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
 import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
+import { PullCoordinatesFields } from '@/components/app/ManageDialogPullCoordinates';
 import {
   EnvironmentTypeValues,
   type UICloudContextStatus,
@@ -42,6 +43,11 @@ export function GeneralTab(): React.ReactElement {
   // Fall back to the effective path so the field is never blank for an env
   // whose repo path is derived rather than explicitly set.
   const repoPathValue = config.localRepoPath?.trim() ? config.localRepoPath : config.repoPath;
+
+  // One statement of "the editor is not accepting input right now", so each
+  // field does not restate it.
+  const fieldsDisabled = dialog.busy || dialog.configLoading;
+
   return (
     <>
       {config.type === 'local-agent' ? (
@@ -54,7 +60,7 @@ export function GeneralTab(): React.ReactElement {
           label="Repository path"
           helper="Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy."
           value={repoPathValue}
-          disabled={dialog.busy || dialog.configLoading}
+          disabled={fieldsDisabled}
           onChange={(localRepoPath) => {
             dispatch(updateManageConfig({ localRepoPath }));
           }}
@@ -75,16 +81,23 @@ export function GeneralTab(): React.ReactElement {
         entries={config.containerRegistries}
         inherited={config.containerRegistriesInherited}
         suggestions={containerRegistrySuggestions}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         onChange={(containerRegistries) => {
           dispatch(updateManageConfig({ containerRegistries }));
+        }}
+      />
+      <PullCoordinatesFields
+        config={config}
+        disabled={fieldsDisabled}
+        onChange={(patch) => {
+          dispatch(updateManageConfig(patch));
         }}
       />
       <CloudAliasSlots config={config} disabled={dialog.busy} />
       <CloudContextField
         context={config.cloudContext}
         cloudProviderAlias={config.cloudProviderAlias}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         loading={
           dialog.busyAction === 'cloud-context-power' &&
           dialog.busyTarget === config.cloudContext?.name
@@ -94,7 +107,7 @@ export function GeneralTab(): React.ReactElement {
       />
       <EnvironmentTypeField
         value={config.type}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         onChange={(type) => {
           dispatch(updateManageConfig({ type }));
         }}

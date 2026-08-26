@@ -27,13 +27,10 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalError } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
-import {
-  loadSavedPastContainerRegistries,
-  loadSavedPastEnvironments,
-  loadSavedPastTenants,
-} from '@/app/storage';
+import { loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
+import { ContainerRegistryField } from '@/components/app/EnvironmentDialogView.RegistryField';
 
 import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
@@ -236,79 +233,6 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
       <ContainerRegistryField dialog={dialog} />
       <EnvironmentCreateChecks dialog={dialog} />
     </>
-  );
-}
-
-// ContainerRegistryField offers the in-cluster erun-registry (resolved from the
-// selected Kubernetes context) as the default when one is detected, and falls
-// back to a free-text registry otherwise. There is no hardcoded default host —
-// the deployed cluster registry is the default, not a placeholder like erunpaas.
-function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries()]),
-    [dialog.containerRegistry],
-  );
-  const cluster = dialog.clusterRegistry;
-  const clusterAvailable = cluster?.deployed === true;
-  const useCluster = clusterAvailable && dialog.useClusterRegistry;
-  const clusterToggle = clusterAvailable ? (
-    <label className="flex items-center gap-2 text-sm font-normal">
-      <Checkbox
-        id="environment-use-cluster-registry"
-        checked={dialog.useClusterRegistry}
-        disabled={dialog.busy}
-        onCheckedChange={(value) => {
-          dispatch(updateEnvironmentDialog({ useClusterRegistry: value === true }));
-        }}
-      />
-      Use in-cluster registry ({cluster.service ?? 'erun-registry'})
-    </label>
-  ) : null;
-
-  if (useCluster) {
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor="environment-use-cluster-registry">Container registry</Label>
-        {clusterToggle}
-        <p className="text-[12px] leading-[1.4] text-muted-foreground">
-          Resolved from {cluster.service}.{cluster.namespace}:{cluster.port} via this
-          environment&apos;s Kubernetes context — pushed and pulled in-cluster, no host address
-          needed.
-        </p>
-      </div>
-    );
-  }
-
-  // A fresh install has no cluster registry detected and no past values to
-  // suggest, so the field would otherwise offer nothing to go on — no
-  // placeholder, no helper, no suggestions (Nielsen #6, recognition over
-  // recall). Name the format with an example and the route that detects a
-  // registry automatically instead of typing one.
-  const showRegistryHelp = !clusterAvailable && containerRegistrySuggestions.length === 0;
-  return (
-    <div className="grid gap-2">
-      <EditableComboField
-        id="environment-container-registry"
-        label="Container registry"
-        value={dialog.containerRegistry}
-        suggestions={containerRegistrySuggestions}
-        required
-        disabled={dialog.busy}
-        onValueChange={(containerRegistry) => {
-          dispatch(updateEnvironmentDialog({ containerRegistry }));
-        }}
-      />
-      {clusterToggle}
-      {showRegistryHelp && (
-        <p className="text-[12px] leading-[1.4] text-muted-foreground">
-          Where images push to and pull from, e.g. ghcr.io/your-org or docker.io/your-namespace. If
-          the selected Kubernetes context has an in-cluster erun-registry, ERun detects it
-          automatically and offers it above instead — provision one via Settings → Cloud aliases →
-          Add AWS account → Cloud contexts → Init.
-        </p>
-      )}
-    </div>
   );
 }
 
