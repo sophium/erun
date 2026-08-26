@@ -43,6 +43,14 @@ const (
 	// The outcome is not recoverable, and saying so is the point: an orchestrator
 	// that cannot tell this from success would act on a result nobody produced.
 	EnvironmentJobStateUnknown = "unknown"
+	// EnvironmentJobStateAbandoned means the job's own process exited and its
+	// exit status was captured, but it left other processes it spawned still
+	// running in its process group — background work it started and never
+	// waited for, e.g. a gate backgrounded and the job that started it exiting
+	// anyway. It is never success, whatever the captured exit code says:
+	// something the job started continues unsupervised, and nothing further
+	// will ever be reported for it.
+	EnvironmentJobStateAbandoned = "abandoned"
 
 	// UnknownReasonKind values are what an orchestrator branches on instead of
 	// pattern-matching the free-text Reason. Each names a distinct,
@@ -143,9 +151,9 @@ type EnvironmentJob struct {
 	ChildPID  int       `json:"childPid,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	EndedAt   time.Time `json:"endedAt,omitempty"`
-	// ExitCode is set for every job that reached exited, and is -1 when the work
-	// was terminated by a signal. It is nil in every other state, so a missing
-	// outcome can never be read as a zero one.
+	// ExitCode is set for every job that reached exited or abandoned, and is -1
+	// when the work was terminated by a signal. It is nil in every other state,
+	// so a missing outcome can never be read as a zero one.
 	ExitCode *int `json:"exitCode"`
 	// Signal names the signal that ended the work, empty when it exited normally.
 	Signal string `json:"signal,omitempty"`
@@ -207,11 +215,14 @@ type EnvironmentJob struct {
 
 // Finished reports whether the job reached a terminal state.
 func (j EnvironmentJob) Finished() bool {
-	return j.State == EnvironmentJobStateExited || j.State == EnvironmentJobStateUnknown
+	return j.State == EnvironmentJobStateExited || j.State == EnvironmentJobStateUnknown || j.State == EnvironmentJobStateAbandoned
 }
 
 // Succeeded is the only definition of success: an outcome was captured and it
-// was zero. An unknown job is never a success.
+// was zero, with nothing left running behind it. An unknown job is never a
+// success, and neither is an abandoned one — a zero exit code from the
+// process that started background work it never waited for is not the same
+// claim as a zero exit code from a job that finished cleanly.
 func (j EnvironmentJob) Succeeded() bool {
 	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0
 }

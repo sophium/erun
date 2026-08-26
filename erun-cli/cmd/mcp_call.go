@@ -179,6 +179,10 @@ func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOp
 	// help text says as much ("A tool can change the environment").
 	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
 	if err != nil {
+		if tool == "activity_lease_take" {
+			exclusive, _ := toolArguments["exclusive"].(bool)
+			err = common.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, exclusive, err)
+		}
 		return mcpEdgeErrorWithExitCode(target, err)
 	}
 	if commandCtx.Output == common.OutputJSON {

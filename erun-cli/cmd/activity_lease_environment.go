@@ -30,8 +30,11 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	putEnvironmentToolArgument(arguments, "scope", params.Scope)
 	putEnvironmentToolArgument(arguments, "orchestrator", params.Holder.Orchestrator)
 	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "activity_lease_take", arguments, false)
-	if err != nil || !resolved {
-		return common.EnvironmentActivityLease{}, resolved, err
+	if err != nil {
+		return common.EnvironmentActivityLease{}, resolved, common.DescribeExclusiveActivityLeaseVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+	}
+	if !resolved {
+		return common.EnvironmentActivityLease{}, resolved, nil
 	}
 	if result.Lease == nil {
 		return common.EnvironmentActivityLease{}, resolved, nil

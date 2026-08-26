@@ -1,0 +1,5 @@
+abandoned 0: gate (the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work), 0 bytes of output
+audit: erun job status --environment dev --id gate --tenant team
+abandoned 0: gate (the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work), 0 bytes of output
+audit: erun job await --environment dev --id gate --tenant team --timeout 1s
+job "gate" abandoned background work: the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work

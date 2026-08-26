@@ -159,6 +159,33 @@ Where a step genuinely requires an administrator, the product still owns the
 handoff: say exactly who must do what, show the exact values they need, and make
 those values copyable — never leave the user to reconstruct them by hand.
 
+## One Agent Job Is One Run (Mandatory)
+
+**An in-pod agent job is one non-interactive run. There is no "later."** No
+scheduler wakes it back up, no monitor watches it, and nothing notifies
+anyone when a backgrounded process it started finishes. When the job's own
+process exits, the run is over — for good — whatever is still executing
+underneath it. This is the same dead-end failure mode as § "Smooth, Seamless,
+No Dead Ends" above (silence that reads as success), applied to the one
+surface an agent fully controls: its own final turn.
+
+- **Run gates in the foreground, with an explicit timeout.** No `&`, no
+  `nohup`, no background shell task, no "I'll report back when it finishes."
+  If a gate needs to outlive one command, start it as a nested detached job
+  (e.g. `erun job start`) and block on it — `job await` / `job status` — in
+  the same run, not a promise to check later.
+- **A result not in the final message does not exist.** The orchestrator
+  reads the job's recorded outcome, not the agent's intentions. Work reported
+  only as a plan to check back on it is work nobody will ever see reported.
+- **Never end a turn asking a question or offering an option.** Nobody is
+  there to answer. A final message that waits on a reply is a dead end
+  exactly like a UI screen with no next action: the run is stopped, and nothing
+  will ever unstick it.
+- This has already cost real work in this repo: agents that backgrounded a
+  gate and ended their turn reported `exitCode: 0` while the work sat
+  unfinished, uncommitted, or unrecovered, and the orchestrator believed it
+  because nothing in the job's own status said otherwise (erun#1374).
+
 ## Code Comments
 
 - Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.

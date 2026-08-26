@@ -60,3 +60,11 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 // environmentJobExitSignal is always empty on Windows: a terminated process
 // reports an exit code, not a signal.
 func environmentJobExitSignal(state *os.ProcessState) string { return "" }
+
+// environmentJobProcessGroupSurvivors always reports false on Windows: a
+// process group here is a job-object concept with no POSIX-style "signal 0 to
+// probe" equivalent, so a Windows supervisor cannot yet distinguish an
+// abandoned background child from a clean exit this way. Command jobs on
+// Windows fall back to reporting whatever the immediate process's exit status
+// says.
+func environmentJobProcessGroupSurvivors(pgid int) bool { return false }

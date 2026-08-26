@@ -617,18 +617,24 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	detachEnvironmentJobChild(cmd)
 
 	if startErr := cmd.Start(); startErr != nil {
-		return finishEnvironmentJob(recorder, beat, writer, nil, startErr)
+		return finishEnvironmentJob(recorder, beat, writer, 0, nil, startErr)
 	}
 	recorder.update(func(job *EnvironmentJob) { job.ChildPID = cmd.Process.Pid })
 
 	waitErr := cmd.Wait()
-	return finishEnvironmentJob(recorder, beat, writer, cmd.ProcessState, waitErr)
+	return finishEnvironmentJob(recorder, beat, writer, cmd.Process.Pid, cmd.ProcessState, waitErr)
 }
 
 // finishEnvironmentJob records the outcome the supervisor observed. This is the
 // only place an exit status is ever produced, and it comes from waiting on the
 // process — never from parsing output, and never from a shell's $?.
-func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, state *os.ProcessState, waitErr error) error {
+//
+// childPID is the process cmd.Wait just reaped. detachEnvironmentJobChild put
+// it in a process group named after its own pid, so a live process still in
+// that group after the leader is gone — work the leader backgrounded and
+// never waited for — is answered here, not left for the exit code alone to
+// misreport as a clean success.
+func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
@@ -644,8 +650,13 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	case waitErr != nil:
 		reason = "failed to start: " + waitErr.Error()
 	}
+	jobState := EnvironmentJobStateExited
+	if state != nil && environmentJobProcessGroupSurvivors(childPID) {
+		jobState = EnvironmentJobStateAbandoned
+		reason = "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work"
+	}
 	recorder.update(func(job *EnvironmentJob) {
-		job.State = EnvironmentJobStateExited
+		job.State = jobState
 		job.EndedAt = time.Now()
 		job.OutputBytes = writer.written()
 		job.OutputTruncated = writer.truncated()

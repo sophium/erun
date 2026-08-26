@@ -408,26 +408,54 @@ func writeJobList(ctx common.Context, jobs []common.EnvironmentJob) error {
 func jobStatusLine(job common.EnvironmentJob) string {
 	switch job.State {
 	case common.EnvironmentJobStateRunning:
-		line := fmt.Sprintf("running: %s", job.Name)
-		if job.ChildPID > 0 {
-			line += fmt.Sprintf(", pid %d", job.ChildPID)
-		} else if job.PID > 0 {
-			line += fmt.Sprintf(", pid %d", job.PID)
-		}
-		return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobOutputSuffix(job)
+		return jobRunningLine(job)
 	case common.EnvironmentJobStateExited:
-		line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
-		if strings.TrimSpace(job.Signal) != "" {
-			line += fmt.Sprintf(" (signal %s)", job.Signal)
-		}
-		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+		return jobExitedLine(job)
+	case common.EnvironmentJobStateAbandoned:
+		return jobAbandonedLine(job)
 	default:
-		line := fmt.Sprintf("unknown: %s", job.Name)
-		if strings.TrimSpace(job.Reason) != "" {
-			line += " (" + job.Reason + ")"
-		}
-		return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+		return jobUnknownLine(job)
 	}
+}
+
+func jobRunningLine(job common.EnvironmentJob) string {
+	line := fmt.Sprintf("running: %s", job.Name)
+	if job.ChildPID > 0 {
+		line += fmt.Sprintf(", pid %d", job.ChildPID)
+	} else if job.PID > 0 {
+		line += fmt.Sprintf(", pid %d", job.PID)
+	}
+	return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobOutputSuffix(job)
+}
+
+func jobExitedLine(job common.EnvironmentJob) string {
+	line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
+	if strings.TrimSpace(job.Signal) != "" {
+		line += fmt.Sprintf(" (signal %s)", job.Signal)
+	}
+	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobAbandonedLine is rendered distinctly from both exited and unknown: the
+// exit status was captured (unlike unknown), but it is never a success (unlike
+// exited) -- the reason names the background work nothing will ever report on.
+func jobAbandonedLine(job common.EnvironmentJob) string {
+	line := fmt.Sprintf("abandoned %d: %s", jobExitCodeOrUnset(job), job.Name)
+	if strings.TrimSpace(job.Signal) != "" {
+		line += fmt.Sprintf(" (signal %s)", job.Signal)
+	}
+	if strings.TrimSpace(job.Reason) != "" {
+		line += " (" + job.Reason + ")"
+	}
+	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+}
+
+func jobUnknownLine(job common.EnvironmentJob) string {
+	line := fmt.Sprintf("unknown: %s", job.Name)
+	if strings.TrimSpace(job.Reason) != "" {
+		line += " (" + job.Reason + ")"
+	}
+	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 }
 
 // jobAliveSuffix surfaces the supervisor's alive beat for a running job, so an
@@ -568,6 +596,8 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 		return internal.WithExitCode(fmt.Errorf("job %q has no recorded outcome: %s", result.Job.ID, result.Job.Reason), jobAwaitUnknownExitCode)
 	case result.Job.Succeeded():
 		return nil
+	case result.Job.State == common.EnvironmentJobStateAbandoned:
+		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
 	default:
 		return fmt.Errorf("job %q exited %d", result.Job.ID, jobExitCodeOrUnset(result.Job))
 	}
