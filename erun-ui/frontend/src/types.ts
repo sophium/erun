@@ -332,6 +332,9 @@ export interface UIIdleMarkerClient {
 export interface UIEnvironmentLease {
   name: string;
   secondsHeld?: number;
+  // Set only when a job holds the lease, so a surface that names the occupancy
+  // can also act on it. Absent for every other holder.
+  jobId?: string;
 }
 
 export interface UIVersionSuggestion {
