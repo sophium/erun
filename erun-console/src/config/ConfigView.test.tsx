@@ -154,15 +154,21 @@ describe('ConfigView via App', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/An operator has to enrol you/)).toBeInTheDocument();
     // Offering Sign in here is the loop this fix removes.
-    expect(screen.queryByText('Sign in to your console')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
-  it('renders the sign-in prompt when there is no dev token', async () => {
+  it('renders the landing page when there is no dev token', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
     renderWithStore(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Sign in to your console')).toBeInTheDocument();
+      expect(
+        screen.getByText(/A bearer token is required to view your environments\./),
+      ).toBeInTheDocument();
     });
+    expect(
+      screen.getByRole('link', { name: 'configure OIDC sign-in for this instance' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
   });
 });

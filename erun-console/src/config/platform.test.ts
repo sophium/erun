@@ -27,6 +27,9 @@ describe('fetchPlatformConfig', () => {
             consoleClientId: 'console-client',
             cliClientId: 'cli-client',
             brand: 'Acme',
+            docsUrl: 'https://docs.acme.example',
+            tagline: 'Acme tagline',
+            logoUrl: 'https://console.acme.example/logo.svg',
           }),
         ),
       ),
@@ -39,6 +42,9 @@ describe('fetchPlatformConfig', () => {
       consoleClientId: 'console-client',
       cliClientId: 'cli-client',
       brand: 'Acme',
+      docsUrl: 'https://docs.acme.example',
+      tagline: 'Acme tagline',
+      logoUrl: 'https://console.acme.example/logo.svg',
     });
   });
 
@@ -70,6 +76,9 @@ describe('fetchPlatformConfig', () => {
       consoleClientId: '',
       cliClientId: '',
       brand: '',
+      docsUrl: '',
+      tagline: '',
+      logoUrl: '',
     });
   });
 });
