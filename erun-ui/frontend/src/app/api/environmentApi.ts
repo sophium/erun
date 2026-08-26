@@ -1,7 +1,11 @@
 import type {
   UIEnvironmentConfig,
+  UIExposedService,
+  UIExposeServiceInput,
+  UIExposureList,
   UIRuntimeResourceStatus,
   UISelection,
+  UIUnexposeResult,
   UIVersionSuggestions,
 } from '@/types';
 import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
@@ -18,6 +22,8 @@ import {
   ChooseLocalRepoPath,
   ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
+  ExposeEnvironmentService,
+  ListEnvironmentExposures,
   LoadClusterRegistry,
   LoadEnvironmentConfig,
   LoadRuntimeActivity,
@@ -27,6 +33,7 @@ import {
   ReclaimRuntimeResources,
   SaveEnvironmentConfig,
   StopEnvironment,
+  UnexposeEnvironment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
@@ -50,6 +57,11 @@ interface RuntimeResourceArgs {
   kubernetesContext: string;
   tenant?: string;
   environment?: string;
+}
+
+interface ExposeServiceArgs {
+  selection: UISelection;
+  input: UIExposeServiceInput;
 }
 
 export const environmentApi = wailsApi.injectEndpoints({
@@ -141,6 +153,25 @@ export const environmentApi = wailsApi.injectEndpoints({
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
         CheckEnvironmentHealth(selection),
+      ),
+    }),
+    // The Ports tab's exposure list. A mutation (not a query) like
+    // checkEnvironmentHealth: it re-reads the cluster each time it is
+    // dispatched rather than caching against a key, since exposing or
+    // un-exposing invalidates it immediately below.
+    listEnvironmentExposures: builder.mutation<UIExposureList, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIExposureList>((selection) =>
+        ListEnvironmentExposures(selection),
+      ),
+    }),
+    exposeEnvironmentService: builder.mutation<UIExposedService, ExposeServiceArgs>({
+      queryFn: wailsQueryFn<ExposeServiceArgs, UIExposedService>(({ selection, input }) =>
+        ExposeEnvironmentService(selection, input),
+      ),
+    }),
+    unexposeEnvironment: builder.mutation<UIUnexposeResult, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIUnexposeResult>((selection) =>
+        UnexposeEnvironment(selection),
       ),
     }),
   }),

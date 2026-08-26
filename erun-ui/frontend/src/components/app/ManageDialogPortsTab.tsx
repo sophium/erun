@@ -4,6 +4,7 @@ import * as React from 'react';
 import type { AppState } from '@/app/state';
 import { ReadonlyField } from '@/components/app/ManageDialog.fields';
 import { portRangeValue } from '@/components/app/ManageDialog.helpers';
+import { ExposuresSection } from '@/components/app/ManageDialogPortsExposures';
 import type { UIPortStatus } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -45,6 +46,7 @@ export function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactEleme
           },
         ]}
       />
+      <ExposuresSection dialog={dialog} />
     </>
   );
 }
