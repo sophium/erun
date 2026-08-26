@@ -54,6 +54,13 @@ export interface OrchestratorInfo {
   nudgeCount: number;
   nudgeCapped: boolean;
   lastNudgeAtUnix?: number;
+  // restartRequired mirrors the Go side's own comparison of what this
+  // orchestrator's live session was actually spawned with against what it is
+  // linked to right now: true means an edit changed the scope while the
+  // session was running, so it still holds tools for an environment it was
+  // unlinked from and none for one newly linked — only Restart re-wires it
+  // (erun#1319).
+  restartRequired: boolean;
 }
 
 export interface OrchestratorsState {

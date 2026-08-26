@@ -25,6 +25,7 @@ function orchestrator(
     shellStartedAtUnix,
     nudgeCount: 0,
     nudgeCapped: false,
+    restartRequired: false,
   };
 }
 

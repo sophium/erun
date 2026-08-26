@@ -139,4 +139,26 @@ export class OrchestratorDialog {
       name: `Stop using ${conversationId} for this orchestrator`,
     });
   }
+
+  // The restart-required banner (erun#1319): shown at the top of the form when
+  // this orchestrator's live session was spawned with a scope that no longer
+  // matches what it is linked to now, naming why and carrying its own action
+  // rather than pointing at the footer button below.
+  restartRequiredNotice(): Locator {
+    return this.locator('Edit orchestrator').getByRole('status').filter({
+      hasText: 'Its environments changed while it was running',
+    });
+  }
+
+  restartNowButton(): Locator {
+    return this.restartRequiredNotice().getByRole('button', { name: 'Restart now' });
+  }
+
+  // The footer's own restart action, present whenever the session is running;
+  // its label names the remedy explicitly once a restart is actually required.
+  footerRestartButton(): Locator {
+    return this.locator('Edit orchestrator').getByRole('button', {
+      name: /^Restart( to apply)?$/,
+    });
+  }
 }

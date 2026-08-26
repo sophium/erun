@@ -25,6 +25,7 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     shellStartedAtUnix: 0,
     nudgeCount: 0,
     nudgeCapped: false,
+    restartRequired: false,
     ...overrides,
   };
 }

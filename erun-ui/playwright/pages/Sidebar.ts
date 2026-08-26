@@ -268,6 +268,16 @@ export class Sidebar {
     return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
   }
 
+  // Distinct from a plain running dot (erun#1319): a live session whose
+  // environment scope was edited while it ran still holds its old toolset
+  // until restarted, so the row says so rather than reading as a clean
+  // "running" that the operator has no reason to doubt.
+  orchestratorRestartRequiredDot(name: string): Locator {
+    return this.erunSection().getByRole('img', {
+      name: `Orchestrator ${name} is running but needs a restart to apply its new environments`,
+    });
+  }
+
   // The row's busy spinner (BusyRowSpinner), rendered whenever the store's
   // aiBusyBySession has this orchestrator's session flagged — whether that
   // came from the ai-activity event or from the list snapshot's own busy

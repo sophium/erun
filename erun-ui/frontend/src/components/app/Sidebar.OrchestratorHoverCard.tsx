@@ -94,6 +94,17 @@ export function OrchestratorHoverCard({
         </div>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">
           <HoverRow label="Status">{running ? 'Running' : 'Stopped'}</HoverRow>
+          {running && orchestrator.restartRequired && (
+            <HoverRow label="Restart">
+              <span className="flex items-start gap-1.5 text-amber-600">
+                <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 flex-none" />
+                <span>
+                  Its environments changed while it was running. It still holds tools for the old
+                  set until restarted.
+                </span>
+              </span>
+            </HoverRow>
+          )}
           <HoverRow label="Doing">
             <OrchestratorDoing orchestrator={orchestrator} running={running} />
           </HoverRow>

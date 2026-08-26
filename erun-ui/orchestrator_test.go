@@ -403,6 +403,102 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	}
 }
 
+// mcpConfigServerKeys reads back the wired MCP server map for id and returns
+// its keys, so a test can assert exactly which environments a live session's
+// toolset covers rather than trusting the in-memory scope alone (erun#1319).
+func mcpConfigServerKeys(t *testing.T, id string) []string {
+	t.Helper()
+	data, err := os.ReadFile(orchestratorMCPConfigPath(id))
+	if err != nil {
+		t.Fatalf("read orchestrator MCP config for %s: %v", id, err)
+	}
+	var config orchestratorMCPConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("unmarshal orchestrator MCP config for %s: %v", id, err)
+	}
+	keys := make([]string, 0, len(config.MCPServers))
+	for key := range config.MCPServers {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// requireOnlyOrchestratorMCPKey fails unless id's on-disk MCP config wires
+// exactly wantKey, so a test can assert what a live session can actually
+// reach rather than trusting the in-memory scope alone (erun#1319).
+func requireOnlyOrchestratorMCPKey(t *testing.T, id, wantKey, label string) {
+	t.Helper()
+	if keys := mcpConfigServerKeys(t, id); len(keys) != 1 || keys[0] != wantKey {
+		t.Fatalf("%s: expected the session wired for %s only, got %v", label, wantKey, keys)
+	}
+}
+
+// requireLoneOrchestratorRestartRequired fails unless ListOrchestrators
+// reports exactly one orchestrator whose RestartRequired flag matches want.
+func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, label string) {
+	t.Helper()
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || listed[0].RestartRequired != want {
+		t.Fatalf("%s: expected one orchestrator with RestartRequired=%v, got %+v", label, want, listed)
+	}
+}
+
+// TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale is the red-then-
+// green case for erun#1319: re-scoping a running orchestrator changes what it
+// is allowed to touch but the live session — its --mcp-config was resolved at
+// launch and cannot be rewired in place — keeps whatever it was spawned with
+// until it is restarted. Both defect directions are asserted on disk, not just
+// against in-memory state: the unlinked env's server entry must still be
+// there (RED: it stays fully tool-reachable) and the newly linked env's must
+// not be (RED: it has no tools at all). The fix is UpdateOrchestrator no
+// longer reporting "running" as if the save took effect: it flags
+// RestartRequired, and ListOrchestrators keeps reporting it on every poll
+// until a restart actually re-wires the session (GREEN).
+func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
+	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	mustNoErr(t, err, "CreateOrchestrator")
+	started, err := app.StartOrchestrator(created.ID, 80, 24)
+	mustNoErr(t, err, "StartOrchestrator")
+	if started.RestartRequired {
+		t.Fatalf("expected a freshly spawned session to need no restart, got %+v", started)
+	}
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "before re-scope")
+
+	// Re-scope to a different environment while the session is still running.
+	updated, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
+		{Tenant: "frs", Environment: "laptop", Directory: laptopRepo},
+	})
+	mustNoErr(t, err, "UpdateOrchestrator")
+	if updated.Status != "running" {
+		t.Fatalf("expected the live session to still be reported running, got %+v", updated)
+	}
+	if !updated.RestartRequired {
+		t.Fatalf("expected UpdateOrchestrator to flag a restart as required for a live scope change, got %+v", updated)
+	}
+
+	// RED: the live session's actual MCP config, read back from disk, has not
+	// moved — frs/dev (unlinked) is still wired and frs/laptop (newly linked)
+	// has no tools at all. Quoted here so the defect is visible, not asserted
+	// away.
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "RED: after re-scope, before restart")
+	// The same mismatch must keep showing up on every subsequent poll, not
+	// just in UpdateOrchestrator's own return value.
+	requireLoneOrchestratorRestartRequired(t, app, true, "RED: polled after re-scope")
+
+	// GREEN: restarting is the only thing that re-wires the session, and it
+	// resolves the flag along with the actual toolset.
+	restarted, err := app.RestartOrchestrator(created.ID, 80, 24)
+	mustNoErr(t, err, "RestartOrchestrator")
+	if restarted.RestartRequired {
+		t.Fatalf("expected a fresh spawn to clear RestartRequired, got %+v", restarted)
+	}
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-laptop", "GREEN: after restart")
+	requireLoneOrchestratorRestartRequired(t, app, false, "GREEN: polled after restart")
+}
+
 func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T) {
 	var seededPrompt string
 	home := t.TempDir()

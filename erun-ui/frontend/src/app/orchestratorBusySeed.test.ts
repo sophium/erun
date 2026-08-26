@@ -20,6 +20,7 @@ function orchestrator(sessionId: number, busy: boolean): OrchestratorInfo {
     shellStartedAtUnix: 0,
     nudgeCount: 0,
     nudgeCapped: false,
+    restartRequired: false,
   };
 }
 
