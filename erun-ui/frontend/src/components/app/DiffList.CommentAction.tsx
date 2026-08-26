@@ -5,6 +5,7 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   cancelReviewComment,
+  clearReviewCommentError,
   setReviewCommentDraft,
   startReviewComment,
   submitReviewComment,
@@ -155,7 +156,15 @@ function DiffLineCommentComposer(): React.ReactElement {
           dispatch(setReviewCommentDraft(event.target.value));
         }}
       />
-      {submitError && <PlatformErrorAlert message={submitError} alias={cloudProviderAlias} />}
+      {submitError && (
+        <PlatformErrorAlert
+          message={submitError}
+          alias={cloudProviderAlias}
+          onRecovered={() => {
+            dispatch(clearReviewCommentError());
+          }}
+        />
+      )}
       <div className="flex justify-end gap-2">
         <Button
           type="button"

@@ -9,7 +9,11 @@ import {
   restrictedTenantDashboardReads,
   visibleTenantDashboardTabs,
 } from '@/app/tenantDashboardPanels';
-import { refreshTenantDashboard, setTenantDashboardTab } from '@/app/tenantDialogThunks';
+import {
+  loadTenantDashboard,
+  refreshTenantDashboard,
+  setTenantDashboardTab,
+} from '@/app/tenantDialogThunks';
 import type { UITenant } from '@/types';
 
 import { PlatformErrorAlert } from './PlatformSignInAlert';
@@ -115,10 +119,17 @@ function TenantDashboardFailure({
   message: string;
   alias: string;
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
   return (
     <div className="flex h-full min-h-0 items-center justify-center">
       <div className="w-full max-w-sm">
-        <PlatformErrorAlert message={message} alias={alias} />
+        <PlatformErrorAlert
+          message={message}
+          alias={alias}
+          onRecovered={() => {
+            void dispatch(loadTenantDashboard());
+          }}
+        />
       </div>
     </div>
   );

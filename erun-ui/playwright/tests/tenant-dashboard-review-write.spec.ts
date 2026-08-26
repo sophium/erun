@@ -231,8 +231,12 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
   // dead end wherever a review write surfaced it. The alert must now offer
   // the same "Log in" the sidebar's cloud alias row already uses, and
   // clicking it must actually dispatch LoginCloudProvider for the tenant's
-  // primary alias — not just render inert text.
-  test('a stale-identity error on create offers to sign in, and clicking it does', async ({
+  // primary alias — not just render inert text. #1392: a successful sign-in
+  // used to leave this exact error and button in place next to a
+  // now-valid session, since nothing cleared the stale write error — this
+  // also asserts the error actually clears, so the operator sees the dialog
+  // ready to retry Create rather than the identical failure.
+  test('a stale-identity error on create offers to sign in, and a successful sign-in clears it', async ({
     app,
     page,
   }) => {
@@ -298,6 +302,13 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await expect(signIn).toBeVisible();
       await signIn.click();
       await expect.poll(() => loginAlias).toBe('pw-aws');
+
+      // The dialog must recover: the stale write error and its Log in
+      // button are gone, and the dialog is ready for the operator to retry
+      // Create themselves — the sign-in fixed the session, not the submit.
+      await expect(alert).toHaveCount(0);
+      await expect(dialog.locator().getByRole('button', { name: 'Log in' })).toHaveCount(0);
+      await expect(dialog.locator()).toBeVisible();
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

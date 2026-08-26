@@ -159,6 +159,14 @@ export const pushCreateReviewBranch = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
+// clearCreateReviewError drops a stale create-review write error once a
+// sign-in it prompted has succeeded, so the dialog recovers instead of
+// showing the identical error and button next to a now-valid session
+// (#1392) — the operator retries Create themselves from there.
+export const clearCreateReviewError = (): AppThunk => (dispatch) => {
+  dispatch(patchCreateReviewDialog({ createError: '' }));
+};
+
 export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const dialog = state.createReviewDialog;

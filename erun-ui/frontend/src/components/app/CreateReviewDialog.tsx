@@ -15,6 +15,7 @@ import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  clearCreateReviewError,
   closeCreateReviewDialog,
   commitCreateReviewBranch,
   pushCreateReviewBranch,
@@ -238,7 +239,13 @@ function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): Rea
         }}
       />
       {dialog.createError && (
-        <PlatformErrorAlert message={dialog.createError} alias={cloudProviderAlias} />
+        <PlatformErrorAlert
+          message={dialog.createError}
+          alias={cloudProviderAlias}
+          onRecovered={() => {
+            dispatch(clearCreateReviewError());
+          }}
+        />
       )}
     </StepShell>
   );

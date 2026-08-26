@@ -5,6 +5,8 @@ import * as React from 'react';
 import { useAppDispatch } from '@/app/hooks';
 import {
   cancelReviewReply,
+  clearResolveCommentError,
+  clearReviewReplyError,
   setReviewReplyDraft,
   setReviewReplyTarget,
   submitResolveComment,
@@ -203,12 +205,19 @@ function ThreadResolveError({
   root: UIReviewComment;
   detail: ReviewDetailState;
 }): React.ReactElement | null {
+  const dispatch = useAppDispatch();
   if (detail.resolveErrorCommentId !== root.commentId || !detail.resolveError) {
     return null;
   }
   return (
     <div className="mt-2">
-      <PlatformErrorAlert message={detail.resolveError} alias={detail.callerCloudProviderAlias} />
+      <PlatformErrorAlert
+        message={detail.resolveError}
+        alias={detail.callerCloudProviderAlias}
+        onRecovered={() => {
+          dispatch(clearResolveCommentError());
+        }}
+      />
     </div>
   );
 }
@@ -289,7 +298,13 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
         }}
       />
       {detail.submitError && (
-        <PlatformErrorAlert message={detail.submitError} alias={detail.callerCloudProviderAlias} />
+        <PlatformErrorAlert
+          message={detail.submitError}
+          alias={detail.callerCloudProviderAlias}
+          onRecovered={() => {
+            dispatch(clearReviewReplyError());
+          }}
+        />
       )}
       <div className="flex justify-end gap-2">
         <Button

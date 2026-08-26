@@ -9,6 +9,7 @@ import { openCreateReviewDialog } from '@/app/createReviewDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   cancelAdvanceMergeQueue,
+  clearAdvanceMergeQueueError,
   confirmAdvanceMergeQueue,
   submitAdvanceMergeQueue,
 } from '@/app/mergeQueueThunks';
@@ -309,7 +310,13 @@ function AdvanceMergeQueueAction({
       )}
       {action.error && (
         <div className="max-w-sm">
-          <PlatformErrorAlert message={action.error} alias={cloudProviderAlias} />
+          <PlatformErrorAlert
+            message={action.error}
+            alias={cloudProviderAlias}
+            onRecovered={() => {
+              dispatch(clearAdvanceMergeQueueError());
+            }}
+          />
         </div>
       )}
     </div>

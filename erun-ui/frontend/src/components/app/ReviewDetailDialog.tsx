@@ -14,8 +14,10 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   cancelCloseReview,
+  clearCloseReviewError,
   closeReviewDetail,
   confirmCloseReview,
+  loadReviewDetail,
   submitCloseReview,
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
@@ -55,6 +57,7 @@ export function ReviewDetailDialog(): React.ReactElement {
 }
 
 function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.ReactElement {
+  const dispatch = useAppDispatch();
   if (detail.loading) {
     return (
       <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
@@ -77,7 +80,13 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
   if (data.apiError) {
     return (
       <div className="py-4">
-        <PlatformErrorAlert message={data.apiError} alias={detail.callerCloudProviderAlias} />
+        <PlatformErrorAlert
+          message={data.apiError}
+          alias={detail.callerCloudProviderAlias}
+          onRecovered={() => {
+            void dispatch(loadReviewDetail(detail.reviewId));
+          }}
+        />
       </div>
     );
   }
@@ -210,7 +219,13 @@ function CloseReviewAction({
           </Button>
         </div>
         {detail.closeError && (
-          <PlatformErrorAlert message={detail.closeError} alias={detail.callerCloudProviderAlias} />
+          <PlatformErrorAlert
+            message={detail.closeError}
+            alias={detail.callerCloudProviderAlias}
+            onRecovered={() => {
+              dispatch(clearCloseReviewError());
+            }}
+          />
         )}
       </div>
     );

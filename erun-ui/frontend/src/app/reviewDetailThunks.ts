@@ -160,6 +160,12 @@ export const setReviewReplyDraft =
     dispatch(patchReviewDetail({ draftBody: body }));
   };
 
+// clearReviewReplyError mirrors clearCloseReviewError for the reply
+// composer's own write error (#1392).
+export const clearReviewReplyError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ submitError: '' }));
+};
+
 export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const { reviewId, replyingTo, draftBody, data } = state.reviewDetail;
@@ -212,6 +218,14 @@ export const cancelCloseReview = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ closeConfirming: false, closeError: '' }));
 };
 
+// clearCloseReviewError drops a stale close-review write error once a
+// sign-in it prompted has succeeded, so the operator sees the panel recover
+// rather than the identical error and button (#1392) — they retry Close
+// themselves from there.
+export const clearCloseReviewError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeError: '' }));
+};
+
 export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const { reviewId } = state.reviewDetail;
@@ -249,6 +263,12 @@ export const submitResolveComment = (commentId: string): AppThunk<Promise<void>>
 
 export const submitUnresolveComment = (commentId: string): AppThunk<Promise<void>> =>
   submitCommentStatus(commentId, 'unresolveReviewComment');
+
+// clearResolveCommentError mirrors clearCloseReviewError for a thread's own
+// resolve/unresolve write error (#1392).
+export const clearResolveCommentError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ resolveError: '', resolveErrorCommentId: '' }));
+};
 
 function submitCommentStatus(
   commentId: string,
@@ -327,6 +347,12 @@ export const setReviewCommentDraft =
   (dispatch) => {
     dispatch(patchReviewDetail({ newCommentDraft: body }));
   };
+
+// clearReviewCommentError mirrors clearCloseReviewError for the new-thread
+// composer's own write error (#1392).
+export const clearReviewCommentError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ newCommentSubmitError: '' }));
+};
 
 export const submitReviewComment = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
