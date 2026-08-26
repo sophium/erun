@@ -123,6 +123,16 @@ Read what you control from erun's config store — never infer it from what happ
   confirm it is impossible for the *product* and not merely absent from *that surface* — and if the
   product can do it, an unexposed capability is a dead end that belongs in the issue, not a limitation
   to be documented in the copy.
+- **An answer computed inside a pod is an answer about the pod, not about the host.** Diagnosing a
+  host-side desktop bug, an orchestrator ran `platform_whoami` through an environment's MCP edge and
+  got "no erun platform cloud provider alias is configured." It reported to the operator that their
+  tenant was not on the platform. It was not — that was the pod's config answering about the pod. The
+  host had a valid, logged-in erun platform alias all along, and `erun platform whoami` run on the
+  host returned a real tenant and user id. The mistake cost a wrong diagnosis delivered with
+  confidence, and it was caught only because the host command was run later for an unrelated reason.
+  A pod can answer questions about its own workspace, its own build, its own git tree — it cannot
+  answer a question about the operator's machine, and configuration is always a question about a
+  specific machine. When the subject of the question is the host, run the command on the host.
 
 ## Working in a pod
 
