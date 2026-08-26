@@ -90,7 +90,15 @@ export interface UITenant {
   environments: UIEnvironment[];
 }
 
-export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'history' | 'delete';
+export type ManageTab =
+  | 'general'
+  | 'runtime'
+  | 'ai'
+  | 'ports'
+  | 'ssh'
+  | 'jobs'
+  | 'history'
+  | 'delete';
 export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
 export interface UISelection {
@@ -653,3 +661,36 @@ export * from './diffTypes';
 
 // Review-detail types live in ./reviewTypes for the same reason.
 export * from './reviewTypes';
+
+// A retained job in an environment's job store. exitCode is null unless the job
+// reached exited, so a missing outcome is never read as a successful zero, and
+// progress is absent for a command job rather than a fabricated zero state.
+export interface UIEnvironmentJob {
+  id: string;
+  name: string;
+  state: string;
+  kind?: string;
+  agentTool?: string;
+  command?: string[];
+  dir?: string;
+  exitCode: number | null;
+  startedAtUnix?: number;
+  endedAtUnix?: number;
+  progress?: UIEnvironmentJobProgress;
+}
+
+export interface UIEnvironmentJobProgress {
+  activity?: string;
+  lastMessage?: string;
+  turns: number;
+  toolsRun: number;
+}
+
+export interface UIEnvironmentJobOutput {
+  job: UIEnvironmentJob;
+  offset: number;
+  nextOffset: number;
+  output: string;
+  hasMore: boolean;
+  complete: boolean;
+}

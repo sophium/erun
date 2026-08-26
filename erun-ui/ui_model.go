@@ -852,6 +852,11 @@ type startSessionResult struct {
 type uiEnvironmentLease struct {
 	Name        string `json:"name"`
 	SecondsHeld int64  `json:"secondsHeld,omitempty"`
+	// JobID is set only when the lease is held by a job, so the surface that
+	// names the occupancy can also act on it. Empty for every other holder,
+	// which is what keeps a non-job lease from rendering a cancel that cannot
+	// work.
+	JobID string `json:"jobId,omitempty"`
 }
 
 type deleteEnvironmentResult struct {

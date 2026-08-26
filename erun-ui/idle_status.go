@@ -122,6 +122,9 @@ func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now tim
 	out := make([]uiEnvironmentLease, 0, len(leases))
 	for _, lease := range leases {
 		entry := uiEnvironmentLease{Name: strings.TrimSpace(lease.Name)}
+		if jobID, ok := eruncommon.EnvironmentJobIDFromLeaseID(lease.ID); ok {
+			entry.JobID = jobID
+		}
 		if !lease.StartedAt.IsZero() && now.After(lease.StartedAt) {
 			entry.SecondsHeld = int64(now.Sub(lease.StartedAt) / time.Second)
 		}

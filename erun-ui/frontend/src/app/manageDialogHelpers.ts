@@ -121,44 +121,48 @@ export function manageDialogTabHasUnsavedChanges(
   }
   const compare = (...keys: (keyof UIEnvironmentConfig)[]): boolean =>
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
-  switch (tab) {
-    case 'general':
-      return compare(
-        'localRepoPath',
-        'containerRegistries',
-        'cloudProviderAlias',
-        'cloudAliasSlots',
-        'remoteHostCredentials',
-        'type',
-      );
-    case 'runtime':
-      return compare(
-        'runtimePod',
-        'idle',
-        'autoStart',
-        'autoUpgrade',
-        'upgradeChannel',
-        'disableBuildScript',
-        'runtimeChart',
-        'platformAccount',
-        'mountSource',
-        'repoURL',
-      );
-    case 'ai':
-      return compare('claude');
-    case 'ports':
-      return false;
-    case 'ssh':
-      return (
-        JSON.stringify(config.sshd.workspaceSyncEnabled) !==
-          JSON.stringify(initial.sshd.workspaceSyncEnabled) ||
-        JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
-          JSON.stringify(initial.sshd.workspaceSyncLocalPath)
-      );
-    case 'history':
-      // History is read-only — no edits, no save, never dirty.
-      return false;
-    case 'delete':
-      return false;
+  // A table rather than a switch: every tab that edits config names the keys it
+  // owns, and a tab absent from the table is read-only by construction. Adding a
+  // tab is then a data change, not another branch.
+  const editedKeys: Partial<Record<ManageTab, (keyof UIEnvironmentConfig)[]>> = {
+    general: [
+      'localRepoPath',
+      'containerRegistries',
+      'runtimeRegistry',
+      'imagePullSecrets',
+      'cloudProviderAlias',
+      'cloudAliasSlots',
+      'remoteHostCredentials',
+      'type',
+    ],
+    runtime: [
+      'runtimePod',
+      'idle',
+      'autoStart',
+      'autoUpgrade',
+      'upgradeChannel',
+      'disableBuildScript',
+      'runtimeChart',
+      'platformAccount',
+      'mountSource',
+      'repoURL',
+    ],
+    ai: ['claude'],
+    // Only the two workspace-sync values are editable here; the rest of the SSH
+    // section is applied by its own actions rather than the dialog's Save.
+    ssh: ['sshd'],
+  };
+  const keys = editedKeys[tab];
+  if (!keys) {
+    return false;
   }
+  if (tab === 'ssh') {
+    return (
+      JSON.stringify(config.sshd.workspaceSyncEnabled) !==
+        JSON.stringify(initial.sshd.workspaceSyncEnabled) ||
+      JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
+        JSON.stringify(initial.sshd.workspaceSyncLocalPath)
+    );
+  }
+  return compare(...keys);
 }

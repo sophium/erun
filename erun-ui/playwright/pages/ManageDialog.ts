@@ -281,7 +281,7 @@ export class ManageDialog {
   }
 
   async cancel(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Cancel' });
+    const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }
@@ -300,6 +300,44 @@ export class ManageDialog {
   }
 
   // --- Container-registries editor (General tab) ---
+
+  // --- Jobs tab ---
+
+  jobsTabTrigger(): Locator {
+    return this.locator().getByRole('tab', { name: 'Jobs' });
+  }
+
+  jobsEmptyState(): Locator {
+    return this.locator().getByTestId('manage-jobs-empty');
+  }
+
+  jobRows(): Locator {
+    return this.locator().getByTestId('manage-jobs-row');
+  }
+
+  jobOutcome(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-outcome').nth(index);
+  }
+
+  jobShowOutputButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Show output for ${name}` });
+  }
+
+  jobOutput(): Locator {
+    return this.locator().getByTestId('manage-jobs-output');
+  }
+
+  jobOutputEmpty(): Locator {
+    return this.locator().getByTestId('manage-jobs-output-empty');
+  }
+
+  jobCancelButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Cancel job ${name}` });
+  }
+
+  jobConfirmCancelButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Confirm cancelling ${name}` });
+  }
 
   addPullSecretButton(): Locator {
     return this.locator().getByRole('button', { name: 'Add image pull secret' });
