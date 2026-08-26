@@ -10,12 +10,8 @@ import type { OidcConfig } from './auth/auth';
 import { signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
 import { AppShell } from './shell/AppShell';
-import {
-  ErrorScreen,
-  LoadingScreen,
-  NotEnrolledScreen,
-  SignInScreen,
-} from './shell/PreShellScreens';
+import { LandingScreen } from './shell/LandingScreen';
+import { ErrorScreen, LoadingScreen, NotEnrolledScreen } from './shell/PreShellScreens';
 
 type LoadState =
   | { status: 'loading' }
@@ -77,20 +73,35 @@ function computeLoadState(auth: AuthPhase, configQuery: ConfigQueryPhase): LoadS
   return loadStateFromConfigQuery(auth.token, configQuery);
 }
 
-// useBrand resolves the platform's display name from discovery (GET
-// /v1/platform) and mirrors it into the document title — the one thing that
-// used to be a hardcoded literal (`erun console`) despite the value already
-// being fetched and parsed for OIDC config. There is no logo/favicon field in
-// the platform contract today, so the favicon stays the static build asset.
-function useBrand(): string | undefined {
-  const [brand, setBrand] = React.useState<string | undefined>(undefined);
+interface PlatformInfo {
+  brand?: string;
+  docsUrl?: string;
+  tagline?: string;
+  logoUrl?: string;
+}
+
+// usePlatformInfo resolves the instance's white-label surface from discovery
+// (GET /v1/platform) and mirrors the brand into the document title — the one
+// thing that used to be a hardcoded literal (`erun console`) despite the
+// value already being fetched and parsed for OIDC config. Every field is
+// optional and left undefined when the backend has it unset (#1327); callers
+// fall back to bundled product-level defaults, never a hardcoded instance
+// name.
+function usePlatformInfo(): PlatformInfo {
+  const [info, setInfo] = React.useState<PlatformInfo>({});
   React.useEffect(() => {
     let cancelled = false;
     fetchPlatformConfig()
       .then((platform) => {
-        if (!cancelled && platform !== undefined && platform.brand.length > 0) {
-          setBrand(platform.brand);
+        if (cancelled || platform === undefined) {
+          return;
         }
+        setInfo({
+          brand: platform.brand.length > 0 ? platform.brand : undefined,
+          docsUrl: platform.docsUrl.length > 0 ? platform.docsUrl : undefined,
+          tagline: platform.tagline.length > 0 ? platform.tagline : undefined,
+          logoUrl: platform.logoUrl.length > 0 ? platform.logoUrl : undefined,
+        });
       })
       .catch(() => undefined);
     return () => {
@@ -98,31 +109,41 @@ function useBrand(): string | undefined {
     };
   }, []);
   React.useEffect(() => {
-    document.title = brand !== undefined ? `${brand} console` : 'ERun console';
-  }, [brand]);
-  return brand;
+    document.title = info.brand !== undefined ? `${info.brand} console` : 'ERun console';
+  }, [info.brand]);
+  return info;
 }
 
 function AppContent({
-  brand,
+  platform,
   state,
   oidc,
   oidcFallbackReason,
   onChanged,
   onSignOut,
 }: {
-  brand: string | undefined;
+  platform: PlatformInfo;
   state: LoadState;
   oidc: OidcConfig | undefined;
   oidcFallbackReason: string | undefined;
   onChanged: () => void;
   onSignOut: () => void;
 }): React.ReactElement {
+  const brand = platform.brand;
   switch (state.status) {
     case 'loading':
       return <LoadingScreen brand={brand} />;
     case 'signed-out':
-      return <SignInScreen brand={brand} oidc={oidc} fallbackReason={oidcFallbackReason} />;
+      return (
+        <LandingScreen
+          brand={brand}
+          logoUrl={platform.logoUrl}
+          tagline={platform.tagline}
+          docsUrl={platform.docsUrl}
+          oidc={oidc}
+          fallbackReason={oidcFallbackReason}
+        />
+      );
     case 'not-enrolled':
       return <NotEnrolledScreen brand={brand} token={state.token} />;
     case 'error':
@@ -141,7 +162,7 @@ function AppContent({
 }
 
 export function App(): React.ReactElement {
-  const brand = useBrand();
+  const platform = usePlatformInfo();
   const dispatch = useAppDispatch();
   const auth = useAppSelector((s) => s.auth);
 
@@ -165,7 +186,7 @@ export function App(): React.ReactElement {
   return (
     <TooltipProvider>
       <AppContent
-        brand={brand}
+        platform={platform}
         state={state}
         oidc={auth.oidc}
         oidcFallbackReason={auth.oidcFallbackReason}

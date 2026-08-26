@@ -1,9 +1,6 @@
-import { Button } from 'erun-kit';
 import { LoaderCircle } from 'lucide-react';
 import type * as React from 'react';
 
-import type { OidcConfig } from '../auth/auth';
-import { beginLogin } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
 import { CenteredCard } from './CenteredCard';
 
@@ -14,46 +11,6 @@ export function LoadingScreen({ brand }: { brand: string | undefined }): React.R
         aria-hidden="true"
         className="mx-auto size-5 animate-spin text-muted-foreground"
       />
-    </CenteredCard>
-  );
-}
-
-// SignInScreen is the branded replacement for the bare paragraph + button that
-// used to greet every visitor. With OIDC configured it offers the real
-// Authorization Code + PKCE redirect; without it (local dev), it explains that
-// a token is required. fallbackReason surfaces why a local VITE_OIDC_* override
-// is in play when platform discovery could not supply the config, so a
-// misconfigured instance is visible rather than silently running against a
-// possibly-wrong client id.
-export function SignInScreen({
-  brand,
-  oidc,
-  fallbackReason,
-}: {
-  brand: string | undefined;
-  oidc: OidcConfig | undefined;
-  fallbackReason: string | undefined;
-}): React.ReactElement {
-  return (
-    <CenteredCard brand={brand} title="Sign in to your console" role="status">
-      <p className="text-sm text-muted-foreground">
-        {oidc !== undefined
-          ? 'Sign in with your organization identity to view and manage your environments.'
-          : 'A bearer token is required to view your environments. Ask an operator for one, or configure OIDC sign-in for this instance.'}
-      </p>
-      {oidc !== undefined && (
-        <Button
-          type="button"
-          onClick={() => {
-            void beginLogin(oidc);
-          }}
-        >
-          Sign in
-        </Button>
-      )}
-      {fallbackReason !== undefined && (
-        <p className="text-xs text-muted-foreground">{fallbackReason}</p>
-      )}
     </CenteredCard>
   );
 }
