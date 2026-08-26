@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,7 +21,11 @@ const (
 	tenantDashboardWriteCreateReview      = "POST /v1/reviews"
 	tenantDashboardWriteReviewStatus      = "PATCH /v1/reviews/{review_id}/status"
 	tenantDashboardWriteAdvanceMergeQueue = "POST /v1/reviews/merge-queue/advance"
-	tenantDashboardWriteCommentStatus     = "PATCH /v1/reviews/{review_id}/comments/{comment_id}/status"
+	// The platform gates this on its own, distinct route so a tenant can grant
+	// it to a narrower set of roles than ordinary advance (see erun-backend-api
+	// AGENTS.md "Merge Queue").
+	tenantDashboardWriteOverrideAdvanceMergeQueue = "POST /v1/reviews/merge-queue/override-advance"
+	tenantDashboardWriteCommentStatus             = "PATCH /v1/reviews/{review_id}/comments/{comment_id}/status"
 )
 
 // CreateReview opens a review. It is a real, immediate write — there is no
@@ -86,7 +91,12 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	return tenantDashboardReview(review), nil
 }
 
-// AdvanceMergeQueue advances targetBranch's merge queue head to MERGED.
+// AdvanceMergeQueue advances targetBranch's merge queue head to MERGE. When
+// the queue head still has unresolved comment threads, the platform refuses
+// and this reports the block (which review, how many threads) on the same
+// review shape rather than a bare error string — Blocked/UnresolvedThreads
+// let the caller route the operator to the threads, or to
+// OverrideAdvanceMergeQueue, instead of hitting a dead end.
 func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	if tenant == "" {
@@ -109,7 +119,46 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 
 	review, err := client.AdvanceMergeQueue(requestCtx, targetBranch)
 	if err != nil {
+		var blocked *eruncommon.PlatformMergeQueueBlockedError
+		if errors.As(err, &blocked) {
+			unresolved := blocked.UnresolvedThreads
+			return uiTenantDashboardReview{ReviewID: blocked.ReviewID, Blocked: true, UnresolvedThreads: &unresolved}, nil
+		}
 		return uiTenantDashboardReview{}, operatorPlatformError(actionAdvanceQueue, err)
+	}
+	return tenantDashboardReview(review), nil
+}
+
+// OverrideAdvanceMergeQueue bypasses AdvanceMergeQueue's unresolved-thread
+// gate. Reason is required — the backend refuses a blank one — and is
+// recorded in the platform's audit trail alongside the caller's identity.
+func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
+	tenant := strings.TrimSpace(input.Tenant)
+	if tenant == "" {
+		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
+	}
+	targetBranch := strings.TrimSpace(input.TargetBranch)
+	if targetBranch == "" {
+		return uiTenantDashboardReview{}, fmt.Errorf("target branch is required")
+	}
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return uiTenantDashboardReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
+	}
+	defer cancel()
+
+	review, err := client.OverrideAdvanceMergeQueue(requestCtx, targetBranch, reason)
+	if err != nil {
+		return uiTenantDashboardReview{}, operatorPlatformError(actionOverrideAdvanceQueue, err)
 	}
 	return tenantDashboardReview(review), nil
 }

@@ -117,6 +117,7 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
 	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
 	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
+	dashboard.CanOverrideMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
 }
 
 // tenantDashboardUsernames resolves every tenant user id to its display
