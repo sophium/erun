@@ -1033,11 +1033,15 @@ type appNotificationPayload struct {
 	Tenant      string `json:"tenant,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	Source      string `json:"source,omitempty"`
+	// OrchestratorID tags a notification about a specific orchestrator so the
+	// frontend can render an action that operates on that orchestrator
+	// directly (e.g. restarting it), the orchestrator-scoped analogue of
+	// Tenant/Environment.
+	OrchestratorID string `json:"orchestratorId,omitempty"`
 	// Action names a control the frontend can render beside the message that
 	// actually performs the remedy the message names, e.g. "deploy" opens the
 	// tagged env's deploy dialog. Empty means the message carries no action the
-	// app can perform — the operator-facing text is the whole of the recovery
-	// (#1390).
+	// app can perform — the operator-facing text is the whole of the recovery.
 	Action string `json:"action,omitempty"`
 }
 

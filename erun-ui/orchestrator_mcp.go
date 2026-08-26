@@ -187,6 +187,18 @@ func orchestratorMCPUnwiredNotice(name string, err error) string {
 	return fmt.Sprintf("%s started without its environment tools: %s. %s", label, cause, recovery)
 }
 
+// orchestratorMCPUnwiredAction names the control the frontend can render
+// beside orchestratorMCPUnwiredNotice's message so its named recovery is
+// something the operator can click rather than type: the executable-missing
+// cause also links the install docs, since "install the erun command line
+// tool" has no in-app affordance of its own.
+func orchestratorMCPUnwiredAction(err error) string {
+	if errors.Is(err, errOrchestratorMCPExecutable) {
+		return notificationActionInstallAndRestartOrchestrator
+	}
+	return notificationActionRestartOrchestrator
+}
+
 // orchestratorMCPPartialNotice is the operator-facing line for an orchestrator
 // that got SOME of its environments' tools. Distinct from the unwired notice
 // because the session is usable and will look entirely healthy: the missing

@@ -12,6 +12,7 @@ import {
 import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
 import * as React from 'react';
 
+import { openInstallDocs } from '@/app/documentationThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog, setManageTab } from '@/app/manageDialogThunks';
 import {
@@ -20,6 +21,7 @@ import {
   dismissTerminalStatus,
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
+import { restartOrchestrator } from '@/app/orchestratorThunks';
 import type { AppNotification, AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
 
@@ -54,6 +56,10 @@ interface TitlebarStatusValue {
   envAction?: AppNotification['action'];
   envTenant?: string;
   envEnvironment?: string;
+  // Set only when the notification's action operates on a specific
+  // orchestrator (restart-orchestrator / install-and-restart-orchestrator)
+  // rather than a specific env.
+  orchestratorId?: string;
 }
 
 const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
@@ -98,13 +104,7 @@ export function TitlebarStatus(): React.ReactElement | null {
         <StatusIcon status={status} />
         <StatusMessage status={status} />
         {status.action === 'wait-longer' && <StatusWaitAction />}
-        {status.envAction === 'deploy' && status.envTenant && status.envEnvironment && (
-          <StatusDeployAction
-            status={status}
-            tenant={status.envTenant}
-            environment={status.envEnvironment}
-          />
-        )}
+        <StatusEnvAction status={status} />
         {status.copyOutput &&
           (status.source === 'notification' ? (
             <NotificationCopyAction text={status.copyOutput} />
@@ -148,6 +148,7 @@ function computeTitlebarStatus(
       envAction: notification.action,
       envTenant: notification.tenant,
       envEnvironment: notification.environment,
+      orchestratorId: notification.orchestratorId,
     };
   }
   if (terminal.terminalBusy && terminal.terminalMessage) {
@@ -272,6 +273,36 @@ function StatusWaitAction(): React.ReactElement {
   );
 }
 
+// StatusEnvAction dispatches to whichever named remedy the notification
+// carries — kept as one switch here rather than inline branches in
+// TitlebarStatus so that component's own complexity stays bounded as more
+// remedies get named actions.
+function StatusEnvAction({ status }: { status: TitlebarStatusValue }): React.ReactElement | null {
+  switch (status.envAction) {
+    case 'deploy':
+      return status.envTenant && status.envEnvironment ? (
+        <StatusDeployAction
+          status={status}
+          tenant={status.envTenant}
+          environment={status.envEnvironment}
+        />
+      ) : null;
+    case 'restart-orchestrator':
+      return status.orchestratorId ? (
+        <StatusRestartOrchestratorAction status={status} orchestratorId={status.orchestratorId} />
+      ) : null;
+    case 'install-and-restart-orchestrator':
+      return status.orchestratorId ? (
+        <>
+          <StatusInstallDocsAction />
+          <StatusRestartOrchestratorAction status={status} orchestratorId={status.orchestratorId} />
+        </>
+      ) : null;
+    default:
+      return null;
+  }
+}
+
 // StatusDeployAction is the toast's own version of #1390's rule: a runtime-
 // unreachable notification names "deploy" as its remedy, and the app already
 // has a control for that — the Manage dialog's Runtime tab, where the
@@ -304,6 +335,55 @@ function StatusDeployAction({
       }}
     >
       Deploy
+    </Button>
+  );
+}
+
+// StatusInstallDocsAction links the CLI install page for the notice's
+// "erun executable could not be resolved" cause — naming the fix without
+// giving a way to act on it is the dead end this exists to close.
+function StatusInstallDocsAction(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        dispatch(openInstallDocs());
+      }}
+    >
+      Install docs
+    </Button>
+  );
+}
+
+// StatusRestartOrchestratorAction performs the notice's other named remedy —
+// restarting the orchestrator — directly, rather than leaving it as an
+// instruction with no control behind it.
+function StatusRestartOrchestratorAction({
+  status,
+  orchestratorId,
+}: {
+  status: TitlebarStatusValue;
+  orchestratorId: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        void dispatch(restartOrchestrator(orchestratorId));
+        if (status.notificationId) {
+          dispatch(dismissNotification(status.notificationId));
+        }
+      }}
+    >
+      Restart
     </Button>
   );
 }

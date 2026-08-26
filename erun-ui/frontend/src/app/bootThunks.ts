@@ -33,6 +33,16 @@ function seedEnvActivity(dispatch: AppDispatch, tenants: UITenant[]): void {
   }
 }
 
+// The generated UIState type says tenants is never null, but that is a
+// promise about the Go struct, not about what actually crosses the wire — a
+// stub, or a future backend regression, can still send JSON null. Array.isArray
+// is a real runtime check here, not a redundant null-coalesce against an
+// already-narrowed type, so boot() cannot crash on this before the titlebar
+// even has a chance to say why.
+function normalizeBootTenants(tenants: UITenant[]): UITenant[] {
+  return Array.isArray(tenants) ? tenants : [];
+}
+
 // "Choose from the left pane" contradicts the sidebar's own "No environments
 // yet" empty state when there is nothing yet to choose — name the actual
 // first action instead.
@@ -51,8 +61,9 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     const loaded = await dispatch(
       stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
-    dispatch(setTenants(loaded.tenants));
-    seedEnvActivity(dispatch, loaded.tenants);
+    const tenants = normalizeBootTenants(loaded.tenants);
+    dispatch(setTenants(tenants));
+    seedEnvActivity(dispatch, tenants);
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
     dispatch(setSelected(loaded.selected ?? null));
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));

@@ -413,6 +413,18 @@ const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreach
 // action to emitEnvNotification; "" means the notification carries no action.
 const notificationActionDeploy = "deploy"
 
+// notificationActionRestartOrchestrator tags a notification the frontend can
+// resolve by restarting the named orchestrator directly, via
+// emitOrchestratorNotification.
+const notificationActionRestartOrchestrator = "restart-orchestrator"
+
+// notificationActionInstallAndRestartOrchestrator is the executable-missing
+// variant of notificationActionRestartOrchestrator: the orchestrator also
+// needs the erun CLI installed first, so the frontend renders a link to the
+// install docs alongside the restart control rather than leaving "install the
+// CLI" as prose the desktop cannot act on.
+const notificationActionInstallAndRestartOrchestrator = "install-and-restart-orchestrator"
+
 // emitEnvNotification posts a notification tagged with the env it describes and
 // a stable source, so a later emitClearEnvNotification for the same
 // (source, tenant, environment) can dismiss it. Use it for env-scoped, state-
@@ -430,6 +442,22 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message, ac
 		Environment: environment,
 		Source:      source,
 		Action:      action,
+	})
+}
+
+// emitOrchestratorNotification posts a notification tagged with the orchestrator
+// it describes, so the frontend can render an action that operates on that
+// orchestrator directly (restarting it) rather than leaving a named remedy with
+// no way to perform it.
+func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.emit(appNotificationEvent, appNotificationPayload{
+		Kind:           kind,
+		Message:        message,
+		OrchestratorID: orchestratorID,
+		Action:         action,
 	})
 }
 

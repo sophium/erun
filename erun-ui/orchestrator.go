@@ -1566,7 +1566,7 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 	}
 	if err != nil {
 		log.Printf("erun-app: write orchestrator MCP config for %s: %v", id, err)
-		a.emitAppNotification("warning", orchestratorMCPUnwiredNotice(name, err))
+		a.emitOrchestratorNotification("warning", id, orchestratorMCPUnwiredNotice(name, err), orchestratorMCPUnwiredAction(err))
 		return ""
 	}
 	if len(skipped) > 0 {
