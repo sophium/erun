@@ -48,7 +48,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		return dashboard, nil
 	}
 	defer cancel()
-	loadTenantDashboardData(requestCtx, client, &dashboard)
+	loadTenantDashboardData(requestCtx, client, &dashboard, input)
 	return dashboard, nil
 }
 
@@ -96,12 +96,13 @@ const (
 	tenantDashboardReadComments    = "GET /v1/reviews/{review_id}/comments"
 	tenantDashboardWriteComment    = "POST /v1/reviews/{review_id}/comments"
 	tenantDashboardReadAuditEvents = "GET /v1/audit-events"
+	tenantDashboardReadUsers       = "GET /v1/users"
 )
 
 // loadTenantDashboardData resolves every panel independently. One panel the
 // caller may not read, or one call that fails, must not blank the panels that
 // worked — and a panel the caller may not read must not read as an empty one.
-func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard) {
+func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
 		// Identity is the dashboard's own precondition: without it there is no
@@ -119,12 +120,67 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	}
 	dashboard.Panels = []uiTenantDashboardPanel{{Tab: tenantDashboardTabUsers}}
 	capabilities := whoami.Capabilities
-	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard)
-	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard)
+	usernames := tenantDashboardUsernames(ctx, client, capabilities)
+	reviewFilter := eruncommon.PlatformReviewFilter{}
+	if input.ReviewFilterMine {
+		reviewFilter.AuthorUserID = whoami.UserID
+	}
+	if input.ReviewFilterWaitingOnMe {
+		reviewFilter.ReviewerUserID = whoami.UserID
+	}
+	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard, reviewFilter, usernames)
+	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard, usernames)
 	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard, reviewsOutcome)
+	loadTenantDashboardReviewThreadCounts(ctx, client, capabilities, dashboard, reviewsOutcome)
+	loadTenantDashboardReviewFilterCounts(ctx, client, capabilities, dashboard, whoami.UserID)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
 	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
 	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
+}
+
+// tenantDashboardUsernames resolves every tenant user id to its display
+// username, best effort: a caller who cannot read /v1/users, or a read that
+// fails, gets back an empty map rather than failing the dashboard load — every
+// caller of the map already falls back to the raw id it was given (#1378).
+func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) map[string]string {
+	names := make(map[string]string)
+	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
+		return names
+	}
+	users, err := client.ListUsers(ctx, eruncommon.PlatformListUsersParams{})
+	if err != nil {
+		return names
+	}
+	for _, user := range users {
+		userID := strings.TrimSpace(user.UserID)
+		username := strings.TrimSpace(user.Username)
+		if userID == "" || username == "" {
+			continue
+		}
+		names[userID] = username
+	}
+	return names
+}
+
+// loadTenantDashboardReviewFilterCounts reports how many reviews are Mine and
+// how many are Waiting on me, independent of whichever filter the caller
+// currently has applied: the Reviews tab's filter buttons need the
+// distribution visible before the caller clicks either one (#1378), not only
+// after. Best effort like the other row-enrichment reads: a restricted or
+// failing count simply leaves the corresponding field unset rather than
+// reporting a false zero.
+func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
+	if strings.TrimSpace(userID) == "" || restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews) != "" {
+		return
+	}
+	if mine, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{AuthorUserID: userID}); err == nil {
+		count := len(mine)
+		dashboard.MineReviewCount = &count
+	}
+	if waiting, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{ReviewerUserID: userID}); err == nil {
+		count := len(waiting)
+		dashboard.WaitingOnMeReviewCount = &count
+	}
 }
 
 // reviewsLoadOutcome carries the Reviews panel's own result forward to the
@@ -137,25 +193,25 @@ type reviewsLoadOutcome struct {
 	restricted string
 }
 
-func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) reviewsLoadOutcome {
+func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, filter eruncommon.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return reviewsLoadOutcome{restricted: restricted}
 	}
-	reviews, err := client.ListReviews(ctx, eruncommon.PlatformReviewFilter{})
+	reviews, err := client.ListReviews(ctx, filter)
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadReviews, err)
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return reviewsLoadOutcome{err: err}
 	}
-	dashboard.Reviews = tenantDashboardReviews(reviews)
+	dashboard.Reviews = tenantDashboardReviews(reviews, usernames)
 	dashboard.Panels = append(dashboard.Panels, panel)
 	return reviewsLoadOutcome{reviews: reviews}
 }
 
-func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, usernames map[string]string) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabQueue}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue); restricted != "" {
 		panel.Restricted = restricted
@@ -168,7 +224,7 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.Platf
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
 	} else {
-		dashboard.MergeQueue = tenantDashboardReviews(reviews)
+		dashboard.MergeQueue = tenantDashboardReviews(reviews, usernames)
 	}
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
@@ -199,6 +255,67 @@ func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformC
 		}
 	}
 	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+// loadTenantDashboardReviewThreadCounts enriches each review row with its
+// unresolved-thread count, so "is this review actually finished" is readable
+// from the list itself, not only inside the detail dialog. A review is left
+// without a count (rather than a false zero) when the caller cannot read
+// comments at all, or when its own comment read failed — supplemental detail
+// on a row, not worth a panel error the way the Reviews/Builds panels get.
+func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
+	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
+		return
+	}
+	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) != "" {
+		return
+	}
+	counts := fetchReviewThreadCountsConcurrently(ctx, client, reviewsOutcome.reviews)
+	for i := range dashboard.Reviews {
+		count, ok := counts[dashboard.Reviews[i].ReviewID]
+		if !ok {
+			continue
+		}
+		dashboard.Reviews[i].UnresolvedThreads = &count
+	}
+}
+
+// maxConcurrentReviewCommentReads mirrors maxConcurrentReviewBuildReads for
+// the same reason: bound the per-review /comments reads a big tenant's
+// listing pays for, inside the one dashboard load's shared timeout.
+const maxConcurrentReviewCommentReads = 8
+
+// fetchReviewThreadCountsConcurrently reads every review's comments in
+// parallel, bounded by maxConcurrentReviewCommentReads, mirroring
+// fetchReviewBuildsConcurrently's shape. A review whose comment read fails is
+// simply absent from the returned map rather than reported as zero.
+func fetchReviewThreadCountsConcurrently(ctx context.Context, client *eruncommon.PlatformClient, reviews []eruncommon.PlatformReview) map[string]int {
+	counts := make(map[string]int, len(reviews))
+	semaphore := make(chan struct{}, maxConcurrentReviewCommentReads)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for _, review := range reviews {
+		reviewID := strings.TrimSpace(review.ReviewID)
+		if reviewID == "" {
+			continue
+		}
+		wg.Add(1)
+		semaphore <- struct{}{}
+		go func(reviewID string) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+			comments, err := client.ListComments(ctx, reviewID)
+			if err != nil {
+				return
+			}
+			count := eruncommon.CountUnresolvedThreads(comments)
+			mu.Lock()
+			counts[reviewID] = count
+			mu.Unlock()
+		}(reviewID)
+	}
+	wg.Wait()
+	return counts
 }
 
 // maxConcurrentReviewBuildReads bounds how many /builds requests run at once,
@@ -313,11 +430,22 @@ func tenantDashboardIdentityError(err error) string {
 	}
 }
 
-func tenantDashboardReviews(reviews []eruncommon.PlatformReview) []uiTenantDashboardReview {
+func tenantDashboardReviews(reviews []eruncommon.PlatformReview, usernames map[string]string) []uiTenantDashboardReview {
 	converted := make([]uiTenantDashboardReview, 0, len(reviews))
 	for _, review := range reviews {
-		converted = append(converted, tenantDashboardReview(review))
+		converted = append(converted, tenantDashboardReviewWithUsername(review, usernames))
 	}
+	return converted
+}
+
+// tenantDashboardReviewWithUsername mirrors tenantDashboardCommentWithUsername:
+// the read paths (listings, single-review load) have a resolved user
+// directory to enrich with; the write paths in tenant_review_write.go return
+// the review the caller themselves just acted on and use the base converter
+// directly, unresolved (#1378).
+func tenantDashboardReviewWithUsername(review eruncommon.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
+	converted := tenantDashboardReview(review)
+	converted.AuthorUsername = usernames[review.AuthorUserID]
 	return converted
 }
 
@@ -325,6 +453,7 @@ func tenantDashboardReview(review eruncommon.PlatformReview) uiTenantDashboardRe
 	return uiTenantDashboardReview{
 		ReviewID:          review.ReviewID,
 		TenantID:          review.TenantID,
+		AuthorUserID:      review.AuthorUserID,
 		Name:              review.Name,
 		TargetBranch:      review.TargetBranch,
 		SourceBranch:      review.SourceBranch,

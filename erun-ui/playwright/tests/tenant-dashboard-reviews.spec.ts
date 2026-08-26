@@ -1,5 +1,6 @@
 import type { Page, Route, Request } from '@playwright/test';
 
+import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { test, expect } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
 import {
@@ -253,6 +254,322 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
 
       await expect(app.reviewDetailDialog.locator()).toContainText('platform api: conflict');
       await expect(app.reviewDetailDialog.replyInput()).toHaveValue('fixed, thanks');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
+
+// Discovery (#1378): an author column and unresolved-thread count readable
+// from the row, plus the Mine/Waiting-on-me one-click filters and their own
+// distinct "nothing matches this filter" empty state.
+test.describe('tenant dashboard — reviews discovery (#1378)', () => {
+  test('the row shows the signed-in author as "You" and the unresolved-thread count without opening the review', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-author-threads');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [{ ...REVIEW, authorUserId: 'u1', unresolvedThreads: 2 }],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('You');
+      await expect(row).toContainText('2 unresolved');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('Mine and Waiting on me apply as one-click filters and reload the dashboard with them', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-filter');
+    try {
+      const filterCalls: { authorUserId?: string; reviewerUserId?: string }[] = [];
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as {
+          method: string;
+          args?: [{ reviewFilterMine?: boolean; reviewFilterWaitingOnMe?: boolean }];
+        };
+        if (body.method === 'LoadTenantDashboard') {
+          const input = body.args?.[0];
+          const mine = Boolean(input?.reviewFilterMine);
+          const waitingOnMe = Boolean(input?.reviewFilterWaitingOnMe);
+          filterCalls.push({
+            authorUserId: mine ? 'u1' : undefined,
+            reviewerUserId: waitingOnMe ? 'u1' : undefined,
+          });
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            // Filtering is proven by the request the desktop makes (the
+            // stub cannot re-filter server-side), not by which reviews come
+            // back — so it always returns the same review and the assertion
+            // is on filterCalls plus the distinct empty state below.
+            reviews: mine || waitingOnMe ? [] : [REVIEW],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+
+      await app.tenantDashboard.mineFilterButton().click();
+      await expect(app.tenantDashboard.reviewsFilteredEmptyState()).toBeVisible();
+      await expect(app.tenantDashboard.reviewsEmptyState()).toHaveCount(0);
+      await expect(app.tenantDashboard.mineFilterButton()).toHaveAttribute('aria-pressed', 'true');
+
+      await app.tenantDashboard.clearReviewFilterButton().click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      await expect(app.tenantDashboard.mineFilterButton()).toHaveAttribute('aria-pressed', 'false');
+
+      await app.tenantDashboard.waitingOnMeFilterButton().click();
+      await expect(app.tenantDashboard.reviewsFilteredEmptyState()).toBeVisible();
+
+      expect(filterCalls).toEqual(
+        expect.arrayContaining([
+          { authorUserId: 'u1', reviewerUserId: undefined },
+          { authorUserId: undefined, reviewerUserId: undefined },
+          { authorUserId: undefined, reviewerUserId: 'u1' },
+        ]),
+      );
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
+
+// Resolution (#1378): a thread's status is visible and actionable from the
+// review detail dialog, offered only on a thread's root.
+test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
+  test('resolving a thread flips its status, the action to Reopen, and the header count', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-resolve');
+    try {
+      let resolved = false;
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [REVIEW],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            ...reviewDetail([{ ...ROOT_COMMENT, status: resolved ? 'CLOSED' : 'OPEN' }]),
+            unresolvedThreads: resolved ? 0 : 1,
+            canResolveComments: true,
+          });
+          return;
+        }
+        if (body.method === 'ResolveReviewComment') {
+          resolved = true;
+          await fulfillJSON(route, { ...ROOT_COMMENT, status: 'CLOSED' });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+
+      await expect(app.reviewDetailDialog.locator()).toContainText('1 unresolved');
+      await expect(app.reviewDetailDialog.locator()).toContainText('Unresolved');
+
+      await app.reviewDetailDialog.resolveButton(0).click();
+
+      await expect(app.reviewDetailDialog.locator()).toContainText('All resolved');
+      await expect(app.reviewDetailDialog.locator()).toContainText('Resolved');
+      await expect(app.reviewDetailDialog.reopenButton(0)).toBeVisible();
+      await expect(app.reviewDetailDialog.resolveButton(0)).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('the row shows an avatar and resolved author name, the filter buttons show counts, and the dialog gives the branch line and Resolve their own treatment', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-craft-pass');
+    const longBranch =
+      'feature/1378-desktop-review-loop-usability-and-craft-pass-for-the-tenant-dashboard-reviews-tab';
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [
+              {
+                ...REVIEW,
+                authorUserId: 'u2',
+                authorUsername: 'Pat Reviewer',
+                unresolvedThreads: 1,
+              },
+            ],
+            mineReviewCount: 3,
+            waitingOnMeReviewCount: 5,
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            reviewId: REVIEW.reviewId,
+            review: { ...REVIEW, sourceBranch: longBranch, targetBranch: `main-${longBranch}` },
+            comments: [ROOT_COMMENT],
+            unresolvedThreads: 1,
+            builds: [],
+            canComment: true,
+            canResolveComments: true,
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      // C: a resolved username, not the raw "u2" id.
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('Pat Reviewer');
+      await expect(row).not.toContainText('u2');
+      // D: an initials avatar renders beside it (decorative, so a structural
+      // locator — no accessible name exists to query by design).
+      await expect(row.locator('span[aria-hidden="true"]').filter({ hasText: 'PR' })).toBeVisible();
+
+      // E: counts are visible on the filter buttons before either is clicked.
+      await expect(app.tenantDashboard.mineFilterButton()).toContainText('3');
+      await expect(app.tenantDashboard.waitingOnMeFilterButton()).toContainText('5');
+
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+      const dialog = app.reviewDetailDialog.locator();
+
+      // K: the dialog gets a diff-discussion-appropriate width, not ~510px.
+      const dialogBox = await boundingBoxOf(dialog, 'review detail dialog');
+      expect(dialogBox.width).toBeGreaterThan(700);
+
+      // M: the branch line middle-ellipses rather than running three lines
+      // unbounded, with the full value still reachable via title.
+      await expect(dialog.getByText(longBranch, { exact: true })).toHaveCount(0);
+      await expect(dialog.locator(`[title="${longBranch}"]`)).toHaveCount(1);
+
+      // I: Resolve carries the primary button weight; Reply stays secondary.
+      await expect(dialog.getByRole('button', { name: 'Resolve' }).first()).toHaveAttribute(
+        'data-variant',
+        'default',
+      );
+      await expect(dialog.getByRole('button', { name: 'Reply' }).first()).toHaveAttribute(
+        'data-variant',
+        'outline',
+      );
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('hides the resolve action and names the missing access when the caller cannot resolve threads', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-resolve-restricted');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [REVIEW],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            ...reviewDetail([ROOT_COMMENT]),
+            unresolvedThreads: 1,
+            canResolveComments: false,
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+
+      await expect(app.reviewDetailDialog.locator()).toContainText('Unresolved');
+      await expect(app.reviewDetailDialog.resolveButton(0)).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

@@ -158,6 +158,42 @@ func reviewCloseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 	}
 }
 
+type ReviewCommentStatusInput struct {
+	platformAliasInput
+	ReviewID  string `json:"reviewId" jsonschema:"review id the comment belongs to"`
+	CommentID string `json:"commentId" jsonschema:"comment id to change status on; must be a thread's root comment, not a reply"`
+}
+
+func reviewResolveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommentID) == "" {
+			return nil, ReviewCommentResult{}, fmt.Errorf("reviewId and commentId are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		comment, err := eruncommon.RunReviewResolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, cloudDependencies())
+		if err != nil {
+			return nil, ReviewCommentResult{}, err
+		}
+		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func reviewUnresolveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentStatusInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommentID) == "" {
+			return nil, ReviewCommentResult{}, fmt.Errorf("reviewId and commentId are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		comment, err := eruncommon.RunReviewUnresolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, cloudDependencies())
+		if err != nil {
+			return nil, ReviewCommentResult{}, err
+		}
+		return nil, ReviewCommentResult{Preview: input.Preview, Comment: comment, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type ReviewMergeQueueListInput struct {
 	platformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch to list the merge queue for"`

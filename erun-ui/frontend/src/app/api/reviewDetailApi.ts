@@ -6,6 +6,7 @@ import type {
   UIReviewDetail,
   UIReviewDetailInput,
   UITenantDashboardReview,
+  UIUpdateReviewCommentStatusInput,
 } from '@/types';
 
 import {
@@ -13,6 +14,8 @@ import {
   CreateReviewComment,
   CreateReviewReply,
   LoadReviewDetail,
+  ResolveReviewComment,
+  UnresolveReviewComment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
@@ -49,6 +52,24 @@ export const reviewDetailApi = wailsApi.injectEndpoints({
         { type: 'TenantDashboard', id: input.tenant },
       ],
     }),
+    resolveReviewComment: builder.mutation<UIReviewComment, UIUpdateReviewCommentStatusInput>({
+      queryFn: wailsQueryFn<UIUpdateReviewCommentStatusInput, UIReviewComment>((input) =>
+        ResolveReviewComment(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [
+        { type: 'ReviewDetail', id: input.reviewId },
+        { type: 'TenantDashboard', id: input.tenant },
+      ],
+    }),
+    unresolveReviewComment: builder.mutation<UIReviewComment, UIUpdateReviewCommentStatusInput>({
+      queryFn: wailsQueryFn<UIUpdateReviewCommentStatusInput, UIReviewComment>((input) =>
+        UnresolveReviewComment(input),
+      ),
+      invalidatesTags: (_result, _error, input) => [
+        { type: 'ReviewDetail', id: input.reviewId },
+        { type: 'TenantDashboard', id: input.tenant },
+      ],
+    }),
   }),
 });
 
@@ -58,4 +79,6 @@ export const {
   useCreateReviewReplyMutation,
   useCreateReviewCommentMutation,
   useCloseReviewMutation,
+  useResolveReviewCommentMutation,
+  useUnresolveReviewCommentMutation,
 } = reviewDetailApi;

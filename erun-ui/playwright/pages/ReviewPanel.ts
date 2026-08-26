@@ -52,6 +52,24 @@ export class ReviewPanel {
     return this.page.getByLabel('Changed files tree');
   }
 
+  // changedFilesEnvLabel locates the changed-files tree's own copy of the
+  // shared ReviewEnvLabel (#1314) — scoped to the tree container so it can't
+  // also match the diff panel's or the review-layers block's copy of the same
+  // "tenant / environment" text.
+  changedFilesEnvLabel(envKey: string): Locator {
+    const [tenant, environment] = envKey.split('/');
+    return this.changedFilesTree().getByText(`${tenant} / ${environment}`, { exact: true });
+  }
+
+  // envLabels locates every rendered copy of the shared ReviewEnvLabel for
+  // one environment across the whole review surface (review-layers block,
+  // changed-files tree, and diff panel section header) — three when more
+  // than one environment is in scope, proving all three share one treatment.
+  envLabels(envKey: string): Locator {
+    const [tenant, environment] = envKey.split('/');
+    return this.page.getByText(`${tenant} / ${environment}`, { exact: true });
+  }
+
   async treeFilePaths(): Promise<string[]> {
     return this.changedFilesTree()
       .locator('[data-path]')
@@ -76,10 +94,16 @@ export class ReviewPanel {
   // renders above each linked environment's section once more than one target
   // is shown (#1178). Scoped to DiffList's sticky header class combination
   // (unique in the frontend source) rather than a plain text match: the
-  // changed-files tree renders its own per-env header with the same envKey
-  // text, and other surfaces (sidebar rows, tab labels) can also contain it.
+  // changed-files tree renders its own per-env header with the same label
+  // text (#1314 made the two share one ReviewEnvLabel treatment), and other
+  // surfaces (sidebar rows, tab labels) can also contain it. envKey is the
+  // internal `tenant/environment` form; the rendered label spaces the slash
+  // ("tenant / environment"), so this reformats before matching.
   envSectionHeader(envKey: string): Locator {
-    return this.page.locator('.sticky.top-0.z-10.border-b').filter({ hasText: envKey });
+    const [tenant, environment] = envKey.split('/');
+    return this.page
+      .locator('.sticky.top-0.z-10.border-b')
+      .filter({ hasText: `${tenant} / ${environment}` });
   }
 
   // The "Changed files N" collapsible header inside the aside, distinct from

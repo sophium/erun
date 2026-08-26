@@ -184,6 +184,20 @@ func (c *PlatformClient) CreateComment(ctx context.Context, reviewID string, par
 	return comment, err
 }
 
+// PlatformUpdateCommentStatusParams is the comment status-transition input.
+type PlatformUpdateCommentStatusParams struct {
+	Status string `json:"status"`
+}
+
+// UpdateCommentStatus transitions a comment thread's status (OPEN/CLOSED).
+// Only a thread's root comment carries a meaningful status; the backend
+// refuses a status change addressed to a reply.
+func (c *PlatformClient) UpdateCommentStatus(ctx context.Context, reviewID, commentID string, params PlatformUpdateCommentStatusParams) (PlatformComment, error) {
+	var comment PlatformComment
+	err := c.do(ctx, http.MethodPatch, "/v1/reviews/"+url.PathEscape(reviewID)+"/comments/"+url.PathEscape(commentID)+"/status", params, true, &comment)
+	return comment, err
+}
+
 // ListBuilds lists the builds recorded against a review.
 func (c *PlatformClient) ListBuilds(ctx context.Context, reviewID string) ([]PlatformBuild, error) {
 	var builds []PlatformBuild

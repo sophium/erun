@@ -72,6 +72,27 @@ export class TenantDashboard {
     return this.activePanel().getByText('No reviews yet', { exact: true });
   }
 
+  // reviewsFilteredEmptyState is the distinct "nothing matches this filter"
+  // empty state (as opposed to reviewsEmptyState's "nothing exists yet") —
+  // the repo's three-empty-states rule requires the two read differently.
+  reviewsFilteredEmptyState(): Locator {
+    return this.activePanel().getByText('No reviews match this filter', { exact: true });
+  }
+
+  clearReviewFilterButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Clear filter' });
+  }
+
+  // Mine's accessible name gains a count badge (e.g. "Mine 2"), so this
+  // matches the prefix rather than the exact former label (#1378).
+  mineFilterButton(): Locator {
+    return this.activePanel().getByRole('button', { name: /^Mine\b/ });
+  }
+
+  waitingOnMeFilterButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Waiting on me' });
+  }
+
   async openReview(name: string): Promise<void> {
     await this.page.getByRole('button', { name: `Open review ${name}` }).click();
   }
@@ -81,7 +102,7 @@ export class TenantDashboard {
   }
 
   reviewsRestrictedNote(): Locator {
-    return this.activePanel().getByText('You do not have access to open reviews.');
+    return this.activePanel().getByText('You do not have access to create reviews.');
   }
 
   mergeQueueTable(): Locator {

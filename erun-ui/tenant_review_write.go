@@ -20,6 +20,7 @@ const (
 	tenantDashboardWriteCreateReview      = "POST /v1/reviews"
 	tenantDashboardWriteReviewStatus      = "PATCH /v1/reviews/{review_id}/status"
 	tenantDashboardWriteAdvanceMergeQueue = "POST /v1/reviews/merge-queue/advance"
+	tenantDashboardWriteCommentStatus     = "PATCH /v1/reviews/{review_id}/comments/{comment_id}/status"
 )
 
 // CreateReview opens a review. It is a real, immediate write — there is no
@@ -196,6 +197,62 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 	})
 	if err != nil {
 		return uiReviewComment{}, operatorPlatformError(actionCommentReview, err)
+	}
+	return tenantDashboardComment(comment), nil
+}
+
+// ResolveReviewComment marks a comment thread CLOSED (resolved). The
+// dashboard only ever offers this on a thread's root comment — never a reply —
+// so, unlike the CLI/MCP paths, there is no reply-addressed-to-root rejection
+// to surface here.
+func (a *App) ResolveReviewComment(input uiUpdateReviewCommentStatusInput) (uiReviewComment, error) {
+	return a.updateReviewCommentStatus(input, "CLOSED")
+}
+
+// UnresolveReviewComment reopens a comment thread (marks it OPEN).
+func (a *App) UnresolveReviewComment(input uiUpdateReviewCommentStatusInput) (uiReviewComment, error) {
+	return a.updateReviewCommentStatus(input, "OPEN")
+}
+
+func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, status string) (uiReviewComment, error) {
+	tenant := strings.TrimSpace(input.Tenant)
+	if tenant == "" {
+		return uiReviewComment{}, fmt.Errorf("tenant is required")
+	}
+	apiURL := strings.TrimSpace(input.APIURL)
+	if apiURL == "" {
+		return uiReviewComment{}, fmt.Errorf("tenant API URL is required")
+	}
+	alias := strings.TrimSpace(input.CloudProviderAlias)
+	if alias == "" {
+		return uiReviewComment{}, fmt.Errorf("tenant primary cloud alias is required")
+	}
+	reviewID := strings.TrimSpace(input.ReviewID)
+	if reviewID == "" {
+		return uiReviewComment{}, fmt.Errorf("review id is required")
+	}
+	commentID := strings.TrimSpace(input.CommentID)
+	if commentID == "" {
+		return uiReviewComment{}, fmt.Errorf("comment id is required")
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	if err != nil {
+		return uiReviewComment{}, err
+	}
+	defer cancel()
+
+	action := actionResolveComment
+	if status == "OPEN" {
+		action = actionUnresolveComment
+	}
+	comment, err := client.UpdateCommentStatus(requestCtx, reviewID, commentID, eruncommon.PlatformUpdateCommentStatusParams{Status: status})
+	if err != nil {
+		return uiReviewComment{}, operatorPlatformError(action, err)
 	}
 	return tenantDashboardComment(comment), nil
 }

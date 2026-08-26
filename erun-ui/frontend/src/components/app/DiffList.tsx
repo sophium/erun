@@ -13,6 +13,7 @@ import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
+import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 export function DiffList(): React.ReactElement {
   const targets = useAppSelector(selectReviewEnvTargets);
@@ -50,9 +51,15 @@ function DiffEnvSection({
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
   const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
 
+  // The same ReviewEnvLabel treatment the review-layers block and the
+  // changed-files tree use (#1314), so all three per-environment surfaces
+  // read as one group instead of three independently-labelled ones. The
+  // sticky wrapper stays: it is a real functional need (this header keeps the
+  // active environment identity visible while a long diff scrolls), unlike
+  // the label styling it wraps.
   const header = showHeader ? (
-    <div className="sticky top-0 z-10 border-b border-border bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
-      {target.envKey}
+    <div className="sticky top-0 z-10 border-b border-border bg-background px-3 py-1">
+      <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />
     </div>
   ) : null;
 

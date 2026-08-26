@@ -19,11 +19,16 @@ import {
   submitCloseReview,
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
-import { formatDashboardDate, reviewStatusTone } from '@/app/tenantDashboardPanels';
+import {
+  reviewStatusTone,
+  unresolvedThreadsLabel,
+  unresolvedThreadsTone,
+} from '@/app/tenantDashboardPanels';
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
-import { InlineAlert } from './InlineAlert';
+import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
+import { BranchArrow, RelativeTime } from './TenantDashboardMessage';
 
 // ReviewDetailDialog is the review object's own detail surface, opened from a
 // row in the tenant dashboard's Reviews tab. Named "review detail" — not
@@ -41,7 +46,7 @@ export function ReviewDetailDialog(): React.ReactElement {
         }
       }}
     >
-      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
         <ReviewDetailBody detail={detail} />
       </DialogContent>
     </Dialog>
@@ -109,17 +114,47 @@ function ReviewDetailLoaded({
           {review.name || review.reviewId}
           <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
         </DialogTitle>
-        <DialogDescription>
-          {review.sourceBranch} → {review.targetBranch}
-          {data.queuePosition ? ` · queue position ${String(data.queuePosition)}` : ''}
+        <DialogDescription className="flex min-w-0 items-center gap-1.5">
+          <BranchArrow source={review.sourceBranch} target={review.targetBranch} />
+          {data.queuePosition ? (
+            <span className="flex-none">· queue position {data.queuePosition}</span>
+          ) : null}
         </DialogDescription>
       </DialogHeader>
+      <ReviewDetailThreadStatus data={data} />
       <CloseReviewAction review={review} data={data} detail={detail} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <ReviewDetailBuilds data={data} />
         <ReviewDetailComments detail={detail} />
       </div>
     </>
+  );
+}
+
+// ReviewDetailThreadStatus is the "is this review actually finished" signal
+// at the top of the dialog, visible without scrolling into the comments
+// list. Rendered only once at least one thread exists — a review with no
+// comments yet has nothing to call "all resolved".
+function ReviewDetailThreadStatus({
+  data,
+}: {
+  data: NonNullable<ReviewDetailState['data']>;
+}): React.ReactElement | null {
+  if (data.commentsRestricted || data.commentsError) {
+    return null;
+  }
+  const roots = (data.comments ?? []).filter((comment) => !comment.parentCommentId);
+  if (roots.length === 0) {
+    return null;
+  }
+  const unresolved = data.unresolvedThreads ?? 0;
+  return (
+    <div>
+      <StatusBadge
+        tone={unresolvedThreadsTone(unresolved)}
+        label={unresolvedThreadsLabel(unresolved)}
+      />
+    </div>
   );
 }
 
@@ -143,11 +178,7 @@ function CloseReviewAction({
     return null;
   }
   if (!data.canClose) {
-    return (
-      <p className="text-[13px] text-muted-foreground">
-        You do not have access to close this review.
-      </p>
-    );
+    return <PermissionNotice>You do not have access to close this review.</PermissionNotice>;
   }
   if (detail.closeConfirming) {
     return (
@@ -236,7 +267,7 @@ function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): Rea
       />
       <span className="text-muted-foreground">{build.commitId}</span>
       {build.version && <span className="text-muted-foreground">v{build.version}</span>}
-      <span className="ml-auto text-muted-foreground">{formatDashboardDate(build.createdAt)}</span>
+      <RelativeTime value={build.createdAt} className="ml-auto text-muted-foreground" />
     </li>
   );
 }

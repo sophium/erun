@@ -182,6 +182,50 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
       .toEqual(expect.arrayContaining(['alpha-only.ts', 'beta-only.ts']));
   });
 
+  test('the review-layers block, changed-files tree, and diff panel share one env label treatment (#1314)', async ({
+    app,
+    page,
+  }) => {
+    const base: DiffReviewBaseStub = { branch: 'main', commit: 'base0', shortCommit: 'base0' };
+    await stubOrchestratorAndDiffs(page, {
+      [SEED_ENV_ALPHA]: {
+        kind: 'success',
+        file: 'alpha-only.ts',
+        reviewBase: base,
+        reviewCommits: [
+          { hash: 'a1', shortHash: 'a1', subject: 'Alpha commit', author: 'a', date: '2024-01-01' },
+        ],
+      },
+      [SEED_ENV_BETA]: { kind: 'success', file: 'beta-only.ts', reviewBase: base },
+    });
+    await app.reboot();
+
+    await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
+    await app.titlebar.toggleReviewPanel();
+    const review = app.reviewPanel;
+    await expect
+      .poll(() => review.diffSectionPaths())
+      .toEqual(expect.arrayContaining(['alpha-only.ts', 'beta-only.ts']));
+
+    // Three surfaces render "pw / alpha" (review layers, changed-files tree,
+    // diff panel section header) — the raw "pw/alpha" envKey never reaches
+    // the DOM, and every occurrence uses the same spaced, app-native format.
+    await expect(review.envLabels(ALPHA_ENV_KEY)).toHaveCount(3);
+    await expect(review.envLabels(BETA_ENV_KEY)).toHaveCount(3);
+    await expect(review.changedFilesEnvLabel(ALPHA_ENV_KEY)).toBeVisible();
+    await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();
+    await expect(page.getByText(ALPHA_ENV_KEY, { exact: true })).toHaveCount(0);
+  });
+
+  test('a single linked environment renders no redundant env label', async ({ app }) => {
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.titlebar.toggleReviewPanel();
+
+    // Single-env sessions must not gain the multi-env label (#1314) — the
+    // review panel here has exactly one target, so no surface names it.
+    await expect(app.reviewPanel.envLabels(ALPHA_ENV_KEY)).toHaveCount(0);
+  });
+
   test('fetches each linked environment independently rather than one shared request', async ({
     app,
     page,

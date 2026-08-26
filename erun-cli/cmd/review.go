@@ -25,6 +25,8 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 		newReviewShowCmd(store, &alias, deps),
 		newReviewCreateCmd(store, &alias, deps),
 		newReviewCommentCmd(store, &alias, deps),
+		newReviewResolveCmd(store, &alias, deps),
+		newReviewUnresolveCmd(store, &alias, deps),
 		newReviewCloseCmd(store, &alias, deps),
 		newReviewMergeQueueCmd(store, &alias, deps),
 	)
@@ -126,7 +128,7 @@ func writeReviewDetail(ctx common.Context, detail common.ReviewDetail) error {
 	if err := writeReviewLine(ctx, detail.Review); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(ctx.Stdout, "  builds: %d, comments: %d\n", len(detail.Builds), len(detail.Comments)); err != nil {
+	if _, err := fmt.Fprintf(ctx.Stdout, "  builds: %d, comments: %d, unresolved threads: %d\n", len(detail.Builds), len(detail.Comments), detail.UnresolvedThreads); err != nil {
 		return err
 	}
 	for _, comment := range detail.Comments {
@@ -137,12 +139,15 @@ func writeReviewDetail(ctx common.Context, detail common.ReviewDetail) error {
 	return nil
 }
 
+// writeReviewCommentLine renders one comment. A thread's status lives on its
+// root comment only (a reply's own status is never separately settable), so
+// only root lines carry status=.
 func writeReviewCommentLine(ctx common.Context, comment common.PlatformComment) error {
-	prefix := "  "
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
-		prefix = "    ↳ "
+		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)
+		return err
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "%s[%s] %s:%d %s\n", prefix, comment.CommentID, comment.FilePath, comment.Line, comment.Body)
+	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] status=%s %s:%d %s\n", comment.CommentID, comment.Status, comment.FilePath, comment.Line, comment.Body)
 	return err
 }
 
@@ -234,6 +239,72 @@ func newReviewCommentCmd(store common.CloudReadStore, alias *string, deps common
 	cmd.Flags().StringVar(&filePath, "file", "", "File path the comment is anchored to")
 	cmd.Flags().IntVar(&line, "line", 0, "Line number the comment is anchored to")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "Comment id to reply to, making this a reply in that thread")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewResolveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "resolve REVIEW_ID COMMENT_ID",
+		Short: "Resolve a comment thread by closing its root comment",
+		Long: "Resolve a comment thread on a review by closing its root comment.\n\n" +
+			"COMMENT_ID must be the thread's root comment — the first comment posted at a " +
+			"file/line, not one made with --reply-to. Addressing a reply fails, naming the " +
+			"root comment to retry against. A real, immediate write, not a preview.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		Example:      "  erun review resolve 018f... 018g...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			comment, err := common.RunReviewResolve(ctx, store, *alias, args[0], args[1], deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review resolve planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewCommentLine(ctx, comment); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(comment)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewUnresolveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unresolve REVIEW_ID COMMENT_ID",
+		Short: "Reopen a comment thread by marking its root comment OPEN",
+		Long: "Reopen a comment thread on a review by marking its root comment OPEN again.\n\n" +
+			"COMMENT_ID must be the thread's root comment — the first comment posted at a " +
+			"file/line, not one made with --reply-to. Addressing a reply fails, naming the " +
+			"root comment to retry against. A real, immediate write, not a preview.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		Example:      "  erun review unresolve 018f... 018g...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			comment, err := common.RunReviewUnresolve(ctx, store, *alias, args[0], args[1], deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review unresolve planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewCommentLine(ctx, comment); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(comment)
+		},
+	}
 	addDryRunFlag(cmd)
 	return cmd
 }

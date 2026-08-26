@@ -5,7 +5,10 @@ import type { UITenantDashboard, UITenantDashboardPanel } from '@/types';
 
 import {
   activeTenantDashboardTab,
+  middleEllipsis,
+  relativeDashboardDate,
   restrictedTenantDashboardReads,
+  reviewAuthorInitials,
   visibleTenantDashboardTabs,
 } from './tenantDashboardPanels';
 
@@ -73,4 +76,29 @@ test('a selected tab the user may not open falls back to one they can', () => {
 test('a selected tab the user may open is kept', () => {
   const data = dashboard([{ tab: 'users' }, { tab: 'queue' }]);
   assert.equal(activeTenantDashboardTab(data, 'queue'), 'queue');
+});
+
+test('relativeDashboardDate reads as a scannable relative phrase, not a raw timestamp', () => {
+  const anHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  assert.match(relativeDashboardDate(anHourAgo), /ago$/);
+  assert.equal(relativeDashboardDate(undefined), '-');
+  assert.equal(relativeDashboardDate('not a date'), 'not a date');
+});
+
+test('reviewAuthorInitials derives up to two letters from a display name', () => {
+  assert.equal(reviewAuthorInitials('You'), 'Y');
+  assert.equal(reviewAuthorInitials('reviewer-1'), 'R1');
+  assert.equal(reviewAuthorInitials('operator'), 'OP');
+  assert.equal(reviewAuthorInitials(''), '?');
+});
+
+test('middleEllipsis keeps both ends of a long identifier visible', () => {
+  const longBranch =
+    'feature/1378-desktop-review-loop-usability-and-craft-pass-for-the-tenant-dashboard-reviews-tab';
+  const shortened = middleEllipsis(longBranch);
+  assert.ok(shortened.startsWith('feature/1378-desktop'));
+  assert.ok(shortened.endsWith('reviews-tab'));
+  assert.ok(shortened.includes('…'));
+  assert.ok(shortened.length < longBranch.length);
+  assert.equal(middleEllipsis('main'), 'main');
 });

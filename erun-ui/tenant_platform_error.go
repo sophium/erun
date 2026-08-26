@@ -23,10 +23,12 @@ import (
 type platformAction string
 
 const (
-	actionCreateReview  platformAction = "open a review"
-	actionCloseReview   platformAction = "close this review"
-	actionAdvanceQueue  platformAction = "advance the merge queue"
-	actionCommentReview platformAction = "comment on this review"
+	actionCreateReview     platformAction = "open a review"
+	actionCloseReview      platformAction = "close this review"
+	actionAdvanceQueue     platformAction = "advance the merge queue"
+	actionCommentReview    platformAction = "comment on this review"
+	actionResolveComment   platformAction = "resolve this comment thread"
+	actionUnresolveComment platformAction = "reopen this comment thread"
 )
 
 // operatorPlatformError turns a platform failure into what the operator needs

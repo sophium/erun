@@ -105,10 +105,13 @@ func resolveReviewListCallerFilters(client *PlatformClient, params ReviewListPar
 // ReviewDetail is the combined result of `erun review show`: the review
 // itself alongside its comment threads and recorded builds, so a caller sees
 // everything needed to read and act on a review from one command.
+// UnresolvedThreads counts root comments (threads) still OPEN; a thread's
+// status is its root comment's Status, since replies never carry their own.
 type ReviewDetail struct {
-	Review   PlatformReview    `json:"review"`
-	Comments []PlatformComment `json:"comments"`
-	Builds   []PlatformBuild   `json:"builds"`
+	Review            PlatformReview    `json:"review"`
+	Comments          []PlatformComment `json:"comments"`
+	Builds            []PlatformBuild   `json:"builds"`
+	UnresolvedThreads int               `json:"unresolvedThreads"`
 }
 
 // RunReviewShow fetches one review together with its comments and builds.
@@ -135,7 +138,76 @@ func RunReviewShow(ctx Context, store CloudReadStore, alias, reviewID string, de
 	if err != nil {
 		return ReviewDetail{}, err
 	}
-	return ReviewDetail{Review: review, Comments: comments, Builds: builds}, nil
+	return ReviewDetail{Review: review, Comments: comments, Builds: builds, UnresolvedThreads: CountUnresolvedThreads(comments)}, nil
+}
+
+// CountUnresolvedThreads counts root comments (parentCommentId unset) whose
+// status is still OPEN. A thread's status lives entirely on its root; replies
+// never carry their own (comments_validate in erun-backend-db enforces this).
+// Exported so other transports (erun-ui's tenant dashboard) can compute the
+// same count from a comment list without re-deriving the rule.
+func CountUnresolvedThreads(comments []PlatformComment) int {
+	count := 0
+	for _, comment := range comments {
+		if strings.TrimSpace(comment.ParentCommentID) == "" && comment.Status == "OPEN" {
+			count++
+		}
+	}
+	return count
+}
+
+// threadRootCommentID reports commentID's thread root when commentID is a
+// reply (parentCommentId set), so a resolve/unresolve call addressed to a
+// reply can be refused with the root id the caller should retry against
+// instead. A commentID absent from comments (e.g. a wrong review id) is
+// reported as not-a-reply and left to the backend's own not-found error.
+func threadRootCommentID(comments []PlatformComment, commentID string) (string, bool) {
+	for _, comment := range comments {
+		if comment.CommentID != commentID {
+			continue
+		}
+		if root := strings.TrimSpace(comment.ParentCommentID); root != "" {
+			return root, true
+		}
+		return "", false
+	}
+	return "", false
+}
+
+// runReviewCommentStatus is the shared implementation behind RunReviewResolve
+// and RunReviewUnresolve: it lists the review's comments (both to trace the
+// lookup and to enforce that only a thread's root, never a reply, is
+// addressable) before issuing the status PATCH.
+func runReviewCommentStatus(ctx Context, store CloudReadStore, alias, reviewID, commentID, status string, deps CloudDependencies) (PlatformComment, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformComment{}, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/comments")
+	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/comments/"+commentID+"/status", "status="+status)
+	if ctx.DryRun {
+		return PlatformComment{}, nil
+	}
+	comments, err := client.ListComments(context.Background(), reviewID)
+	if err != nil {
+		return PlatformComment{}, err
+	}
+	if rootID, isReply := threadRootCommentID(comments, commentID); isReply {
+		return PlatformComment{}, fmt.Errorf("comment %s is a reply; only a thread's root comment can be resolved or unresolved — retry against root comment %s", commentID, rootID)
+	}
+	return client.UpdateCommentStatus(context.Background(), reviewID, commentID, PlatformUpdateCommentStatusParams{Status: status})
+}
+
+// RunReviewResolve marks a comment thread CLOSED (resolved). commentID must
+// be a thread's root comment; addressing a reply is refused.
+func RunReviewResolve(ctx Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "CLOSED", deps)
+}
+
+// RunReviewUnresolve reopens a comment thread (marks it OPEN). commentID must
+// be a thread's root comment; addressing a reply is refused.
+func RunReviewUnresolve(ctx Context, store CloudReadStore, alias, reviewID, commentID string, deps CloudDependencies) (PlatformComment, error) {
+	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "OPEN", deps)
 }
 
 // RunReviewCreate opens a review.

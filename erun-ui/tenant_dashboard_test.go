@@ -30,6 +30,8 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
 		case "/v1/audit-events":
 			_, _ = w.Write([]byte(`{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`))
+		case "/v1/users":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			http.NotFound(w, req)
 		}
@@ -162,13 +164,52 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
 
-	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/audit-events" {
-		t.Fatalf("expected every read to be attempted, got %q", got)
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events"
+	if got := strings.Join(requests, ","); got != want {
+		t.Fatalf("expected every read to be attempted, got %q, want %q", got, want)
 	}
 	for _, panel := range dashboard.Panels {
 		if panel.Restricted != "" {
 			t.Fatalf("expected no panel to be hidden on an unknown capability set, got %+v", panel)
 		}
+	}
+	if dashboard.MineReviewCount == nil || *dashboard.MineReviewCount != 1 {
+		t.Fatalf("expected the Mine filter count to be computed, got %+v", dashboard.MineReviewCount)
+	}
+	if dashboard.WaitingOnMeReviewCount == nil || *dashboard.WaitingOnMeReviewCount != 1 {
+		t.Fatalf("expected the Waiting-on-me filter count to be computed, got %+v", dashboard.WaitingOnMeReviewCount)
+	}
+}
+
+// TestTenantDashboardResolvesReviewAuthorUsernames is the "u2 in the UI" bug
+// fixed for #1378: a review's raw authorUserId is enriched with the tenant
+// user directory's display name whenever the caller can read /v1/users.
+func TestTenantDashboardResolvesReviewAuthorUsernames(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests = append(requests, req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Path {
+		case "/v1/whoami":
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","capabilities":null}`))
+		case "/v1/users":
+			_, _ = w.Write([]byte(`[{"userId":"user-2","tenantId":"tenant-1","username":"pat"}]`))
+		case "/v1/reviews", "/v1/reviews/merge-queue":
+			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","authorUserId":"user-2","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+		case "/v1/reviews/review-1/builds", "/v1/reviews/review-1/comments":
+			_, _ = w.Write([]byte(`[]`))
+		case "/v1/audit-events":
+			_, _ = w.Write([]byte(`{"events":[]}`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+
+	if len(dashboard.Reviews) != 1 || dashboard.Reviews[0].AuthorUsername != "pat" {
+		t.Fatalf("expected the review's author to resolve to its username, got %+v", dashboard.Reviews)
 	}
 }
 

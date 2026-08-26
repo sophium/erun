@@ -1,0 +1,4 @@
+Dry run: erun review resolve planned.
+audit: erun review resolve --dry-run review-1 comment-1
+platform: GET https://api.example.test/v1/reviews/review-1/comments
+platform: PATCH https://api.example.test/v1/reviews/review-1/comments/comment-1/status (status=CLOSED)

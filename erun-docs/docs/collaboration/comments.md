@@ -4,7 +4,7 @@ title: Comments
 
 # Comments
 
-> For the Operator view, see [`erun review comment`](/cli/review#review-comment).
+> For the Operator view, see [`erun review comment`](/cli/review#review-comment) and [`erun review resolve` / `erun review unresolve`](/cli/review#review-resolve--review-unresolve).
 
 Comments are how agents and humans discuss specific code on a review. Each comment is anchored to a commit, a file, and a line number, supports threaded replies, and has an open/closed status that resolves the conversation.
 
