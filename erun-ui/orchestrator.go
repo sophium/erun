@@ -153,6 +153,13 @@ type orchestratorInfo struct {
 	NudgeCount         int                   `json:"nudgeCount"`
 	NudgeCapped        bool                  `json:"nudgeCapped"`
 	LastNudgeAtUnix    int64                 `json:"lastNudgeAtUnix,omitempty"`
+	// RestartRequired is true when this orchestrator's live session was spawned
+	// with an environment scope that no longer matches its persisted one. A
+	// live Claude Code session resolves --mcp-config once at launch, so nothing
+	// short of a fresh spawn (Restart) can re-wire it: the session keeps tools
+	// for an unlinked environment and has none for a newly linked one until
+	// then. See orchestratorScopeMismatch.
+	RestartRequired bool `json:"restartRequired"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -990,7 +997,7 @@ type orchestratorPacingSnapshot struct {
 	LastNudgeAtUnix int64
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState) orchestratorInfo {
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, restartRequired bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                 id,
 		Name:               name,
@@ -1008,7 +1015,18 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		NudgeCount:         pacing.NudgeCount,
 		NudgeCapped:        pacing.Capped,
 		LastNudgeAtUnix:    pacing.LastNudgeAtUnix,
+		RestartRequired:    restartRequired,
 	}
+}
+
+// orchestratorScopeMismatch reports whether a running session's wired
+// environment scope (wiredEnvs, i.e. what wireOrchestratorMCP last built its
+// MCP config from) has drifted from the environments it is configured with
+// right now. True means the live session still holds tools for an
+// environment it was unlinked from, is missing tools for one it was newly
+// linked to, or both — and only a fresh spawn (RestartOrchestrator) fixes it.
+func orchestratorScopeMismatch(wiredEnvs, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
+	return !equalOrchestratorScope(orchestratorScopeOf(wiredEnvs), orchestratorScopeOf(configuredEnvs))
 }
 
 // orchestratorModel is the model an orchestrator's Claude session launches on,
@@ -1349,7 +1367,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot()), nil
+	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), false), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments and
@@ -1384,19 +1402,31 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
-	status := "stopped"
-	sessionID := 0
-	busy := orchestratorBusySnapshot{}
-	shell := orchestratorShellSnapshot{}
-	pacing := orchestratorPacingSnapshot{}
-	if info, ok := a.runningOrchestratorInfo(id); ok {
-		status = "running"
-		sessionID = info.SessionID
-		busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
-		shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
-		pacing = orchestratorPacingSnapshot{NudgeCount: info.NudgeCount, Capped: info.NudgeCapped, LastNudgeAtUnix: info.LastNudgeAtUnix}
+	status, sessionID, busy, shell, pacing, restartRequired := a.updatedOrchestratorRunningSnapshot(id, refs)
+	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), restartRequired), nil
+}
+
+// updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
+// session state, split out to keep that function's complexity within budget.
+// "stopped" (the zero snapshots, restartRequired false) when nothing is
+// running for id.
+func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eruncommon.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired bool) {
+	info, ok := a.runningOrchestratorInfo(id)
+	if !ok {
+		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, false
 	}
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot()), nil
+	busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
+	shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
+	pacing = orchestratorPacingSnapshot{NudgeCount: info.NudgeCount, Capped: info.NudgeCapped, LastNudgeAtUnix: info.LastNudgeAtUnix}
+	// The session already running still holds whatever it was spawned with;
+	// saving a different scope here does not touch it (see
+	// orchestratorScopeMismatch). Restart is the only thing that re-wires it,
+	// so the operator is told rather than shown "running" as if the save took
+	// effect immediately.
+	if wired, ok := a.orchestratorWiredEnvs(id); ok {
+		restartRequired = orchestratorScopeMismatch(wired, configuredEnvs)
+	}
+	return "running", info.SessionID, busy, shell, pacing, restartRequired
 }
 
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
@@ -1486,7 +1516,22 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity), true
+	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, false), true
+}
+
+// orchestratorWiredEnvs returns the environment scope id's live session was
+// actually spawned with — what wireOrchestratorMCP last built its MCP config
+// from, not necessarily what the orchestrator is configured with right now —
+// or ok=false when nothing is running for it.
+func (a *App) orchestratorWiredEnvs(id string) (envs []eruncommon.OrchestratorEnvConfig, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.orchestrators[id]
+	managed := a.sessions[orchestratorSessionKey(id)]
+	if session == nil || managed == nil || managed.closed {
+		return nil, false
+	}
+	return session.envs, true
 }
 
 // runningOrchestratorConversation returns the conversation a live session was
@@ -1726,7 +1771,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot()), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), false), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -1803,6 +1848,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		busy := orchestratorBusySnapshot{}
 		shell := orchestratorShellSnapshot{}
 		pacing := orchestratorPacingSnapshot{}
+		restartRequired := false
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
@@ -1810,9 +1856,14 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
 				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 				pacing = orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+				// The persisted config is the operator's intent; the session
+				// still runs on whatever it was spawned with. A poll that
+				// shows the new set as if it were live is exactly the defect
+				// this flag exists to stop (see orchestratorScopeMismatch).
+				restartRequired = orchestratorScopeMismatch(session.envs, config.Environments)
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity, restartRequired))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -1825,7 +1876,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity))
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

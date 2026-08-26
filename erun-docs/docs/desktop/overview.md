@@ -34,6 +34,8 @@ Above your environments, the sidebar's **ERUN** section lists your host-side orc
 
 **Orchestrator details on hover.** Hover a running orchestrator's row to see what it's doing and, for each linked environment, its own state rather than just its name: busy (naming the holder when it's known), idle, in outage, or not open from this desktop — the same activity this environment's own hover card reports, so the two can never disagree. A **Nudges** line reports whether ERun has had to restate its pacing contract to a quiet session, how many times, and whether it has stopped nudging after repeated attempts — a capped session needs your reply or a restart, since ERun has stopped acting on its behalf.
 
+**Editing a running orchestrator's environments takes a restart to apply.** Its session already holds the AI tooling for the environments it started with, and that can't be swapped out from under it — so saving a different set in **Manage** doesn't touch a session that's already running. The row's status dot and the hover card both say so ("Restart to apply") until you do, and the manage dialog carries the same **Restart** action right there, next to the reason. Editing a stopped orchestrator needs no restart: its next start already picks up the new set.
+
 Each orchestrator runs under two layers of guidance, and the dialog opens either one in your editor (VS Code or IntelliJ):
 
 - **Role** — what this orchestrator does. Yours to edit; ERun creates it once and never overwrites it.

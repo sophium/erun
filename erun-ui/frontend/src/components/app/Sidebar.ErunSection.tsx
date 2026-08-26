@@ -322,18 +322,26 @@ function OrchestratorRowActions({
   running: boolean;
   active: boolean;
 }): React.ReactElement {
+  // A live session's toolset is fixed at launch (see erun#1319): re-scoping it
+  // while it runs cannot take effect until it restarts, so "running" alone
+  // would say the save already applied when it has not. The dot borrows the
+  // same shape 'failed' already uses (WCAG non-colour-only status) rather
+  // than inventing a third one, since both mean "this needs your attention."
+  const restartRequired = running && orchestrator.restartRequired;
   return (
     <>
       <span
         className="flex size-[18px] flex-none items-center justify-center"
         role="img"
         aria-label={
-          running
-            ? `Orchestrator ${orchestrator.name} is running`
-            : `Orchestrator ${orchestrator.name} is stopped`
+          restartRequired
+            ? `Orchestrator ${orchestrator.name} is running but needs a restart to apply its new environments`
+            : running
+              ? `Orchestrator ${orchestrator.name} is running`
+              : `Orchestrator ${orchestrator.name} is stopped`
         }
       >
-        <StatusDotGlyph state={running ? 'running' : 'stopped'} />
+        <StatusDotGlyph state={restartRequired ? 'failed' : running ? 'running' : 'stopped'} />
       </span>
       {!orchestrator.transient && (
         <>

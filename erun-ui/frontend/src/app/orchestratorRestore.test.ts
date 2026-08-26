@@ -20,6 +20,7 @@ function orchestrator(id: string, transient = false): OrchestratorInfo {
     shellStartedAtUnix: 0,
     nudgeCount: 0,
     nudgeCapped: false,
+    restartRequired: false,
   };
 }
 

@@ -22,7 +22,7 @@ func postRestartControl(t *testing.T, port int, orchestratorID string) restartCo
 	if err != nil {
 		t.Fatalf("POST restart control: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var decoded restartControlResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode response: %v", err)
