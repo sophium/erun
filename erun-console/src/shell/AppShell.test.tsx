@@ -14,9 +14,9 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-// Only the identity panels fetch on mount (Users, Org settings); every other
-// section fetches only on submit. A blanket 200-empty response is enough to
-// let navigating into either without erroring.
+// Only the identity panels fetch on mount (Users, Org settings, Outbound
+// mail); every other section fetches only on submit. A blanket 200-empty
+// response is enough to let navigating into any of them without erroring.
 function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
@@ -70,6 +70,7 @@ describe('AppShell navigation', () => {
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
     expect(nav.getByRole('button', { name: /Users/ })).toBeInTheDocument();
     expect(nav.getByRole('button', { name: /Org settings/ })).toBeInTheDocument();
+    expect(nav.getByRole('button', { name: /Outbound mail/ })).toBeInTheDocument();
   });
 
   it('hides the identity sections for a non-OPERATIONS tenant', () => {
@@ -78,6 +79,7 @@ describe('AppShell navigation', () => {
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
     expect(nav.queryByRole('button', { name: /Users/ })).not.toBeInTheDocument();
     expect(nav.queryByRole('button', { name: /Org settings/ })).not.toBeInTheDocument();
+    expect(nav.queryByRole('button', { name: /Outbound mail/ })).not.toBeInTheDocument();
   });
 
   it('switches the main pane and keeps exactly one nav item current', () => {

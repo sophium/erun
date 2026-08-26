@@ -5,12 +5,16 @@ import {
   type EnrollIdentityUserResult,
   type IdentityUser,
   type OrgSettings,
+  type SmtpStatus,
   type UpdateOrgSettingsInput,
+  type UpdateSmtpSettingsInput,
   useCreateIdentityUserMutation,
   useGetOrgSettingsQuery,
+  useGetSmtpSettingsQuery,
   useListIdentityUsersQuery,
   useSetIdentityUserActiveMutation,
   useUpdateOrgSettingsMutation,
+  useUpdateSmtpSettingsMutation,
 } from '../app/api/identityApi';
 import { queryErrorMessage } from '../app/queryError';
 
@@ -42,6 +46,7 @@ export interface UsersController {
   refresh: () => void;
   enroll: (input: EnrollIdentityUserInput) => void;
   setActive: (externalId: string, active: boolean) => void;
+  dismissTemporaryPassword: () => void;
 }
 
 // useUsersController lists, enrolls, deactivates and reactivates identities.
@@ -107,7 +112,19 @@ export function useUsersController(token: string): UsersController {
     [token, activeRef, setIdentityUserActive],
   );
 
-  return { usersState, enrollState, refresh, enroll, setActive };
+  // dismissTemporaryPassword strips the one-time credential out of the held
+  // result once the operator has closed the dialog showing it, so it stops
+  // sitting in this controller's state — the enrolled/error messaging above
+  // it stays, only the secret itself is dropped.
+  const dismissTemporaryPassword = React.useCallback(() => {
+    setEnrollState((prev) =>
+      prev.status === 'enrolled' && prev.result.temporaryPassword !== undefined
+        ? { status: 'enrolled', result: { ...prev.result, temporaryPassword: undefined } }
+        : prev,
+    );
+  }, []);
+
+  return { usersState, enrollState, refresh, enroll, setActive, dismissTemporaryPassword };
 }
 
 export type OrgSettingsState =
@@ -146,6 +163,53 @@ export function useOrgSettingsController(token: string): OrgSettingsController {
     const settings = updateResult.data ?? query.data;
     if (settings === undefined) {
       return { status: 'loading' };
+    }
+    return updateResult.isLoading ? { status: 'saving', settings } : { status: 'ready', settings };
+  })();
+
+  return { state, save };
+}
+
+// SmtpSettingsState keeps a failed save's settings around (status 'error'
+// still carries the last-known settings) rather than replacing the form with
+// a bare error message: the operator's inputs stay editable and resubmitting
+// is the recovery path, instead of a dead end that only a page reload fixes.
+export type SmtpSettingsState =
+  | { status: 'loading' }
+  | { status: 'load-error'; message: string }
+  | { status: 'ready'; settings: SmtpStatus }
+  | { status: 'saving'; settings: SmtpStatus }
+  | { status: 'error'; settings: SmtpStatus; message: string };
+
+export interface SmtpSettingsController {
+  state: SmtpSettingsState;
+  save: (input: UpdateSmtpSettingsInput) => void;
+}
+
+// useSmtpSettingsController reads the platform's outbound-mail configuration
+// and applies updates, mirroring useOrgSettingsController's precedence rule
+// (the update result's own data wins over the read query's while a save is
+// settling).
+export function useSmtpSettingsController(token: string): SmtpSettingsController {
+  const query = useGetSmtpSettingsQuery(token);
+  const [updateSmtpSettings, updateResult] = useUpdateSmtpSettingsMutation();
+
+  const save = React.useCallback(
+    (input: UpdateSmtpSettingsInput) => {
+      void updateSmtpSettings({ token, input });
+    },
+    [token, updateSmtpSettings],
+  );
+
+  const state: SmtpSettingsState = (() => {
+    const settings = updateResult.data ?? query.data;
+    if (settings === undefined) {
+      return query.error !== undefined
+        ? { status: 'load-error', message: queryErrorMessage(query.error) }
+        : { status: 'loading' };
+    }
+    if (updateResult.isError) {
+      return { status: 'error', settings, message: queryErrorMessage(updateResult.error) };
     }
     return updateResult.isLoading ? { status: 'saving', settings } : { status: 'ready', settings };
   })();

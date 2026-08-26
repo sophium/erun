@@ -20,6 +20,14 @@ export interface IdentityUser {
   lastName?: string;
 }
 
+function asNumber(value: unknown): number {
+  return typeof value === 'number' ? value : 0;
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true;
+}
+
 function parseIdentityUser(raw: Record<string, unknown>): IdentityUser {
   return {
     id: asString(raw.id),
@@ -57,10 +65,19 @@ export interface ErunUserRef {
 // erun-side mapping failed after the IdP identity was created — see
 // service.IdentityService.Enroll on the backend for why that half-landed
 // state is reported rather than swallowed.
+//
+// mailDeliveryConfigured/temporaryPassword/warning report which of the two
+// enrollment paths the backend actually took: with mail configured, the IdP
+// emails the invite itself; without it, the backend mints temporaryPassword
+// once instead so the account is usable immediately rather than stuck
+// waiting on an email that can never arrive.
 export interface EnrollIdentityUserResult {
   idpUser: IdentityUser;
   erunUser?: ErunUserRef;
   error?: string;
+  mailDeliveryConfigured: boolean;
+  temporaryPassword?: string;
+  warning?: string;
 }
 
 function parseEnrollResult(raw: unknown): EnrollIdentityUserResult {
@@ -75,6 +92,9 @@ function parseEnrollResult(raw: unknown): EnrollIdentityUserResult {
         ? { userId: asString(erunUserRaw.userId), username: asString(erunUserRaw.username) }
         : undefined,
     error: asOptionalString(raw.error),
+    mailDeliveryConfigured: asBoolean(raw.mailDeliveryConfigured),
+    temporaryPassword: asOptionalString(raw.temporaryPassword),
+    warning: asOptionalString(raw.warning),
   };
 }
 
@@ -89,14 +109,6 @@ export interface OrgSettings {
   passwordRequiresNumber: boolean;
   passwordRequiresSymbol: boolean;
   verifiedDomains: string[];
-}
-
-function asNumber(value: unknown): number {
-  return typeof value === 'number' ? value : 0;
-}
-
-function asBoolean(value: unknown): boolean {
-  return value === true;
 }
 
 function parseOrgSettings(raw: unknown): OrgSettings {
@@ -125,6 +137,61 @@ export interface UpdateOrgSettingsInput {
   passwordRequiresLowercase?: boolean;
   passwordRequiresNumber?: boolean;
   passwordRequiresSymbol?: boolean;
+}
+
+// The platform's outbound-mail configuration. Password is never part of the
+// read shape — Zitadel does not return it, and this contract only ever
+// writes it.
+export interface SmtpConfig {
+  host: string;
+  username: string;
+  senderAddress: string;
+  senderName: string;
+  replyToAddress?: string;
+  tls: boolean;
+}
+
+// The platform's honest answer to "can this instance send mail at all".
+// configured: false means no active config exists yet — the default for a
+// freshly deployed platform.
+export interface SmtpStatus {
+  configured: boolean;
+  config: SmtpConfig;
+}
+
+function parseSmtpConfig(raw: unknown): SmtpConfig {
+  if (!isRecord(raw)) {
+    return { host: '', username: '', senderAddress: '', senderName: '', tls: false };
+  }
+  return {
+    host: asString(raw.host),
+    username: asString(raw.user),
+    senderAddress: asString(raw.senderAddress),
+    senderName: asString(raw.senderName),
+    replyToAddress: asOptionalString(raw.replyToAddress),
+    tls: asBoolean(raw.tls),
+  };
+}
+
+function parseSmtpStatus(raw: unknown): SmtpStatus {
+  if (!isRecord(raw)) {
+    throw new Error('smtp settings response was not in the expected shape');
+  }
+  return { configured: asBoolean(raw.configured), config: parseSmtpConfig(raw.config) };
+}
+
+// UpdateSmtpSettingsInput is the declarative desired state the operator
+// submits. password is omitted on an update that only changes non-secret
+// fields — the backend leaves Zitadel's stored password untouched — and is
+// required only the first time a config is created.
+export interface UpdateSmtpSettingsInput {
+  host: string;
+  username?: string;
+  password?: string;
+  senderAddress: string;
+  senderName?: string;
+  replyToAddress?: string;
+  tls: boolean;
 }
 
 export const identityApi = platformApi.injectEndpoints({
@@ -191,6 +258,31 @@ export const identityApi = platformApi.injectEndpoints({
       transformResponse: parseOrgSettings,
       invalidatesTags: ['OrgSettings'],
     }),
+
+    // getSmtpSettings reads the platform's active outbound-mail
+    // configuration — configured: false, not an error, when none exists yet.
+    getSmtpSettings: builder.query<SmtpStatus, string>({
+      query: (token) => ({ url: '/v1/identity/smtp-settings', token, label: 'get smtp settings' }),
+      transformResponse: parseSmtpStatus,
+      providesTags: ['SmtpSettings'],
+    }),
+
+    // updateSmtpSettings converges the configuration to input and returns
+    // the resulting status, same shape as the GET above.
+    updateSmtpSettings: builder.mutation<
+      SmtpStatus,
+      { token: string; input: UpdateSmtpSettingsInput }
+    >({
+      query: ({ token, input }) => ({
+        url: '/v1/identity/smtp-settings',
+        method: 'PATCH',
+        body: input,
+        token,
+        label: 'update smtp settings',
+      }),
+      transformResponse: parseSmtpStatus,
+      invalidatesTags: ['SmtpSettings'],
+    }),
   }),
 });
 
@@ -200,4 +292,6 @@ export const {
   useSetIdentityUserActiveMutation,
   useGetOrgSettingsQuery,
   useUpdateOrgSettingsMutation,
+  useGetSmtpSettingsQuery,
+  useUpdateSmtpSettingsMutation,
 } = identityApi;

@@ -4,6 +4,12 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   FieldLabel,
   Input,
@@ -21,6 +27,11 @@ import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityA
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
 
+// EnrollFeedback tells the operator which of the two enrollment paths the
+// backend actually took: with mail configured, the identity provider emails
+// the invite itself; without it, there is no mail path for that link to
+// travel, so the temporary password shown below is the only way the new
+// person signs in.
 function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement | null {
   if (enroll.status === 'enrolled') {
     if (enroll.result.error !== undefined) {
@@ -32,9 +43,18 @@ function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement
         </p>
       );
     }
+    if (enroll.result.mailDeliveryConfigured) {
+      return (
+        <p className="text-sm text-muted-foreground" role="status">
+          Enrolled {enroll.result.idpUser.username}. An invite email is on its way to complete
+          sign-in.
+        </p>
+      );
+    }
     return (
       <p className="text-sm text-muted-foreground" role="status">
-        Enrolled {enroll.result.idpUser.username}. They will receive an email to complete sign-in.
+        Enrolled {enroll.result.idpUser.username}. Outbound mail is not configured, so no invite
+        email was sent — hand them the temporary password shown below.
       </p>
     );
   }
@@ -46,6 +66,69 @@ function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement
     );
   }
   return null;
+}
+
+// TemporaryPasswordDialog shows the one-time credential enrollment returns
+// when mail delivery is not configured. It never leaves a trace once closed:
+// onDismiss (wired to both the "Done" button and clicking outside/the X)
+// strips the password out of the controller's own state, so nothing keeps
+// holding it after the operator has copied or noted it down.
+function TemporaryPasswordDialog({
+  username,
+  password,
+  onDismiss,
+}: {
+  username: string;
+  password: string;
+  onDismiss: () => void;
+}): React.ReactElement {
+  const [copied, setCopied] = React.useState(false);
+
+  const copy = (): void => {
+    void navigator.clipboard.writeText(password).then(() => {
+      setCopied(true);
+    });
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onDismiss();
+        }
+      }}
+    >
+      <DialogContent aria-labelledby="temp-password-heading">
+        <DialogHeader>
+          <DialogTitle id="temp-password-heading">Temporary password for {username}</DialogTitle>
+          <DialogDescription>
+            This is shown once and will not be shown again. Share it with {username} directly; they
+            must sign in and change it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Input
+            readOnly
+            value={password}
+            aria-label="Temporary password"
+            className="font-mono"
+            onFocus={(e) => {
+              e.target.select();
+            }}
+          />
+          <Button type="button" variant="outline" onClick={copy}>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <DialogFooter>
+          <Button type="button" onClick={onDismiss}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function EnrollForm({
@@ -221,7 +304,10 @@ function UsersBody({
 // mapping in one action) and deactivate/reactivate an existing one. Only
 // rendered for an OPERATIONS tenant — see App.tsx.
 export function UsersPanel({ token }: { token: string }): React.ReactElement {
-  const { usersState, enrollState, enroll, setActive } = useUsersController(token);
+  const { usersState, enrollState, enroll, setActive, dismissTemporaryPassword } =
+    useUsersController(token);
+  const temporaryPassword =
+    enrollState.status === 'enrolled' ? enrollState.result.temporaryPassword : undefined;
   return (
     <Card aria-labelledby="identity-users-heading">
       <CardHeader>
@@ -231,6 +317,13 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
         <UsersBody usersState={usersState} onSetActive={setActive} />
         <EnrollForm enroll={enrollState} onEnroll={enroll} />
       </CardContent>
+      {temporaryPassword !== undefined && enrollState.status === 'enrolled' && (
+        <TemporaryPasswordDialog
+          username={enrollState.result.idpUser.username}
+          password={temporaryPassword}
+          onDismiss={dismissTemporaryPassword}
+        />
+      )}
     </Card>
   );
 }
