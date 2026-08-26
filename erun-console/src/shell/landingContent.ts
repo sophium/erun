@@ -6,7 +6,7 @@ import { Columns2, Gauge, Layers, ShieldCheck } from 'lucide-react';
 // pitch instead of a blank hero, while one that does configure `tagline`
 // (GET /v1/platform) overrides this text entirely.
 export const DEFAULT_TAGLINE =
-  'Agentic coding from idea to production — at speed, without compromising compliance.';
+  'Agentic coding from idea to production, without compromising compliance.';
 
 export const DEFAULT_DESCRIPTION =
   'Every task — a feature, a peer review, a hotfix — gets its own isolated environment with the full stack inside, so an Operator and an AI Agent can work side by side without fighting over one shared dev stack.';

@@ -67,7 +67,7 @@ describe('LandingScreen content', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: 'Agentic coding from idea to production — at speed, without compromising compliance.',
+        name: 'Agentic coding from idea to production, without compromising compliance.',
       }),
     ).toBeInTheDocument();
     expect(

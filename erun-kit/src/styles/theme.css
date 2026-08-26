@@ -20,6 +20,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-foreground: var(--accent-brand-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -68,6 +70,11 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
+  /* The one deliberate brand hue in an otherwise neutral palette: a blue at
+     the same 258deg hue as --chart-1..5 so it reads as "this product's
+     color" rather than a decorative addition. 5.67:1 on white. */
+  --accent-brand: oklch(0.52 0.19 258);
+  --accent-brand-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(1 0 0);
   --border: oklch(0.922 0 0);
@@ -135,6 +142,10 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.371 0 0);
   --accent-foreground: oklch(0.985 0 0);
+  /* Lighter and lower-chroma than the light-mode value so it stays legible on
+     a near-black background instead of just inverting: 8.78:1 on dark bg. */
+  --accent-brand: oklch(0.75 0.14 258);
+  --accent-brand-foreground: oklch(0.145 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.275 0 0);
