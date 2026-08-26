@@ -186,7 +186,7 @@ function JobRow({
       className="grid gap-1.5 rounded-[var(--radius)] border border-border bg-background px-3 py-2.5"
       data-testid="manage-jobs-row"
     >
-      <header className="flex items-baseline justify-between gap-3">
+      <header className="flex min-w-0 items-baseline justify-between gap-3">
         <span
           className="min-w-0 truncate text-[13px] font-medium text-foreground"
           data-testid="manage-jobs-row-name"
