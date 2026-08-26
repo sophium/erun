@@ -14,7 +14,7 @@ Signed in as an Operator on an **OPERATIONS** tenant, the console's **Users** vi
 
 - **Enroll a user.** Give a username and email; the console creates the identity in the platform's IdP and the matching erun user in one action. If the erun-side half fails after the identity provider half succeeds, the console tells you the identity provider id it created so you can retry the mapping rather than enrolling a duplicate.
   - **When outbound mail is configured** (see below), enrolling emails the new person a sign-in link, the normal invite flow.
-  - **When it is not**, there is no mail path for that link to travel, so the backend does not pretend to send one: it generates a temporary password instead and returns it once. This is deliberate — an invite that silently waited on an email that could never arrive would look successful and never resolve. **(Planned.)** A console view for handing that temporary password to you is landing alongside the backend work this depends on; until it does, ask an Agent to enroll the user for you and relay the password it gets back.
+  - **When it is not**, there is no mail path for that link to travel, so the backend does not pretend to send one: it generates a temporary password instead and returns it once. This is deliberate — an invite that silently waited on an email that could never arrive would look successful and never resolve. The console shows this password in a dialog right after enrollment, copyable in one click, and says plainly it will not be shown again. Hand it to the new person before closing the dialog — closing it drops the password from the console's own state for good.
 - **List every identity** the platform's IdP knows about, with its current state.
 - **Deactivate** a user, which blocks their next sign-in immediately.
 - **Reactivate** a deactivated user.
@@ -27,14 +27,14 @@ The **Org settings** view lets you read and change:
 
 ## Outbound mail (SMTP)
 
-Signup verification, password reset, and the invite email above all depend on the platform's IdP actually being able to send mail — and by default, a freshly deployed platform cannot: no mail provider is configured. The platform can now report that state, and be told how to fix it (issue #1168):
+Signup verification, password reset, and the invite email above all depend on the platform's IdP actually being able to send mail — and by default, a freshly deployed platform cannot: no mail provider is configured. The console's **Outbound mail** view (next to Users and Org settings, same OPERATIONS-only visibility) reports that state plainly — a badge reading "Not configured" or "Configured" — and lets you set:
 
-- **Host** — your provider's SMTP host and port, e.g. `smtp.yourprovider.com:587`.
-- **Username** and **Password** — the credential your mail provider issued you. Get this from your provider (or wherever your organization stores that kind of credential) before you start; the platform never generates or invents one.
+- **Host** and **Port** — your provider's SMTP host and port, e.g. `smtp.yourprovider.com` / `587`.
+- **Username** and **Password** — the credential your mail provider issued you. Get this from your provider (or wherever your organization stores that kind of credential) before you start; the platform never generates or invents one. Password is required the first time you configure mail; leave it blank on a later edit to keep the one already stored.
 - **From address** and **From name** — what recipients see as the sender, e.g. `noreply@yourdomain.com` / `Your Company`.
 - **Use TLS** — leave this on unless your provider explicitly tells you otherwise.
 
-**(Planned.)** A console view for reading and setting this is landing alongside the backend work this depends on; until it does, ask an Agent to configure it for you — give it the values above and it drives the underlying API (see [Agent reference · Identity administration](/agent-reference/identity-administration#smtp-settings-get)).
+Saving drives the same underlying API an Agent would call directly (see [Agent reference · Identity administration](/agent-reference/identity-administration#smtp-settings-get)); a failed save reports your mail provider's own error next to the form, and your entries stay in place so you can fix the value and retry.
 
 There is no way around supplying those values yourself — ERun cannot supply a mail provider on your behalf, and self-service password reset and signup verification simply cannot work without one. Until it's configured, the platform says so plainly rather than staying silent, and inviting a colleague falls back to the temporary-password flow described above rather than pretending an email went out.
 
