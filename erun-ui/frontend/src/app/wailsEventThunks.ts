@@ -179,7 +179,7 @@ export const handleAppNotification =
 // with no other recovery. Retrying self-heals the missed refresh instead of
 // silently dropping the new environment (erun-ui/AGENTS.md § "Command
 // Completion And State-Refresh Wiring").
-const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 3;
+const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 8;
 const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
 
 const delayMs = (ms: number): Promise<void> =>
