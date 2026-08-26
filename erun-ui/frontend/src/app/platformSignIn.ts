@@ -5,10 +5,10 @@ import type { UITenantDashboard } from '@/types';
 // write (comment, close, advance queue) discovers the signed-in platform
 // token is no longer valid. Kept as an explicit contract here, rather than
 // inferred from error shape, because a failed Wails call surfaces as a bare
-// string with no room for a machine-readable reason to ride along (#1390).
+// string with no room for a machine-readable reason to ride along.
 //
 // The tenant dashboard's own whole-dashboard load no longer needs this
-// string-matching contract (#1393): it renders directly off
+// string-matching contract: it renders directly off
 // UITenantDashboard.platformState, a typed enum distinguishing not-signed-in
 // from not-enrolled from no-permission, none of which collapse to one
 // sentence anymore. This module now covers only the write-action surfaces
@@ -25,7 +25,7 @@ export function tenantNeedsSignIn(message: string): boolean {
 // failure like TENANT_SIGN_IN_AGAIN_MESSAGE names — the same alias the
 // tenant dashboard already resolved server-side for this same tenant
 // session, never a tenant's primary cloud alias (which may be any provider
-// type and was the root cause of #1393).
+// type).
 export function resolveTenantPlatformAlias(
   dashboard: UITenantDashboard | null | undefined,
 ): string {

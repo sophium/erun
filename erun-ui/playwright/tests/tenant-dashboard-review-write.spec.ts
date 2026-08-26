@@ -52,6 +52,7 @@ function dashboardResponse(
     tenant: SEED_TENANT,
     environment,
     apiUrl: 'http://127.0.0.1:1/unreachable',
+    platformAlias: 'pw-aws',
     user: { tenantId: 't1', userId: 'u1', username: 'operator' },
     reviews: overrides.reviews ?? [],
     mergeQueue: overrides.mergeQueue ?? [],

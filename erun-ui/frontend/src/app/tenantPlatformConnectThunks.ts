@@ -1,7 +1,7 @@
 // tenantPlatformConnectThunks drives the tenant dashboard's not-connected and
-// not-enrolled states (#1393): connecting a tenant to a hosted erun platform
-// for the first time, and enrolling the signed-in identity into it. Split out
-// of tenantDialogThunks.ts to keep that file under eslint's 500-line cap.
+// not-enrolled states: connecting a tenant to a hosted erun platform for the
+// first time, and enrolling the signed-in identity into it. Split out of
+// tenantDialogThunks.ts to keep that file under eslint's 500-line cap.
 
 import type { TenantDashboardState } from '@/app/state';
 

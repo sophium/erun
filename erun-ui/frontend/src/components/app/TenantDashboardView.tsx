@@ -23,9 +23,8 @@ import { TenantPlatformStateCard } from './TenantPlatformState';
 // tenantDashboardIsBlocked reports whether the surface has a single shared
 // precondition unmet (loading, a generic load failure, or one of the
 // platform-readiness states) — in which case the tab strip and per-panel
-// chrome must not render at all (#1393, defect 1): a caller who cannot read
-// anything sees that named once, not six enabled tabs each discovering it on
-// their own.
+// chrome must not render at all: a caller who cannot read anything sees
+// that named once, not six enabled tabs each discovering it on their own.
 function tenantDashboardIsBlocked(dashboard: AppState['tenantDashboard']): boolean {
   return (
     dashboard.loading ||
@@ -58,9 +57,9 @@ export function TenantDashboardView(): React.ReactElement | null {
             </p>
           </div>
           {/* Refresh is a manual-choice convenience for an already-loaded
-              dashboard, never the repair path for a blocked one (#1393,
-              defect 3) — every blocked state recovers on its own once its
-              real precondition is resolved. */}
+              dashboard, never the repair path for a blocked one — every
+              blocked state recovers on its own once its real precondition
+              is resolved. */}
           {!blocked && (
             <Button
               type="button"
@@ -86,9 +85,9 @@ export function TenantDashboardView(): React.ReactElement | null {
 }
 
 // TenantDashboardBlockedBody renders the one shared reason nothing loaded,
-// full-panel, with no tab strip beside it (#1393, defect 1 and 2): the
-// operator sees a designed card naming what was attempted, not an alert
-// floating over an otherwise-empty tab strip.
+// full-panel, with no tab strip beside it: the operator sees a designed
+// card naming what was attempted, not an alert floating over an
+// otherwise-empty tab strip.
 function TenantDashboardBlockedBody({
   dashboard,
   tenant,

@@ -13,9 +13,9 @@ import type { AppThunk, RootState } from './store';
 
 // CloudProviderUpdateOutcome distinguishes an update that never ran (the
 // alias was already busy with another action, or was blank) from one that
-// ran and failed — the fix for the second #1392-review defect. Collapsing
-// both into `false` meant a second click while the first sign-in was still
-// in flight rendered "Sign-in failed" for an attempt that never happened.
+// ran and failed. Collapsing both into `false` meant a second click while
+// the first sign-in was still in flight rendered "Sign-in failed" for an
+// attempt that never happened.
 export type CloudProviderUpdateOutcome =
   | { status: 'success'; provider: UICloudProviderStatus }
   | { status: 'failed'; message: string }

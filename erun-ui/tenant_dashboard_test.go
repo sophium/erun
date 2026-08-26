@@ -46,6 +46,15 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 // access token carrying issuer/subject claims a test can assert on.
 func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
 	t.Helper()
+	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}})
+}
+
+// testERunPlatformAliasAppWithTenants is testERunPlatformAliasApp with an
+// explicit tenants map, for tests exercising a tenant-level config override
+// (e.g. TenantConfig.APIURL) that the default single-tenant fixture cannot
+// carry.
+func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]eruncommon.TenantConfig) *App {
+	t.Helper()
 	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
@@ -59,7 +68,7 @@ func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
 		ERun:     &eruncommon.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}
 	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: tenants},
 		cloudDeps: eruncommon.CloudDependencies{
 			CloudSecretStore: secrets,
 			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
@@ -79,9 +88,9 @@ const (
 )
 
 // testAWSAliasApp builds an App whose only configured cloud alias is an AWS
-// one — the exact shape the operator's own machine had (#1393): a tenant's
-// primary cloud alias is AWS-typed, and no erun platform alias is configured
-// at all. Used to prove the platform read no longer reaches for it.
+// one — the exact shape the operator's own machine had: a tenant's primary
+// cloud alias is AWS-typed, and no erun platform alias is configured at all.
+// Used to prove the platform read no longer reaches for it.
 func testAWSAliasApp(t *testing.T) *App {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")

@@ -13,7 +13,7 @@ import {
 // resolves to a sign-in action, and that every other message — the "ask an
 // administrator" permission notices included — stays action-less. The
 // dashboard's own whole-dashboard load no longer goes through this
-// string-matching contract at all (#1393) — it renders directly off
+// string-matching contract at all — it renders directly off
 // UITenantDashboard.platformState.
 
 test('the known stale-identity sentence needs a sign-in action', () => {

@@ -366,11 +366,11 @@ export const chooseTenantPlatformAlias =
   };
 
 // tenantDashboardInput no longer resolves a platform base URL or cloud
-// alias itself (#1393) — the desktop's Go side resolves the erun-type
-// platform alias the same way `erun platform` does and reports the outcome
-// on the response (platformState/platformAlias/platformUrl). This only
-// still needs an environment for the API-log panel's own MCP/kube-context
-// read, which is a distinct, per-environment concern.
+// alias itself — the desktop's Go side resolves the erun-type platform
+// alias the same way `erun platform` does and reports the outcome on the
+// response (platformState/platformAlias/platformUrl). This only still needs
+// an environment for the API-log panel's own MCP/kube-context read, which is
+// a distinct, per-environment concern.
 function tenantDashboardInput(
   tenantName: string,
   tenant: UITenant | undefined,

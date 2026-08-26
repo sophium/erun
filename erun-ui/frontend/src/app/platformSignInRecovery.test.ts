@@ -18,19 +18,19 @@ import tenantsReducer from './slices/tenantsSlice';
 import type { AppDispatch } from './store';
 import { loadTenantDashboard } from './tenantDialogThunks';
 
-// #1392/#1393: loginPrimaryCloudProvider logs in and updates the sidebar's
-// alias state, but never re-fetched whatever surface had failed with a stale
-// identity — a successful sign-in on the tenant-dashboard's not-signed-in
-// state left the identical state and button on screen. #1390 shipped that
-// alert with zero coverage of what happens after a *successful* login,
+// loginPrimaryCloudProvider logs in and updates the sidebar's alias state,
+// but never re-fetched whatever surface had failed with a stale identity —
+// a successful sign-in on the tenant-dashboard's not-signed-in state left
+// the identical state and button on screen. An earlier version of this alert
+// shipped with zero coverage of what happens after a *successful* login,
 // because the Playwright harness's aws stub is inert and can never make a
 // real login succeed. The seam that was missing is the RPC boundary itself
 // (window.go.main.App.*, which every wailsQueryFn-backed endpoint calls
 // through) — standing it up by hand here lets these tests drive a real
 // success through the exact production dispatch path (cloudApi/tenantApi
 // mutations and queries, real RTK Query middleware) rather than asserting
-// dispatch shape and stopping there, which is exactly how #1390 shipped
-// broken.
+// dispatch shape and stopping there, which is exactly how that regression
+// shipped.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -127,10 +127,9 @@ test('a successful sign-in from the tenant dashboard’s not-signed-in state re-
   assert.equal(dashboard.error, '');
 });
 
-// The mirror case (#1392's second requirement, review defect 1): a login
-// that does not succeed must not silently re-render the identical state, and
-// the real failure reason — not a generic "Sign-in failed. Try again." —
-// must be what the caller learns.
+// The mirror case: a login that does not succeed must not silently
+// re-render the identical state, and the real failure reason — not a
+// generic "Sign-in failed. Try again." — must be what the caller learns.
 test('a failed sign-in runs no recovery and reports the real reason, not a generic message', async () => {
   const store = buildTestStore();
   const dispatch = store.dispatch as unknown as AppDispatch;
@@ -161,9 +160,8 @@ test('a failed sign-in runs no recovery and reports the real reason, not a gener
   );
 });
 
-// #1392 review, second defect: a click while the alias is already busy with
-// another attempt must not run at all — and must not report "failed" for an
-// attempt that never happened.
+// A click while the alias is already busy with another attempt must not run
+// at all — and must not report "failed" for an attempt that never happened.
 test('signing in while the alias is already busy is reported as skipped, not failed', async () => {
   const store = buildTestStore();
   const dispatch = store.dispatch as unknown as AppDispatch;

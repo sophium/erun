@@ -211,7 +211,7 @@ type uiTenantDashboardInput struct {
 	// alias; when more than one is configured the load reports every alias as
 	// a choice instead of guessing. See tenant_platform.go — the desktop
 	// resolves the platform's base URL and identity the same way `erun
-	// platform` does, never from an environment's own apiUrl (#1393).
+	// platform` does, never from an environment's own apiUrl.
 	PlatformAlias string `json:"platformAlias,omitempty"`
 	// ReviewFilterMine/ReviewFilterWaitingOnMe are the Reviews tab's one-click
 	// discovery filters. Both resolve to the signed-in user's own id (already

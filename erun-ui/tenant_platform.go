@@ -14,7 +14,7 @@ import (
 // (erun-common's ResolveERunPlatformAlias / newPlatformClientForAlias)
 // instead of the desktop inventing its own scheme from an environment's own
 // apiUrl and the tenant's primary cloud alias — which may be any provider
-// type and, for a loopback port-forward, is never the platform (#1393).
+// type and, for a loopback port-forward, is never the platform.
 
 // Platform-readiness states surfaced to the frontend when the platform
 // identity is not ready far enough to load the dashboard. Each maps to

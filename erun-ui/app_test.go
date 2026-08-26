@@ -1800,7 +1800,7 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 }
 
 // TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the "green"
-// half of the erun-vs-AWS seam (#1393): the dashboard's bearer and username
+// half of the erun-vs-AWS seam: the dashboard's bearer and username
 // hint come from the resolved erun-type platform alias, never from whichever
 // alias happens to be the tenant's primary one. See
 // TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform for the "red"
@@ -1909,7 +1909,7 @@ func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T)
 }
 
 // TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform is the "red" half
-// of the erun-vs-AWS seam (#1393): on a machine configured exactly like the
+// of the erun-vs-AWS seam: on a machine configured exactly like the
 // operator's own (only an AWS cloud alias, no erun platform alias at all),
 // the dashboard must report not-connected rather than signing the platform
 // read with the AWS identity. Before this fix, LoadTenantDashboard took its

@@ -64,9 +64,9 @@ export function SignInAction({
     (state) => (state.sidebar.sidebarCloudAliasBusyByAlias[alias] ?? '') !== '',
   );
   // The real failure reason, not a generic sentence — updatePrimaryCloudProvider
-  // already computed one via readError and only threw it away here (#1392
-  // review). "" clears on every new attempt so a stale failure never lingers
-  // beside a click that has not resolved yet.
+  // already computed one via readError and only threw it away here. "" clears
+  // on every new attempt so a stale failure never lingers beside a click that
+  // has not resolved yet.
   const [signInError, setSignInError] = React.useState('');
   return (
     <div className="grid gap-2">
@@ -80,8 +80,7 @@ export function SignInAction({
             const outcome = await dispatch(signInAndRecover(alias, onRecovered));
             // 'skipped' means this click found the alias already busy with
             // another attempt (or blank) — nothing ran, so nothing failed;
-            // rendering an error here would blame a click that never happened
-            // (#1392 review, second defect).
+            // rendering an error here would blame a click that never happened.
             if (outcome.status === 'failed') {
               setSignInError(outcome.message);
             }

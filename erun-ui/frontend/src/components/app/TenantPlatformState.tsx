@@ -1,8 +1,9 @@
 import { Button, EmptyState, FieldLabel, Input } from 'erun-kit';
-import { KeyRound, Link2, LoaderCircle, ShieldAlert, UserPlus, Users } from 'lucide-react';
+import { Copy, KeyRound, Link2, LoaderCircle, ShieldAlert, UserPlus, Users } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { showNotification } from '@/app/notificationThunks';
 import { chooseTenantPlatformAlias, loadTenantDashboard } from '@/app/tenantDialogThunks';
 import {
   connectTenantPlatform,
@@ -19,11 +20,12 @@ import {
   type UITenantDashboard,
 } from '@/types';
 
+import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 import { InlineAlert } from './InlineAlert';
 import { SignInAction } from './PlatformSignInAlert';
 
 // TenantPlatformState.tsx renders the tenant dashboard's four/five platform-
-// readiness states (#1393): not-connected, choose-alias, not-signed-in,
+// readiness states: not-connected, choose-alias, not-signed-in,
 // not-enrolled, no-permission. Each is a distinct user situation with its
 // own next action — never one generic "sign in again" sentence — per the
 // repo's "Smooth, Seamless, No Dead Ends" standard: a state with no action
@@ -52,9 +54,9 @@ export function TenantPlatformStateCard({
   }
 }
 
-// PlatformContactLine names what the surface actually talked to (#1393,
-// defect 4 in the operator's screenshot): a resolved URL and identity, so a
-// misconfiguration is self-diagnosing rather than requiring a network trace.
+// PlatformContactLine names what the surface actually talked to: a resolved
+// URL and identity, so a misconfiguration is self-diagnosing rather than
+// requiring a network trace.
 function PlatformContactLine({ data }: { data: UITenantDashboard }): React.ReactElement | null {
   if (!data.platformUrl && !data.platformAlias) {
     return null;
@@ -81,6 +83,16 @@ function NotConnectedState({ tenant }: { tenant: string }): React.ReactElement {
   const connecting = useAppSelector((state) => state.tenantDashboard.connecting);
   const error = useAppSelector((state) => state.tenantDashboard.connectError);
   const placeholder = `https://api.${tenant}-prod.services.erunpaas.com`;
+  // Prefill from erun's own naming convention rather than leaving a blank
+  // field the operator must hand-type into (Smooth: "no hand-typed URL where
+  // one can be discovered"). Still fully editable — this is a starting guess
+  // the Connect action itself verifies against the real platform, not an
+  // assumption the app is asking the operator to trust blindly.
+  React.useEffect(() => {
+    if (!draft.trim()) {
+      dispatch(setConnectApiUrlDraft(placeholder));
+    }
+  }, [dispatch, draft, placeholder]);
   return (
     <EmptyState
       icon={<Link2 />}
@@ -192,7 +204,7 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
         </div>
       }
       action={
-        <div className="grid w-full max-w-md gap-3 text-left">
+        <div className="grid w-full max-w-xl gap-3 text-left">
           <div className="grid gap-2">
             <FieldLabel htmlFor="enroll-username" required>
               Username
@@ -219,11 +231,20 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
             </Button>
             {enrollError && <InlineAlert>{enrollError}</InlineAlert>}
           </div>
-          <div className="grid gap-1 rounded-[var(--radius)] border border-border bg-muted/30 p-3 text-left">
-            <FieldLabel htmlFor="enroll-admin-command">Or ask an administrator to run</FieldLabel>
+          <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3 text-left">
+            <div className="flex items-baseline justify-between gap-2">
+              <FieldLabel htmlFor="enroll-admin-command">Or ask an administrator to run</FieldLabel>
+              <CopyCommandButton command={command} />
+            </div>
+            {/* whitespace-pre-wrap + break-all (not overflow-x-auto) so the
+                full issuer/subject values are always visible on their own,
+                never clipped at the card edge with no visual cue that more
+                text exists — the whole point of showing this command is for
+                the administrator to read and verify it, not just copy it
+                blind. */}
             <code
               id="enroll-admin-command"
-              className="block overflow-x-auto whitespace-pre rounded bg-background px-2 py-1.5 text-[12px]"
+              className="block overflow-x-hidden whitespace-pre-wrap break-words rounded bg-background px-2 py-1.5 text-[12px]"
             >
               {command}
             </code>
@@ -231,6 +252,29 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
         </div>
       }
     />
+  );
+}
+
+// CopyCommandButton is the one-click copy the not-enrolled hand-off needs:
+// the operator's explicit ask is that the administrator never has to
+// reconstruct the enrollment command by hand.
+function CopyCommandButton({ command }: { command: string }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-label="Copy enrollment command"
+      onClick={() => {
+        void (async () => {
+          await ClipboardSetText(command);
+          dispatch(showNotification('success', 'Copied the enrollment command.'));
+        })();
+      }}
+    >
+      <Copy aria-hidden="true" />
+    </Button>
   );
 }
 
