@@ -100,9 +100,11 @@ func (a *App) reconcileOrchestratorActivity() {
 	now := time.Now()
 	a.mu.Lock()
 	type row struct {
-		id     string
-		serial int
-		alive  bool
+		id             string
+		serial         int
+		alive          bool
+		launchID       string
+		conversationID string
 	}
 	rows := make([]row, 0, len(a.orchestrators))
 	for id, session := range a.orchestrators {
@@ -115,9 +117,11 @@ func (a *App) reconcileOrchestratorActivity() {
 		// "working" past the short bound, because nothing will ever clear it.
 		managed := a.sessions[orchestratorSessionKey(id)]
 		rows = append(rows, row{
-			id:     id,
-			serial: session.serial,
-			alive:  managed != nil && !managed.closed,
+			id:             id,
+			serial:         session.serial,
+			alive:          managed != nil && !managed.closed,
+			launchID:       session.launchID,
+			conversationID: session.conversationID,
 		})
 	}
 	a.mu.Unlock()
@@ -133,11 +137,13 @@ func (a *App) reconcileOrchestratorActivity() {
 		// The report has to name the session that wrote it and be checked against
 		// this orchestrator's own session: sessionAlive alone is computed per
 		// orchestrator id, not per session, so a report a replaced session left
-		// behind would otherwise borrow its successor's liveness. The session is
-		// derived rather than read back, so this check cannot be fooled by a
-		// record another session wrote.
-		liveSessionID := orchestratorResumeConversationID(r.id, "")
-		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveSessionID)
+		// behind would otherwise borrow its successor's liveness. The comparison
+		// is against what the CURRENT launch's session reports being on, not the
+		// derived id — a session that moved to a conversation of its own is still
+		// this orchestrator's session, and comparing against the derivation would
+		// reject every report it writes.
+		liveConversationID := orchestratorLiveConversationForLaunch(r.id, r.launchID, r.conversationID)
+		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveConversationID)
 		shellRunning := shellOK && shell.Running
 		a.mu.Lock()
 		if session := a.orchestrators[r.id]; session != nil {

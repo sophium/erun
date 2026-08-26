@@ -286,7 +286,7 @@ func TestRestartHandOffStaysOneShotAndAgeBoundedOverTheDurableRecord(t *testing.
 		Environments:   []string{"frs/dev"},
 		ResumePrompt:   prompt,
 	}
-	if err := recordOpenOrchestrator(openPath, id, []string{"frs/dev"}); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, "launch-1", []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 	if err := writeOrchestratorRestoreTarget(restoreDir, handOff, time.Now()); err != nil {
@@ -389,7 +389,7 @@ func TestPlainLaunchResumesTheDerivedConversation(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	id := createAndStartOrchestrator(t, app)
-	if err := recordOpenOrchestrator(openPath, id, []string{"frs/dev"}); err != nil {
+	if err := recordOpenOrchestrator(openPath, id, "launch-1", []string{"frs/dev"}); err != nil {
 		t.Fatalf("record open orchestrator: %v", err)
 	}
 

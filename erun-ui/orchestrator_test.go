@@ -888,6 +888,17 @@ func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []b
 	return settings.Hooks.SessionStart, data
 }
 
+// sessionStartGroupAsBlock re-renders a decoded group in the untyped shape the
+// hook-block predicates read, so a test can ask the production predicate which
+// blocks are which instead of matching on command text of its own.
+func sessionStartGroupAsBlock(group sessionStartGroup) map[string]any {
+	hooks := make([]any, 0, len(group.Hooks))
+	for _, hook := range group.Hooks {
+		hooks = append(hooks, map[string]any{"type": hook.Type, "command": hook.Command})
+	}
+	return map[string]any{"matcher": group.Matcher, "hooks": hooks}
+}
+
 // sessionStartCommandCounts flattens every command across the given groups
 // into a command -> occurrence-count map.
 func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
@@ -947,16 +958,24 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	}
 	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
 
+	contractGroups := make([]sessionStartGroup, 0, len(groups))
 	for _, group := range groups {
 		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
 			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
 		}
+		// The live-conversation recorder shares this event and is not a contract
+		// injector; it has its own coverage in
+		// TestOrchestratorLiveConversationRecorderIsInstalledWhereItIsRead.
+		if isOrchestratorLiveConversationHookBlock(sessionStartGroupAsBlock(group)) {
+			continue
+		}
 		if !strings.Contains(group.Hooks[0].Command, "CLAUDE.md") {
 			t.Fatalf("SessionStart command does not inject the contract (print CLAUDE.md):\n%s", group.Hooks[0].Command)
 		}
+		contractGroups = append(contractGroups, group)
 	}
 	assertSessionStartCommandsUnique(t, groups, data)
-	assertSessionStartMatchersCover(t, groups, data, "startup", "resume", "clear", "compact")
+	assertSessionStartMatchersCover(t, contractGroups, data, "startup", "resume", "clear", "compact")
 }
 
 // TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks
