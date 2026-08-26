@@ -305,18 +305,10 @@ func resolveReopenSessionID(entry orchestratorOpenEntry) string {
 	if entry.SessionID != "" && orchestratorSessionExists(entry.SessionID) {
 		return entry.SessionID
 	}
-	// The durable record has no usable conversation for this orchestrator:
-	// either it never recorded one, or its claim was released because another
-	// orchestrator held the same session. Its OWN hooks may still know which
-	// conversation is really its, so prefer that over minting a fresh id and
-	// orphaning a live transcript — the release exists to end a crossing, not
-	// to cost the loser its history. Still refused if a different orchestrator
-	// claims it, which is the crossing this would otherwise re-create.
-	if live, ok := readOrchestratorLiveSessionID(entry.OrchestratorID); ok &&
-		orchestratorSessionExists(live) &&
-		!orchestratorLiveSessionClaimedByOther(entry.OrchestratorID, live) {
-		return live
-	}
+	// A record that names a conversation which is gone, and a legacy record that
+	// names none, both start fresh on purpose: an orchestrator id is reusable, so
+	// silence must not be read as permission to resume whatever the derived id
+	// happens to name from an unrelated earlier run.
 	return uuid.NewString()
 }
 
@@ -520,19 +512,18 @@ func (a *App) RestartApp(returnToOrchestratorID string) error {
 // safely tell to carry on, so the launch reopens the orchestrator idle rather
 // than handing a task to whichever conversation its id happens to resolve to.
 //
-// The conversation id itself is not simply the one the session was spawned
-// with: Claude Code forks the transcript to a new session id when a resumed
-// conversation compacts, so the spawn-time id can name a conversation that has
-// stopped growing. preferLiveOrchestratorSessionID prefers whatever id the
-// orchestrator's own hooks last saw live, validated against disk, over that
-// stale spawn-time id.
+// The conversation id is derived from the orchestrator id, not read back from
+// a record. Deriving it is what makes a restart land in the orchestrator's own
+// conversation every time: the derivation is a pure function, so it cannot go
+// stale, cannot be written by another session, and needs nothing on disk to be
+// correct.
 func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	state := orchestratorRestoreState{OrchestratorID: strings.TrimSpace(orchestratorID)}
 	conversationID, scope := a.runningOrchestratorConversation(state.OrchestratorID)
 	if conversationID == "" {
 		return state
 	}
-	state.ConversationID = preferLiveOrchestratorSessionID(state.OrchestratorID, conversationID)
+	state.ConversationID = orchestratorResumeConversationID(state.OrchestratorID, conversationID)
 	state.Environments = scope
 	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
 	return state

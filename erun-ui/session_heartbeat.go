@@ -131,11 +131,12 @@ func (a *App) reconcileOrchestratorActivity() {
 		// into the busy report above.
 		//
 		// The report has to name the session that wrote it and be checked against
-		// whichever session is currently live for this id: sessionAlive alone is
-		// computed per orchestrator id, not per session, so a report a replaced
-		// session left behind would otherwise borrow its successor's liveness
-		// (#1274).
-		liveSessionID, _ := readOrchestratorLiveSessionID(r.id)
+		// this orchestrator's own session: sessionAlive alone is computed per
+		// orchestrator id, not per session, so a report a replaced session left
+		// behind would otherwise borrow its successor's liveness. The session is
+		// derived rather than read back, so this check cannot be fooled by a
+		// record another session wrote.
+		liveSessionID := orchestratorResumeConversationID(r.id, "")
 		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveSessionID)
 		shellRunning := shellOK && shell.Running
 		a.mu.Lock()
