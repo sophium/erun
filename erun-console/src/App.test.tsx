@@ -1,0 +1,67 @@
+import { cleanup, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { App } from './App';
+import { renderWithStore } from './test/renderWithStore';
+
+const PLATFORM = {
+  issuer: 'https://auth.acme.example',
+  apiUrl: 'https://console.acme.example',
+  consoleUrl: 'https://console.acme.example',
+  consoleClientId: 'console-client',
+  cliClientId: 'cli-client',
+  brand: 'Acme',
+  docsUrl: 'https://docs.acme.example',
+  tagline: 'Acme, from idea to production.',
+  logoUrl: '',
+};
+
+function jsonResponse(body: unknown): Response {
+  return { ok: true, status: 200, json: () => Promise.resolve(body) } as unknown as Response;
+}
+
+beforeEach(() => {
+  vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve(jsonResponse(PLATFORM))),
+  );
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
+describe('App signed-out route', () => {
+  // The regression this guards: the old signed-out screen was a CenteredCard
+  // wrapping a CardTitle div and a paragraph — zero real <h1>-<h6> elements,
+  // per erun#1327 ("no <h1> and no <main> landmark"). This same assertion,
+  // run against origin/main's SignInScreen, fails with "expected length to be
+  // greater than 1, received 0" (CardTitle is a <div>, not a heading) — see
+  // the PR description for the recorded red run. It passes here because
+  // LandingScreen renders a real <h1> pitch and an <h2> differentiators
+  // heading inside a <main> landmark.
+  it('is a real landing page, not merely a CenteredCard sign-in prompt', async () => {
+    renderWithStore(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading').length).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    const docsLinks = screen.getAllByRole('link', { name: 'Read the docs' });
+    expect(docsLinks.length).toBeGreaterThan(0);
+    for (const link of docsLinks) {
+      expect(link).toHaveAttribute('href', 'https://docs.acme.example');
+    }
+  });
+
+  it('renders the instance tagline from platform discovery as the h1', async () => {
+    renderWithStore(<App />);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Acme, from idea to production.' }),
+    ).toBeInTheDocument();
+  });
+});

@@ -17,7 +17,7 @@ export function LandingDifferentiators({ brandLabel }: { brandLabel: string }): 
         >
           What makes {brandLabel} different
         </h2>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {DIFFERENTIATORS.map((item) => (
             <Card key={item.key} className="flex flex-col gap-3 px-6">
               <item.icon aria-hidden="true" className="size-6 text-primary" />
