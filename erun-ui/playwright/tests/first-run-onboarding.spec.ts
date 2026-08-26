@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/erunApp.js';
 import { AppShell } from '../pages/index.js';
 
-// erun#1396: a genuinely fresh install has no tool config at all, so
+// A genuinely fresh install has no tool config at all, so
 // ResolveListResult fails with ErrNotInitialized instead of succeeding with
 // zero tenants. LoadState() used to special-case that into a bare
 // `{message: "...Run \`erun init\` first.", tenants: <unset>}` — a nil
