@@ -97,7 +97,11 @@ export function OrchestratorHoverCard({
           <HoverRow label="Doing">
             <OrchestratorDoing orchestrator={orchestrator} running={running} />
           </HoverRow>
-          <HoverRow label="Environments">
+          {/* wide: an environment's busy detail names a real holder ("held by
+              gradle-build"), which needs the card's full content width to read
+              without eliding -- the narrow value column every other row shares
+              with the "Environments" label leaves too little room for it. */}
+          <HoverRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverRow>
           {running && (
@@ -224,15 +228,36 @@ function OrchestratorNudges({
 
 function HoverRow({
   label,
+  wide = false,
   children,
 }: {
   label: string;
+  // wide stacks the label above the value across both grid columns, for a
+  // value that needs the card's full content width rather than sharing it
+  // with the label column.
+  wide?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
     <>
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-foreground">{children}</dd>
+      <dt
+        className={
+          wide
+            ? 'col-span-2 text-[12px] text-muted-foreground'
+            : 'text-[12px] text-muted-foreground'
+        }
+      >
+        {label}
+      </dt>
+      <dd
+        className={
+          wide
+            ? 'col-span-2 min-w-0 break-words text-foreground'
+            : 'min-w-0 break-words text-foreground'
+        }
+      >
+        {children}
+      </dd>
     </>
   );
 }
