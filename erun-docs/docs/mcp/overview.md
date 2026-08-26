@@ -294,11 +294,13 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_show` | Read | Fetch one review together with its comment threads and recorded builds. |
 | `review_create` | Work | Open a review. `name` is the eventual squash-merge message and must be unique per tenant. `sourceBranch` must already be pushed (`exec_push`) — the platform can only fetch what has actually landed on the remote. |
 | `review_comment` | Work | Comment on a review line, or reply to an existing comment via `parentCommentId`. |
+| `review_resolve` | Work (idempotent) | Resolve a comment thread by closing its root comment. `commentId` must be the thread's root — resolving a reply fails, naming the root to retry against. |
+| `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
 | `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
 | `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGED` — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`. |
 
-All seven support `preview` except the immediate writes (`review_create`, `review_comment`, `review_close`, `review_queue_advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All nine support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_queue_advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -418,6 +420,8 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_show` | `erun review show` | Read |
 | review | `review_create` | `erun review create` | Work |
 | review | `review_comment` | `erun review comment` | Work |
+| review | `review_resolve` | `erun review resolve` | Work |
+| review | `review_unresolve` | `erun review unresolve` | Work |
 | review | `review_close` | `erun review close` | Work |
 | review | `review_queue_list` | `erun review queue list` | Read |
 | review | `review_queue_advance` | `erun review queue advance` | Work |

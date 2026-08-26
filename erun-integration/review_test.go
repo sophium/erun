@@ -179,6 +179,29 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		_ = json.NewEncoder(w).Encode(comments[r.PathValue("review_id")])
 	})
 
+	mux.HandleFunc("PATCH /v1/reviews/{review_id}/comments/{comment_id}/status", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		defer mu.Unlock()
+		for _, comment := range comments[r.PathValue("review_id")] {
+			if comment["commentId"] != r.PathValue("comment_id") {
+				continue
+			}
+			if parent, ok := comment["parentCommentId"].(string); ok && parent != "" {
+				http.Error(w, "only the root comment of a thread can have its status updated", http.StatusBadRequest)
+				return
+			}
+			comment["status"] = body["status"]
+			_ = json.NewEncoder(w).Encode(comment)
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	})
+
 	mux.HandleFunc("POST /v1/reviews/{review_id}/comments", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
@@ -218,6 +241,52 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
+}
+
+// createReviewJSON runs `review create --output json` against the stub
+// server and decodes the resulting reviewId, for scenarios that need a real
+// review to act on rather than a --dry-run trace.
+func createReviewJSON(t testing.TB, setup env.Setup, name, sourceBranch, targetBranch string) struct{ ReviewID string } {
+	t.Helper()
+	result := erun.Run(t, []string{
+		"review", "create", "--name", name, "--source-branch", sourceBranch, "--target-branch", targetBranch, "--output", "json",
+	}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("review create exit %d: %s", result.ExitCode, result.Combined)
+	}
+	var decoded struct{ ReviewID string }
+	if err := json.Unmarshal([]byte(result.Stdout), &decoded); err != nil {
+		t.Fatalf("decode review create --output json: %v\n%s", err, result.Stdout)
+	}
+	if decoded.ReviewID == "" {
+		t.Fatalf("expected a non-empty reviewId, got:\n%s", result.Stdout)
+	}
+	return decoded
+}
+
+// postCommentJSON runs `review comment --output json` against the stub
+// server and decodes the resulting commentId. parentCommentID is passed as
+// --reply-to when non-empty, making the posted comment a reply.
+func postCommentJSON(t testing.TB, setup env.Setup, reviewID, commitID, filePath string, line int, body, parentCommentID string) string {
+	t.Helper()
+	args := []string{
+		"review", "comment", reviewID, "--commit", commitID, "--file", filePath, "--line", strconv.Itoa(line), "--output", "json",
+	}
+	if parentCommentID != "" {
+		args = append(args, "--reply-to", parentCommentID)
+	}
+	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: body + "\n"})
+	if result.ExitCode != 0 {
+		t.Fatalf("review comment exit %d: %s", result.ExitCode, result.Combined)
+	}
+	var decoded struct{ CommentID string }
+	if err := json.Unmarshal([]byte(result.Stdout), &decoded); err != nil {
+		t.Fatalf("decode review comment --output json: %v\n%s", err, result.Stdout)
+	}
+	if decoded.CommentID == "" {
+		t.Fatalf("expected a non-empty commentId, got:\n%s", result.Stdout)
+	}
+	return decoded.CommentID
 }
 
 func TestReview(t *testing.T) {
@@ -375,6 +444,82 @@ func TestReview(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "review/comment_reply_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("resolve_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"review", "resolve", "review-1", "comment-1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/resolve_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("unresolve_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"review", "unresolve", "review-1", "comment-1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/unresolve_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("resolve_and_unresolve_root_real_run", func(t *testing.T) {
+		// create -> comment (root) -> resolve -> show (unresolved: 0, status=CLOSED)
+		// -> unresolve -> show (unresolved: 1, status=OPEN), covering
+		// PlatformClient.UpdateCommentStatus's request/response handling and
+		// ReviewDetail.UnresolvedThreads end to end.
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		created := createReviewJSON(t, setup, "Resolve test", "feature/resolve", "main")
+		rootID := postCommentJSON(t, setup, created.ReviewID, "abc123", "main.go", 1, "root note", "")
+
+		resolve := erun.Run(t, []string{"review", "resolve", created.ReviewID, rootID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if resolve.ExitCode != 0 || !strings.Contains(resolve.Combined, "status=CLOSED") {
+			t.Fatalf("resolve exit %d: %s", resolve.ExitCode, resolve.Combined)
+		}
+
+		afterResolve := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if afterResolve.ExitCode != 0 || !strings.Contains(afterResolve.Combined, "unresolved threads: 0") {
+			t.Fatalf("expected zero unresolved threads after resolve, got:\n%s", afterResolve.Combined)
+		}
+		if !strings.Contains(afterResolve.Combined, "status=CLOSED") {
+			t.Fatalf("expected the root comment's status=CLOSED in show output, got:\n%s", afterResolve.Combined)
+		}
+
+		unresolve := erun.Run(t, []string{"review", "unresolve", created.ReviewID, rootID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if unresolve.ExitCode != 0 || !strings.Contains(unresolve.Combined, "status=OPEN") {
+			t.Fatalf("unresolve exit %d: %s", unresolve.ExitCode, unresolve.Combined)
+		}
+
+		afterUnresolve := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if afterUnresolve.ExitCode != 0 || !strings.Contains(afterUnresolve.Combined, "unresolved threads: 1") {
+			t.Fatalf("expected one unresolved thread after unresolve, got:\n%s", afterUnresolve.Combined)
+		}
+	})
+
+	t.Run("resolve_reply_refused_names_root_real_run", func(t *testing.T) {
+		// A status change addressed to a reply must be refused, naming the
+		// thread's root comment id so the caller can retry against it.
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		created := createReviewJSON(t, setup, "Reply refusal test", "feature/reply-refusal", "main")
+		rootID := postCommentJSON(t, setup, created.ReviewID, "abc123", "main.go", 1, "root note", "")
+		replyID := postCommentJSON(t, setup, created.ReviewID, "abc123", "main.go", 1, "reply note", rootID)
+
+		result := erun.Run(t, []string{"review", "resolve", created.ReviewID, replyID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected resolving a reply to fail, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, rootID) {
+			t.Fatalf("expected the refusal to name root comment %s, got:\n%s", rootID, result.Combined)
+		}
 	})
 
 	t.Run("show_not_found_real_run", func(t *testing.T) {

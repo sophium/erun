@@ -107,6 +107,8 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"review_create":                {Family: "review", CLIPath: []string{"review", "create"}, Title: "Open a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_comment":               {Family: "review", CLIPath: []string{"review", "comment"}, Title: "Comment on a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_close":                 {Family: "review", CLIPath: []string{"review", "close"}, Title: "Close a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"review_resolve":               {Family: "review", CLIPath: []string{"review", "resolve"}, Title: "Resolve a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"review_unresolve":             {Family: "review", CLIPath: []string{"review", "unresolve"}, Title: "Reopen a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"review_queue_list":            {Family: "review", CLIPath: []string{"review", "queue", "list"}, Title: "List a merge queue", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_queue_advance":         {Family: "review", CLIPath: []string{"review", "queue", "advance"}, Title: "Advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"idle":                         {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},

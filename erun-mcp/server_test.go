@@ -168,8 +168,8 @@ var wantRegisteredTools = []string{
 	"platform_tenant_create", "platform_tenant_list", "platform_user_enroll",
 	"platform_user_list", "platform_whoami", "publish", "push", "raw",
 	"release", "review_close", "review_comment", "review_create", "review_list",
-	"review_queue_advance", "review_queue_list", "review_show",
-	"terraform", "unexpose", "upgrade", "usage", "version", "write",
+	"review_queue_advance", "review_queue_list", "review_resolve", "review_show",
+	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "write",
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {

@@ -4,7 +4,7 @@ title: erun review
 
 # `erun review`
 
-Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), close it, and inspect or advance a target branch's merge queue.
+Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, close a review, and inspect or advance a target branch's merge queue.
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
@@ -17,6 +17,8 @@ erun review list [flags]
 erun review show REVIEW_ID [flags]
 erun review create --name <name> --source-branch <branch> --target-branch <branch> [flags]
 erun review comment REVIEW_ID --commit <hash> --file <path> --line <n> [flags]
+erun review resolve REVIEW_ID COMMENT_ID [flags]
+erun review unresolve REVIEW_ID COMMENT_ID [flags]
 erun review close REVIEW_ID [flags]
 erun review queue list --target-branch <branch> [flags]
 erun review queue advance --target-branch <branch> [flags]
@@ -57,6 +59,10 @@ Comments on a line of a review, or replies to an existing comment with `--reply-
 | `--line` | Line number the comment is anchored to. |
 | `--reply-to` | Comment id to reply to, making this a reply in that thread. |
 
+### `review resolve` / `review unresolve` {#review-resolve--review-unresolve}
+
+Resolve a comment thread by closing its root comment, or reopen one by marking its root comment `OPEN` again. A thread's status lives entirely on its root comment — `COMMENT_ID` must be the thread's root (the first comment posted at a file/line, not one made with `--reply-to`); addressing a reply fails, naming the root comment to retry against.
+
 ### `review close`
 
 Closes a review without merging it.
@@ -83,6 +89,8 @@ echo 'nit: rename this' | erun review comment 018f... --commit abc123 --file mai
 echo 'good catch, fixed' | erun review comment 018f... --commit abc123 --file main.go --line 42 --reply-to 018g...
 
 erun review show 018f...
+erun review resolve 018f... 018h...
+erun review unresolve 018f... 018h...
 erun review close 018f...
 
 erun review queue list --target-branch main
@@ -99,4 +107,5 @@ erun review queue advance --target-branch main
 | `create` with a `--name` that collides with an existing review. | `409 Conflict`. |
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
+| `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `409 Conflict`. |
