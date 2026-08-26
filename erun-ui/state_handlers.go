@@ -17,10 +17,19 @@ func (a *App) LoadState() (uiState, error) {
 	})
 	if err != nil {
 		if errors.Is(err, eruncommon.ErrNotInitialized) {
+			// A fresh install with no tool config at all is not a distinct
+			// state from "initialized but zero tenants configured" — both
+			// recover the same way, from the sidebar's own "Initialize
+			// environment" affordance, so this returns the identical shape
+			// stateFromListResult uses for that case (non-nil empty Tenants,
+			// no Message) rather than a separate CLI-only instruction the
+			// desktop cannot carry out. Tenants must be non-nil: the frontend
+			// range-iterates it unconditionally on boot, and a nil slice
+			// marshals to JSON `null`, which throws there.
 			info := a.deps.resolveBuildInfo()
 			suggestions, notices := a.runtimeVersionSuggestions(info, "", "")
 			return uiState{
-				Message:                  "ERun is not initialized yet. Run `erun init` first.",
+				Tenants:                  []uiTenant{},
 				Build:                    buildDetailsFrom(info),
 				VersionSuggestions:       suggestions,
 				VersionSuggestionNotices: notices,
