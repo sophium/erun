@@ -53,6 +53,7 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       containerRegistry: containerRegistryDefault,
       clusterRegistry: null,
       useClusterRegistry: false,
+      useErunRegistry: false,
       envType: 'remote-agent',
       localRepoPath: '',
       noGit: false,
@@ -208,13 +209,17 @@ function environmentDialogInitFields(
   const isLocalAgent = dialog.envType === 'local-agent';
   // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
   // omit the static container-registry string (the two are mutually exclusive).
-  const useClusterRegistry = dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
+  const useErunRegistry = dialog.useErunRegistry;
+  const useClusterRegistry =
+    !useErunRegistry && dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
+  const resolvedRegistry = useErunRegistry || useClusterRegistry;
   return {
     runtimeCpu: runtimePod.cpu,
     runtimeMemory: runtimePod.memory,
     kubernetesContext: values.kubernetesContext,
-    containerRegistry: useClusterRegistry ? '' : values.containerRegistry,
+    containerRegistry: resolvedRegistry ? '' : values.containerRegistry,
     clusterRegistry: useClusterRegistry,
+    erunRegistry: useErunRegistry,
     type: dialog.envType,
     localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
     setDefaultTenant: dialog.setDefaultTenant,

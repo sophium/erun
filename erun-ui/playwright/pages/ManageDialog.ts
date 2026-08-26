@@ -301,6 +301,24 @@ export class ManageDialog {
 
   // --- Container-registries editor (General tab) ---
 
+  addPullSecretButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add image pull secret' });
+  }
+
+  pullSecretInput(index: number): Locator {
+    return this.locator().getByRole('textbox', { name: `Image pull secret ${String(index + 1)}` });
+  }
+
+  removePullSecretButton(index: number): Locator {
+    return this.locator().getByRole('button', {
+      name: `Remove image pull secret ${String(index + 1)}`,
+    });
+  }
+
+  runtimeRegistryInput(): Locator {
+    return this.locator().getByLabel('Runtime registry');
+  }
+
   addRegistryButton(): Locator {
     return this.locator().getByRole('button', { name: 'Add registry' });
   }

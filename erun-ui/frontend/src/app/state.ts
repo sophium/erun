@@ -86,6 +86,9 @@ export interface EnvironmentDialogState {
   // registry entry instead of the containerRegistry string.
   clusterRegistry: UIClusterRegistryStatus | null;
   useClusterRegistry: boolean;
+  // useErunRegistry selects erun's hosted registry (registry.erunpaas.com/<tenant>),
+  // authenticated by the tenant's own API token. Exclusive with the other two.
+  useErunRegistry: boolean;
   envType: EnvironmentType;
   localRepoPath: string;
   noGit: boolean;
@@ -371,6 +374,7 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   containerRegistry: '',
   clusterRegistry: null,
   useClusterRegistry: false,
+  useErunRegistry: false,
   envType: 'remote-agent',
   localRepoPath: '',
   noGit: false,

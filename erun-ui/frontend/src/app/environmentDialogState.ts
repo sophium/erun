@@ -52,7 +52,9 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   }
   // The in-cluster registry needs no host string — its addresses resolve from the
   // kube-context — so a container registry is only required when not using it.
-  if (!dialog.useClusterRegistry && !values.containerRegistry) {
+  // Neither the in-cluster nor the hosted registry needs a host string: the
+  // first resolves from the kube-context, the second from the tenant.
+  if (!dialog.useClusterRegistry && !dialog.useErunRegistry && !values.containerRegistry) {
     return 'Select a container registry.';
   }
   return null;

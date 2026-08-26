@@ -104,6 +104,9 @@ export interface UISelection {
   containerRegistry?: string;
   // Selects the in-cluster erun-registry instead of the containerRegistry string.
   clusterRegistry?: boolean;
+  // erunRegistry selects erun's hosted registry for the tenant. Mutually
+  // exclusive with both clusterRegistry and containerRegistry.
+  erunRegistry?: boolean;
   // Bare string to match the Wails binding, which widens the Go EnvironmentType
   // alias; use the EnvironmentType union for narrowed dropdown values.
   type?: string;
@@ -485,6 +488,13 @@ export interface UIEnvironmentConfig {
   // reference that may carry its own version. Empty means the chart published
   // with the deployed version -- right whenever chart and image ride one line.
   runtimeChart?: string;
+  // Where the environment resolves erun's own artifacts from -- the runtime
+  // chart and platform images -- as distinct from where this project's images
+  // are pushed.
+  runtimeRegistry?: string;
+  // The Kubernetes dockerconfigjson secrets the runtime pod pulls its image
+  // with. Without one, a private runtime image leaves the pod unable to start.
+  imagePullSecrets?: string[];
   runtimePod: UIRuntimePodConfig;
   sshd: UISSHDConfig;
   idle: {

@@ -286,6 +286,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		CloudAliasSlots:              environmentCloudAliasSlots(a.deps.store, config),
 		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
 		RuntimeChart:                 strings.TrimSpace(config.RuntimeChart),
+		RuntimeRegistry:              strings.TrimSpace(config.RuntimeRegistry),
+		ImagePullSecrets:             trimmedNonEmpty(config.ImagePullSecrets),
 		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
@@ -594,6 +596,11 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	// four deploy coordinates; a redeploy installs it, so saving it is enough --
 	// nothing derives it.
 	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
+	// Both are pull-time coordinates the operator states once: the registry
+	// erun's own chart comes from, and the secrets the pod pulls its image
+	// with. An empty list clears the secrets rather than keeping a stale one.
+	existing.RuntimeRegistry = strings.TrimSpace(config.RuntimeRegistry)
+	existing.ImagePullSecrets = trimmedNonEmpty(config.ImagePullSecrets)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
@@ -608,10 +615,16 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 }
 
 func trimmedComponentNames(names []string) []string {
-	out := make([]string, 0, len(names))
-	for _, raw := range names {
-		if name := strings.TrimSpace(raw); name != "" {
-			out = append(out, name)
+	return trimmedNonEmpty(names)
+}
+
+// trimmedNonEmpty drops blanks so an omitempty field clears rather than
+// persisting a list of empty strings the operator never entered.
+func trimmedNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, raw := range values {
+		if value := strings.TrimSpace(raw); value != "" {
+			out = append(out, value)
 		}
 	}
 	if len(out) == 0 {
