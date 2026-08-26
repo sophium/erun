@@ -99,10 +99,10 @@ If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env doe
 
 **Symptoms:** the desktop titlebar shows a warning reading `<name> started without its environment tools`, and the [orchestrator](/collaboration/workflow) has none of the tools for the environments it links — every call against one fails, even though the session itself looks healthy.
 
-The desktop wires each linked environment in by launching `erun mcp proxy` for it. When it cannot wire any of them the session still starts, and the warning names which of the two causes applies, because the fixes differ:
+The desktop wires each linked environment in by launching `erun mcp proxy` for it. When it cannot wire any of them the session still starts, and the warning names which of the two causes applies and offers the matching action right in the titlebar — no need to leave the app to act on it:
 
-- **"the erun executable could not be resolved"** — the `erun` command line tool was not found beside the desktop app or on `PATH`. Install it, then restart the orchestrator.
-- **"no linked environment resolved an MCP port"** — none of the linked environments resolves a port any more, usually because they were renamed or removed. Check the orchestrator's linked environments in the desktop app, then restart it.
+- **"the erun executable could not be resolved"** — the `erun` command line tool was not found beside the desktop app or on `PATH`. The warning's **Install docs** button opens the CLI install page; once it's installed, click **Restart** to relaunch the orchestrator with its tools wired.
+- **"no linked environment resolved an MCP port"** — none of the linked environments resolves a port any more, usually because they were renamed or removed. Check the orchestrator's linked environments in the desktop app, then click **Restart**.
 
 The warning stays until you dismiss it and carries a copy action, so the message is still readable after the session comes up. An orchestrator that links no environments has nothing to wire and stays quiet.
 
