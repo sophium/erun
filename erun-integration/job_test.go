@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -670,6 +671,45 @@ func TestJob(t *testing.T) {
 		if !strings.Contains(string(body), `"state": "unknown"`) {
 			t.Errorf("expected the reconciled record to persist the unknown state, got:\n%s", body)
 		}
+	})
+
+	t.Run("a_job_that_backgrounds_work_and_exits_reads_as_abandoned_not_success", func(t *testing.T) {
+		// The supervisor waits on its immediate child only; a child that
+		// backgrounds a grandchild and exits 0 would otherwise read as a clean
+		// success while the backgrounded work runs on unsupervised. Redirecting
+		// the grandchild's output away from the supervisor's captured pipe is
+		// what reproduces the shape -- a grandchild inheriting that pipe would
+		// block the immediate child's own exit instead.
+		if runtime.GOOS == "windows" {
+			t.Skip("process-group survivor detection is POSIX-only; see erun-common/job_process_windows.go")
+		}
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		backgroundLog := filepath.Join(setup.Cwd, "background.log")
+		envVars := jobStubEnv(t, setup, "sleep 5 </dev/null >'"+backgroundLog+"' 2>&1 &\nexit 0")
+
+		start := startJob(t, setup, envVars, "gate", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "gate", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected an abandoned job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		golden.Equal(t, "job/a_job_that_backgrounds_work_and_exits_reads_as_abandoned_not_success", normalize.Apply(status.Combined+await.Combined))
 	})
 
 	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {

@@ -66,5 +66,5 @@ func environmentJobExitSignal(state *os.ProcessState) string { return "" }
 // probe" equivalent, so a Windows supervisor cannot yet distinguish an
 // abandoned background child from a clean exit this way. Command jobs on
 // Windows fall back to reporting whatever the immediate process's exit status
-// says, same as before erun#1374.
+// says.
 func environmentJobProcessGroupSurvivors(pgid int) bool { return false }
