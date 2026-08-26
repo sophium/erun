@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 
-// #1383: the orchestrator hover card named its linked environments and said
+// The orchestrator hover card named its linked environments and said
 // nothing about either one — `Environments: petios / rihards-review, erun /
 // local-ideas`, two names, no state. Both missing signals (each environment's
 // own activity, and the orchestrator's own pacing/nudge state) are already
@@ -55,7 +55,7 @@ function card(page: Page) {
   return page.getByRole('dialog', { name: `${SEED_ORCHESTRATOR} details` });
 }
 
-test.describe('orchestrator hover card environment and pacing state (#1383)', () => {
+test.describe('orchestrator hover card environment and pacing state', () => {
   test('a linked environment names what it is doing, not just its name (red-then-green)', async ({
     app,
     page,
@@ -313,6 +313,8 @@ test.describe('orchestrator hover card environment and pacing state (#1383)', ()
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Stopped nudging after 6 attempts');
     await expect(dialog).toContainText('reply or restart');
+
+    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1383-visual/capped-nudge.png' });
   });
 
   test('a stopped orchestrator reports no nudge row at all', async ({ app, page }) => {
