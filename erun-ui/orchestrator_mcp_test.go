@@ -457,14 +457,10 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	// Exactly one unreachable env is the unambiguous case: the notice can only
 	// mean this env, so it carries the deploy action and is tagged with it
 	// (#1390) rather than leaving the "deploy or reopen" remedy unreachable.
-	if payload.Tenant != "frs" || payload.Environment != "dev" {
-		t.Fatalf("notice tenant/environment = %q/%q, want frs/dev", payload.Tenant, payload.Environment)
-	}
-	if payload.Source != notificationSourceOrchestratorEdgeUnreachable {
-		t.Fatalf("notice source = %q, want %q", payload.Source, notificationSourceOrchestratorEdgeUnreachable)
-	}
-	if payload.Action != notificationActionDeploy {
-		t.Fatalf("notice action = %q, want %q", payload.Action, notificationActionDeploy)
+	wantTag := [4]string{"frs", "dev", notificationSourceOrchestratorEdgeUnreachable, notificationActionDeploy}
+	gotTag := [4]string{payload.Tenant, payload.Environment, payload.Source, payload.Action}
+	if gotTag != wantTag {
+		t.Fatalf("notice tenant/environment/source/action = %+v, want %+v", gotTag, wantTag)
 	}
 }
 
