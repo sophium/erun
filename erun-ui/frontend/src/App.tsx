@@ -5,7 +5,7 @@ import { ControllerProvider } from '@/app/ControllerContext';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startSidebarResize, stepSidebarResize } from '@/app/layoutThunks';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
-import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from '@/app/state';
+import { computeMaxSidebarWidth, MIN_SIDEBAR_WIDTH } from '@/app/state';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialog';
@@ -94,7 +94,11 @@ export function App(): React.ReactElement {
                   onMouseDown={(event) => {
                     dispatch(startSidebarResize(event));
                   }}
-                  value={{ now: sidebarWidth, min: MIN_SIDEBAR_WIDTH, max: MAX_SIDEBAR_WIDTH }}
+                  value={{
+                    now: sidebarWidth,
+                    min: MIN_SIDEBAR_WIDTH,
+                    max: computeMaxSidebarWidth(window.innerWidth),
+                  }}
                   onStep={(delta) => {
                     dispatch(stepSidebarResize(delta));
                   }}

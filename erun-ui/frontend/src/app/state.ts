@@ -32,19 +32,103 @@ export const DEFAULT_SIDEBAR_WIDTH = 338;
 export const MIN_REVIEW_WIDTH = 420;
 export const MAX_REVIEW_WIDTH = 1400;
 export const DEFAULT_REVIEW_WIDTH = 620;
-const REVIEW_GRID_TERMINAL_MIN_WIDTH = 360;
-const REVIEW_GRID_DIVIDER_WIDTH = 10;
+// MIN_MAIN_PANE_WIDTH is the narrowest <main> the shell treats as usable
+// while showing the terminal/diff-review surface — the only other content
+// that competes with the review panel for the same viewport, so they can't
+// independently agree to starve it.
+export const MIN_MAIN_PANE_WIDTH = 360;
+// MIN_DASHBOARD_PANE_WIDTH is the narrowest <main> the shell treats as usable
+// while showing the tenant dashboard, which never renders alongside the
+// review panel (MainPane.tsx shows one or the other), so it is its own,
+// wider floor rather than folded into MIN_MAIN_PANE_WIDTH above. Measured,
+// not guessed: the dashboard's tab strip (Users/Reviews/Merge queue/Builds/
+// Audit log/API log) plus the page header's padding has an unwrapping,
+// unshrinkable content width of ~495px in Chromium. MIN_MAIN_PANE_WIDTH's
+// 360 let that content render wider than <main>, invisibly — the
+// intermediate overflow-x-auto wrapper (MainPane.tsx) permits the overflow
+// but never paints a discoverable scrollbar for it. 500 rounds the
+// measurement up with a small margin for cross-platform font metrics. The
+// sidebar breakpoint below is sized off this, the larger of the two floors,
+// since the sidebar competes with whichever of the two is showing.
+export const MIN_DASHBOARD_PANE_WIDTH = 500;
+export const GRID_DIVIDER_WIDTH = 10;
 
 export function computeMaxReviewWidth(
   viewportWidth: number,
   effectiveSidebarWidth: number,
 ): number {
-  const fittable =
-    viewportWidth -
-    effectiveSidebarWidth -
-    REVIEW_GRID_TERMINAL_MIN_WIDTH -
-    REVIEW_GRID_DIVIDER_WIDTH;
-  return Math.max(MIN_REVIEW_WIDTH, Math.min(MAX_REVIEW_WIDTH, fittable));
+  const fittable = viewportWidth - effectiveSidebarWidth - MIN_MAIN_PANE_WIDTH - GRID_DIVIDER_WIDTH;
+  // Floor at 0, not MIN_REVIEW_WIDTH: a floor at the panel's own minimum
+  // forced it wider than the viewport had room for whenever fittable went
+  // negative, which is the starved-<main> overflow this module prevents.
+  return Math.max(0, Math.min(MAX_REVIEW_WIDTH, fittable));
+}
+
+// Mirrors computeMaxReviewWidth for the sidebar. Unlike the review panel, its
+// floor stays at MIN_SIDEBAR_WIDTH — collapsing away entirely is the separate
+// decision nextSidebarHidden below makes, not a width squeeze. Reserves room
+// for MIN_DASHBOARD_PANE_WIDTH (not the smaller MIN_MAIN_PANE_WIDTH) because
+// the sidebar has no visibility into which of the two <main> contents is
+// showing, so it must leave enough for the wider requirement either way.
+export function computeMaxSidebarWidth(viewportWidth: number): number {
+  return Math.max(
+    MIN_SIDEBAR_WIDTH,
+    Math.min(MAX_SIDEBAR_WIDTH, viewportWidth - MIN_DASHBOARD_PANE_WIDTH - GRID_DIVIDER_WIDTH),
+  );
+}
+
+// What the shell actually renders for the sidebar column: 0 while collapsed,
+// otherwise the stored width reclamped to the viewport. Every consumer that
+// needs the sidebar's real current width (the review-panel max-width calc,
+// the CSS var writer) goes through this instead of layout.sidebarWidth
+// directly, so a resize is reflected everywhere at once.
+export function effectiveSidebarWidth(
+  hidden: boolean,
+  width: number,
+  viewportWidth: number,
+): number {
+  if (hidden) {
+    return 0;
+  }
+  return Math.min(computeMaxSidebarWidth(viewportWidth), Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
+// Below this viewport width, the sidebar at its own minimum plus the divider
+// already leaves <main> under MIN_DASHBOARD_PANE_WIDTH, so the shell
+// collapses the sidebar instead of continuing to squeeze it.
+export const SIDEBAR_COLLAPSE_BREAKPOINT =
+  MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH + MIN_DASHBOARD_PANE_WIDTH;
+// A widen has to clear the breakpoint by this margin before the sidebar
+// auto-reopens, so a window parked on the breakpoint doesn't oscillate.
+export const SIDEBAR_COLLAPSE_HYSTERESIS = 40;
+// Below this width even a collapsed sidebar's own divider has nowhere to sit
+// beside a non-empty <main>; no user override can keep it open past this.
+export const SIDEBAR_HARD_COLLAPSE_WIDTH = MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH;
+
+// Distinguishes the operator's explicit sidebar choice from the shell's
+// automatic viewport-driven collapse. null means no explicit choice yet, so
+// the automatic threshold governs; once the operator toggles the sidebar,
+// their choice sticks across future resizes until they toggle it again.
+export type SidebarUserOverride = 'shown' | 'hidden' | null;
+
+export function nextSidebarHidden(
+  current: boolean,
+  userOverride: SidebarUserOverride,
+  viewportWidth: number,
+): boolean {
+  if (viewportWidth < SIDEBAR_HARD_COLLAPSE_WIDTH) {
+    return true;
+  }
+  if (userOverride !== null) {
+    return userOverride === 'hidden';
+  }
+  if (viewportWidth < SIDEBAR_COLLAPSE_BREAKPOINT) {
+    return true;
+  }
+  if (viewportWidth >= SIDEBAR_COLLAPSE_BREAKPOINT + SIDEBAR_COLLAPSE_HYSTERESIS) {
+    return false;
+  }
+  return current;
 }
 export const MIN_FILES_WIDTH = 220;
 export const MAX_FILES_WIDTH = 460;

@@ -9,21 +9,24 @@ import {
   setReviewOpen as setReviewOpenAction,
   setReviewWidth,
   setSidebarHidden,
+  setSidebarUserOverride,
   setSidebarWidth,
 } from './slices/layoutSlice';
 import {
   computeMaxReviewWidth,
+  computeMaxSidebarWidth,
   DEBUG_HEIGHT_STORAGE_KEY,
   DEBUG_OPEN_STORAGE_KEY,
+  effectiveSidebarWidth,
   FILES_OPEN_STORAGE_KEY,
   FILES_WIDTH_STORAGE_KEY,
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
-  MAX_SIDEBAR_WIDTH,
   MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   MIN_SIDEBAR_WIDTH,
+  nextSidebarHidden,
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
 } from './state';
@@ -42,10 +45,36 @@ export function toggleSidebar(
   getState: () => RootState,
   callbacks: LayoutCallbacks,
 ): void {
-  dispatch(setSidebarHidden(!getState().layout.sidebarHidden));
+  const nextHidden = !getState().layout.sidebarHidden;
+  // Recorded as an explicit override, not a plain setSidebarHidden: this is
+  // the operator overruling whatever the automatic viewport collapse decided,
+  // so it must stick across later resizes until they toggle again.
+  dispatch(setSidebarUserOverride(nextHidden ? 'hidden' : 'shown'));
   callbacks.applyLayoutVars();
   callbacks.flushTerminalResize();
   callbacks.focusTerminalSoon();
+}
+
+// reconcileSidebarForViewport re-derives the sidebar's collapsed state on
+// every layout pass (mount, window resize, any panel toggle) so a window that
+// was resized rather than dragged still gets the same auto-collapse a narrow
+// launch would. It never touches sidebarWidth itself — that stays reclamped
+// only where it's rendered (applyTerminalLayoutVars) and where it's dragged
+// (below), so a window that narrows and widens again restores the operator's
+// chosen width instead of forgetting it.
+export function reconcileSidebarForViewport(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+): void {
+  const layout = getState().layout;
+  const hidden = nextSidebarHidden(
+    layout.sidebarHidden,
+    layout.sidebarUserOverride,
+    window.innerWidth,
+  );
+  if (hidden !== layout.sidebarHidden) {
+    dispatch(setSidebarHidden(hidden));
+  }
 }
 
 export function startSidebarResize(
@@ -61,7 +90,8 @@ export function startSidebarResize(
   document.body.classList.add('is-resizing');
 
   const move = (moveEvent: MouseEvent) => {
-    dispatch(setSidebarWidth(clamp(moveEvent.clientX, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)));
+    const maxWidth = computeMaxSidebarWidth(window.innerWidth);
+    dispatch(setSidebarWidth(clamp(moveEvent.clientX, MIN_SIDEBAR_WIDTH, maxWidth)));
     applyLayoutVars();
   };
   const stop = () => {
@@ -84,7 +114,8 @@ export function stepSidebarWidth(
   if (getState().layout.sidebarHidden) {
     return;
   }
-  const next = clamp(getState().layout.sidebarWidth + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+  const maxWidth = computeMaxSidebarWidth(window.innerWidth);
+  const next = clamp(getState().layout.sidebarWidth + delta, MIN_SIDEBAR_WIDTH, maxWidth);
   dispatch(setSidebarWidth(next));
   applyLayoutVars();
   saveNumber(SIDEBAR_WIDTH_STORAGE_KEY, next);
@@ -109,7 +140,11 @@ export function startReviewResize(
       return;
     }
     const layout = getState().layout;
-    const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+    const effectiveSidebar = effectiveSidebarWidth(
+      layout.sidebarHidden,
+      layout.sidebarWidth,
+      window.innerWidth,
+    );
     const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
     dispatch(setReviewWidth(clamp(paneRect.right - moveEvent.clientX, MIN_REVIEW_WIDTH, maxWidth)));
     callbacks.applyLayoutVars();
@@ -136,7 +171,11 @@ export function stepReviewWidth(
   if (!layout.reviewOpen) {
     return;
   }
-  const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+  const effectiveSidebar = effectiveSidebarWidth(
+    layout.sidebarHidden,
+    layout.sidebarWidth,
+    window.innerWidth,
+  );
   const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
   const next = clamp(layout.reviewWidth + delta, MIN_REVIEW_WIDTH, maxWidth);
   dispatch(setReviewWidth(next));
