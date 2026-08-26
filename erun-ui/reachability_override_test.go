@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestLocalPortReachabilityOverrideWinsOverARealListener pins erun#1375,
-// erun#1362, and erun#1381: the headless Playwright harness's isolated config
-// store computes local port ranges purely from its own seeded tenant/env
+// TestLocalPortReachabilityOverrideWinsOverARealListener pins the invariant
+// that the headless Playwright harness's isolated config store depends on:
+// it computes local port ranges purely from its own seeded tenant/env
 // list, so a seeded env's port can coincide with a real port a genuine
 // environment on the same host has bound (this host's own MCP/SSH forwards,
 // or another agent's). Unforced, canReachMCPEndpoint/canConnectLocalPort read

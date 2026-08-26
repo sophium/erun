@@ -82,7 +82,7 @@ test.describe('local port isolation from a real, unrelated listener', () => {
     }
   });
 
-  // erun#1362: on a host where the seeded env's port range collides with a
+  // On a host where the seeded env's port range collides with a
   // real listener, the same hang that swallowed the false-occupancy overlay
   // above (canReachMCPEndpoint's GET succeeds, so the code used to proceed to
   // a real, never-answered MCP connect) sat in front of every default tab

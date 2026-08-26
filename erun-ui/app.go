@@ -370,10 +370,10 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 // port ranges purely from its own (seeded) tenant/env list, so a seeded env
 // can land on the same port range a real environment on the same host has
 // genuinely bound (its own MCP/SSH forwards). Unforced, that reads as a real
-// answer about a seeded env that was never deployed (erun#1375, erun#1362,
-// erun#1381). ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE pins both probes to a
-// fixed answer for exactly that reason; it is set only by
-// playwright/fixtures/seedRoot.ts, never in production.
+// answer about a seeded env that was never deployed.
+// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE pins both probes to a fixed answer
+// for exactly that reason; it is set only by playwright/fixtures/seedRoot.ts,
+// never in production.
 func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = func(port int) bool {
