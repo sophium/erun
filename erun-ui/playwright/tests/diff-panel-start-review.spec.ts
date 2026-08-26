@@ -2,16 +2,15 @@ import type { Request, Route } from '@playwright/test';
 
 import { expect, test } from '../fixtures/erunApp.js';
 
-// #1315: half of "start a review from the diff panel" already shipped
-// (DiffLineCommentAction, #1348/#1388) — commenting on a line. The remaining
-// half, covered here, is starting the review itself from the diff panel: the
-// panel already knows the environment and the branch it is diffing against,
-// so opening "Open a review" from here must carry both instead of sending the
-// operator to the Reviews tab to re-specify what they were already looking
-// at. The dialog and its write thunks (commit, push, create) are unchanged —
-// covered by tenant-dashboard-review-write.spec.ts and
-// erun-ui/tenant_review_write_test.go — these specs cover only the new entry
-// point, its prefill, and its own capability probe
+// Starting a review from the diff panel: the panel already knows the
+// environment and the branch it is diffing against, so opening "Open a
+// review" from here must carry both instead of sending the operator to the
+// Reviews tab to re-specify what they were already looking at. Commenting on
+// a diff line is a separate, already-shipped entry point
+// (DiffList.CommentAction). The dialog and its write thunks (commit, push,
+// create) are unchanged — covered by tenant-dashboard-review-write.spec.ts
+// and erun-ui/tenant_review_write_test.go — these specs cover only the new
+// entry point, its prefill, and its own capability probe
 // (erun-ui/tenant_review_capability_test.go covers that Go method directly).
 
 function invokeBody(request: Request): { method: string } {
@@ -74,7 +73,7 @@ const REVIEW = {
 // own helper (not imported: specs stay independent of each other's internals,
 // see erun-ui/playwright/AGENTS.md). Opening an environment auto-spawns its AI
 // tab, which resolves either into an AI tab or -- if the environment's
-// activity lease is already held -- this occupancy prompt (erun#1221). These
+// activity lease is already held -- this occupancy prompt. These
 // specs care about the diff panel, not the AI tab, so race on whichever the
 // spawn actually produces.
 async function dismissAIOccupancyPromptIfShown(
