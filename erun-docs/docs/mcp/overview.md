@@ -690,7 +690,7 @@ Install a published version into the env. Same semantics as the CLI `erun deploy
 
 ### `exec_raw` (backgrounded) / `exec_job_await` / `exec_job_output`
 
-The job record is the shared shape every job tool returns. It is deliberately explicit about what is *not* known: `exitCode` is `null` in every state but `exited`, so a missing outcome can never be read as a zero one.
+The job record is the shared shape every job tool returns. It is deliberately explicit about what is *not* known: `exitCode` is `null` in `running` and `unknown` — the two states where no outcome was ever observed — and set to the captured code in both `exited` and `abandoned`, so a missing outcome can never be read as a zero one.
 
 ```jsonc
 // exec_raw {"command": ["./gradlew", "test"], "name": "suite", "wait": false}
@@ -707,7 +707,7 @@ The immediate response only confirms the job started; `exec_job_status` returns 
   "job": {
     "id": "suite",                 // defaults to name; addresses the job from here on
     "name": "suite",
-    "state": "running",            // running | exited | unknown
+    "state": "running",            // running | exited | abandoned | unknown
     "command": ["./gradlew", "test"],
     "dir": "/home/erun/git/team",
     "pid": 4242,                   // the supervisor — what liveness is decided by
@@ -736,6 +736,14 @@ The immediate response only confirms the job started; `exec_job_status` returns 
 { "job": { "id": "suite", "state": "exited", "exitCode": 42,
            "endedAt": "2026-08-07T09:18:41Z", "outputBytes": 81204, … },
   "timedOut": false, "waitedSeconds": 4, "timeoutSeconds": 30 }
+
+// exec_job_await {"id": "gate", "timeoutSeconds": 30} — the job's own process
+// exited, but it left work running behind it in its process group (e.g. a
+// gate it backgrounded and returned past); exitCode is captured, same as the
+// exited case, but this is never a success whatever it says
+{ "job": { "id": "gate", "state": "abandoned", "exitCode": 0,
+           "reason": "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work" },
+  "timedOut": false, … }
 
 // a job whose supervisor vanished — never reported as success, and as
 // terminal as the exited case above: never re-wait on this expecting a

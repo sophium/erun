@@ -927,9 +927,12 @@ Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sen
 |---|---|---|
 | `running` | The recorded process is alive and no outcome has been observed. | `null` |
 | `exited` | The work finished and the supervisor captured its status. `-1` means it was terminated by a signal, which `signal` names. | integer |
+| `abandoned` | The job's own process exited and the supervisor captured its exit status, but it left something it spawned still running in its process group — background work started and never waited for, e.g. a gate a job backgrounded and then exited past. `reason` describes it. Never a success, whatever `exitCode` says. | integer |
 | `unknown` | The record outlived whatever was meant to finish it — the supervisor is gone without recording an outcome (most often because the runtime pod was replaced), or an attached job's tracked process is gone. `reason` says which. | `null` |
 
 The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
+
+`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group still has a live member; that check is POSIX-only, so on Windows a job that backgrounds work this way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
 
 ### The alive contract {#alive-contract}
 
@@ -1058,7 +1061,7 @@ The call returns inside the timeout either way, so no connection is held open fo
 | Exit code | Meaning |
 |---|---|
 | `0` | The job reached `exited` with code `0`. |
-| `1` | The job reached `exited` with a non-zero code. The real code is in the message and in `job.exitCode`. |
+| `1` | The job reached `exited` with a non-zero code, or its state is `abandoned` — background work it started outlived it, so even a captured `exitCode` of `0` is never a success. `job.exitCode` carries the captured code either way; the message text says which case it is. |
 | `124` | The timeout elapsed with the job still running. Matches `timeout(1)`. |
 | `125` | The job's state is `unknown` — no outcome was ever recorded. |
 
@@ -1101,7 +1104,7 @@ On Windows there are no signals: every name maps to a `taskkill /F /T` of the re
 | Durability | The same store the [activity leases](/agent-reference/idle-policy#activity-leases) use. Inside a runtime pod that path is on the home PVC, so records survive pod replacement — deliberately not container-local `/tmp`, which every deploy strands. |
 | Output cap | `--max-output-bytes` (default 4 MiB) per job. Past it the log stops growing, the record sets `outputTruncated: true` (immediately, not at exit), and `job status` says `(truncated at the output cap)`. The **head** is kept: the outcome never comes from the log, so a bounded log costs detail, never the result. |
 | Retention | A finished job stays readable for **24 hours** after it ended, and the newest **50** finished records per environment are kept. Running jobs are never pruned. An orchestrator reconnecting after the work ended can therefore still learn the outcome; reaping at exit would recreate the problem this surface closes. |
-| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes abandoned records. Pruning removes the record and its log together. |
+| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes a stranded record to `unknown`. Pruning removes the record and its log together. |
 
 ### The lease a job holds
 
