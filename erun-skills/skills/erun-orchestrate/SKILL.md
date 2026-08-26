@@ -94,6 +94,15 @@ Read what you control from erun's config store — never infer it from what happ
   contract, not a reason to lean on it instead of pacing yourself.
   Short repeated checks also keep the operator informed, which a single silent block does not.
 - **On completion, list the assumptions you took** in place of asking. This is what keeps "don't ask" accountable.
+- **Waiting is not working.** Pacing yourself is the floor, not the job. While delegated work is in
+  flight there is almost always work that needs no worktree at all — reading the artifacts it has
+  already produced, judging rendered output, preparing the next brief, driving an independent
+  environment. An orchestrator that only polls is idle, and from the outside idle is
+  indistinguishable from blocked.
+- **Correct is not the same as good.** A green gate and a working surface can both hold while the
+  result still fails the bar it was given. Where the bar is craft or convenience, the passing verdict
+  and the quality verdict are separate judgements, and only one of them a test can make. Decide the
+  second one by looking at what shipped, and be willing to send back something that works.
 
 ## Working in a pod
 
@@ -192,6 +201,22 @@ Read what you control from erun's config store — never infer it from what happ
   running, exited, or unreachable.
 - **Wake a stopped environment from the host.** A stopped env has no pod, so its MCP edge cannot answer and cannot start itself; that silence is not a broken env. Open it from the host CLI, then resume over MCP.
 - **When you hand an agent a long gate, tell it how to wait.** An agent left to invent its own waiting starts the work in a background shell and then spends its turns re-reading an empty output file — hundreds of turns that buy nothing and can exhaust it before the work it is waiting for even finishes. Have it run the gate as a detached job and block on that job's own completion, so waiting costs one call rather than one per poll.
+- **A delegated run's progress is not its committed state.** Coherent narration, advancing turn
+  counts and a busy lease say nothing about whether anything was saved. Read the tree, not the
+  report: work can sit uncommitted behind hundreds of turns of confident progress, and a run that
+  dies then loses all of it. Ask for commits after each coherent chunk, then verify they exist.
+- **Telling an agent not to background its gate is not a control.** It will do it anyway, including
+  when told first, told as a rule, and told what it cost last time. Treat that as a property of the
+  medium rather than a lapse to instruct away: what actually protects the work is verifying commits
+  and being ready to take the tree over and finish the gate yourself.
+- **Someone else's reading of an artifact is not the artifact.** A delegated "pass" against a
+  screenshot, a log or a report is a claim about evidence, not evidence — and it fails in a
+  characteristic way, by asserting something weaker than what mattered ("the tab opened" for "the
+  operator can see the job"). Open the artifact yourself before believing a verdict about it.
+- **A long bounded wait loses to a recycling channel.** The bounded wait is built for repeated short
+  calls; stretched toward its maximum it holds one request open across a channel that may not live
+  that long, so it fails for reasons that have nothing to do with the work. Poll short, and prefer
+  the path that self-heals a dropped hop over one that only reports it.
 
 ## Fixing erun itself
 
