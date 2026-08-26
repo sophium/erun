@@ -55,11 +55,9 @@ func reviewDetailAPI(t *testing.T, forbidden map[string]bool) *httptest.Server {
 	}))
 }
 
-func loadReviewDetailFrom(t *testing.T, app *App, apiURL string) uiReviewDetail {
+func loadReviewDetailFrom(t *testing.T, app *App) uiReviewDetail {
 	t.Helper()
-	detail, err := app.LoadReviewDetail(uiReviewDetailInput{
-		Tenant: "frs", APIURL: apiURL, CloudProviderAlias: "team-cloud", ReviewID: "review-1",
-	})
+	detail, err := app.LoadReviewDetail(uiReviewDetailInput{Tenant: "frs", ReviewID: "review-1"})
 	if err != nil {
 		t.Fatalf("LoadReviewDetail failed: %v", err)
 	}
@@ -70,7 +68,7 @@ func TestLoadReviewDetailPopulatesTheReviewItself(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t, server.URL))
 
 	if detail.APIError != "" || detail.Restricted != "" || detail.Error != "" {
 		t.Fatalf("unexpected top-level failure: %+v", detail)
@@ -87,7 +85,7 @@ func TestLoadReviewDetailPopulatesCommentsBuildsAndQueuePosition(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t, server.URL))
 
 	if len(detail.Comments) != 2 || detail.Comments[1].ParentCommentID != "comment-1" {
 		t.Fatalf("expected the thread's root and reply, got %+v", detail.Comments)
@@ -105,7 +103,7 @@ func TestLoadReviewDetailDegradesPerSubReadWithoutBlankingTheRest(t *testing.T) 
 	server := reviewDetailAPI(t, map[string]bool{"/v1/reviews/review-1/comments": true})
 	defer server.Close()
 
-	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t, server.URL))
 
 	if detail.Review == nil {
 		t.Fatalf("expected the review to still load: %+v", detail)
@@ -122,9 +120,8 @@ func TestCreateReviewReplyCopiesTheParentThreadsAnchor(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	comment, err := tenantDashboardApp(t).CreateReviewReply(uiCreateReviewReplyInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
-		ReviewID: "review-1", ParentCommentID: "comment-1",
+	comment, err := tenantDashboardApp(t, server.URL).CreateReviewReply(uiCreateReviewReplyInput{
+		Tenant: "frs", ReviewID: "review-1", ParentCommentID: "comment-1",
 		CommitID: "abc123", FilePath: "main.go", Line: 42,
 		Body: "fixed, thanks",
 	})
@@ -140,9 +137,8 @@ func TestCreateReviewReplyRequiresABody(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).CreateReviewReply(uiCreateReviewReplyInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
-		ReviewID: "review-1", ParentCommentID: "comment-1", Body: "   ",
+	_, err := tenantDashboardApp(t, server.URL).CreateReviewReply(uiCreateReviewReplyInput{
+		Tenant: "frs", ReviewID: "review-1", ParentCommentID: "comment-1", Body: "   ",
 	})
 	if err == nil || !strings.Contains(err.Error(), "reply body is required") {
 		t.Fatalf("expected a body-required error, got %v", err)
@@ -184,7 +180,7 @@ func TestLoadReviewDetailResolvesAuthorAndCommenterUsernames(t *testing.T) {
 	server := usernameResolutionAPI(t)
 	defer server.Close()
 
-	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t, server.URL))
 
 	if detail.Review == nil || detail.Review.AuthorUsername != "pat" {
 		t.Fatalf("expected the review's author to resolve to its username, got %+v", detail.Review)

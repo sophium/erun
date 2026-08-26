@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -38,14 +39,57 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 	}))
 }
 
-func tenantDashboardApp(t *testing.T) *App {
+// testERunPlatformAliasApp builds an App with one signed-in erun-type cloud
+// alias whose ERun.APIURL is apiURL, backed by a real (temp-dir) secret store
+// so CloudProviderBearerToken runs its real refresh_token grant path — the
+// same path erun platform`/`erun cloud login` drives — down to a crafted
+// access token carrying issuer/subject claims a test can assert on.
+func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
+	t.Helper()
+	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
+	refreshRef := "erun/refresh/" + testERunAlias
+	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
+		t.Fatalf("seed refresh token: %v", err)
+	}
+	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:    testERunAlias,
+		Provider: eruncommon.CloudProviderERun,
+		Username: "erun",
+		ERun:     &eruncommon.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+	}}}
+	return NewApp(erunUIDeps{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}}},
+		cloudDeps: eruncommon.CloudDependencies{
+			CloudSecretStore: secrets,
+			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
+				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
+			},
+			RefreshERunTokens: func(eruncommon.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
+				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
+			},
+		},
+	})
+}
+
+const (
+	testERunAlias   = "erun+api.test.example@erun"
+	testERunIssuer  = "https://auth.erun.example"
+	testERunSubject = "user-subject-1"
+)
+
+// testAWSAliasApp builds an App whose only configured cloud alias is an AWS
+// one — the exact shape the operator's own machine had (#1393): a tenant's
+// primary cloud alias is AWS-typed, and no erun platform alias is configured
+// at all. Used to prove the platform read no longer reaches for it.
+func testAWSAliasApp(t *testing.T) *App {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")
 	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
 		Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS, Profile: "team",
 	}}}
 	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: eruncommon.CloudDependencies{
 			RunAWSBearerToken: func(eruncommon.Context, string, string) (string, error) { return jwt, nil },
 			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
@@ -55,11 +99,14 @@ func tenantDashboardApp(t *testing.T) *App {
 	})
 }
 
-func loadTenantDashboardFrom(t *testing.T, app *App, apiURL string) uiTenantDashboard {
+func tenantDashboardApp(t *testing.T, apiURL string) *App {
 	t.Helper()
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
-		Tenant: "frs", APIURL: apiURL, CloudProviderAlias: "team-cloud",
-	})
+	return testERunPlatformAliasApp(t, apiURL)
+}
+
+func loadTenantDashboardFrom(t *testing.T, app *App) uiTenantDashboard {
+	t.Helper()
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
@@ -85,7 +132,7 @@ func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/reviews": true}, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if dashboard.APIError != "" {
 		t.Fatalf("one refused panel must not fail the whole dashboard: %q", dashboard.APIError)
@@ -113,7 +160,7 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 	server := tenantDashboardAPI(t, capabilities, nil, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/audit-events" {
 		t.Fatalf("expected only the reads the caller may make, got %q", got)
@@ -142,7 +189,7 @@ func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T
 	server := tenantDashboardAPI(t, "[]", nil, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if got := strings.Join(requests, ","); got != "/v1/whoami" {
 		t.Fatalf("expected no read beyond identity, got %q", got)
@@ -162,7 +209,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 	server := tenantDashboardAPI(t, "null", nil, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events"
 	if got := strings.Join(requests, ","); got != want {
@@ -206,7 +253,7 @@ func TestTenantDashboardResolvesReviewAuthorUsernames(t *testing.T) {
 	}))
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if len(dashboard.Reviews) != 1 || dashboard.Reviews[0].AuthorUsername != "pat" {
 		t.Fatalf("expected the review's author to resolve to its username, got %+v", dashboard.Reviews)
@@ -222,7 +269,7 @@ func TestTenantDashboardExplainsARefusedIdentityRead(t *testing.T) {
 	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/whoami": true}, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if !strings.Contains(dashboard.APIError, "do not have access to this tenant's dashboard") {
 		t.Fatalf("expected the refusal to be explained in the operator's terms, got %q", dashboard.APIError)

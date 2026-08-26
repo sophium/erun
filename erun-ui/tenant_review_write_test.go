@@ -68,9 +68,9 @@ func TestCreateReviewOpensAReviewFromThePushedBranch(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t).CreateReview(uiCreateReviewInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
-		Name: "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
+	review, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+		Tenant: "frs",
+		Name:   "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
 	if err != nil {
 		t.Fatalf("CreateReview failed: %v", err)
@@ -84,9 +84,9 @@ func TestCreateReviewRequiresNameAndBothBranches(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).CreateReview(uiCreateReviewInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
-		Name: "", TargetBranch: "main", SourceBranch: "feature/1348-x",
+	_, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+		Tenant: "frs",
+		Name:   "", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
 	if err == nil || !strings.Contains(err.Error(), "are required") {
 		t.Fatalf("expected a required-fields error, got %v", err)
@@ -97,9 +97,9 @@ func TestCreateReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	server := reviewWriteAPI(t, map[string]bool{"POST /v1/reviews": true})
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).CreateReview(uiCreateReviewInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
-		Name: "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
+	_, err := tenantDashboardApp(t, server.URL).CreateReview(uiCreateReviewInput{
+		Tenant: "frs",
+		Name:   "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
 	if err == nil {
 		t.Fatalf("expected the refused write to surface as an error")
@@ -110,8 +110,8 @@ func TestCloseReviewTransitionsToClosed(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t).CloseReview(uiCloseReviewInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud", ReviewID: "review-1",
+	review, err := tenantDashboardApp(t, server.URL).CloseReview(uiCloseReviewInput{
+		Tenant: "frs", ReviewID: "review-1",
 	})
 	if err != nil {
 		t.Fatalf("CloseReview failed: %v", err)
@@ -125,8 +125,8 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	server := reviewWriteAPI(t, map[string]bool{"PATCH /v1/reviews/review-1/status": true})
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).CloseReview(uiCloseReviewInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud", ReviewID: "review-1",
+	_, err := tenantDashboardApp(t, server.URL).CloseReview(uiCloseReviewInput{
+		Tenant: "frs", ReviewID: "review-1",
 	})
 	if err == nil {
 		t.Fatalf("expected the refused write to surface as an error")
@@ -137,8 +137,8 @@ func TestAdvanceMergeQueueAdvancesTheTargetBranchsHead(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	review, err := tenantDashboardApp(t).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud", TargetBranch: "main",
+	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+		Tenant: "frs", TargetBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("AdvanceMergeQueue failed: %v", err)
@@ -152,8 +152,8 @@ func TestAdvanceMergeQueueRequiresATargetBranch(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
+	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+		Tenant: "frs",
 	})
 	if err == nil || !strings.Contains(err.Error(), "target branch is required") {
 		t.Fatalf("expected a target-branch-required error, got %v", err)
@@ -164,8 +164,8 @@ func TestCreateReviewCommentStartsATopLevelThreadWithNoParent(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	comment, err := tenantDashboardApp(t).CreateReviewComment(uiCreateReviewCommentInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
+	comment, err := tenantDashboardApp(t, server.URL).CreateReviewComment(uiCreateReviewCommentInput{
+		Tenant:   "frs",
 		ReviewID: "review-1", CommitID: "abc123", FilePath: "main.go", Line: 10,
 		Body: "why this line?",
 	})
@@ -184,8 +184,8 @@ func TestCreateReviewCommentRequiresADiffLineAnchor(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
 
-	_, err := tenantDashboardApp(t).CreateReviewComment(uiCreateReviewCommentInput{
-		Tenant: "frs", APIURL: server.URL, CloudProviderAlias: "team-cloud",
+	_, err := tenantDashboardApp(t, server.URL).CreateReviewComment(uiCreateReviewCommentInput{
+		Tenant:   "frs",
 		ReviewID: "review-1", Body: "why this line?",
 	})
 	if err == nil || !strings.Contains(err.Error(), "diff line anchor") {
@@ -203,7 +203,7 @@ func TestTenantDashboardReportsWriteCapabilitiesAlongsideReads(t *testing.T) {
 	server := tenantDashboardAPI(t, capabilities, nil, &requests)
 	defer server.Close()
 
-	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t), server.URL)
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
 	if !dashboard.CanCreateReview {
 		t.Fatalf("expected CanCreateReview true when POST /v1/reviews is granted, got %+v", dashboard)
@@ -217,7 +217,7 @@ func TestReviewDetailReportsCanCloseAlongsideCanComment(t *testing.T) {
 	server := reviewDetailAPI(t, nil)
 	defer server.Close()
 
-	detail := loadReviewDetailFrom(t, tenantDashboardApp(t), server.URL)
+	detail := loadReviewDetailFrom(t, tenantDashboardApp(t, server.URL))
 
 	if !detail.CanClose {
 		t.Fatalf("expected an unknown capability set to leave closing attemptable, got %+v", detail)

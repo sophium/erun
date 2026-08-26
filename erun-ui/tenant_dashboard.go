@@ -16,14 +16,9 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	if tenant == "" {
 		return uiTenantDashboard{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiTenantDashboard{}, fmt.Errorf("tenant API URL is required")
-	}
 	dashboard := uiTenantDashboard{
 		Tenant:      tenant,
 		Environment: strings.TrimSpace(input.Environment),
-		APIURL:      apiURL,
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -38,40 +33,26 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 			dashboard.APILog = log
 		}
 	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiTenantDashboard{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+
+	resolution, err := a.resolveTenantPlatform(tenant, strings.TrimSpace(input.PlatformAlias))
 	if err != nil {
-		dashboard.APIError = err.Error()
+		return uiTenantDashboard{}, err
+	}
+	dashboard.PlatformState = resolution.state
+	dashboard.PlatformAliasChoices = resolution.aliasChoices
+	dashboard.PlatformAlias = resolution.alias
+	dashboard.PlatformURL = resolution.apiURL
+	dashboard.PlatformIssuer = resolution.issuer
+	dashboard.PlatformSubject = resolution.subject
+	if resolution.state != tenantPlatformStateReady {
 		return dashboard, nil
 	}
-	defer cancel()
-	loadTenantDashboardData(requestCtx, client, &dashboard, input)
-	return dashboard, nil
-}
+	dashboard.APIURL = resolution.apiURL
 
-// tenantDashboardBearerClient mints a bearer token for cloudProviderAlias and
-// wraps it in the shared platform client every dashboard-backed read or write
-// uses, so wire shapes, error mapping, and header handling cannot drift from
-// the CLI's. cloudProviderAlias must already be validated non-empty by the
-// caller; a failure here is a runtime condition (bad or expired credentials),
-// not a caller wiring error, so every caller surfaces it as its own error
-// field rather than treating it as a Wails-level failure.
-func (a *App) tenantDashboardBearerClient(ctx context.Context, apiURL, cloudProviderAlias string) (*eruncommon.PlatformClient, context.Context, context.CancelFunc, error) {
-	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: cloudProviderAlias}, a.deps.cloudDeps)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("get cloud bearer token: %w", err)
-	}
-	bearer := strings.TrimSpace(token.Token)
-	if bearer == "" {
-		return nil, nil, nil, fmt.Errorf("get cloud bearer token: empty token")
-	}
-	client := eruncommon.NewPlatformClient(apiURL, func() (string, error) { return bearer, nil }).
-		WithUsernameHint(a.tenantDashboardUsernameHint(token.Alias))
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
-	return client, requestCtx, cancel, nil
+	defer cancel()
+	loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
+	return dashboard, nil
 }
 
 const tenantDashboardTimeout = 10 * time.Second
@@ -107,7 +88,7 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	if err != nil {
 		// Identity is the dashboard's own precondition: without it there is no
 		// capability set to gate the remaining panels honestly.
-		dashboard.APIError = tenantDashboardIdentityError(err)
+		dashboard.PlatformState, dashboard.APIError = tenantDashboardIdentityFailure(err)
 		return
 	}
 	dashboard.User = &uiTenantDashboardUser{
@@ -415,18 +396,24 @@ func tenantDashboardReadError(read string, err error) string {
 	return fmt.Sprintf("load tenant dashboard %s: %v", read, err)
 }
 
-// tenantDashboardIdentityError says what a refused identity read means for the
-// operator. The identity read is authorized like any other route, so a user with
-// no permissions at all is refused it — and "http 403: Forbidden" is the state
-// of their access, not a fault they can act on as written.
-func tenantDashboardIdentityError(err error) string {
+// tenantDashboardIdentityFailure classifies a refused identity read into the
+// state that names the operator's actual next action, plus the message the
+// dashboard shows before that action. By the time this runs, the bearer
+// itself minted successfully (resolveTenantPlatform already reports
+// tenantPlatformStateNotSignedIn when it does not) — so a 401 here is the
+// platform's own auth middleware rejecting a token whose subject it does not
+// recognize, i.e. an identity that is not enrolled in this tenant, never a
+// stale session signing in again could fix. A 403 means the identity is
+// enrolled but the whoami read itself is refused, which happens only for a
+// caller with no permissions at all.
+func tenantDashboardIdentityFailure(err error) (state, message string) {
 	switch {
 	case errors.Is(err, eruncommon.ErrPlatformForbidden):
-		return "You do not have access to this tenant's dashboard. Ask an administrator for access."
+		return tenantPlatformStateNoPermission, "You do not have access to this tenant's dashboard. Ask an administrator for access."
 	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
-		return "This tenant's platform did not accept the signed-in identity. Sign in to the tenant's cloud provider again."
+		return tenantPlatformStateNotEnrolled, "Your signed-in identity is not enrolled in this tenant yet. Ask an administrator to enroll it, or request access below."
 	default:
-		return tenantDashboardReadError(tenantDashboardReadWhoami, err)
+		return "", tenantDashboardReadError(tenantDashboardReadWhoami, err)
 	}
 }
 

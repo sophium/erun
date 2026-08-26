@@ -1799,59 +1799,41 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	}
 }
 
-func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
-	jwt := testUIJWT("https://sts.aws.example")
+// TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the "green"
+// half of the erun-vs-AWS seam (#1393): the dashboard's bearer and username
+// hint come from the resolved erun-type platform alias, never from whichever
+// alias happens to be the tenant's primary one. See
+// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform for the "red"
+// half — proving an AWS-only configuration cannot reach this path at all.
+func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T) {
 	var requests []string
-	server := httptest.NewServer(tenantDashboardHandler(t, jwt, &requests))
+	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests))
 	defer server.Close()
 
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
-		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
-		Profile:  "team",
-		Username: "Rihards.Freimanis",
-	}}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
-		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
-				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
-					t.Fatalf("unexpected bearer input profile=%q audience=%q", profile, audience)
-				}
-				return jwt, nil
-			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
-			},
-		},
-	})
-
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
-		Tenant:             "frs",
-		APIURL:             server.URL,
-		CloudProviderAlias: "team-cloud",
-	})
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	assertPrimaryCloudDashboard(t, dashboard, requests)
+	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
-func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.HandlerFunc {
+func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.HandlerFunc {
 	t.Helper()
+	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer "+jwt {
 			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
 		}
-		if req.Header.Get("X-ERun-Username") != "Rihards.Freimanis" {
+		if req.Header.Get("X-ERun-Username") != "erun" {
 			t.Fatalf("unexpected username hint: %q", req.Header.Get("X-ERun-Username"))
 		}
 		*requests = append(*requests, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch req.URL.Path {
 		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"https://sts.aws.example","subject":"subject-1"}`))
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`))
 		case "/v1/reviews":
 			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
 		case "/v1/reviews/merge-queue":
@@ -1859,7 +1841,7 @@ func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.H
 		case "/v1/reviews/review-1/builds":
 			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
 		case "/v1/audit-events":
-			_, _ = w.Write([]byte(`{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"https://sts.aws.example","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`))
+			_, _ = w.Write([]byte(`{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`))
 		case "/v1/users":
 			_, _ = w.Write([]byte(`[]`))
 		default:
@@ -1868,28 +1850,30 @@ func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.H
 	}
 }
 
-func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
+func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
 	t.Helper()
 
 	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
-	assertPrimaryCloudDashboardAuditEvents(t, dashboard.AuditEvents)
+	if dashboard.PlatformAlias != testERunAlias {
+		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
+	}
+	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
 	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}
 }
 
-func assertPrimaryCloudDashboardAuditEvents(t *testing.T, events []uiTenantDashboardAudit) {
+func assertERunPlatformDashboardAuditEvents(t *testing.T, events []uiTenantDashboardAudit) {
 	t.Helper()
 	if len(events) != 1 || events[0].Actor != "subject-1" || events[0].Action != "GET /v1/reviews" {
 		t.Fatalf("unexpected audit events: %+v", events)
 	}
 }
 
-func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
-	jwt := testUIJWT("https://sts.aws.example")
+func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/v1/whoami" {
 			t.Fatalf("unexpected request path: %s", req.URL.Path)
@@ -1898,40 +1882,54 @@ func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
-		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
-		Profile:  "team",
-	}}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
-		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(eruncommon.Context, string, string) (string, error) {
-				return jwt, nil
-			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
-			},
-		},
-		loadAPILog: func(_ context.Context, input uiTenantDashboardInput) (string, error) {
-			if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
-				t.Fatalf("unexpected log input: %+v", input)
-			}
-			return "auth rejected token", nil
-		},
-	})
+	app := testERunPlatformAliasApp(t, server.URL)
+	app.deps.loadAPILog = func(_ context.Context, input uiTenantDashboardInput) (string, error) {
+		if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
+			t.Fatalf("unexpected log input: %+v", input)
+		}
+		return "auth rejected token", nil
+	}
 
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
-		Tenant:             "frs",
-		APIURL:             server.URL,
-		MCPURL:             "http://127.0.0.1:17000/mcp",
-		CloudProviderAlias: "team-cloud",
+		Tenant: "frs",
+		MCPURL: "http://127.0.0.1:17000/mcp",
 	})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	if !strings.Contains(dashboard.APIError, "did not accept the signed-in identity") || dashboard.APILog != "auth rejected token" {
+	if dashboard.PlatformState != tenantPlatformStateNotEnrolled {
+		t.Fatalf("expected the not-enrolled state, got %q (message %q)", dashboard.PlatformState, dashboard.APIError)
+	}
+	if !strings.Contains(dashboard.APIError, "not enrolled") {
+		t.Fatalf("unexpected dashboard message: %q", dashboard.APIError)
+	}
+	if dashboard.APILog != "auth rejected token" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
+	}
+}
+
+// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform is the "red" half
+// of the erun-vs-AWS seam (#1393): on a machine configured exactly like the
+// operator's own (only an AWS cloud alias, no erun platform alias at all),
+// the dashboard must report not-connected rather than signing the platform
+// read with the AWS identity. Before this fix, LoadTenantDashboard took its
+// apiUrl/cloudProviderAlias straight from the frontend, which happily handed
+// it the tenant's AWS-typed primary alias and an environment's own loopback
+// port-forward — this test fails against that shape because there is no
+// APIURL/CloudProviderAlias field left to even construct it with, and it
+// would otherwise reach an AWS-signed 401 rather than this local, no-network
+// classification.
+func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
+	app := testAWSAliasApp(t)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.PlatformState != tenantPlatformStateNotConnected {
+		t.Fatalf("expected not-connected with only an AWS alias configured, got %q (apiError=%q)", dashboard.PlatformState, dashboard.APIError)
+	}
+	if dashboard.APIURL != "" || dashboard.PlatformAlias != "" {
+		t.Fatalf("expected no platform URL or alias to be reported, got %+v", dashboard)
 	}
 }
 
@@ -2047,8 +2045,12 @@ func TestLoadAndSaveERunConfig(t *testing.T) {
 }
 
 func testUIJWT(issuer string) string {
+	return testUIJWTWithSubject(issuer, "test-subject")
+}
+
+func testUIJWTWithSubject(issuer, subject string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `","sub":"` + subject + `"}`))
 	return header + "." + payload + ".signature"
 }
 

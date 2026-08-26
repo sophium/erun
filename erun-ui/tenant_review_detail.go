@@ -22,14 +22,6 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	if tenant == "" {
 		return uiReviewDetail{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiReviewDetail{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiReviewDetail{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
 		return uiReviewDetail{}, fmt.Errorf("review id is required")
@@ -40,7 +32,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		detail.APIError = err.Error()
 		return detail, nil
@@ -49,7 +41,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 
 	whoami, err := client.Whoami(requestCtx)
 	if err != nil {
-		detail.APIError = tenantDashboardIdentityError(err)
+		_, detail.APIError = tenantDashboardIdentityFailure(err)
 		return detail, nil
 	}
 	capabilities := whoami.Capabilities
@@ -128,14 +120,6 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 	if tenant == "" {
 		return uiReviewComment{}, fmt.Errorf("tenant is required")
 	}
-	apiURL := strings.TrimSpace(input.APIURL)
-	if apiURL == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant API URL is required")
-	}
-	alias := strings.TrimSpace(input.CloudProviderAlias)
-	if alias == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant primary cloud alias is required")
-	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
 		return uiReviewComment{}, fmt.Errorf("review id is required")
@@ -153,7 +137,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	client, requestCtx, cancel, err := a.tenantDashboardBearerClient(ctx, apiURL, alias)
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err
 	}

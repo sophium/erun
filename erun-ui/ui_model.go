@@ -202,12 +202,17 @@ type uiTenantConfig struct {
 }
 
 type uiTenantDashboardInput struct {
-	Tenant             string `json:"tenant"`
-	Environment        string `json:"environment,omitempty"`
-	APIURL             string `json:"apiUrl"`
-	MCPURL             string `json:"mcpUrl,omitempty"`
-	KubernetesContext  string `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
+	Tenant            string `json:"tenant"`
+	Environment       string `json:"environment,omitempty"`
+	MCPURL            string `json:"mcpUrl,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	// PlatformAlias optionally names which configured erun-type cloud alias's
+	// platform to read. Empty defers to the caller's sole configured erun
+	// alias; when more than one is configured the load reports every alias as
+	// a choice instead of guessing. See tenant_platform.go — the desktop
+	// resolves the platform's base URL and identity the same way `erun
+	// platform` does, never from an environment's own apiUrl (#1393).
+	PlatformAlias string `json:"platformAlias,omitempty"`
 	// ReviewFilterMine/ReviewFilterWaitingOnMe are the Reviews tab's one-click
 	// discovery filters. Both resolve to the signed-in user's own id (already
 	// known from this same load's whoami call) rather than asking the
@@ -228,15 +233,34 @@ type uiTenantDashboard struct {
 	// APIError is a whole-dashboard failure: the caller's identity could not be
 	// read, so no panel can be resolved or gated. A single panel's own failure
 	// belongs on that panel, not here.
-	APIError    string                    `json:"apiError,omitempty"`
-	APILog      string                    `json:"apiLog,omitempty"`
-	APILogError string                    `json:"apiLogError,omitempty"`
-	User        *uiTenantDashboardUser    `json:"user,omitempty"`
-	Reviews     []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue  []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds      []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	AuditEvents []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
-	Panels      []uiTenantDashboardPanel  `json:"panels,omitempty"`
+	APIError    string `json:"apiError,omitempty"`
+	APILog      string `json:"apiLog,omitempty"`
+	APILogError string `json:"apiLogError,omitempty"`
+	// PlatformState names why the platform identity is not ready to load, so
+	// the frontend renders the one action that resolves it instead of a
+	// generic error. "" means the platform resolved and the load proceeded
+	// (see tenantPlatformStateReady and its siblings in tenant_platform.go).
+	PlatformState string `json:"platformState,omitempty"`
+	// PlatformAliasChoices lists every configured erun-type alias when more
+	// than one exists and the caller did not name one to use.
+	PlatformAliasChoices []string `json:"platformAliasChoices,omitempty"`
+	// PlatformAlias is the erun-type cloud alias actually resolved (or that a
+	// not-signed-in/not-enrolled/no-permission state must act on).
+	PlatformAlias string `json:"platformAlias,omitempty"`
+	// PlatformURL is the platform base URL actually resolved (or that would be
+	// contacted once signed in), so the surface can name what it talked to.
+	PlatformURL string `json:"platformUrl,omitempty"`
+	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
+	// identity already in hand, once a bearer minted successfully — set even
+	// when the subsequent identity read itself failed (not-enrolled).
+	PlatformIssuer  string                    `json:"platformIssuer,omitempty"`
+	PlatformSubject string                    `json:"platformSubject,omitempty"`
+	User            *uiTenantDashboardUser    `json:"user,omitempty"`
+	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
+	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
+	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	AuditEvents     []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
+	Panels          []uiTenantDashboardPanel  `json:"panels,omitempty"`
 	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
 	// may attempt those writes at all, so the composing actions can be hidden
 	// rather than rendered to fail on submit — the same contract CanComment
@@ -321,10 +345,8 @@ type uiTenantDashboardAudit struct {
 }
 
 type uiReviewDetailInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	ReviewID           string `json:"reviewId"`
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
 }
 
 // uiReviewDetail is the Reviews tab's per-row detail: the review itself, its
@@ -383,11 +405,9 @@ type uiReviewComment struct {
 // CommentID must be a thread's root; the frontend never offers the action on
 // a reply, so there is no reply-rejection path to surface here.
 type uiUpdateReviewCommentStatusInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	ReviewID           string `json:"reviewId"`
-	CommentID          string `json:"commentId"`
+	Tenant    string `json:"tenant"`
+	ReviewID  string `json:"reviewId"`
+	CommentID string `json:"commentId"`
 }
 
 // uiCreateReviewReplyInput replies to an existing comment thread. CommitID,
@@ -395,41 +415,33 @@ type uiUpdateReviewCommentStatusInput struct {
 // holds — a reply must anchor to the same line as the thread it joins — so
 // Body is the only field the operator actually authors.
 type uiCreateReviewReplyInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	ReviewID           string `json:"reviewId"`
-	ParentCommentID    string `json:"parentCommentId"`
-	CommitID           string `json:"commitId"`
-	FilePath           string `json:"filePath"`
-	Line               int    `json:"line"`
-	Body               string `json:"body"`
+	Tenant          string `json:"tenant"`
+	ReviewID        string `json:"reviewId"`
+	ParentCommentID string `json:"parentCommentId"`
+	CommitID        string `json:"commitId"`
+	FilePath        string `json:"filePath"`
+	Line            int    `json:"line"`
+	Body            string `json:"body"`
 }
 
 // uiCreateReviewInput opens a review on the platform. sourceBranch must
 // already be pushed to the remote — see ExecPush — since the review
 // references it by name.
 type uiCreateReviewInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Name               string `json:"name"`
-	TargetBranch       string `json:"targetBranch"`
-	SourceBranch       string `json:"sourceBranch"`
+	Tenant       string `json:"tenant"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
 }
 
 type uiCloseReviewInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	ReviewID           string `json:"reviewId"`
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
 }
 
 type uiAdvanceMergeQueueInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	TargetBranch       string `json:"targetBranch"`
+	Tenant       string `json:"tenant"`
+	TargetBranch string `json:"targetBranch"`
 }
 
 // uiCreateReviewCommentInput starts a new top-level thread anchored to a diff
@@ -437,14 +449,12 @@ type uiAdvanceMergeQueueInput struct {
 // Every field but Body is the anchor the operator picked by clicking a line in
 // the diff panel, not a value they typed.
 type uiCreateReviewCommentInput struct {
-	Tenant             string `json:"tenant"`
-	APIURL             string `json:"apiUrl"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	ReviewID           string `json:"reviewId"`
-	CommitID           string `json:"commitId"`
-	FilePath           string `json:"filePath"`
-	Line               int    `json:"line"`
-	Body               string `json:"body"`
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	CommitID string `json:"commitId"`
+	FilePath string `json:"filePath"`
+	Line     int    `json:"line"`
+	Body     string `json:"body"`
 }
 
 type uiSSHDConfig struct {
