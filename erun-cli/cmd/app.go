@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -49,7 +50,68 @@ func newAppCmd(launchApp AppLauncher) *cobra.Command {
 	cmd.Flags().BoolVar(&headless, "headless", false, "Run the desktop backend without a Wails window and serve the frontend over HTTP")
 	cmd.Flags().IntVar(&port, "port", 0, "HTTP listen port for --headless mode (defaults to the desktop binary's default)")
 	addDryRunFlag(cmd)
+	addCommands(cmd, newAppRestartCmd())
 	return cmd
+}
+
+func newAppRestartCmd() *cobra.Command {
+	var orchestratorID string
+	cmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the running desktop app in place to pick up a rebuild",
+		Long: "Restart the already-running erun-app desktop process: it asks that process to run the exact " +
+			"rebuild+restart its own Restart button runs — write the resume hand-off (naming the conversation " +
+			"the orchestrator was actually live on, per --orchestrator), relaunch a fresh copy of itself, then " +
+			"quit. It never spawns a second desktop instance or signals a process directly; it only ever asks " +
+			"the one already running to restart itself, so it cannot leave two instances up or a process " +
+			"half-killed. It resolves the running desktop from a marker that process wrote at startup and " +
+			"verifies that process is still alive before doing anything — a stale marker (the desktop already " +
+			"exited) or no marker at all (nothing running) is refused outright rather than guessed at, since a " +
+			"relaunch armed against a dead target would silently do nothing.",
+		Example:       "  erun app restart\n  erun app restart --orchestrator my-orchestrator\n  erun app restart --dry-run",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAppRestartCommand(commandContext(cmd), orchestratorID)
+		},
+	}
+	cmd.Flags().StringVar(&orchestratorID, "orchestrator", "", "Orchestrator id to resume after the restart (defaults to $ERUN_ORCHESTRATOR_ID; a bare restart with neither set reopens whatever was last open, idle)")
+	addDryRunFlag(cmd)
+	addOutputFlag(cmd)
+	return cmd
+}
+
+// runAppRestartCommand resolves the orchestrator asking for the restart (the
+// flag, else the environment an orchestrator session already carries), then
+// defers entirely to eruncommon.RestartDesktopApp: the running desktop is the
+// only thing that can correctly resolve which conversation to resume, so this
+// command never re-implements that resolution.
+func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
+	id := strings.TrimSpace(orchestratorID)
+	if id == "" {
+		id = strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID"))
+	}
+	ctx.Trace(fmt.Sprintf("app restart: orchestrator=%q", id))
+	markerPath := eruncommon.DefaultDesktopControlMarkerPath()
+	ctx.Trace(fmt.Sprintf("app restart: resolving the running desktop app from %s", markerPath))
+	outcome := eruncommon.RestartDesktopApp(context.Background(), eruncommon.DefaultDesktopRestartDeps(), id, ctx.DryRun)
+	ctx.Trace(fmt.Sprintf("app restart: status=%s pid=%d controlPort=%d", outcome.Status, outcome.PID, outcome.ControlPort))
+	if outcome.Status == eruncommon.DesktopRestartRefused || outcome.Status == eruncommon.DesktopRestartFailed {
+		_ = ctx.WriteResult(outcome)
+		return fmt.Errorf("restart %s: %s", outcome.Status, outcome.Reason)
+	}
+	if !ctx.DryRun && ctx.Output != eruncommon.OutputJSON {
+		_, _ = fmt.Fprintln(ctx.Stdout, appRestartSummary(outcome))
+	}
+	return ctx.WriteResult(outcome)
+}
+
+// appRestartSummary renders the two non-error outcomes; RestartDesktopApp
+// never returns would-restart for a real (non-dry-run) call, so this only
+// ever prints for a successful restart.
+func appRestartSummary(outcome eruncommon.DesktopRestartOutcome) string {
+	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
 }
 
 // buildAppLaunchArgs returns the argv tail passed to erun-app. Only the
