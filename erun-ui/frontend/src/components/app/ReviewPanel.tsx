@@ -28,6 +28,7 @@ import type { DiffCommit } from '@/types';
 
 import { DiffList } from './DiffList';
 import { ChangedFileTree } from './ReviewPanel.ChangedFiles';
+import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 const filesSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-files_&]:before:bg-border';
@@ -299,7 +300,17 @@ function ReviewBoundaryTrack({
 // SelectedCommit are all per-repository, so a commit list or a base commit
 // shared across two unrelated checkouts would be a value that means nothing
 // (#1178).
-function ReviewRangeControl({ envKey }: { envKey: string }): React.ReactElement | null {
+function ReviewRangeControl({
+  envKey,
+  tenant,
+  environment,
+  showEnvLabel,
+}: {
+  envKey: string;
+  tenant: string;
+  environment: string;
+  showEnvLabel: boolean;
+}): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const slot = useEnvDiffSlot(envKey);
   const diff = slot.diff;
@@ -308,9 +319,9 @@ function ReviewRangeControl({ envKey }: { envKey: string }): React.ReactElement 
   if (!base?.commit && commits.length === 0) {
     return null;
   }
-
   return (
     <div className="mb-3.5 flex min-h-0 flex-col gap-2 border-b border-border pb-3.5">
+      {showEnvLabel && <ReviewEnvLabel tenant={tenant} environment={environment} />}
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="text-xs font-semibold text-foreground">Review layers</div>
         <div className="text-[11px] leading-4 text-muted-foreground">
@@ -399,10 +410,17 @@ function ReviewBoundaryButton({
 // each has its own commit list.
 function ReviewRangeControls(): React.ReactElement {
   const targets = useAppSelector(selectReviewEnvTargets);
+  const multi = targets.length > 1;
   return (
     <>
       {targets.map((target) => (
-        <ReviewRangeControl key={target.envKey} envKey={target.envKey} />
+        <ReviewRangeControl
+          key={target.envKey}
+          envKey={target.envKey}
+          tenant={target.tenant}
+          environment={target.environment}
+          showEnvLabel={multi}
+        />
       ))}
     </>
   );

@@ -11,6 +11,8 @@ import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { ReviewStatus } from '@/components/app/DiffList';
 import type { DiffTreeNode } from '@/types';
 
+import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
+
 export function ChangedFileTree(): React.ReactElement {
   const targets = useAppSelector(selectReviewEnvTargets);
   if (targets.length === 0) {
@@ -20,7 +22,13 @@ export function ChangedFileTree(): React.ReactElement {
   return (
     <>
       {targets.map((target) => (
-        <ChangedFileTreeSection key={target.envKey} envKey={target.envKey} showHeader={multi} />
+        <ChangedFileTreeSection
+          key={target.envKey}
+          envKey={target.envKey}
+          tenant={target.tenant}
+          environment={target.environment}
+          showHeader={multi}
+        />
       ))}
     </>
   );
@@ -39,9 +47,13 @@ export function ChangedFileTree(): React.ReactElement {
 // panel, which keeps the one actionable report.
 function ChangedFileTreeSection({
   envKey,
+  tenant,
+  environment,
   showHeader,
 }: {
   envKey: string;
+  tenant: string;
+  environment: string;
   showHeader: boolean;
 }): React.ReactElement {
   const slot = useEnvDiffSlot(envKey);
@@ -49,7 +61,9 @@ function ChangedFileTreeSection({
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
 
   const header = showHeader ? (
-    <div className="px-1 pt-2 pb-1 text-[11px] font-medium text-muted-foreground">{envKey}</div>
+    <div className="px-1 pt-2 pb-1">
+      <ReviewEnvLabel tenant={tenant} environment={environment} />
+    </div>
   ) : null;
 
   const body = ((): React.ReactElement => {
