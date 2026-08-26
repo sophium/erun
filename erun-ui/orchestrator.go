@@ -710,6 +710,12 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// See orchestrator_shell_activity.go.
 	hooks["PostToolUse"] = mergeOrchestratorHookBlocks(
 		hooks["PostToolUse"], orchestratorShellActivityHookBlocks(), isOrchestratorShellActivityHookBlock)
+	// Not installing the retired session recorder is not enough: every machine
+	// that ever ran an older build still carries it, and it would go on writing
+	// a file nothing reads on every turn boundary. Strip it wherever it is found.
+	for event := range hooks {
+		hooks[event] = pruneRetiredSessionRecorderHooks(hooks[event])
+	}
 	settings["hooks"] = hooks
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
