@@ -82,7 +82,7 @@ Two things are yours to supply; the chart does the rest.
 
 ### The apex and www redirect {#apex-redirect}
 
-The bare `<base-domain>` and `www.<base-domain>` are otherwise dead ends — only the console host resolves to anything. Whenever `platform.baseDomain` is set, `erun-console` also redirects those two hosts to the console with a permanent (301) redirect, so someone who types your product's own domain lands on the console instead. It stays a redirect rather than a third origin the console is also served on, because sign-in (Authorization Code + PKCE) depends on being reachable at exactly one origin.
+The bare `<base-domain>` and `www.<base-domain>` are otherwise dead ends — only the console host resolves to anything. Whenever `platform.baseDomain` is set, `erun-console` also redirects those two hosts to the console with a permanent (301) redirect, so someone who types your product's own domain lands on a landing page that pitches the product, instead of a dead end. It stays a redirect rather than a third origin the console is also served on, because sign-in (Authorization Code + PKCE) depends on being reachable at exactly one origin.
 
 Two things beyond the console's own DNS/certificate above:
 
@@ -98,7 +98,7 @@ Running your apex for something else already (a marketing site)? Set `console.ap
 | Failure mode | What happens | Recovery |
 |---|---|---|
 | No external domain resolvable | `erun deploy` aborts at the chart render with `an external domain is required`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.externalDomain` |
-| `GET /v1/platform` is absent or empty | The console falls back to its build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID`; with neither configured it shows the signed-out message with no Sign in button | Configure the backend's platform discovery, or set the console's `VITE_OIDC_*` build args as a stopgap |
+| `GET /v1/platform` is absent or empty | The console falls back to its build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID`; with neither configured, the landing page still shows the full pitch and a **Read the docs** link, but the Sign in button is replaced by a note that a bearer token is needed and a link to configuring OIDC for this instance | Configure the backend's platform discovery, or set the console's `VITE_OIDC_*` build args as a stopgap |
 | `/v1/config` returns `502` through the console | The API Service the console's nginx proxies to isn't up yet, or `console.apiServiceName`/`console.apiServicePort` don't match the deployed API | Confirm `<tenant>-api` is running and the chart's proxy target matches its Service name/port |
 | The apex/www redirect is enabled but no apex host resolves | `erun deploy` aborts at the chart render with `console.apexRedirectEnabled is true but no apex host could be resolved`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.apexHost`/`console.wwwHost`, or `console.apexRedirectEnabled=false` |
 | The apex/www hosts don't resolve at all | The Helm chart's Ingress/Middleware are only half the picture — DNS is separate. Confirm the `terraform-erun-cloudflare-apex` module has actually been applied for this env | Apply it via your `terraform-<tenant>/` tree, pointed at the cluster's ingress IP |
