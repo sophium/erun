@@ -26,15 +26,45 @@ type HTTPConfig struct {
 	Path string
 }
 
-func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig) error {
+// RunHTTP serves the MCP edge and the Prometheus metrics listener
+// concurrently until ctx is cancelled. Either one failing (a bind error, most
+// often) cancels the other and its error wins, rather than the metrics
+// listener silently dying while the MCP edge keeps the process alive for the
+// rest of the pod's lifetime.
+func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime RuntimeConfig) error {
 	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
 		return err
 	}
+	metricsCfg, err = normalizeMetricsConfig(metricsCfg)
+	if err != nil {
+		return err
+	}
+	runtime = normalizeRuntimeConfig(runtime)
+	recorder := newMetricsRecorder(runtime.Context.Tenant, runtime.Context.Environment)
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go startIdleMetricsTicker(runCtx, runtime, recorder)
+	go startTrafficWindowTicker(runCtx, runtime, recorder)
+
+	results := make(chan error, 2)
+	go func() { results <- runMCPHTTP(runCtx, info, cfg, runtime, recorder) }()
+	go func() { results <- runMetricsHTTP(runCtx, metricsCfg, recorder) }()
+
+	first := <-results
+	cancel()
+	second := <-results
+	if first != nil {
+		return first
+	}
+	return second
+}
+
+func runMCPHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) error {
 	server := &http.Server{
 		Addr:              listenAddress(cfg),
-		Handler:           newHTTPHandler(info, cfg, runtime),
+		Handler:           newHTTPHandler(info, cfg, runtime, recorder),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -46,21 +76,21 @@ func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, run
 		shutdownErr <- server.Shutdown(shutdownCtx)
 	}()
 
-	err = server.ListenAndServe()
+	err := server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return <-shutdownErr
 	}
 	return err
 }
 
-func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig) http.Handler {
+func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig, recorder *metricsRecorder) http.Handler {
 	cfg, _ = normalizeHTTPConfig(cfg)
 
 	// One server per distinct capability set, resolved per request: a caller
 	// sees exactly the tools it may call, and `tools/list` is the same answer as
 	// what it is allowed to do rather than a menu with locked entries.
 	servers := newCapabilityServerCache(func(identity authIdentity) *mcp.Server {
-		return newServer(info, runtime, identity)
+		return newServer(info, runtime, identity, recorder)
 	})
 	handler := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
 		JSONResponse:   true,
@@ -69,8 +99,10 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 
 	mux := http.NewServeMux()
 	// Auth is the outermost layer, so even idle probes must carry a valid token
-	// before any tool runs.
-	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), activityHTTPMiddleware(runtime, handler)))
+	// before any tool runs. Traffic metering sits just inside it so a rejected
+	// call's tiny response still counts, but wraps the real MCP traffic that
+	// erun_traffic_window_bytes exists to measure.
+	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler))))
 	return mux
 }
 
@@ -138,7 +170,7 @@ func endpointURL(cfg HTTPConfig) string {
 	return "http://" + listenAddress(cfg) + cfg.Path
 }
 
-func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authIdentity) *mcp.Server {
+func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
 	info = eruncommon.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
 
@@ -147,7 +179,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 		Version: info.Version,
 	}, nil)
 
-	reg := toolRegistrar{server: server, identity: identity}
+	reg := toolRegistrar{server: server, identity: identity, metrics: metrics}
 	registerReadModelTools(reg, info, runtime)
 	registerIdleStopTools(reg, runtime)
 	registerJobTools(reg, runtime)

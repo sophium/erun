@@ -28,7 +28,7 @@ func connectWithCapabilities(t *testing.T, capabilities ...string) *mcp.ClientSe
 	}
 	info := eruncommon.BuildInfo{Version: "1.2.3"}
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return newServer(info, RuntimeConfig{}, identity)
+		return newServer(info, RuntimeConfig{}, identity, nil)
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
 	httpServer := httptest.NewServer(handler)
@@ -159,7 +159,7 @@ func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 		return nil, struct{}{}, nil
 	}
 
-	guarded := guardTool(identity, "raw", handler)
+	guarded := guardTool(identity, "raw", nil, handler)
 	if _, _, err := guarded(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("the guard must refuse a tool outside the caller's capabilities")
 	}

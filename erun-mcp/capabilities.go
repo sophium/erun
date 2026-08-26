@@ -52,6 +52,7 @@ func authIdentityFrom(ctx context.Context) authIdentity {
 type toolRegistrar struct {
 	server   *mcp.Server
 	identity authIdentity
+	metrics  *metricsRecorder
 }
 
 // addTool registers a tool only when the caller may use it. A tool the caller
@@ -63,7 +64,7 @@ func addTool[In, Out any](reg toolRegistrar, tool *mcp.Tool, handler mcp.ToolHan
 		return
 	}
 	describeTool(tool)
-	mcp.AddTool(reg.server, tool, guardTool(reg.identity, tool.Name, handler))
+	mcp.AddTool(reg.server, tool, guardTool(reg.identity, tool.Name, reg.metrics, handler))
 }
 
 // describeTool attaches the tool's family, CLI path, title and annotations from
@@ -110,7 +111,16 @@ func describeTool(tool *mcp.Tool) {
 // guardTool re-checks at call time. Registration already filtered, so this only
 // fires if a tool is reached another way — which is exactly when a check that
 // depends on registration would have been useless.
-func guardTool[In, Out any](identity authIdentity, name string, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
+//
+// It is also the one place every MCP tool call passes through regardless of
+// which register* function added it, which makes it the natural home for
+// erun_mcp_calls_total and erun_audit_events_total (erun-docs/docs/
+// agent-reference/metrics-spec.md): every call is counted here exactly once,
+// with the same allow/deny/outcome guardTool already computes for the log
+// line above. actor_kind is always "agent" because this edge is MCP-only — an
+// Operator's own actions go through the CLI, a source this in-pod counter does
+// not read from yet (see the spec's corrected note on erun_audit_events_total).
+func guardTool[In, Out any](identity authIdentity, name string, metrics *metricsRecorder, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
 		// A server is cached per capability set, so the identity captured at
 		// registration is whichever caller first produced that set. Its
@@ -119,13 +129,19 @@ func guardTool[In, Out any](identity authIdentity, name string, handler mcp.Tool
 		if live, ok := ctx.Value(authContextKey{}).(authIdentity); ok {
 			identity = live
 		}
+		action := "mcp." + name
 		if !identity.Capabilities.AllowsTool(name) {
 			var zero Out
 			auditToolDecision(identity, name, false)
+			metrics.recordAuditEvent(action, "agent", "error")
 			return nil, zero, fmt.Errorf("tool %q requires the %s capability", name, eruncommon.MCPToolCapability(name))
 		}
 		auditToolDecision(identity, name, true)
-		return handler(ctx, req, input)
+		result, out, err := handler(ctx, req, input)
+		label := mcpCallResultLabel(out, err)
+		metrics.recordMCPCall(name, label)
+		metrics.recordAuditEvent(action, "agent", label)
+		return result, out, err
 	}
 }
 

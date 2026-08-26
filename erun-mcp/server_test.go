@@ -187,7 +187,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 		Date:    "2024-01-01",
 	}
 
-	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, RuntimeConfig{}))
+	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, RuntimeConfig{}, nil))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
