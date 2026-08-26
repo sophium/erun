@@ -1,5 +1,4 @@
 import type { ReviewDetailState, TenantDashboardState } from '@/app/state';
-import type { UIReviewDetailInput, UITenant } from '@/types';
 
 import { reviewDetailApi } from './api/reviewDetailApi';
 import { readError } from './errors';
@@ -7,22 +6,13 @@ import { showNotification } from './notificationThunks';
 import { patchReviewDetail } from './slices/reviewDetailSlice';
 import type { AppThunk } from './store';
 
-// reviewDetailInput resolves the same tenant API URL + cloud alias the
-// tenant dashboard itself already loaded, so opening a review's detail needs
-// no input beyond the review id.
-function reviewDetailInput(
-  tenant: string,
-  apiUrl: string,
-  tenants: UITenant[],
-  reviewId: string,
-): UIReviewDetailInput | null {
-  const cloudProviderAlias = tenants
-    .find((candidate) => candidate.name === tenant)
-    ?.primaryCloudProviderAlias?.trim();
-  if (!apiUrl.trim() || !cloudProviderAlias) {
-    return null;
-  }
-  return { tenant, apiUrl, cloudProviderAlias, reviewId };
+// ReviewCallerContext is what every write against a review needs: which
+// tenant to resolve the platform for (the platform read/bearer is resolved
+// server-side from that alone), plus the platform alias to sign into if the
+// write reports a stale identity.
+interface ReviewCallerContext {
+  tenant: string;
+  platformAlias: string;
 }
 
 // reviewCallerContext resolves the caller context a write against reviewId
@@ -31,33 +21,18 @@ function reviewDetailInput(
 // operator may do after navigating away from the tenant dashboard entirely,
 // long past the point state.tenantDashboard still describes this review.
 function reviewCallerContext(
-  state: {
-    reviewDetail: ReviewDetailState;
-    tenantDashboard: TenantDashboardState;
-    tenants: { tenants: UITenant[] };
-  },
+  state: { reviewDetail: ReviewDetailState; tenantDashboard: TenantDashboardState },
   reviewId: string,
-): UIReviewDetailInput | null {
+): ReviewCallerContext | null {
   const detail = state.reviewDetail;
-  if (
-    detail.reviewId === reviewId &&
-    detail.callerTenant &&
-    detail.callerApiUrl &&
-    detail.callerCloudProviderAlias
-  ) {
-    return {
-      tenant: detail.callerTenant,
-      apiUrl: detail.callerApiUrl,
-      cloudProviderAlias: detail.callerCloudProviderAlias,
-      reviewId,
-    };
+  if (detail.reviewId === reviewId && detail.callerTenant) {
+    return { tenant: detail.callerTenant, platformAlias: detail.callerPlatformAlias };
   }
-  return reviewDetailInput(
-    state.tenantDashboard.tenant,
-    state.tenantDashboard.data?.apiUrl ?? '',
-    state.tenants.tenants,
-    reviewId,
-  );
+  const tenant = state.tenantDashboard.tenant.trim();
+  if (!tenant) {
+    return null;
+  }
+  return { tenant, platformAlias: state.tenantDashboard.data?.platformAlias ?? '' };
 }
 
 export const openReviewDetail =
@@ -71,8 +46,7 @@ export const openReviewDetail =
         error: '',
         data: null,
         callerTenant: '',
-        callerApiUrl: '',
-        callerCloudProviderAlias: '',
+        callerPlatformAlias: '',
         replyingTo: '',
         draftBody: '',
         submitError: '',
@@ -105,19 +79,17 @@ export const closeReviewDetail = (): AppThunk => (dispatch) => {
 export const loadReviewDetail =
   (reviewId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const input = reviewCallerContext(getState(), reviewId);
-    if (!input) {
-      dispatch(
-        patchReviewDetail({
-          loading: false,
-          error: 'Review detail requires an API URL and a primary cloud alias.',
-        }),
-      );
+    const context = reviewCallerContext(getState(), reviewId);
+    if (!context) {
+      dispatch(patchReviewDetail({ loading: false, error: 'No tenant is open.' }));
       return;
     }
     dispatch(patchReviewDetail({ loading: true, error: '' }));
     const request = dispatch(
-      reviewDetailApi.endpoints.getReviewDetail.initiate(input, { forceRefetch: true }),
+      reviewDetailApi.endpoints.getReviewDetail.initiate(
+        { tenant: context.tenant, reviewId },
+        { forceRefetch: true },
+      ),
     );
     try {
       const data = await request.unwrap();
@@ -129,9 +101,8 @@ export const loadReviewDetail =
           loading: false,
           error: '',
           data,
-          callerTenant: input.tenant,
-          callerApiUrl: input.apiUrl,
-          callerCloudProviderAlias: input.cloudProviderAlias,
+          callerTenant: context.tenant,
+          callerPlatformAlias: context.platformAlias,
         }),
       );
     } catch (error) {
@@ -174,20 +145,16 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
   if (!body || !parent) {
     return;
   }
-  const input = reviewCallerContext(state, reviewId);
-  if (!input) {
-    dispatch(
-      patchReviewDetail({ submitError: 'Reply requires an API URL and a primary cloud alias.' }),
-    );
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ submitError: 'No tenant is open.' }));
     return;
   }
   dispatch(patchReviewDetail({ submitting: true, submitError: '' }));
   try {
     await dispatch(
       reviewDetailApi.endpoints.createReviewReply.initiate({
-        tenant: input.tenant,
-        apiUrl: input.apiUrl,
-        cloudProviderAlias: input.cloudProviderAlias,
+        tenant: context.tenant,
         reviewId,
         parentCommentId: parent.commentId,
         commitId: parent.commitId,
@@ -229,22 +196,15 @@ export const clearCloseReviewError = (): AppThunk => (dispatch) => {
 export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const { reviewId } = state.reviewDetail;
-  const input = reviewCallerContext(state, reviewId);
-  if (!input) {
-    dispatch(
-      patchReviewDetail({ closeError: 'Closing requires an API URL and a primary cloud alias.' }),
-    );
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ closeError: 'No tenant is open.' }));
     return;
   }
   dispatch(patchReviewDetail({ closing: true, closeError: '' }));
   try {
     const review = await dispatch(
-      reviewDetailApi.endpoints.closeReview.initiate({
-        tenant: input.tenant,
-        apiUrl: input.apiUrl,
-        cloudProviderAlias: input.cloudProviderAlias,
-        reviewId,
-      }),
+      reviewDetailApi.endpoints.closeReview.initiate({ tenant: context.tenant, reviewId }),
     ).unwrap();
     dispatch(patchReviewDetail({ closing: false, closeConfirming: false, closeError: '' }));
     dispatch(showNotification('success', `Closed ${review.name || review.reviewId}.`));
@@ -277,13 +237,10 @@ function submitCommentStatus(
   return async (dispatch, getState) => {
     const state = getState();
     const { reviewId } = state.reviewDetail;
-    const input = reviewCallerContext(state, reviewId);
-    if (!input) {
+    const context = reviewCallerContext(state, reviewId);
+    if (!context) {
       dispatch(
-        patchReviewDetail({
-          resolveError: 'Resolving requires an API URL and a primary cloud alias.',
-          resolveErrorCommentId: commentId,
-        }),
+        patchReviewDetail({ resolveError: 'No tenant is open.', resolveErrorCommentId: commentId }),
       );
       return;
     }
@@ -297,9 +254,7 @@ function submitCommentStatus(
     try {
       await dispatch(
         reviewDetailApi.endpoints[endpoint].initiate({
-          tenant: input.tenant,
-          apiUrl: input.apiUrl,
-          cloudProviderAlias: input.cloudProviderAlias,
+          tenant: context.tenant,
           reviewId,
           commentId,
         }),
@@ -361,22 +316,16 @@ export const submitReviewComment = (): AppThunk<Promise<void>> => async (dispatc
   if (!body || !newCommentAnchor) {
     return;
   }
-  const input = reviewCallerContext(state, reviewId);
-  if (!input) {
-    dispatch(
-      patchReviewDetail({
-        newCommentSubmitError: 'Commenting requires an API URL and a primary cloud alias.',
-      }),
-    );
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ newCommentSubmitError: 'No tenant is open.' }));
     return;
   }
   dispatch(patchReviewDetail({ newCommentSubmitting: true, newCommentSubmitError: '' }));
   try {
     await dispatch(
       reviewDetailApi.endpoints.createReviewComment.initiate({
-        tenant: input.tenant,
-        apiUrl: input.apiUrl,
-        cloudProviderAlias: input.cloudProviderAlias,
+        tenant: context.tenant,
         reviewId,
         commitId: newCommentAnchor.commitId,
         filePath: newCommentAnchor.filePath,

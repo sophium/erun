@@ -144,7 +144,7 @@ function DiffLineCommentComposer(): React.ReactElement {
   const draft = useAppSelector((state) => state.reviewDetail.newCommentDraft);
   const submitting = useAppSelector((state) => state.reviewDetail.newCommentSubmitting);
   const submitError = useAppSelector((state) => state.reviewDetail.newCommentSubmitError);
-  const cloudProviderAlias = useAppSelector((state) => state.reviewDetail.callerCloudProviderAlias);
+  const cloudProviderAlias = useAppSelector((state) => state.reviewDetail.callerPlatformAlias);
   return (
     <div className="grid gap-2">
       <Textarea

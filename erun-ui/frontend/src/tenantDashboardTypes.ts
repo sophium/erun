@@ -6,15 +6,29 @@
 export interface UITenantDashboardInput {
   tenant: string;
   environment?: string;
-  apiUrl: string;
   mcpUrl?: string;
   kubernetesContext?: string;
-  cloudProviderAlias: string;
+  // platformAlias optionally names which configured erun-type cloud alias's
+  // platform to read; empty defers to the caller's sole configured erun
+  // alias (or reports every alias as a choice when more than one exists).
+  platformAlias?: string;
   // reviewFilterMine/reviewFilterWaitingOnMe are the Reviews tab's one-click
   // discovery filters, resolved server-side to the signed-in user's own id.
   reviewFilterMine?: boolean;
   reviewFilterWaitingOnMe?: boolean;
 }
+
+// UITenantPlatformState names why the platform identity is not ready to load
+// the dashboard, so the UI can render the one action that resolves it. Kept
+// as plain string values (matching the Go side and every other status-like
+// field in this file, e.g. UITenantDashboardPanel) rather than a literal
+// union, since the value crosses the Wails boundary as an untyped string. ""
+// means the platform resolved and the load proceeded.
+export const TENANT_PLATFORM_STATE_NOT_CONNECTED = 'not-connected';
+export const TENANT_PLATFORM_STATE_CHOOSE_ALIAS = 'choose-alias';
+export const TENANT_PLATFORM_STATE_NOT_SIGNED_IN = 'not-signed-in';
+export const TENANT_PLATFORM_STATE_NOT_ENROLLED = 'not-enrolled';
+export const TENANT_PLATFORM_STATE_NO_PERMISSION = 'no-permission';
 
 export interface UITenantDashboard {
   tenant: string;
@@ -25,6 +39,16 @@ export interface UITenantDashboard {
   apiError?: string;
   apiLog?: string;
   apiLogError?: string;
+  // platformState/platformAliasChoices/platformAlias/platformUrl/
+  // platformIssuer/platformSubject describe why the platform identity is not
+  // ready (or, once ready, what was actually resolved) — see the
+  // TENANT_PLATFORM_STATE_* constants above.
+  platformState?: string;
+  platformAliasChoices?: string[];
+  platformAlias?: string;
+  platformUrl?: string;
+  platformIssuer?: string;
+  platformSubject?: string;
   user?: UITenantDashboardUser;
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
@@ -97,6 +121,30 @@ export interface UITenantDashboardBuild {
   version: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+// UIConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
+// just the API base URL, discovered against the platform itself the same way
+// `erun cloud init erun` already does.
+export interface UIConnectERunPlatformInput {
+  apiUrl: string;
+}
+
+// UIPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt.
+// Every field is prefilled from the identity already in hand
+// (UITenantDashboard.platformIssuer/platformSubject), so the operator never
+// retypes a value erun already knows.
+export interface UIPlatformUserEnrollInput {
+  alias: string;
+  username: string;
+  issuer: string;
+  subject: string;
+}
+
+export interface UIPlatformUser {
+  userId: string;
+  tenantId: string;
+  username: string;
 }
 
 export interface UITenantDashboardAudit {

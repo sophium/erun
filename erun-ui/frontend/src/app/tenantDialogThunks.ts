@@ -259,6 +259,13 @@ export const openTenantDashboard =
         error: '',
         data: null,
         reviewFilter: sameTenant ? currentDashboard.reviewFilter : defaultReviewFilter(),
+        platformAliasOverride: sameTenant ? currentDashboard.platformAliasOverride : '',
+        connectApiUrlDraft: sameTenant ? currentDashboard.connectApiUrlDraft : '',
+        connecting: false,
+        connectError: '',
+        enrollUsernameDraft: sameTenant ? currentDashboard.enrollUsernameDraft : '',
+        enrolling: false,
+        enrollError: '',
       }),
     );
     dispatch(setReviewOpen(false));
@@ -293,17 +300,12 @@ export const loadTenantDashboard =
       return;
     }
     const tenantState = state.tenants.tenants.find((candidate) => candidate.name === target);
-    const input = tenantDashboardInput(tenantState, state.tenantDashboard.reviewFilter);
-    if (!input) {
-      dispatch(
-        patchTenantDashboard({
-          loading: false,
-          error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
-          data: null,
-        }),
-      );
-      return;
-    }
+    const input = tenantDashboardInput(
+      target,
+      tenantState,
+      state.tenantDashboard.reviewFilter,
+      state.tenantDashboard.platformAliasOverride,
+    );
     dispatch(patchTenantDashboard({ loading: true, error: '' }));
     // forceRefetch: true, because this fires on every dashboard open and every
     // Refresh click — without it RTK Query's cache (never invalidated here)
@@ -351,26 +353,37 @@ export const refreshTenantDashboard = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
+// chooseTenantPlatformAlias resolves the choose-alias state: more than one
+// erun-type platform alias is configured and the operator picked one. The
+// choice is kept in tenantDashboard state (not persisted) so it survives
+// tab switches for this session but resets the next time this tenant's
+// dashboard is opened fresh.
+export const chooseTenantPlatformAlias =
+  (alias: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    dispatch(patchTenantDashboard({ platformAliasOverride: alias.trim() }));
+    await dispatch(loadTenantDashboard());
+  };
+
+// tenantDashboardInput no longer resolves a platform base URL or cloud
+// alias itself (#1393) — the desktop's Go side resolves the erun-type
+// platform alias the same way `erun platform` does and reports the outcome
+// on the response (platformState/platformAlias/platformUrl). This only
+// still needs an environment for the API-log panel's own MCP/kube-context
+// read, which is a distinct, per-environment concern.
 function tenantDashboardInput(
+  tenantName: string,
   tenant: UITenant | undefined,
   reviewFilter: ReviewFilterState,
-): UITenantDashboardInput | null {
-  if (!tenant) {
-    return null;
-  }
-  const environment = tenantDashboardEnvironment(tenant);
-  const apiUrl = trimOptional(environment?.apiUrl);
-  const cloudProviderAlias = trimOptional(tenant.primaryCloudProviderAlias);
-  if (!apiUrl || !cloudProviderAlias) {
-    return null;
-  }
+  platformAliasOverride: string,
+): UITenantDashboardInput {
+  const environment = tenant ? tenantDashboardEnvironment(tenant) : undefined;
   return {
-    tenant: tenant.name,
+    tenant: tenantName,
     environment: trimOptional(environment?.name),
-    apiUrl,
     mcpUrl: trimOptional(environment?.mcpUrl),
     kubernetesContext: trimOptional(environment?.kubernetesContext),
-    cloudProviderAlias,
+    platformAlias: platformAliasOverride,
     reviewFilterMine: reviewFilter.mine,
     reviewFilterWaitingOnMe: reviewFilter.waitingOnMe,
   };

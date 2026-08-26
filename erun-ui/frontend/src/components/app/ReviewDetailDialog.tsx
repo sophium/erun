@@ -82,7 +82,7 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
       <div className="py-4">
         <PlatformErrorAlert
           message={data.apiError}
-          alias={detail.callerCloudProviderAlias}
+          alias={detail.callerPlatformAlias}
           onRecovered={() => {
             void dispatch(loadReviewDetail(detail.reviewId));
           }}
@@ -221,7 +221,7 @@ function CloseReviewAction({
         {detail.closeError && (
           <PlatformErrorAlert
             message={detail.closeError}
-            alias={detail.callerCloudProviderAlias}
+            alias={detail.callerPlatformAlias}
             onRecovered={() => {
               dispatch(clearCloseReviewError());
             }}

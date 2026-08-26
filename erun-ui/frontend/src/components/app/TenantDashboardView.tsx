@@ -16,9 +16,25 @@ import {
 } from '@/app/tenantDialogThunks';
 import type { UITenant } from '@/types';
 
-import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
+import { TenantPlatformStateCard } from './TenantPlatformState';
+
+// tenantDashboardIsBlocked reports whether the surface has a single shared
+// precondition unmet (loading, a generic load failure, or one of the
+// platform-readiness states) — in which case the tab strip and per-panel
+// chrome must not render at all (#1393, defect 1): a caller who cannot read
+// anything sees that named once, not six enabled tabs each discovering it on
+// their own.
+function tenantDashboardIsBlocked(dashboard: AppState['tenantDashboard']): boolean {
+  return (
+    dashboard.loading ||
+    Boolean(dashboard.error) ||
+    Boolean(dashboard.data?.platformState) ||
+    Boolean(dashboard.data?.apiError && !dashboard.data.platformState)
+  );
+}
+
 export function TenantDashboardView(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const dashboard = useAppSelector((state) => state.tenantDashboard);
@@ -27,9 +43,8 @@ export function TenantDashboardView(): React.ReactElement | null {
     return null;
   }
   const tenant = tenants.find((candidate) => candidate.name === dashboard.tenant);
-  const cloudProviderAlias = tenant?.primaryCloudProviderAlias?.trim() ?? '';
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
-  const visibleTabs = visibleTenantDashboardTabs(dashboard.data);
+  const blocked = tenantDashboardIsBlocked(dashboard);
   return (
     <section className="grid h-full min-h-0 bg-background text-foreground">
       <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
@@ -42,96 +57,147 @@ export function TenantDashboardView(): React.ReactElement | null {
               {tenantDashboardSubtitle(tenant, environmentName)}
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={dashboard.loading}
-            onClick={() => {
-              void dispatch(refreshTenantDashboard());
-            }}
-          >
-            {dashboard.loading ? (
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-            ) : (
+          {/* Refresh is a manual-choice convenience for an already-loaded
+              dashboard, never the repair path for a blocked one (#1393,
+              defect 3) — every blocked state recovers on its own once its
+              real precondition is resolved. */}
+          {!blocked && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void dispatch(refreshTenantDashboard());
+              }}
+            >
               <RefreshCw aria-hidden="true" />
-            )}
-            Refresh
-          </Button>
+              Refresh
+            </Button>
+          )}
         </header>
-        <Tabs
-          value={activeTenantDashboardTab(dashboard.data, dashboard.tab)}
-          onValueChange={(value) => {
-            dispatch(setTenantDashboardTab(value as AppState['tenantDashboard']['tab']));
-          }}
-          className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
-        >
-          <div className="grid gap-2">
-            <TabsList className="w-fit">
-              {visibleTabs.map((descriptor) => (
-                <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
-                  {descriptor.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <RestrictedAccessNote missing={restrictedTenantDashboardReads(dashboard.data)} />
-          </div>
-          <TenantDashboardBody dashboard={dashboard} cloudProviderAlias={cloudProviderAlias} />
-        </Tabs>
+        {blocked ? (
+          <TenantDashboardBlockedBody dashboard={dashboard} tenant={dashboard.tenant} />
+        ) : (
+          <TenantDashboardReadyBody dashboard={dashboard} />
+        )}
       </div>
     </section>
   );
 }
 
-function TenantDashboardBody({
+// TenantDashboardBlockedBody renders the one shared reason nothing loaded,
+// full-panel, with no tab strip beside it (#1393, defect 1 and 2): the
+// operator sees a designed card naming what was attempted, not an alert
+// floating over an otherwise-empty tab strip.
+function TenantDashboardBlockedBody({
   dashboard,
-  cloudProviderAlias,
+  tenant,
 }: {
   dashboard: AppState['tenantDashboard'];
-  cloudProviderAlias: string;
+  tenant: string;
 }): React.ReactElement {
+  return (
+    <div className="grid min-h-0 place-items-center px-5 py-4">
+      <div className="w-full max-w-lg">
+        <TenantDashboardBlockedCard dashboard={dashboard} tenant={tenant} />
+      </div>
+    </div>
+  );
+}
+
+function TenantDashboardBlockedCard({
+  dashboard,
+  tenant,
+}: {
+  dashboard: AppState['tenantDashboard'];
+  tenant: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
   if (dashboard.loading) {
     return (
       <DashboardMessage
         icon={<LoaderCircle className="animate-spin" aria-hidden="true" />}
-        message="Loading tenant dashboard..."
+        message={`Loading ${tenant}'s dashboard…`}
       />
     );
   }
   if (dashboard.error) {
-    return <DashboardMessage message={dashboard.error} destructive />;
+    return (
+      <GenericLoadFailure
+        message={dashboard.error}
+        onRetry={() => {
+          void dispatch(loadTenantDashboard());
+        }}
+      />
+    );
   }
-  const apiError = dashboard.data?.apiError ?? '';
-  if (apiError) {
-    return <TenantDashboardFailure message={apiError} alias={cloudProviderAlias} />;
+  if (dashboard.data?.platformState) {
+    return <TenantPlatformStateCard tenant={tenant} data={dashboard.data} />;
   }
-  return <TenantDashboardPanels data={dashboard.data} />;
+  // A whole-dashboard apiError with no platformState is a failure this build
+  // could not classify into one of the named states — diagnosed as far as
+  // possible, not guessed the rest of the way (per the standard's rule 1).
+  return (
+    <GenericLoadFailure
+      message={dashboard.data?.apiError ?? 'The tenant dashboard failed to load.'}
+      onRetry={() => {
+        void dispatch(loadTenantDashboard());
+      }}
+    />
+  );
 }
 
-// TenantDashboardFailure is the whole-dashboard failure's own layout: centered
-// in the panel's full height instead of DashboardMessage's small top-anchored
-// row, which used to leave the message adrift over a large empty area beneath
-// it (#1390). Carries the sign-in action when the failure is a stale identity.
-function TenantDashboardFailure({
+function GenericLoadFailure({
   message,
-  alias,
+  onRetry,
 }: {
   message: string;
-  alias: string;
+  onRetry: () => void;
+}): React.ReactElement {
+  return (
+    <div className="grid gap-3">
+      <DashboardMessage message={message} destructive />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-self-start"
+        onClick={onRetry}
+      >
+        <RefreshCw aria-hidden="true" />
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+function TenantDashboardReadyBody({
+  dashboard,
+}: {
+  dashboard: AppState['tenantDashboard'];
 }): React.ReactElement {
   const dispatch = useAppDispatch();
+  const visibleTabs = visibleTenantDashboardTabs(dashboard.data);
   return (
-    <div className="flex h-full min-h-0 items-center justify-center">
-      <div className="w-full max-w-sm">
-        <PlatformErrorAlert
-          message={message}
-          alias={alias}
-          onRecovered={() => {
-            void dispatch(loadTenantDashboard());
-          }}
-        />
+    <Tabs
+      value={activeTenantDashboardTab(dashboard.data, dashboard.tab)}
+      onValueChange={(value) => {
+        dispatch(setTenantDashboardTab(value as AppState['tenantDashboard']['tab']));
+      }}
+      className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
+    >
+      <div className="grid gap-2">
+        <TabsList className="w-fit">
+          {visibleTabs.map((descriptor) => (
+            <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
+              {descriptor.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <RestrictedAccessNote missing={restrictedTenantDashboardReads(dashboard.data)} />
       </div>
-    </div>
+      <TenantDashboardPanels data={dashboard.data} />
+    </Tabs>
   );
 }
 
@@ -154,11 +220,9 @@ function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: 
     return environmentName || 'Tenant dashboard';
   }
   const environmentCount = tenant.environments.length;
-  const alias = tenant.primaryCloudProviderAlias?.trim();
   const parts = [
     environmentName,
     `${String(environmentCount)} environment${environmentCount === 1 ? '' : 's'}`,
-    alias ? `Primary cloud: ${alias}` : '',
   ].filter(Boolean);
   return parts.join(', ');
 }

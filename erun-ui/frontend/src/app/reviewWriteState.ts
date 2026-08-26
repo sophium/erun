@@ -27,7 +27,6 @@ export interface CreateReviewDialogState {
   open: boolean;
   tenant: string;
   environment: string;
-  apiUrl: string;
   name: string;
   targetBranch: string;
   sourceBranch: string;
@@ -47,7 +46,6 @@ export const defaultCreateReviewDialog = (): CreateReviewDialogState => ({
   open: false,
   tenant: '',
   environment: '',
-  apiUrl: '',
   name: '',
   targetBranch: 'main',
   sourceBranch: '',

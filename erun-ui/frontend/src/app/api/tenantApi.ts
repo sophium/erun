@@ -1,6 +1,10 @@
 import type {
   UIAdvanceMergeQueueInput,
+  UICloudProviderStatus,
+  UIConnectERunPlatformInput,
   UICreateReviewInput,
+  UIPlatformUser,
+  UIPlatformUserEnrollInput,
   UITenantConfig,
   UITenantDashboard,
   UITenantDashboardInput,
@@ -9,7 +13,9 @@ import type {
 
 import {
   AdvanceMergeQueue,
+  ConnectERunPlatform,
   CreateReview,
+  EnrollERunPlatformUser,
   LoadTenantConfig,
   LoadTenantDashboard,
   SaveTenantConfig,
@@ -50,6 +56,17 @@ export const tenantApi = wailsApi.injectEndpoints({
       ),
       invalidatesTags: (_result, _error, input) => [{ type: 'TenantDashboard', id: input.tenant }],
     }),
+    connectERunPlatform: builder.mutation<UICloudProviderStatus, UIConnectERunPlatformInput>({
+      queryFn: wailsQueryFn<UIConnectERunPlatformInput, UICloudProviderStatus>((input) =>
+        ConnectERunPlatform(input),
+      ),
+      invalidatesTags: ['CloudProviders'],
+    }),
+    enrollERunPlatformUser: builder.mutation<UIPlatformUser, UIPlatformUserEnrollInput>({
+      queryFn: wailsQueryFn<UIPlatformUserEnrollInput, UIPlatformUser>((input) =>
+        EnrollERunPlatformUser(input),
+      ),
+    }),
   }),
 });
 
@@ -61,4 +78,6 @@ export const {
   useLazyGetTenantDashboardQuery,
   useCreateReviewMutation,
   useAdvanceMergeQueueMutation,
+  useConnectERunPlatformMutation,
+  useEnrollERunPlatformUserMutation,
 } = tenantApi;

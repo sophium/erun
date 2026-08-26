@@ -21,6 +21,19 @@ export interface TenantDashboardState {
   error: string;
   data: UITenantDashboard | null;
   reviewFilter: ReviewFilterState;
+  // platformAliasOverride is the operator's explicit pick when more than one
+  // erun-type platform alias is configured (the choose-alias state); empty
+  // defers to the server's own sole-alias resolution.
+  platformAliasOverride: string;
+  // connect*/enroll* back the not-connected/not-enrolled states' own inline
+  // forms, kept here (rather than local component state) so switching tabs
+  // or panels mid-edit does not lose an in-progress value (Nielsen #3).
+  connectApiUrlDraft: string;
+  connecting: boolean;
+  connectError: string;
+  enrollUsernameDraft: string;
+  enrolling: boolean;
+  enrollError: string;
 }
 
 // ReviewDetailState backs the dialog a Reviews-tab row opens. draftBody
@@ -32,15 +45,16 @@ export interface ReviewDetailState {
   loading: boolean;
   error: string;
   data: UIReviewDetail | null;
-  // callerTenant/callerApiUrl/callerCloudProviderAlias are the caller context
-  // resolved when the review loaded, captured here rather than re-derived
-  // from state.tenantDashboard on every write: closing this dialog keeps the
+  // callerTenant/callerPlatformAlias are the caller context resolved when the
+  // review loaded, captured here rather than re-derived from
+  // state.tenantDashboard on every write: closing this dialog keeps the
   // review as the diff panel's active commenting context (see
   // closeReviewDetail), and by then the operator may have navigated away
-  // from the tenant dashboard entirely.
+  // from the tenant dashboard entirely. callerPlatformAlias only backs the
+  // "Log in" action a stale-identity write failure offers — the write itself
+  // needs no alias, the platform resolves it server-side from callerTenant.
   callerTenant: string;
-  callerApiUrl: string;
-  callerCloudProviderAlias: string;
+  callerPlatformAlias: string;
   replyingTo: string;
   draftBody: string;
   submitting: boolean;
@@ -81,6 +95,13 @@ export const defaultTenantDashboard = (): TenantDashboardState => ({
   error: '',
   data: null,
   reviewFilter: defaultReviewFilter(),
+  platformAliasOverride: '',
+  connectApiUrlDraft: '',
+  connecting: false,
+  connectError: '',
+  enrollUsernameDraft: '',
+  enrolling: false,
+  enrollError: '',
 });
 
 export const defaultReviewDetail = (): ReviewDetailState => ({
@@ -90,8 +111,7 @@ export const defaultReviewDetail = (): ReviewDetailState => ({
   error: '',
   data: null,
   callerTenant: '',
-  callerApiUrl: '',
-  callerCloudProviderAlias: '',
+  callerPlatformAlias: '',
   replyingTo: '',
   draftBody: '',
   submitting: false,

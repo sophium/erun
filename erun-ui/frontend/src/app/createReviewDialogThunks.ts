@@ -1,5 +1,3 @@
-import type { UITenant } from '@/types';
-
 import { EnvironmentWorkingIssue } from '../../wailsjs/go/main/App';
 import { execApi } from './api/execApi';
 import { tenantApi } from './api/tenantApi';
@@ -16,21 +14,6 @@ import type { AppThunk } from './store';
 // none of this fires implicitly on open (Professional UX: side-effecting
 // actions need a visible boundary, not an on-open side effect).
 
-function dialogCallerContext(
-  tenant: string,
-  environment: string,
-  apiUrl: string,
-  tenants: UITenant[],
-): { apiUrl: string; cloudProviderAlias: string } | null {
-  const cloudProviderAlias = tenants
-    .find((candidate) => candidate.name === tenant)
-    ?.primaryCloudProviderAlias?.trim();
-  if (!apiUrl.trim() || !cloudProviderAlias || !tenant.trim() || !environment.trim()) {
-    return null;
-  }
-  return { apiUrl: apiUrl.trim(), cloudProviderAlias };
-}
-
 export const openCreateReviewDialog = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
   const { tenant, data } = state.tenantDashboard;
@@ -41,7 +24,6 @@ export const openCreateReviewDialog = (): AppThunk<Promise<void>> => async (disp
       open: true,
       tenant,
       environment,
-      apiUrl: data?.apiUrl?.trim() ?? '',
       branchLoading: Boolean(environment),
     }),
   );
@@ -173,21 +155,7 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
   const name = dialog.name.trim();
   const targetBranch = dialog.targetBranch.trim();
   const sourceBranch = (dialog.pushedBranch || dialog.sourceBranch).trim();
-  if (!name || !targetBranch || !sourceBranch || dialog.creating) {
-    return;
-  }
-  const context = dialogCallerContext(
-    dialog.tenant,
-    dialog.environment,
-    dialog.apiUrl,
-    state.tenants.tenants,
-  );
-  if (!context) {
-    dispatch(
-      patchCreateReviewDialog({
-        createError: 'Opening a review requires an API URL and a primary cloud alias.',
-      }),
-    );
+  if (!name || !targetBranch || !sourceBranch || dialog.creating || !dialog.tenant.trim()) {
     return;
   }
   dispatch(patchCreateReviewDialog({ creating: true, createError: '' }));
@@ -195,8 +163,6 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
     const review = await dispatch(
       tenantApi.endpoints.createReview.initiate({
         tenant: dialog.tenant,
-        apiUrl: context.apiUrl,
-        cloudProviderAlias: context.cloudProviderAlias,
         name,
         targetBranch,
         sourceBranch,

@@ -213,7 +213,7 @@ function ThreadResolveError({
     <div className="mt-2">
       <PlatformErrorAlert
         message={detail.resolveError}
-        alias={detail.callerCloudProviderAlias}
+        alias={detail.callerPlatformAlias}
         onRecovered={() => {
           dispatch(clearResolveCommentError());
         }}
@@ -300,7 +300,7 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
       {detail.submitError && (
         <PlatformErrorAlert
           message={detail.submitError}
-          alias={detail.callerCloudProviderAlias}
+          alias={detail.callerPlatformAlias}
           onRecovered={() => {
             dispatch(clearReviewReplyError());
           }}

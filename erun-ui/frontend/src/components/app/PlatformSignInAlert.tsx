@@ -49,7 +49,10 @@ export function PlatformErrorAlert({
 // the sign-in itself reports success; a failed sign-in says so right here
 // instead of silently leaving the same message and button on screen, which is
 // the identical trap one level down (#1392).
-function SignInAction({
+// SignInAction is also reused directly by TenantPlatformState.tsx for the
+// dashboard's own not-signed-in state, which needs the exact same sign-in +
+// recover behavior beside a different (typed-state) message.
+export function SignInAction({
   alias,
   onRecovered,
 }: {
@@ -60,7 +63,11 @@ function SignInAction({
   const busy = useAppSelector(
     (state) => (state.sidebar.sidebarCloudAliasBusyByAlias[alias] ?? '') !== '',
   );
-  const [signInFailed, setSignInFailed] = React.useState(false);
+  // The real failure reason, not a generic sentence — updatePrimaryCloudProvider
+  // already computed one via readError and only threw it away here (#1392
+  // review). "" clears on every new attempt so a stale failure never lingers
+  // beside a click that has not resolved yet.
+  const [signInError, setSignInError] = React.useState('');
   return (
     <div className="grid gap-2">
       <Button
@@ -68,11 +75,15 @@ function SignInAction({
         size="sm"
         disabled={busy}
         onClick={() => {
-          setSignInFailed(false);
+          setSignInError('');
           void (async () => {
-            const signedIn = await dispatch(signInAndRecover(alias, onRecovered));
-            if (!signedIn) {
-              setSignInFailed(true);
+            const outcome = await dispatch(signInAndRecover(alias, onRecovered));
+            // 'skipped' means this click found the alias already busy with
+            // another attempt (or blank) — nothing ran, so nothing failed;
+            // rendering an error here would blame a click that never happened
+            // (#1392 review, second defect).
+            if (outcome.status === 'failed') {
+              setSignInError(outcome.message);
             }
           })();
         }}
@@ -84,7 +95,7 @@ function SignInAction({
         )}
         {busy ? 'Logging in...' : 'Log in'}
       </Button>
-      {signInFailed && <InlineAlert>Sign-in failed. Try again.</InlineAlert>}
+      {signInError && <InlineAlert>{signInError}</InlineAlert>}
     </div>
   );
 }
