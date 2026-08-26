@@ -1,9 +1,13 @@
 import { Popover, PopoverAnchor, PopoverContent } from 'erun-kit';
+import { TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { formatElapsed } from '@/app/activityQueueState';
 import { orchestratorBusyElapsed } from '@/app/orchestratorBusyLabel';
+import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivity';
+import { orchestratorNudgeSummary } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
+import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // OrchestratorHoverCard gives an orchestrator row the same hover treatment the
 // environment row has had since EnvHoverCard: a Popover, not a tooltip, because
@@ -93,9 +97,18 @@ export function OrchestratorHoverCard({
           <HoverRow label="Doing">
             <OrchestratorDoing orchestrator={orchestrator} running={running} />
           </HoverRow>
-          <HoverRow label="Environments">
+          {/* wide: an environment's busy detail names a real holder ("held by
+              gradle-build"), which needs the card's full content width to read
+              without eliding -- the narrow value column every other row shares
+              with the "Environments" label leaves too little room for it. */}
+          <HoverRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverRow>
+          {running && (
+            <HoverRow label="Nudges">
+              <OrchestratorNudges orchestrator={orchestrator} />
+            </HoverRow>
+          )}
         </dl>
       </PopoverContent>
     </Popover>
@@ -146,6 +159,13 @@ function OrchestratorDoing({
   );
 }
 
+// Each linked environment renders what it is doing, joined from the
+// environment-activity poller rather than collected here (see
+// orchestratorEnvironmentActivity.ts) -- this is the fix for the defect that
+// motivated the whole card: it used to name two environments and say nothing
+// about either. min-w-0 on both the row and its text column is required for
+// truncate to engage on a grid/flex child (a long environment name or a long
+// busy detail elides instead of blowing out the card's fixed w-72).
 function OrchestratorEnvironments({
   environments,
 }: {
@@ -157,27 +177,87 @@ function OrchestratorEnvironments({
     return <Muted>None linked</Muted>;
   }
   return (
-    <span className="grid gap-0.5">
-      {environments.map((env) => (
-        <span key={`${env.tenant}/${env.environment}`} className="truncate">
-          {env.tenant} / {env.environment}
-        </span>
-      ))}
+    <span className="grid gap-1.5">
+      {environments.map((env) => {
+        const line = orchestratorEnvironmentLine(env);
+        return (
+          <span key={line.key} className="flex min-w-0 items-start gap-1.5">
+            <span
+              className="mt-0.5 flex w-2.5 flex-none items-center justify-center"
+              aria-hidden="true"
+            >
+              {line.dot && <StatusDotGlyph state={line.dot} />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{line.name}</span>
+              <span className="block truncate text-[12px] text-muted-foreground">
+                {line.status}
+              </span>
+            </span>
+          </span>
+        );
+      })}
     </span>
   );
 }
 
+// Whether erun has been nudging this orchestrator (orchestrator_pacing.go):
+// a session that has gone quiet gets restated the pacing contract every 15s
+// tick once it is stale, capped after orchestratorPacingMaxNudges. Rendered
+// only while running -- a stopped orchestrator's pacing state does not
+// survive past its session, so there is nothing to report.
+function OrchestratorNudges({
+  orchestrator,
+}: {
+  orchestrator: OrchestratorInfo;
+}): React.ReactElement {
+  const summary = orchestratorNudgeSummary(orchestrator, Date.now());
+  if (orchestrator.nudgeCapped) {
+    return (
+      <span className="flex items-start gap-1.5 text-amber-600">
+        <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 flex-none" />
+        <span>{summary}</span>
+      </span>
+    );
+  }
+  if (orchestrator.nudgeCount > 0) {
+    return <span>{summary}</span>;
+  }
+  return <Muted>{summary}</Muted>;
+}
+
 function HoverRow({
   label,
+  wide = false,
   children,
 }: {
   label: string;
+  // wide stacks the label above the value across both grid columns, for a
+  // value that needs the card's full content width rather than sharing it
+  // with the label column.
+  wide?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
     <>
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-foreground">{children}</dd>
+      <dt
+        className={
+          wide
+            ? 'col-span-2 text-[12px] text-muted-foreground'
+            : 'text-[12px] text-muted-foreground'
+        }
+      >
+        {label}
+      </dt>
+      <dd
+        className={
+          wide
+            ? 'col-span-2 min-w-0 break-words text-foreground'
+            : 'min-w-0 break-words text-foreground'
+        }
+      >
+        {children}
+      </dd>
     </>
   );
 }

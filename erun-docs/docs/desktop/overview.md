@@ -31,6 +31,8 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 
 Above your environments, the sidebar's **ERUN** section lists your host-side orchestrators — AI sessions that coordinate work across the environments you link to them, reviewing each one's code on your machine and delegating every change to the Agent inside it. Open an orchestrator's **…** menu to manage it: restart, delete, or reveal the guidance it operates under.
 
+**Orchestrator details on hover.** Hover a running orchestrator's row to see what it's doing and, for each linked environment, its own state rather than just its name: busy (naming the holder when it's known), idle, in outage, or not open from this desktop — the same activity this environment's own hover card reports, so the two can never disagree. A **Nudges** line reports whether ERun has had to restate its pacing contract to a quiet session, how many times, and whether it has stopped nudging after repeated attempts — a capped session needs your reply or a restart, since ERun has stopped acting on its behalf.
+
 Each orchestrator runs under two layers of guidance, and the dialog opens either one in your editor (VS Code or IntelliJ):
 
 - **Role** — what this orchestrator does. Yours to edit; ERun creates it once and never overwrites it.

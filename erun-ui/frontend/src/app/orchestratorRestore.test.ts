@@ -18,6 +18,8 @@ function orchestrator(id: string, transient = false): OrchestratorInfo {
     shellRunning: false,
     shellCommand: '',
     shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    nudgeCapped: false,
   };
 }
 
