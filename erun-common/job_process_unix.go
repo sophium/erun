@@ -65,6 +65,21 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 	return nil
 }
 
+// environmentJobProcessGroupSurvivors reports whether any process remains
+// alive in the process group named by pgid, after its leader has already been
+// waited on. detachEnvironmentJobChild always gives the work a fresh process
+// group named after its own pid, so this is how a supervisor tells "the work
+// exited clean" from "the work exited but left something it spawned still
+// running" (erun#1374): signal 0 sends nothing, it only probes for a target,
+// so a live answer here means the group still has a member.
+func environmentJobProcessGroupSurvivors(pgid int) bool {
+	if pgid <= 0 {
+		return false
+	}
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || err == syscall.EPERM
+}
+
 func environmentJobSignalNumber(signal string) (syscall.Signal, error) {
 	switch signal {
 	case "TERM":
