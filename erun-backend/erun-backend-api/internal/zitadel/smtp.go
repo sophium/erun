@@ -133,18 +133,24 @@ func (c *Client) UpdateSMTPConfig(ctx context.Context, params SetSMTPConfigParam
 		return smtpStatusFromParams(params), nil
 	}
 
+	// Activate before writing the password: Zitadel's password-update command
+	// refuses an inactive config with the same "SMTP configuration not
+	// found" error GetSMTPStatus's 404 uses, even though the same config
+	// happily accepts a plain field update while inactive (confirmed live
+	// against a real v4.15.3 instance) -- so activation has to come first,
+	// not last, whenever the existing config is not already active.
 	current := existing[0]
+	if current.State != "SMTP_CONFIG_ACTIVE" {
+		if err := c.activateSMTPConfig(ctx, current.ID); err != nil {
+			return SMTPStatus{}, fmt.Errorf("activate zitadel smtp config: %w", err)
+		}
+	}
 	if err := c.updateSMTPConfigFields(ctx, current.ID, params); err != nil {
 		return SMTPStatus{}, fmt.Errorf("update zitadel smtp config: %w", err)
 	}
 	if strings.TrimSpace(params.Password) != "" {
 		if err := c.updateSMTPConfigPassword(ctx, current.ID, params.Password); err != nil {
 			return SMTPStatus{}, fmt.Errorf("update zitadel smtp password: %w", err)
-		}
-	}
-	if current.State != "SMTP_CONFIG_ACTIVE" {
-		if err := c.activateSMTPConfig(ctx, current.ID); err != nil {
-			return SMTPStatus{}, fmt.Errorf("activate zitadel smtp config: %w", err)
 		}
 	}
 	return smtpStatusFromParams(params), nil

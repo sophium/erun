@@ -189,6 +189,39 @@ func TestCreateHumanUserSendsInviteWithNoPassword(t *testing.T) {
 	}
 }
 
+// TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow locks the
+// no-SMTP fallback (issue #1168): Zitadel only skips its initialization
+// email when the email is marked verified AND a password is set (confirmed
+// live -- either alone still leaves the account in USER_STATE_INITIAL
+// waiting on a link nothing will ever send), so a caller-supplied
+// InitialPassword must mark the email verified too, and the returned user
+// must report USER_STATE_ACTIVE, not the invite-flow INITIAL state.
+func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
+	var gotBody map[string]any
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"userId": "u3"})
+	})
+	user, err := client.CreateHumanUser(context.Background(), CreateHumanUserParams{
+		Username: "carol", Email: "carol@example.com", InitialPassword: "Er7hK2mQ9xL4nP6z!",
+	})
+	if err != nil {
+		t.Fatalf("CreateHumanUser: %v", err)
+	}
+	if user.State != "USER_STATE_ACTIVE" {
+		t.Fatalf("user.State = %q, want USER_STATE_ACTIVE", user.State)
+	}
+	if gotBody["initialPassword"] != "Er7hK2mQ9xL4nP6z!" {
+		t.Fatalf("request body = %+v, want the initial password carried", gotBody)
+	}
+	email, _ := gotBody["email"].(map[string]any)
+	if email["isEmailVerified"] != true {
+		t.Fatalf("email.isEmailVerified = %v, want true -- otherwise Zitadel still emails an init link nothing can deliver", email["isEmailVerified"])
+	}
+}
+
 func TestDeactivateAndReactivateUser(t *testing.T) {
 	var gotPaths []string
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

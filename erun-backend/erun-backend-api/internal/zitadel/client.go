@@ -220,17 +220,30 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 // CreateHumanUserParams is the enrollment input for a new IdP identity.
+// InitialPassword is empty for Zitadel's normal invite flow: no password is
+// set, so Zitadel emails the enrollee a verification/initialization link
+// rather than this client (or its caller) ever handling a credential for
+// someone else's account. When the platform cannot send that email at all
+// (issue #1168), the caller sets InitialPassword instead -- verified live
+// against a real Zitadel v4.15.3 instance that AddHumanUser only sends the
+// initialization email "if either the email address is not marked as
+// verified or no password is set" (its own API doc comment), so a set
+// password alone still leaves the account in USER_STATE_INITIAL waiting on
+// a link that will never arrive; CreateHumanUser accordingly marks the email
+// verified in that case too, and only in that case, which is what actually
+// lands the account in USER_STATE_ACTIVE with the password usable
+// immediately.
 type CreateHumanUserParams struct {
-	Username  string
-	Email     string
-	FirstName string
-	LastName  string
+	Username        string
+	Email           string
+	FirstName       string
+	LastName        string
+	InitialPassword string
 }
 
-// CreateHumanUser creates a new human user via Zitadel's invite flow: no
-// password is set here, so Zitadel emails the enrollee a verification/
-// initialization link rather than this client (or its caller) ever handling
-// a credential for someone else's account.
+// CreateHumanUser creates a new human user in Zitadel. See
+// CreateHumanUserParams.InitialPassword for the two distinct outcomes this
+// produces.
 func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserParams) (User, error) {
 	username := strings.TrimSpace(params.Username)
 	email := strings.TrimSpace(params.Email)
@@ -245,6 +258,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 	if lastName == "" {
 		lastName = username
 	}
+	hasInitialPassword := params.InitialPassword != ""
 	body := map[string]any{
 		"userName": username,
 		"profile": map[string]any{
@@ -253,8 +267,11 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 		},
 		"email": map[string]any{
 			"email":           email,
-			"isEmailVerified": false,
+			"isEmailVerified": hasInitialPassword,
 		},
+	}
+	if hasInitialPassword {
+		body["initialPassword"] = params.InitialPassword
 	}
 	var resp struct {
 		UserID string `json:"userId"`
@@ -262,13 +279,17 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 	if err := c.call(ctx, http.MethodPost, "/management/v1/users/human", body, &resp); err != nil {
 		return User{}, err
 	}
+	state := "USER_STATE_INITIAL"
+	if hasInitialPassword {
+		state = "USER_STATE_ACTIVE"
+	}
 	return User{
 		ID:        resp.UserID,
 		Username:  username,
 		Email:     email,
 		FirstName: firstName,
 		LastName:  lastName,
-		State:     "USER_STATE_INITIAL",
+		State:     state,
 	}, nil
 }
 

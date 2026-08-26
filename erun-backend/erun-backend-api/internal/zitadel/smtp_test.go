@@ -152,3 +152,37 @@ func TestUpdateSMTPConfigActivatesAnInactiveExistingConfig(t *testing.T) {
 		t.Fatalf("activated = %q, want the inactive existing config reactivated", activated)
 	}
 }
+
+// TestUpdateSMTPConfigActivatesBeforeWritingThePassword locks a real
+// Zitadel business rule found live against a v4.15.3 instance: the
+// password-update command refuses an inactive config with the same "SMTP
+// configuration not found" error GetSMTPStatus's 404 uses, even though a
+// plain field update on the same inactive config succeeds -- so an inactive
+// existing config must be activated before its password is written, not
+// after.
+func TestUpdateSMTPConfigActivatesBeforeWritingThePassword(t *testing.T) {
+	var order []string
+	client := routedTestClient(t, []jsonRoute{
+		{method: http.MethodPost, path: "/admin/v1/smtp/_search", body: map[string]any{
+			"result": []map[string]any{{"id": "smtp-3", "state": "SMTP_CONFIG_INACTIVE"}},
+		}},
+		{method: http.MethodPost, path: "/admin/v1/smtp/smtp-3/_activate", record: func(map[string]any) { order = append(order, "activate") }},
+		{method: http.MethodPut, path: "/admin/v1/smtp/smtp-3", record: func(map[string]any) { order = append(order, "fields") }},
+		{method: http.MethodPut, path: "/admin/v1/smtp/smtp-3/password", record: func(map[string]any) { order = append(order, "password") }},
+	})
+
+	if _, err := client.UpdateSMTPConfig(context.Background(), SetSMTPConfigParams{
+		Host: "smtp.example.com:587", SenderAddress: "noreply@example.com", Password: "s3cret",
+	}); err != nil {
+		t.Fatalf("UpdateSMTPConfig: %v", err)
+	}
+	want := []string{"activate", "fields", "password"}
+	if len(order) != len(want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	for i, step := range want {
+		if order[i] != step {
+			t.Fatalf("order = %v, want %v", order, want)
+		}
+	}
+}
