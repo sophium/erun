@@ -1,6 +1,8 @@
 import {
+  AttachOrchestratorConversation,
   CreateOrchestrator,
   DeleteOrchestrator,
+  DetachOrchestratorConversation,
   InvestigateFailure,
   ListOrchestrators,
   ResolveOrchestratorToReopen,
@@ -145,6 +147,40 @@ export const restartOrchestrator =
   async (dispatch) => {
     try {
       const info = await RestartOrchestrator(id, 80, 24);
+      dispatch(focusOrchestratorSession(info.sessionId));
+      await dispatch(loadOrchestrators());
+    } catch (error) {
+      dispatch(setOrchestratorsError(readError(error)));
+    }
+  };
+
+// attachOrchestratorConversation points an orchestrator at a conversation the
+// operator picked and lands them in it: the session restarts there and the
+// choice is remembered, so later launches honour it rather than recomputing the
+// default. The dialog closes because the terminal pane is where the result of
+// this is — a dialog left open over the session it just replaced hides the one
+// thing the operator asked for.
+export const attachOrchestratorConversation =
+  (id: string, conversationId: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      const info = await AttachOrchestratorConversation(id, conversationId, 80, 24);
+      dispatch(closeOrchestratorDialog());
+      dispatch(focusOrchestratorSession(info.sessionId));
+      await dispatch(loadOrchestrators());
+    } catch (error) {
+      dispatch(setOrchestratorsError(readError(error)));
+    }
+  };
+
+// detachOrchestratorConversation drops an explicit choice and restarts the
+// orchestrator on whatever it resolves to on its own.
+export const detachOrchestratorConversation =
+  (id: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      const info = await DetachOrchestratorConversation(id, 80, 24);
+      dispatch(closeOrchestratorDialog());
       dispatch(focusOrchestratorSession(info.sessionId));
       await dispatch(loadOrchestrators());
     } catch (error) {

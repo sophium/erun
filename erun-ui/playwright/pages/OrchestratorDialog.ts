@@ -109,4 +109,34 @@ export class OrchestratorDialog {
       name: `Open ${OrchestratorDialog.guidanceTitle[layer]} in ${ide}`,
     });
   }
+
+  // The conversation picker: which conversation this orchestrator resumes, every
+  // one it could be pointed at instead, and the attach that corrects it. Rows
+  // carry their conversation id and role as data attributes so a spec addresses
+  // one without matching on rendered prose.
+  conversationSummary(): Locator {
+    return this.locator('Edit orchestrator').getByText('Resuming the conversation', {
+      exact: false,
+    });
+  }
+
+  conversationRow(conversationId: string): Locator {
+    return this.locator('Edit orchestrator').locator(`[data-conversation-id="${conversationId}"]`);
+  }
+
+  conversationRows(): Locator {
+    return this.locator('Edit orchestrator').locator('[data-conversation-id]');
+  }
+
+  conversationAttachButton(conversationId: string): Locator {
+    return this.conversationRow(conversationId).getByRole('button', {
+      name: `Attach ${conversationId} to this orchestrator`,
+    });
+  }
+
+  conversationDetachButton(conversationId: string): Locator {
+    return this.conversationRow(conversationId).getByRole('button', {
+      name: `Stop using ${conversationId} for this orchestrator`,
+    });
+  }
 }

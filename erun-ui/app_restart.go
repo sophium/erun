@@ -253,11 +253,12 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 		}
 		owner := openEntries[len(openEntries)-1]
 		alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, owner.OrchestratorID))
+		conversationID, conversationNotice := a.resolveReopenSessionID(owner)
 		notices := append([]string{orchestratorScopeChangedNoticeIfAny(owner, a.currentOrchestratorScope(owner.OrchestratorID))}, alsoNotices...)
-		notices = append(notices, notice)
+		notices = append(notices, conversationNotice, notice)
 		return relaunchTarget{
 			OrchestratorID: owner.OrchestratorID,
-			ConversationID: resolveReopenSessionID(owner),
+			ConversationID: conversationID,
 			AlsoReopen:     alsoRefs,
 			Notice:         joinOrchestratorNotices(notices...),
 		}
@@ -286,23 +287,28 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 		target.Notice = joinOrchestratorNotices(n, target.Notice)
 	}
 	// No prompt to deliver, or the hand-off was refused: still resume the exact
-	// conversation the durable record last saw running for this orchestrator,
-	// rather than leaving it for a re-derivation that can land on a different,
-	// older one.
-	target.ConversationID = resolveReopenSessionID(entry)
+	// conversation this orchestrator is on, rather than leaving it for a
+	// re-derivation that can land on a different, older one.
+	conversationID, conversationNotice := a.resolveReopenSessionID(entry)
+	target.ConversationID = conversationID
+	target.Notice = joinOrchestratorNotices(target.Notice, conversationNotice)
 	return target
 }
 
 // resolveReopenSessionID decides which conversation a reopened orchestrator
-// resumes: its own, derived from its id. Nothing is read, because nothing is
-// stored -- a derivation is the same answer on every launch, so a second copy
-// on disk could only ever disagree with it. A transient orchestrator has no id
-// to derive from and gets a fresh conversation.
-func resolveReopenSessionID(entry orchestratorOpenEntry) string {
-	if id := strings.TrimSpace(entry.OrchestratorID); id != "" {
-		return orchestratorSessionID(id)
+// resumes, and what has to be said about it: the conversation the operator
+// attached, else the one this orchestrator's own session last reported under the
+// launch the durable entry records, else the anchor derived from its id. See
+// orchestrator_live_conversation.go for why the tracked answer needs the launch
+// to vouch for it and why an unconfirmed one falls back loudly instead of
+// quietly. A transient orchestrator has no id to derive from and gets a fresh
+// conversation.
+func (a *App) resolveReopenSessionID(entry orchestratorOpenEntry) (string, string) {
+	if strings.TrimSpace(entry.OrchestratorID) == "" {
+		return uuid.NewString(), ""
 	}
-	return uuid.NewString()
+	choice := a.resolveOrchestratorConversation(entry)
+	return choice.ConversationID, choice.Notice
 }
 
 // orchestratorEntryOrEmpty finds id's entry in entries, or a zero-value entry
@@ -345,10 +351,14 @@ func (a *App) reopenRefs(entries []orchestratorOpenEntry) ([]orchestratorReopenR
 	out := make([]orchestratorReopenRef, 0, len(entries))
 	var notices []string
 	for _, entry := range entries {
+		conversationID, conversationNotice := a.resolveReopenSessionID(entry)
 		out = append(out, orchestratorReopenRef{
 			OrchestratorID: entry.OrchestratorID,
-			ConversationID: resolveReopenSessionID(entry),
+			ConversationID: conversationID,
 		})
+		if conversationNotice != "" {
+			notices = append(notices, conversationNotice)
+		}
 		if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(entry.OrchestratorID)); n != "" {
 			notices = append(notices, n)
 		}
@@ -505,18 +515,18 @@ func (a *App) RestartApp(returnToOrchestratorID string) error {
 // safely tell to carry on, so the launch reopens the orchestrator idle rather
 // than handing a task to whichever conversation its id happens to resolve to.
 //
-// The conversation id is derived from the orchestrator id, not read back from
-// a record. Deriving it is what makes a restart land in the orchestrator's own
-// conversation every time: the derivation is a pure function, so it cannot go
-// stale, cannot be written by another session, and needs nothing on disk to be
-// correct.
+// The conversation is the one the session running right now reports being on --
+// what it told its own hooks under this launch's nonce, and only failing that
+// the id it was spawned with. A restart is the operator taking a live session
+// away and promising it back, so naming anything other than the conversation
+// that is live is how a restart strands the work it was meant to preserve.
 func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	state := orchestratorRestoreState{OrchestratorID: strings.TrimSpace(orchestratorID)}
-	conversationID, scope := a.runningOrchestratorConversation(state.OrchestratorID)
+	conversationID, launchID, scope := a.runningOrchestratorConversation(state.OrchestratorID)
 	if conversationID == "" {
 		return state
 	}
-	state.ConversationID = orchestratorResumeConversationID(state.OrchestratorID, conversationID)
+	state.ConversationID = orchestratorLiveConversationForLaunch(state.OrchestratorID, launchID, conversationID)
 	state.Environments = scope
 	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
 	return state

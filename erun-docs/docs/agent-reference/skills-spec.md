@@ -105,6 +105,51 @@ The desktop also writes a `SessionStart` hook into the shared orchestrators work
 
 Guidance is two layers, injected shared-then-specific so the ordering is the precedence rule. `CLAUDE.md` — described above — is the one shared contract every orchestrator obeys; erun rewrites it on every launch, so an edit there is discarded on the next one. `CLAUDE.<id>.md`, in the same shared orchestrators workspace, is this orchestrator's own standing role: erun seeds it once, with a short comment explaining the convention, and never rewrites it afterward — the deliberate inverse of the shared file. The hook prints it immediately after `CLAUDE.md`, so anything in it can add to the contract or override a line of it. `<id>` is the orchestrator's internal id, not its display name — an orchestrator the sidebar shows as `erun-admin` can carry id `erun-issues`, so its role file is `CLAUDE.erun-issues.md` — which is why the desktop's orchestrator management dialog resolves and opens both files by id rather than asking the operator to know the filename convention (see [Desktop app · Orchestrators](/desktop/overview#orchestrators) for the Operator-facing view).
 
+#### Which conversation a launch resumes {#orchestrator-conversation-resolution}
+
+> For the Operator view, see [Desktop app · The conversation an orchestrator comes back to](/desktop/overview#orchestrator-conversations).
+
+Every launch of an orchestrator resumes a named conversation rather than `--continue`'s most-recent one, which in a shared workspace collapses every orchestrator onto one session. The name is resolved from three sources, in this order.
+
+**The anchor (derived).** `uuid5(6f7e9c2a-1b3d-4e5f-8a9b-0c1d2e3f4a5b, <orchestrator id>)`. A pure function of the id, so it is identical on every launch and on every machine, needs nothing on disk, and cannot be written by another session. It answers *which conversation is this orchestrator's by convention* — and only that. A transient (Investigate) session has no id, so it has no anchor and starts unpinned.
+
+**The tracked conversation (live).** The harness does not always adopt the id it is asked to resume; a launch that asks for the anchor can end up writing to a conversation of its own, after which the anchor's transcript stops growing while the work accumulates elsewhere. Only the session knows which one it is writing to, so the session reports it:
+
+- The desktop mints a **launch nonce** (a v4 UUID) per launch, exports it as `ERUN_ORCHESTRATOR_LAUNCH` beside `ERUN_ORCHESTRATOR_ID`, and writes it into its own durable open-set record (`orchestrator-open.json`, `launchId` per entry) as the session is spawned.
+- A hook installed on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop` reads `session_id` from the hook's own stdin JSON and writes `{"conversationId":…,"launchId":…,"atUnix":…}` to `<UserConfigDir>/ERun/orchestrator-live/<id>.json`. Session boundaries *and* turn boundaries, because the id can change mid-run; bare shell, so it works with erun off `PATH`; every failure path is `|| true`, since a hook that could wedge a session costs more than a missed record.
+- A record counts only while `launchId` equals the `launchId` on that orchestrator's open-set entry. That makes the two halves independent: the desktop writes the nonce, the session writes the conversation, and neither is authoritative alone. A session that never saw this launch's nonce cannot claim the orchestrator's conversation however it came by the id, and a store whose writer is removed stops counting on the very next launch — the two failure modes of the record this replaces.
+
+**The attachment (operator).** A conversation the Operator attached through the manage dialog. Durable on the open-set entry (`attachedConversationId`), so a later launch honours it instead of recomputing the anchor, and cleared by asking for the default back. It outranks both of the above.
+
+Resolution is: attachment if usable → tracked record if confirmed → anchor. A candidate ahead of the anchor must clear two checks — its transcript is still on disk, and no *other* configured orchestrator has a claim on it (that orchestrator's anchor, its attachment, or its own tracked record) — because the cost of the wrong answer is another orchestrator's history presented as this one's. Recency is never an input: the transcript directory holds conversations belonging to several orchestrators and to none, so "the newest file" is usually somebody else's.
+
+**Nothing falls through silently.** A resolution that is not the plain answer carries an operator-facing notice — surfaced beside the orchestrator list on a restore, and as a notification on an ordinary start:
+
+| Outcome | Notice |
+|---|---|
+| Tracked conversation resumed | Names the conversation resumed and the anchor it beat. It is the good outcome; the two ids disagree, and only the Operator can tell whether the winner holds the work they expect. |
+| `launchId` missing or from another launch | Resumes the anchor, names the unconfirmed conversation, and says nothing has confirmed it since. |
+| Tracked transcript no longer on disk | Resumes the anchor and says the transcript is gone. |
+| Tracked conversation claimed by another orchestrator | Resumes the anchor and names the orchestrator that owns it. |
+| Attachment unusable (either of the two checks above) | Resumes the anchor and says the Operator's own choice could not be honoured. |
+
+The restart hand-off (`orchestrator-restore/<id>.json`) records the conversation the running session reports being on under its launch, not the id it was spawned with — a restart is the one path that must reach the session that asked for it. The crash respawn keeps the same nonce, since it is the same launch continuing.
+
+**Listing and attaching.** `ListOrchestratorConversations(<id>)` reports what one orchestrator could resume, and is the surface that makes a wrong resume correctable rather than terminal:
+
+| Field | Meaning |
+|---|---|
+| `resuming` / `resumingSource` | The conversation a launch resolves right now, and which of `attached` / `tracked` / `derived` produced it. |
+| `attached` | The Operator's standing choice, empty when there is none. |
+| `notice` | The same notice the resolution would surface, so the picker explains the state it is showing. |
+| `conversations[]` | Per conversation: `conversationId`, `folder`, `lastWrittenUnix`, `sizeBytes`, `excerpt`, `role`, `resuming`. |
+| `omittedNotMine` / `omittedForCap` | How many rows were withheld because another orchestrator claims them, and how many older ones the 60-row cap dropped. Stated, never silently trimmed. |
+| `transcriptsRoot` | `~/.claude/projects`, the directory the rows were read from. |
+
+`role` is one of `attached`, `live` (tracked and confirmed), `stranded` (recorded as live by a launch nothing can confirm — the row most likely to hold unreachable work), `derived`, or `unowned`. Enumeration globs `~/.claude/projects/*/*.jsonl` across **every** project directory, since a conversation id is globally unique and an orchestrator's own conversation may have been started elsewhere. `folder` comes from the transcript's own recorded `cwd`, never decoded from the project directory name — the harness encodes a path by replacing each separator with `-`, which no decode can round-trip for a path that already contained one. `folder` and `excerpt` are read from the first 128 KiB only, so listing a directory of multi-megabyte transcripts stays cheap; the anchor is always a row even before its first write.
+
+`AttachOrchestratorConversation(<id>, <conversationId>, cols, rows)` records the choice and restarts the orchestrator in that conversation; `DetachOrchestratorConversation(<id>, cols, rows)` clears it and restarts on whatever resolves. Attaching a conversation another orchestrator claims is **refused**, with the owner named — recovering a mis-attached orchestrator is what this exists for, and crossing two orchestrators is what it exists to prevent.
+
 #### Periodic pacing re-statement and crash auto-resume
 
 > For the Operator view, see [Workflow · Level 3](/collaboration/workflow#level-3).
@@ -133,11 +178,11 @@ Each nudge appears in the pane as a dim marker line naming the attempt count (`�
 - **A torn-down registration never respawns**, even carrying a real failure reason: the closure refuses unless the orchestrator's config-map entry and its managed-terminal registration are both still exactly what they were when the session was spawned. `StopOrchestrator` deletes both under the same lock a Stop takes, so Stop always refuses its own respawn — including a respawn already in flight when Stop is called, since the same check runs again after the relaunch attempt returns.
 - **A transient (Investigate) session never respawns** — it carries no respawn closure at all; its lifecycle is the investigation registry's to end.
 
-When it does fire, the closure relaunches through the same launch path a fresh start uses, resolving the conversation id via `preferLiveOrchestratorSessionID` (the live-recorded id, which can differ from the spawn-time id after a compaction fork) rather than re-deriving one, and hands the relaunched session a resume prompt distinct from the restart-hand-off one above (it names no return note, since nothing wrote one for an involuntary crash):
+When it does fire, the closure relaunches through the same launch path a fresh start uses, resuming whatever conversation the crashed session last reported under this launch's nonce rather than only the id it was spawned with (see [Which conversation a launch resumes](#orchestrator-conversation-resolution)), and hands the relaunched session a resume prompt distinct from the restart-hand-off one above (it names no return note, since nothing wrote one for an involuntary crash):
 
 > This session's process just exited unexpectedly and was relaunched automatically. Resume the conversation exactly where it left off and carry any in-progress task through to its verified end without waiting to be asked.
 
-The crash-fallback shell command itself was also closed: `buildOrchestratorLaunch`'s primary launch already resumes a pinned session id (`--resume <id>` if the conversation exists, `--session-id <id>` to create it) with a `||`-chained (PowerShell: `$LASTEXITCODE`-checked) shell-level fallback for the same single invocation. That fallback now retries the identical pinned invocation rather than ever dropping to an unpinned `claude`, since an unpinned session is what the live-session hook (above) would then record as this orchestrator's conversation — silently swapping it onto an amnesiac one on the very first in-shell retry. Only a transient/legacy launch (no pinned id) still falls back to plain `claude`.
+The crash-fallback shell command itself was also closed: `buildOrchestratorLaunch`'s primary launch already resumes a pinned session id (`--resume <id>` if the conversation exists, `--session-id <id>` to create it) with a `||`-chained (PowerShell: `$LASTEXITCODE`-checked) shell-level fallback for the same single invocation. That fallback now retries the identical pinned invocation rather than ever dropping to an unpinned `claude`, since an unpinned session is what the live-conversation recorder (above) would then report as this orchestrator's conversation — silently swapping it onto an amnesiac one on the very first in-shell retry. Only a transient/legacy launch (no pinned id) still falls back to plain `claude`.
 
 ### Laptop (plugin marketplace)
 
