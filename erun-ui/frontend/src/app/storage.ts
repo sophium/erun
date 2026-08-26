@@ -21,6 +21,8 @@ import {
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
   TERMINAL_SCREEN_READER_MODE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  type ThemePreference,
 } from './state';
 
 const MAX_SAVED_STRING_LIST_ITEMS = 20;
@@ -83,6 +85,21 @@ export function loadSavedTerminalScreenReaderMode(): boolean {
   } catch {
     return false;
   }
+}
+
+export function loadSavedTheme(): ThemePreference | null {
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === 'light' || raw === 'dark' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTheme(theme: ThemePreference): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {}
 }
 
 export function saveNumber(key: string, value: number): void {

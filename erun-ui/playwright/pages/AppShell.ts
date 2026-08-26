@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
 import { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
@@ -22,6 +22,12 @@ import { Titlebar } from './Titlebar';
 // AppShell is the tests' entry point into the rendered app.
 export class AppShell {
   constructor(public readonly page: Page) {}
+
+  // The theme's gating class lives on <html>, not any component the other
+  // POMs render, so it is exposed here rather than on Titlebar.
+  documentElement(): Locator {
+    return this.page.locator('html');
+  }
 
   async open(): Promise<void> {
     await this.page.goto('/');

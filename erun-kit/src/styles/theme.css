@@ -165,6 +165,13 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.275 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  /* Tinted for a near-black background rather than inverted: the light-mode
+     values are a pale mint/pink wash that would render as an unstyled-looking
+     bright block here. Foreground text stays 9.1-9.4:1 on its own background. */
+  --diff-add: oklch(0.28 0.05 145);
+  --diff-add-foreground: oklch(0.85 0.1 145);
+  --diff-delete: oklch(0.28 0.05 25);
+  --diff-delete-foreground: oklch(0.85 0.08 25);
 }
 
 @layer base {
