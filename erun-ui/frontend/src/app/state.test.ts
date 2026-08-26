@@ -6,6 +6,7 @@ import {
   computeMaxSidebarWidth,
   effectiveSidebarWidth,
   MAX_SIDEBAR_WIDTH,
+  MIN_DASHBOARD_PANE_WIDTH,
   MIN_SIDEBAR_WIDTH,
   nextSidebarHidden,
   SIDEBAR_COLLAPSE_BREAKPOINT,
@@ -35,13 +36,18 @@ test('effectiveSidebarWidth is zero while collapsed regardless of the stored wid
 });
 
 test('effectiveSidebarWidth reclamps a too-wide stored width to what the viewport allows', () => {
-  // The exact bug from erun's narrow-viewport issue: a 640px window with the
-  // old 338px default sidebar left only 292px for <main>. The reclamped width
-  // must leave at least MIN_MAIN_PANE_WIDTH (360px) once the 10px divider is
-  // subtracted from the 640px viewport.
-  const width = effectiveSidebarWidth(false, 338, 640);
-  const mainWidth = 640 - width - 10;
-  assert.ok(mainWidth >= 360, `expected <main> to keep >=360px, got ${String(mainWidth)}`);
+  // A viewport just above the collapse breakpoint still shows the sidebar
+  // (narrower viewports auto-collapse it instead, see nextSidebarHidden), so
+  // this is the narrowest case where the reclamp math alone — not the
+  // collapse decision — must keep <main> from starving. The default 338px
+  // stored width has to squeeze down for the 10px divider and
+  // MIN_DASHBOARD_PANE_WIDTH to both fit in 800px.
+  const width = effectiveSidebarWidth(false, 338, 800);
+  const mainWidth = 800 - width - 10;
+  assert.ok(
+    mainWidth >= MIN_DASHBOARD_PANE_WIDTH,
+    `expected <main> to keep >=${String(MIN_DASHBOARD_PANE_WIDTH)}px, got ${String(mainWidth)}`,
+  );
 });
 
 test('effectiveSidebarWidth leaves a wide stored width untouched on a wide viewport', () => {

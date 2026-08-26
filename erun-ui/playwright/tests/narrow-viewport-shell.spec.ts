@@ -20,19 +20,38 @@ import {
 // with an apiUrl and stubs LoadTenantDashboard rather than using a live
 // collaboration API the inert harness deliberately has no access to.
 //
+// A first pass reclamped the sidebar but sized the breakpoint off the
+// terminal/diff-review floor (360px), well under the ~495px the dashboard's
+// header + tab strip actually need to render without clipping — 640px still
+// squeezed <main> to 360px. The intermediate overflow-x-auto wrapper
+// (MainPane.tsx) technically made that overflow scrollable, but Chromium
+// never painted a discoverable scrollbar for it, so the button was reachable
+// only in the DOM, not to a real user. isFullyOnScreen() below asserts the
+// element's own bounding box directly rather than accepting a scrollable
+// ancestor as a substitute; the actual fix gives the sidebar breakpoint its
+// own, wider floor (MIN_DASHBOARD_PANE_WIDTH in app/state.ts) sized off the
+// dashboard's measured minimum, so the breakpoint collapses the sidebar
+// before <main> is ever squeezed that far.
+//
 // Known residual gap (not this spec's to fix): TenantDashboardView.tsx's own
-// <section> root does not set min-width:0, so it can still be wider than
-// <main> when dashboard content (e.g. the reviews table) is wide — that file
-// is owned by a different lane in this multi-agent pass. The shell-level fix
-// here (MainPane.tsx) contains that overflow with a real, reachable scrollbar
-// instead of letting <main>'s own overflow-hidden clip it invisibly, so the
-// button is never a hard dead end, but it is not always directly in-viewport
-// without scrolling. buttonIsReachable() below accepts either outcome.
+// <section> root does not set min-width:0, so the reviews table's explicit
+// min-w-[760px] can still make its own overflow-auto panel wider than
+// <main> at any width below ~760px, and the same invisible-scrollbar
+// symptom applies to it (the Status column can scroll out of reach with no
+// visible affordance). That file is owned by a different lane in this
+// multi-agent pass; this spec only locks down the header/tab-strip/button
+// row, which no longer depends on that table's width.
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 1200 };
-// Mirrors app/state.ts's MIN_MAIN_PANE_WIDTH — kept as a literal here since
-// this project doesn't share a tsconfig path alias with the frontend.
-const MIN_MAIN_PANE_WIDTH = 360;
+// Mirrors app/state.ts's MIN_DASHBOARD_PANE_WIDTH and
+// SIDEBAR_COLLAPSE_BREAKPOINT — kept as literals here since this project
+// doesn't share a tsconfig path alias with the frontend.
+// MIN_DASHBOARD_PANE_WIDTH is the measured, unwrapping minimum width of the
+// tenant dashboard's header + tab strip (~495px in Chromium) rounded up with
+// a small margin; the breakpoint is MIN_SIDEBAR_WIDTH(248) +
+// GRID_DIVIDER_WIDTH(10) + MIN_DASHBOARD_PANE_WIDTH(500).
+const MIN_DASHBOARD_PANE_WIDTH = 500;
+const SIDEBAR_COLLAPSE_BREAKPOINT = 758;
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -122,30 +141,26 @@ async function mainClientWidth(page: Page): Promise<number> {
   return page.evaluate(() => document.querySelector('main')?.clientWidth ?? 0);
 }
 
-// buttonIsReachable is the "never strand a control" invariant: a control is
-// fine either directly inside the viewport, or behind a real, discoverable
-// horizontal scrollbar on one of its ancestors. It is not fine hidden behind
-// an ancestor's overflow-hidden with no scroll affordance at all — that was
-// the original defect this spec guards against.
-async function buttonIsReachable(button: Locator, viewportWidth: number): Promise<boolean> {
-  return button.evaluate((el, vw) => {
+// The sidebar can give <main> at most the whole viewport, so once the
+// viewport itself is narrower than MIN_DASHBOARD_PANE_WIDTH there is nothing
+// left to reclamp even with the sidebar fully collapsed (e.g. 480px) — the
+// floor this spec asserts against is capped at the viewport, not the
+// constant alone.
+function expectedMinMainWidth(viewportWidth: number): number {
+  return Math.min(MIN_DASHBOARD_PANE_WIDTH, viewportWidth);
+}
+
+// isFullyOnScreen is the "never strand a control" invariant, asserted
+// directly against the element's own bounding box rather than inferred from
+// document/main scrollWidth. A width-only overflow check let 640px pass
+// while the "New review" button rendered sliced by the viewport edge: the
+// intermediate overflow-x-auto wrapper (MainPane.tsx) technically made the
+// content scrollable, but painted no discoverable scrollbar, so a control
+// reachable only by scrolling into invisible space is not reachable at all.
+async function isFullyOnScreen(locator: Locator, viewportWidth: number): Promise<boolean> {
+  return locator.evaluate((el, vw) => {
     const box = el.getBoundingClientRect();
-    if (box.x >= 0 && box.x + box.width <= vw) {
-      return true;
-    }
-    let ancestor: Element | null = el.parentElement;
-    while (ancestor) {
-      const style = getComputedStyle(ancestor);
-      const scrollable = ancestor as HTMLElement;
-      if (
-        (style.overflowX === 'auto' || style.overflowX === 'scroll') &&
-        scrollable.scrollWidth > scrollable.clientWidth
-      ) {
-        return true;
-      }
-      ancestor = ancestor.parentElement;
-    }
-    return false;
+    return box.x >= 0 && box.x + box.width <= vw && box.width > 0;
   }, viewportWidth);
 }
 
@@ -162,11 +177,19 @@ for (const width of [480, 640, 900, 1440]) {
         await openReviewsTab(app, page, environment);
 
         await expect.poll(() => hasHorizontalOverflow(page)).toBe(false);
-        await expect.poll(() => mainClientWidth(page)).toBeGreaterThanOrEqual(MIN_MAIN_PANE_WIDTH);
+        await expect
+          .poll(() => mainClientWidth(page))
+          .toBeGreaterThanOrEqual(expectedMinMainWidth(width));
 
         const button = app.tenantDashboard.newReviewButton();
         await expect(button).toBeVisible();
-        await expect.poll(() => buttonIsReachable(button, width)).toBe(true);
+        await expect.poll(() => isFullyOnScreen(button, width)).toBe(true);
+
+        // The tab strip's last tab (API log) is the widest-reaching sibling
+        // in the row; if it fits, none of the others were clipped either.
+        const lastTab = app.tenantDashboard.tab('API log');
+        await expect(lastTab).toBeVisible();
+        await expect.poll(() => isFullyOnScreen(lastTab, width)).toBe(true);
       } finally {
         removeEnvironment(SEED_TENANT, environment);
       }
@@ -187,13 +210,21 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
 
       // This is the original defect verbatim: resizing the OS window, not
       // dragging the splitter, used to leave the sidebar at its stale width
-      // and starve <main> to ~292px at 640px.
+      // and starve <main> to ~292px at 640px. 640px is below the collapse
+      // breakpoint, so the sidebar now gives up the column entirely instead
+      // of reclamping to a squeeze that still clips the dashboard content.
       await page.setViewportSize({ width: 640, height: 900 });
+      await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
       await expect.poll(() => hasHorizontalOverflow(page)).toBe(false);
-      await expect.poll(() => mainClientWidth(page)).toBeGreaterThanOrEqual(MIN_MAIN_PANE_WIDTH);
+      await expect
+        .poll(() => mainClientWidth(page))
+        .toBeGreaterThanOrEqual(expectedMinMainWidth(640));
       const button = app.tenantDashboard.newReviewButton();
       await expect(button).toBeVisible();
-      await expect.poll(() => buttonIsReachable(button, 640)).toBe(true);
+      await expect.poll(() => isFullyOnScreen(button, 640)).toBe(true);
+      const lastTab = app.tenantDashboard.tab('API log');
+      await expect(lastTab).toBeVisible();
+      await expect.poll(() => isFullyOnScreen(lastTab, 640)).toBe(true);
 
       // Below the hard collapse threshold the sidebar must give up the column
       // entirely — there is no room for both it and a usable <main>.
@@ -214,7 +245,7 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
     app,
     page,
   }) => {
-    await page.setViewportSize({ width: 618, height: 900 });
+    await page.setViewportSize({ width: SIDEBAR_COLLAPSE_BREAKPOINT, height: 900 });
     // Confirm against the rendered <aside>, not only the CSS var, so this
     // also proves the grid column actually reflects the reconciled state.
     await expect(app.sidebar.locator()).not.toHaveCSS('width', '0px');
@@ -223,7 +254,13 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
     // Nudge by a pixel repeatedly around the breakpoint; the hysteresis band
     // means the sidebar must hold its current (open) state throughout rather
     // than flicker open/closed on every sub-pixel layout pass.
-    for (const width of [618, 619, 618, 620, 618]) {
+    for (const width of [
+      SIDEBAR_COLLAPSE_BREAKPOINT,
+      SIDEBAR_COLLAPSE_BREAKPOINT + 1,
+      SIDEBAR_COLLAPSE_BREAKPOINT,
+      SIDEBAR_COLLAPSE_BREAKPOINT + 2,
+      SIDEBAR_COLLAPSE_BREAKPOINT,
+    ]) {
       await page.setViewportSize({ width, height: 900 });
       await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
     }
@@ -236,7 +273,8 @@ test.describe('narrow-viewport shell — user intent survives a resize (#1385)',
     app,
     page,
   }) => {
-    await page.setViewportSize({ width: 640, height: 900 });
+    // Above the breakpoint the sidebar still shows on its own.
+    await page.setViewportSize({ width: 900, height: 900 });
     await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
 
     // Auto-collapse it first, then override the automatic decision.

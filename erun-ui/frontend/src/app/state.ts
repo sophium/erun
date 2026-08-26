@@ -30,10 +30,25 @@ export const DEFAULT_SIDEBAR_WIDTH = 338;
 export const MIN_REVIEW_WIDTH = 420;
 export const MAX_REVIEW_WIDTH = 1400;
 export const DEFAULT_REVIEW_WIDTH = 620;
-// MIN_MAIN_PANE_WIDTH is the narrowest <main> the shell treats as usable,
-// shared by every panel (sidebar, diff review) that competes with it for the
-// same viewport so they can't independently agree to starve it.
+// MIN_MAIN_PANE_WIDTH is the narrowest <main> the shell treats as usable
+// while showing the terminal/diff-review surface — the only other content
+// that competes with the review panel for the same viewport, so they can't
+// independently agree to starve it.
 export const MIN_MAIN_PANE_WIDTH = 360;
+// MIN_DASHBOARD_PANE_WIDTH is the narrowest <main> the shell treats as usable
+// while showing the tenant dashboard, which never renders alongside the
+// review panel (MainPane.tsx shows one or the other), so it is its own,
+// wider floor rather than folded into MIN_MAIN_PANE_WIDTH above. Measured,
+// not guessed: the dashboard's tab strip (Users/Reviews/Merge queue/Builds/
+// Audit log/API log) plus the page header's padding has an unwrapping,
+// unshrinkable content width of ~495px in Chromium. MIN_MAIN_PANE_WIDTH's
+// 360 let that content render wider than <main>, invisibly — the
+// intermediate overflow-x-auto wrapper (MainPane.tsx) permits the overflow
+// but never paints a discoverable scrollbar for it. 500 rounds the
+// measurement up with a small margin for cross-platform font metrics. The
+// sidebar breakpoint below is sized off this, the larger of the two floors,
+// since the sidebar competes with whichever of the two is showing.
+export const MIN_DASHBOARD_PANE_WIDTH = 500;
 export const GRID_DIVIDER_WIDTH = 10;
 
 export function computeMaxReviewWidth(
@@ -49,11 +64,14 @@ export function computeMaxReviewWidth(
 
 // Mirrors computeMaxReviewWidth for the sidebar. Unlike the review panel, its
 // floor stays at MIN_SIDEBAR_WIDTH — collapsing away entirely is the separate
-// decision nextSidebarHidden below makes, not a width squeeze.
+// decision nextSidebarHidden below makes, not a width squeeze. Reserves room
+// for MIN_DASHBOARD_PANE_WIDTH (not the smaller MIN_MAIN_PANE_WIDTH) because
+// the sidebar has no visibility into which of the two <main> contents is
+// showing, so it must leave enough for the wider requirement either way.
 export function computeMaxSidebarWidth(viewportWidth: number): number {
   return Math.max(
     MIN_SIDEBAR_WIDTH,
-    Math.min(MAX_SIDEBAR_WIDTH, viewportWidth - MIN_MAIN_PANE_WIDTH - GRID_DIVIDER_WIDTH),
+    Math.min(MAX_SIDEBAR_WIDTH, viewportWidth - MIN_DASHBOARD_PANE_WIDTH - GRID_DIVIDER_WIDTH),
   );
 }
 
@@ -74,10 +92,10 @@ export function effectiveSidebarWidth(
 }
 
 // Below this viewport width, the sidebar at its own minimum plus the divider
-// already leaves <main> under MIN_MAIN_PANE_WIDTH, so the shell collapses the
-// sidebar instead of continuing to squeeze it.
+// already leaves <main> under MIN_DASHBOARD_PANE_WIDTH, so the shell
+// collapses the sidebar instead of continuing to squeeze it.
 export const SIDEBAR_COLLAPSE_BREAKPOINT =
-  MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH + MIN_MAIN_PANE_WIDTH;
+  MIN_SIDEBAR_WIDTH + GRID_DIVIDER_WIDTH + MIN_DASHBOARD_PANE_WIDTH;
 // A widen has to clear the breakpoint by this margin before the sidebar
 // auto-reopens, so a window parked on the breakpoint doesn't oscillate.
 export const SIDEBAR_COLLAPSE_HYSTERESIS = 40;
