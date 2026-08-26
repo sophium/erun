@@ -300,6 +300,20 @@ func TestOrchestratorMCPUnwiredNoticeNamesTheCause(t *testing.T) {
 	}
 }
 
+// TestOrchestratorMCPUnwiredActionNamesTheControl is the red-then-green
+// regression for the "Install the erun command line tool, then restart the
+// orchestrator" dead end: neither half was ever something the desktop could
+// perform, so the action a caller attaches to the notice must let the
+// frontend link the install docs and drive the restart directly.
+func TestOrchestratorMCPUnwiredActionNamesTheControl(t *testing.T) {
+	if got := orchestratorMCPUnwiredAction(errors.Join(errOrchestratorMCPExecutable, errors.New("not on PATH"))); got != notificationActionInstallAndRestartOrchestrator {
+		t.Fatalf("executable-missing action = %q, want %q", got, notificationActionInstallAndRestartOrchestrator)
+	}
+	if got := orchestratorMCPUnwiredAction(errOrchestratorMCPNoPort); got != notificationActionRestartOrchestrator {
+		t.Fatalf("no-port action = %q, want %q", got, notificationActionRestartOrchestrator)
+	}
+}
+
 func TestSanitizeOrchestratorFileID(t *testing.T) {
 	for in, want := range map[string]string{
 		"petios3":     "petios3",
