@@ -576,6 +576,20 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 
 const defaultAITool = "claude"
 
+// localShellDeterministicPromptOverrideEnvVar and localShellDeterministicPrompt
+// are a headless-test seam (see playwright/fixtures/seedRoot.ts): the Local tab
+// otherwise launches the operator's own $SHELL, so a terminal-content spec that
+// selects text by screen position inherits that shell's dotfile-configured
+// prompt shape and startup timing — host-dependent in both content and race
+// window. The Local tab still has to run real commands (erun init/deploy piped
+// into the shared shell), so the override launches a genuine interactive POSIX
+// shell rather than a scripted stub; it only pins the prompt and skips rc files
+// ($ENV unset) for fast, deterministic startup.
+const (
+	localShellDeterministicPromptOverrideEnvVar = "ERUN_LOCAL_SHELL_OVERRIDE"
+	localShellDeterministicPrompt               = "erun-test$ "
+)
+
 func resolveLocalShellCommand(goos string) (string, []string) {
 	if strings.TrimSpace(goos) == "windows" {
 		// ConPTY resolves a non-absolute executable relative to the session's
@@ -590,6 +604,10 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 			}
 		}
 		return "powershell.exe", []string{"-NoLogo"}
+	}
+	if strings.TrimSpace(os.Getenv(localShellDeterministicPromptOverrideEnvVar)) == "1" {
+		script := fmt.Sprintf("unset ENV; export PS1=%s; exec /bin/sh -i", shellQuote(localShellDeterministicPrompt))
+		return "/bin/sh", []string{"-c", script}
 	}
 	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
 		return shell, nil
