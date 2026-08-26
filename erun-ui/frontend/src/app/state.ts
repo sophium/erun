@@ -279,10 +279,17 @@ export interface AppNotification {
   tenant?: string;
   environment?: string;
   source?: string;
+  // orchestratorId is the orchestrator-scoped analogue of tenant/environment,
+  // set when the notification's action operates on a specific orchestrator
+  // (e.g. restarting it) rather than a specific env.
+  orchestratorId?: string;
   // Action names a control TitlebarStatus can render beside the message that
-  // performs the message's own remedy directly — currently only 'deploy'
-  // (open the tagged env's deploy dialog). Undefined means no action (#1390).
-  action?: 'deploy';
+  // performs the message's own remedy directly: 'deploy' opens the tagged
+  // env's deploy dialog; 'restart-orchestrator' restarts the tagged
+  // orchestrator; 'install-and-restart-orchestrator' additionally links the
+  // install docs, for the cause where the erun CLI itself could not be
+  // resolved. Undefined means no action.
+  action?: 'deploy' | 'restart-orchestrator' | 'install-and-restart-orchestrator';
 }
 
 export type TerminalStatusKind = 'info' | 'warning' | 'error';

@@ -15,3 +15,10 @@ const ERUN_DOCS_URL = 'https://docs.erunpaas.com';
 export const openDocumentation = (): AppThunk => () => {
   BrowserOpenURL(ERUN_DOCS_URL);
 };
+
+// openInstallDocs deep-links the CLI install page — the recovery an
+// orchestrator's "erun executable could not be resolved" notice names, which
+// otherwise has no in-app affordance of its own.
+export const openInstallDocs = (): AppThunk => () => {
+  BrowserOpenURL(`${ERUN_DOCS_URL}/getting-started/install`);
+};

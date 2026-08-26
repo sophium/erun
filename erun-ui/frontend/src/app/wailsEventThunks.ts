@@ -168,6 +168,7 @@ export const handleAppNotification =
         tenant: payload.tenant,
         environment: payload.environment,
         source: payload.source,
+        orchestratorId: payload.orchestratorId,
         action: payload.action,
       }),
     );

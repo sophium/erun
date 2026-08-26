@@ -126,6 +126,7 @@ export const showNotification =
       tenant?: string;
       environment?: string;
       source?: string;
+      orchestratorId?: string;
       action?: AppNotification['action'];
     },
   ): AppThunk =>
@@ -143,6 +144,7 @@ export const showNotification =
         tenant: meta?.tenant,
         environment: meta?.environment,
         source: meta?.source,
+        orchestratorId: meta?.orchestratorId,
         action: meta?.action,
       }),
     );
