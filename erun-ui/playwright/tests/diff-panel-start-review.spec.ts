@@ -179,6 +179,7 @@ test.describe('diff panel — starting a review (#1315)', () => {
     // operator's behalf — everything else in this flow is either read back
     // from the environment or prefilled from the diff.
     await dialog.fillName('Add widget');
+    await dialog.fillCommitMessage('describe the change');
     await dialog.commit();
     await dialog.push();
     await expect(dialog.locator()).toContainText('Pushed to origin/feature/777-thing');
@@ -234,6 +235,7 @@ test.describe('diff panel — starting a review (#1315)', () => {
     const dialog = app.createReviewDialog;
     await dialog.waitForOpen();
     await dialog.fillName('Add widget');
+    await dialog.fillCommitMessage('describe the change');
     await dialog.commit();
     await dialog.push();
 
