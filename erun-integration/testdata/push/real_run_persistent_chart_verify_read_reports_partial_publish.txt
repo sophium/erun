@@ -25,7 +25,6 @@ publishing charts at <VERSION> stopped at base, so version <VERSION> is only par
   not attempted: zeta
 re-run `erun push --version <VERSION>` to publish the rest; republishing an already-published chart is safe
     chart base (failed) [<ELAPSED>] — verify published chart base:<VERSION>: exit status 1
-    (unaccounted) [<ELAPSED>]
     api (cache hit) [<ELAPSED>]
       linux/amd64 (cache hit) [<ELAPSED>]
       linux/arm64 (cache hit) [<ELAPSED>]

@@ -174,8 +174,32 @@ export function backendEnv(): Record<string, string> {
       // its chart, so the seam has to say so or the Runtime tab would (correctly)
       // refuse to deploy them.
       '1.0.134=erun-devops;1.0.16=erun-devops',
+    // The seeded local-agent envs are always inert and never deployed, so no
+    // local port they compute should ever be treated as reachable. Unpinned,
+    // the port range is a plain host-wide TCP port number outside HOME/XDG
+    // isolation: a seeded env can land on the same range a real environment
+    // on the same host has genuinely bound (this host's own MCP/SSH
+    // forwards), and the occupancy/idle-status checks then read that real
+    // environment's live state as the seeded env's own. See erun-ui/app.go
+    // withDefaultReachabilityDeps.
+    ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE: '0',
+    // The Local tab otherwise launches the operator's own $SHELL: a
+    // terminal-content spec that selects text by screen position then
+    // inherits that shell's dotfile-configured prompt and startup timing,
+    // both host-dependent. This pins a real, rc-free POSIX shell with the
+    // fixed prompt LOCAL_SHELL_PROMPT below (kept in lockstep with
+    // erun-ui/session.go's localShellDeterministicPrompt) so terminal specs
+    // can wait for a known prompt instead of guessing which row it lands on.
+    ERUN_LOCAL_SHELL_OVERRIDE: '1',
   };
 }
+
+// LOCAL_SHELL_PROMPT is erun-ui/session.go's localShellDeterministicPrompt —
+// the fixed prompt the Local tab's shell renders once ready, when
+// ERUN_LOCAL_SHELL_OVERRIDE is set above. Specs that select terminal text by
+// screen position must wait for this to appear first, so the shell's own
+// startup output can never race a spec's synthetic printOnlyLine write.
+export const LOCAL_SHELL_PROMPT = 'erun-test$ ';
 
 // createIsolatedLayout refuses to run against anything that could be a real
 // home directory.

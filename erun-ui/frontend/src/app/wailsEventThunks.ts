@@ -180,7 +180,7 @@ export const handleAppNotification =
 // with no other recovery. Retrying self-heals the missed refresh instead of
 // silently dropping the new environment (erun-ui/AGENTS.md § "Command
 // Completion And State-Refresh Wiring").
-const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 3;
+const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 8;
 const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
 
 const delayMs = (ms: number): Promise<void> =>
@@ -399,6 +399,13 @@ const dropExitedSessionFromTabs =
     const key = selectionKey(openExitSelection);
     const remaining = dispatch(removeTab(key, sessionId));
     if (getState().terminal.sessionId !== sessionId) {
+      return;
+    }
+    if (getState().sessions.closingEnvs[key]) {
+      // closeEnvironment is tearing this env's tabs down; its own default
+      // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
+      // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
+      // would respawn a tab the user just deliberately closed.
       return;
     }
     const next = remaining[remaining.length - 1];

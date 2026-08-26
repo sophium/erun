@@ -15,7 +15,6 @@ Error: failed to perform "FetchReference" on source: response status code 403: d
 ==> Pushed in <ELAPSED>
 step timing (ordered by duration):
   push [<ELAPSED>]
-    (unaccounted) [<ELAPSED>]
     chart api [<ELAPSED>]
     api (cache hit) [<ELAPSED>]
       linux/amd64 (cache hit) [<ELAPSED>]

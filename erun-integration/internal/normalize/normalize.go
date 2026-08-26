@@ -87,6 +87,16 @@ var defaultRules = []Replacement{
 	// sub-second wall-clock measurements without also sweeping up an unrelated
 	// bare "5m" in help text or a --rollout-timeout example.
 	{regexp.MustCompile(`\[\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s)(?:\d+(?:\.\d+)?(?:ms|µs|us|ns|h|m|s))*\]`), "[<ELAPSED>]"},
+	// A step-timing "(unaccounted)"/"(ran concurrently, overlap)" row's very
+	// presence — not just its duration — is decided by wall clock: it appears
+	// only when a parent step's own time and its children's summed time differ
+	// by at least timingOrderNoiseFloor (100ms), and a stubbed subprocess in a
+	// real-run scenario costs a different amount of that 100ms budget on every
+	// host. Run after the bracket-duration rule above so it matches the
+	// already-normalized "[<ELAPSED>]", and drop the whole line (indentation
+	// through the trailing newline) rather than just the duration, since a
+	// present-here-absent-there row would still fail the comparison otherwise.
+	{regexp.MustCompile(`(?m)^[ ]*\((?:unaccounted|ran concurrently, overlap)\) \[<ELAPSED>\]\n`), ""},
 	// Anchored to `--token ` so a base64url-shaped run elsewhere in the output
 	// is not swept up.
 	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},

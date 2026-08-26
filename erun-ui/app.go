@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -363,14 +364,44 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 // app asks: whether a local port is held at all, and whether an MCP port
 // actually carries traffic. They are separate because a stale port-forward
 // answers the first yes and the second no.
+//
+// Both probe a raw TCP port on the host, which is not namespaced by HOME/XDG:
+// the headless Playwright harness's isolated config store computes local
+// port ranges purely from its own (seeded) tenant/env list, so a seeded env
+// can land on the same port range a real environment on the same host has
+// genuinely bound (its own MCP/SSH forwards). Unforced, that reads as a real
+// answer about a seeded env that was never deployed.
+// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE pins both probes to a fixed answer
+// for exactly that reason; it is set only by playwright/fixtures/seedRoot.ts,
+// never in production.
 func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 	if deps.canConnectLocalPort == nil {
-		deps.canConnectLocalPort = canConnectLocalTCP
+		deps.canConnectLocalPort = func(port int) bool {
+			if override, ok := localPortReachabilityOverride(); ok {
+				return override
+			}
+			return canConnectLocalTCP(port)
+		}
 	}
 	if deps.canReachMCPEndpoint == nil {
-		deps.canReachMCPEndpoint = eruncommon.CanReachLocalMCPEndpoint
+		deps.canReachMCPEndpoint = func(port int) bool {
+			if override, ok := localPortReachabilityOverride(); ok {
+				return override
+			}
+			return eruncommon.CanReachLocalMCPEndpoint(port)
+		}
 	}
 	return deps
+}
+
+// localPortReachabilityOverride parses ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE
+// ("0" or "1"). See withDefaultReachabilityDeps for why the harness needs it.
+func localPortReachabilityOverride() (bool, bool) {
+	raw := strings.TrimSpace(os.Getenv("ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE"))
+	if raw == "" {
+		return false, false
+	}
+	return raw == "1", true
 }
 
 func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {

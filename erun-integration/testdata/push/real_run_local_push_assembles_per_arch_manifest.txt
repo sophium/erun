@@ -13,7 +13,6 @@ promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
 ==> Pushed in <ELAPSED>
 step timing (ordered by duration):
   push [<ELAPSED>]
-    (unaccounted) [<ELAPSED>]
     api (cache hit) [<ELAPSED>]
       linux/amd64 (cache hit) [<ELAPSED>]
       linux/arm64 (cache hit) [<ELAPSED>]

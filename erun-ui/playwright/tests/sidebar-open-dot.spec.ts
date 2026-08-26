@@ -141,6 +141,13 @@ test.describe('sidebar env open dot', () => {
   }) => {
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
+    // ensureDefaultEnvTabs spawns ERun, then Local, then AI in sequence; waiting
+    // for AI (the last one) means every default-tab spawn this open kicked off
+    // has already resolved. Closing before that settles races a spawn still in
+    // flight, which can remount the dot (as open) right after closeEnvironment
+    // converges on it being gone — the race closeEnvironment's own doc comment
+    // warns a bare re-check would hit.
+    await page.getByRole('tab', { name: 'AI', exact: true }).waitFor({ state: 'visible' });
     await app.sidebar.closeEnvironment(tenant, environment);
 
     const row = app.sidebar.envRowButton(tenant, environment).locator('..');
