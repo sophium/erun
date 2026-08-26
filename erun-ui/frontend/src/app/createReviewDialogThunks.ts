@@ -253,7 +253,7 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
     ).unwrap();
     dispatch(resetCreateReviewDialog());
     dispatch(showNotification('success', `Opened ${review.name || review.reviewId}.`));
-    void dispatch(openReviewDetail(review.reviewId));
+    void dispatch(openReviewDetail(review.reviewId, dialog.tenant));
   } catch (error) {
     dispatch(patchCreateReviewDialog({ creating: false, createError: readError(error) }));
   }

@@ -194,6 +194,13 @@ test.describe('diff panel — starting a review (#1315)', () => {
       sourceBranch: 'feature/777-thing',
     });
     await app.reviewDetailDialog.waitForOpen();
+    // The detail dialog must resolve the review it just created, not just
+    // open — this entry point reaches openReviewDetail without the tenant
+    // dashboard ever having loaded (unlike the Reviews tab's own New review
+    // button), so its caller-context resolution needs the tenant threaded
+    // through explicitly or it renders "No tenant is open." instead of data.
+    await expect(app.reviewDetailDialog.locator()).toContainText('Add widget');
+    await expect(app.reviewDetailDialog.locator()).not.toContainText('No tenant is open');
   });
 
   test('a push that fails names its own next action', async ({ app, page, seededEnv }) => {
