@@ -526,31 +526,3 @@ func TestOneOrchestratorMovingConversationsKeepsItsOwnLatestSession(t *testing.T
 		t.Fatalf("expected the one orchestrator to hold its newest session, got %+v", entries)
 	}
 }
-
-// Releasing a duplicate claim must not cost the loser its history: its own
-// hooks still know which conversation is really its, and reopen should prefer
-// that over minting a fresh id. This is the other half of
-// TestRecordingALaunchReleasesAnotherOrchestratorsClaimOnTheSameSession.
-func TestAReleasedClaimRecoversTheOrchestratorsOwnLiveConversation(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", home)
-	t.Setenv("HOME", home)
-
-	stageOrchestratorConversation(t, "its-own-conversation")
-	stageOrchestratorLiveSession(t, "petios-admin", "its-own-conversation")
-
-	entry := orchestratorOpenEntry{OrchestratorID: "petios-admin", SessionID: ""}
-	if got := resolveReopenSessionID(entry); got != "its-own-conversation" {
-		t.Fatalf("expected the orchestrator's own live conversation, got %q", got)
-	}
-
-	// But never one another orchestrator claims — that is the crossing again.
-	stageOrchestratorLiveSession(t, "erun", "its-own-conversation")
-	got := resolveReopenSessionID(entry)
-	if got == "its-own-conversation" {
-		t.Fatal("a conversation another orchestrator claims must not be adopted on reopen")
-	}
-	if got == "" {
-		t.Fatal("expected a freshly minted conversation id")
-	}
-}

@@ -357,12 +357,11 @@ func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *tes
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
 
-	// The session that started the shell has since been replaced: the
-	// recorded live session is a different id from the one the report names.
+	// The session that started the shell has since been replaced: the report
+	// names an id that is not this orchestrator's own derived conversation.
 	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
 		Running: true, Command: "sleep 300", TaskID: "task-1", SessionID: "dead-session", AtUnix: time.Now().Unix(),
 	})
-	stageOrchestratorLiveSession(t, created.ID, "current-session")
 
 	app.reconcileOrchestratorActivity()
 

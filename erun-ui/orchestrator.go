@@ -699,16 +699,10 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// tool-call events in particular are somewhere they are likely to have hooks
 	// of their own, which an assignment would silently delete.
 	busyHook, idleHook := orchestratorActivityHooks()
-	// The live-session recorder rides the same turn-boundary events as the
-	// busy/idle reports: whichever fires next after a compaction forks the
-	// transcript picks up the new session_id from its own stdin.
-	liveSessionHook := orchestratorLiveSessionHookBlock()
 	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
 		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], busyHook, isOrchestratorActivityHookBlock)
-		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], liveSessionHook, isOrchestratorLiveSessionHookBlock)
 	}
 	stop := mergeOrchestratorHookBlocks(hooks["Stop"], idleHook, isOrchestratorActivityHookBlock)
-	stop = mergeOrchestratorHookBlocks(stop, liveSessionHook, isOrchestratorLiveSessionHookBlock)
 	hooks["Stop"] = mergeOrchestratorHookBlocks(stop, orchestratorNoAskStopGuardBlock(), isOrchestratorNoAskStopGuardBlock)
 	// A background shell's start and its completion are both only visible in a
 	// tool call's own result, which PreToolUse never carries — so unlike the
@@ -820,18 +814,13 @@ func orchestratorSessionStartHook(dir string) []any {
 	// would inherit the previous run's "working" and spin on arrival with nothing
 	// running. Clearing it here is what makes that guarantee real.
 	idle := map[string]any{"type": "command", "command": orchestratorActivityHookCommand(false)}
-	// An orchestrator id is mutable and reusable, so a live-session record left
-	// over from a previous run under this id must not survive into this one.
-	// Resetting it here to whatever id this launch actually starts with is what
-	// keeps a stale record from outliving the run that wrote it.
-	liveSession := map[string]any{"type": "command", "command": orchestratorSessionRecordHookCommand()}
 	// A background shell report has the exact same hazard: a shell the previous
 	// run started (or its clear) can outlive that run entirely, and nothing else
 	// resets it at a boundary — see orchestrator_shell_activity.go.
 	shellIdle := map[string]any{"type": "command", "command": orchestratorShellActivityResetHookCommand()}
 	return []any{map[string]any{
 		"matcher": orchestratorSessionStartMatcher,
-		"hooks":   []any{command, idle, liveSession, shellIdle},
+		"hooks":   []any{command, idle, shellIdle},
 	}}
 }
 
@@ -1627,7 +1616,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 // orchestrator's session exits: the same launch path a fresh start uses,
 // preferring whichever conversation id this orchestrator's own hooks last saw
 // live over the one it was spawned with, since a compaction can fork the
-// transcript mid-session (see preferLiveOrchestratorSessionID). It carries the
+// conversation, derived from its id rather than read back from a record. It carries the
 // crash-resume prompt so the relaunched session carries its task forward
 // without waiting to be asked, matching the goal of this recovery: an
 // orchestrator that died comes back on its own.
@@ -1637,7 +1626,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 // real crash being recovered from.
 func (a *App) orchestratorRespawnFunc(id, conversationID, mcpConfigPath, dir string, sessionEnv []string, cols, rows int) func() (terminalSession, error) {
 	return func() (terminalSession, error) {
-		resumeID := preferLiveOrchestratorSessionID(id, conversationID)
+		resumeID := orchestratorResumeConversationID(id, conversationID)
 		executable, args, err := a.deps.resolveOrchestratorLaunch(resumeID, "", orchestratorCrashResumePrompt(), mcpConfigPath)
 		if err != nil {
 			return nil, err

@@ -1,200 +1,34 @@
 package main
 
-import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
-)
+import "strings"
 
-// A restart hand-off names the conversation to resume by id. The id erun
-// SPAWNED the session with is not reliably that conversation: Claude Code
-// forks the transcript to a NEW session id when a resumed conversation
-// compacts, so after any compaction the spawn-time id names a conversation
-// that has stopped growing. The forked transcript carries no structural
-// parent pointer back to the id it forked from, so there is no reading it
-// off disk after the fact — the only reliable source is the live session
-// telling us its own id as it goes, which is exactly what a hook's stdin JSON
-// carries on every invocation.
+// An orchestrator's conversation is DERIVED from its id, never looked up. The
+// derivation is a pure function, so the mapping is the same on every launch and
+// on every machine, and there is nothing on disk for a second session to
+// overwrite.
 //
-// The hooks installed by ensureOrchestratorSessionStartHook keep one file per
-// orchestrator current with that id: reset to the live id at SessionStart
-// (startup, resume, clear, and compact), then refreshed from every
-// turn-boundary hook afterward, so a fork is reflected the moment the next
-// hook fires. Resetting at SessionStart matters because an orchestrator id is
-// mutable and reusable — without the reset, a leftover record from a previous
-// run under the same id would outlive it. Including compact here matters
-// doubly: compaction is the one SessionStart source that itself forks the
-// transcript to a new session id, so the reset at that exact boundary is what
-// keeps the record from naming a conversation that already stopped growing.
-
-// orchestratorLiveSessionDirName holds one file per orchestrator recording the
-// session id its own hooks last saw live.
-const orchestratorLiveSessionDirName = "orchestrator-session"
-
-// orchestratorLiveSession is what one orchestrator's file carries.
-type orchestratorLiveSession struct {
-	SessionID string `json:"sessionId"`
-	AtUnix    int64  `json:"atUnix,omitempty"`
-}
-
-// orchestratorLiveSessionDir is the directory the hooks write into and the
-// desktop reads from, beside the other per-orchestrator state under
-// UserConfigDir()/ERun.
-func orchestratorLiveSessionDir() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		configDir = os.TempDir()
-	}
-	return filepath.Join(configDir, "ERun", orchestratorLiveSessionDirName)
-}
-
-// orchestratorLiveSessionPath is one orchestrator's own file.
-func orchestratorLiveSessionPath(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ""
-	}
-	return filepath.Join(orchestratorLiveSessionDir(), id+".json")
-}
-
-// readOrchestratorLiveSessionID reads the session id an orchestrator's own
-// hooks last recorded as live. Unreadable, unparseable, or blank all answer
-// false: the caller falls back to the id it already trusts rather than acting
-// on a record that cannot be trusted.
-func readOrchestratorLiveSessionID(id string) (string, bool) {
-	path := orchestratorLiveSessionPath(id)
-	if path == "" {
-		return "", false
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", false
-	}
-	var record orchestratorLiveSession
-	if err := json.Unmarshal(data, &record); err != nil {
-		return "", false
-	}
-	record.SessionID = strings.TrimSpace(record.SessionID)
-	if record.SessionID == "" {
-		return "", false
-	}
-	return record.SessionID, true
-}
-
-// preferLiveOrchestratorSessionID returns the session id an orchestrator's own
-// hooks last recorded as live, falling back to the id it was spawned with when
-// the record is absent, names the same id (nothing to prefer), or names a
-// conversation that no longer exists on disk. It never trusts a live record
-// over a spawn-time id it cannot verify: resuming nothing is safer than
-// resuming the wrong conversation.
-func preferLiveOrchestratorSessionID(orchestratorID, spawnConversationID string) string {
-	live, ok := readOrchestratorLiveSessionID(orchestratorID)
-	if !ok || live == "" || live == spawnConversationID {
-		return spawnConversationID
-	}
-	if !orchestratorSessionExists(live) {
-		return spawnConversationID
-	}
-	// A conversation belongs to one orchestrator. The recorder hook keys purely
-	// on $ERUN_ORCHESTRATOR_ID, so a session that ever ran under the wrong id
-	// leaves a record claiming somebody else's conversation — and adopting it
-	// here would hand this orchestrator the other's history and return note.
-	if orchestratorLiveSessionClaimedByOther(orchestratorID, live) {
-		return spawnConversationID
-	}
-	return live
-}
-
-// orchestratorLiveSessionClaimedByOther reports whether some OTHER
-// orchestrator's live-session record already names this conversation. Read
-// errors answer false: the guard exists to refuse a provable conflict, and a
-// directory it cannot list is not proof of one.
-func orchestratorLiveSessionClaimedByOther(orchestratorID, sessionID string) bool {
-	orchestratorID = strings.TrimSpace(orchestratorID)
-	sessionID = strings.TrimSpace(sessionID)
-	if orchestratorID == "" || sessionID == "" {
-		return false
-	}
-	entries, err := os.ReadDir(orchestratorLiveSessionDir())
-	if err != nil {
-		return false
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		other := strings.TrimSuffix(entry.Name(), ".json")
-		if other == orchestratorID {
-			continue
-		}
-		if claimed, ok := readOrchestratorLiveSessionID(other); ok && claimed == sessionID {
-			return true
-		}
-	}
-	return false
-}
-
-// orchestratorSessionRecordHookCommand is the hook command that keeps one
-// orchestrator's live-session file current. It reads the hook's own stdin JSON
-// for session_id — the same field every Claude Code hook invocation carries,
-// which Claude Code updates the moment it forks the transcript on compaction —
-// and writes it under $ERUN_ORCHESTRATOR_ID, resolved at run time for the same
-// reason the activity hooks resolve it at run time: the orchestrators
-// workspace is shared, so a baked-in id would have every orchestrator
-// overwriting the same file.
+// It used to be looked up: a shell hook wrote the live session_id into a file
+// per orchestrator, keyed on $ERUN_ORCHESTRATOR_ID, and a resume preferred that
+// record over the derived id. The record was written by whichever session held
+// that env var, with no ordering and no ownership, so a single launch under the
+// wrong id pointed an orchestrator at another's conversation -- and then kept
+// confirming it, because the session really was running with that variable.
+// Three orchestrators drifted onto conversations that were not theirs and
+// stayed there for days, each abandoning its own history.
 //
-// Bare shell, like the activity hooks and the no-ask guard, so it keeps
-// working when erun is not on PATH. Every failure path is `|| true`: a hook
-// that could wedge a session costs more than a missed record.
-func orchestratorSessionRecordHookCommand() string {
-	dir := filepath.ToSlash(orchestratorLiveSessionDir())
-	return `input=$(cat); ` +
-		`sid=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'); ` +
-		`[ -n "$ERUN_ORCHESTRATOR_ID" ] && [ -n "$sid" ] && mkdir -p "` + dir + `" && ` +
-		`printf '{"sessionId":"%s","atUnix":%s}' "$sid" "$(date +%s)" > "` + dir + `/$ERUN_ORCHESTRATOR_ID.json"` +
-		` || true`
-}
+// The lookup existed to follow a compaction fork, on the premise that Claude
+// Code moves a resumed conversation to a new session id when it compacts. It
+// does not: a resumed session keeps its id across compaction, and forking is
+// opt-in (`--fork-session`), which erun never passes. So the mechanism solved a
+// problem that did not exist and created one that did.
 
-// orchestratorLiveSessionHookMarker identifies a hook this file wrote, so a
-// rewrite replaces its own previous block instead of stacking another copy,
-// and merging into an event leaves everyone else's hooks alone.
-func orchestratorLiveSessionHookMarker() string {
-	return filepath.ToSlash(orchestratorLiveSessionDir())
-}
-
-// isOrchestratorLiveSessionHookBlock reports whether a settings hook block is
-// one of ours. Anything it cannot read is somebody else's and is kept.
-func isOrchestratorLiveSessionHookBlock(block any) bool {
-	group, ok := block.(map[string]any)
-	if !ok {
-		return false
+// orchestratorResumeConversationID answers which conversation a launch should
+// resume. A named orchestrator always resumes its own derived conversation. A
+// transient one (Investigate) has no id to derive from and keeps whatever it was
+// recorded with.
+func orchestratorResumeConversationID(orchestratorID, recordedConversationID string) string {
+	if id := strings.TrimSpace(orchestratorID); id != "" {
+		return orchestratorSessionID(id)
 	}
-	hooks, ok := group["hooks"].([]any)
-	if !ok {
-		return false
-	}
-	marker := orchestratorLiveSessionHookMarker()
-	for _, hook := range hooks {
-		entry, ok := hook.(map[string]any)
-		if !ok {
-			continue
-		}
-		command, ok := entry["command"].(string)
-		if !ok {
-			continue
-		}
-		if strings.Contains(command, marker) && strings.Contains(command, `"sessionId":`) {
-			return true
-		}
-	}
-	return false
-}
-
-// orchestratorLiveSessionHookBlock is the recorder bound to whichever event it
-// is installed on.
-func orchestratorLiveSessionHookBlock() []any {
-	return []any{map[string]any{
-		"hooks": []any{map[string]any{"type": "command", "command": orchestratorSessionRecordHookCommand()}},
-	}}
+	return strings.TrimSpace(recordedConversationID)
 }
