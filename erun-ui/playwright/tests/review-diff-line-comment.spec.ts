@@ -94,6 +94,30 @@ function routeLoadTenantDashboard(
   });
 }
 
+// dismissAIOccupancyPromptIfShown is a defensive wait, not a feature this
+// spec is testing: opening an environment auto-spawns its AI tab
+// (ensureDefaultEnvTabs), which resolves either into an AI tab or -- if the
+// environment's activity lease is already held -- the occupancy prompt
+// (erun#1221). These tests care about the diff panel, not the AI tab, so race
+// on whichever the spawn actually produces and clear the prompt out of the
+// way rather than letting it block a later click.
+async function dismissAIOccupancyPromptIfShown(
+  app: import('../pages/index.js').AppShell,
+): Promise<void> {
+  const dialog = app.aiOccupancyPromptDialog;
+  await Promise.race([
+    dialog.waitForOpen().catch(() => undefined),
+    app.page
+      .getByRole('tab', { name: 'AI', exact: true })
+      .waitFor({ state: 'visible' })
+      .catch(() => undefined),
+  ]);
+  if (await dialog.locator().isVisible()) {
+    await dialog.cancel();
+    await dialog.waitForClosed();
+  }
+}
+
 // openActiveReviewContext opens a review from the tenant dashboard and closes
 // its (modal) dialog, establishing reviewId as the active commenting context
 // per closeReviewDetail's own comment, then returns to the environment's diff
@@ -117,6 +141,7 @@ async function openActiveReviewContext(
   await app.reviewDetailDialog.locator().getByRole('button', { name: 'Close' }).click();
   await app.reviewDetailDialog.waitForClosed();
   await app.sidebar.openEnvironment(tenant, environment);
+  await dismissAIOccupancyPromptIfShown(app);
 }
 
 test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
@@ -139,6 +164,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     });
 
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
     await app.titlebar.toggleReviewPanel();
     await expect(app.page.getByText('package main')).toBeVisible();
 
