@@ -25,8 +25,13 @@ export function environmentTypeBuildsHereLocally(type: string | undefined): bool
 }
 
 // environmentTypeBuildsHere reports whether the env builds its own runtime
-// image rather than consuming a published one. An empty/unset type is treated
-// as building so an unresolved env keeps today's behaviour.
+// image rather than consuming a published one — local-agent, remote-agent,
+// and host all build here; only runtime consumes a published version. An
+// empty/unset type is treated as building so an unresolved env keeps today's
+// behaviour. Enumerated explicitly (rather than `type !== 'runtime'`) so a
+// fifth type is a deliberate decision here, not a default that happens to
+// land on the right answer for host by coincidence. Mirrors
+// EnvConfig.BuildsHere() in erun-common/config.go.
 export function environmentTypeBuildsHere(type: string | undefined): boolean {
-  return type !== 'runtime';
+  return type === 'local-agent' || type === 'remote-agent' || type === 'host' || type === undefined || type === '';
 }

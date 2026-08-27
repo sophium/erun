@@ -29,6 +29,12 @@ func TestDeployNeedsBuildOrchestration(t *testing.T) {
 		{"runtime, forced: still no local build", openOf(eruncommon.EnvironmentTypeRuntime), "", true, false},
 		{"remote-agent: builds in its pod, not here", openOf(eruncommon.EnvironmentTypeRemoteAgent), "", false, false},
 		{"unresolved type: no orchestration", openOf(""), "", false, false},
+		// A host env also satisfies BuildsHere() && !RemoteRepo() (it builds
+		// here, on a local worktree) — the exact combination that used to mean
+		// "local-agent" before host existed. It has no pod to deploy to at
+		// all, so it must never need build orchestration, forced or not.
+		{"host: no pod to deploy to, regardless of version", openOf(eruncommon.EnvironmentTypeHost), "", false, false},
+		{"host, forced: still no pod to deploy to", openOf(eruncommon.EnvironmentTypeHost), "", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

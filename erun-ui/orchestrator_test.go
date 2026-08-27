@@ -106,6 +106,42 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 // orchestrator can link either agent type, and each candidate carries where that
 // env is reviewed — a mirror the operator may place anywhere, or the local-agent
 // worktree already on this machine. A runtime env stays out: nothing to review.
+// TestOrchestratableEnvCoversHost locks in that a host env links like
+// local-agent and remote-agent — the issue's own recommendation (#1380): a
+// host env's worktree is already the operator's own checkout, so the
+// orchestrator reviews it in place, the same as a local-agent worktree, never
+// a synced mirror (which only makes sense for a pod whose worktree lives
+// somewhere else).
+func TestOrchestratableEnvCoversHost(t *testing.T) {
+	cases := []struct {
+		envType eruncommon.EnvironmentType
+		want    bool
+	}{
+		{eruncommon.EnvironmentTypeLocalAgent, true},
+		{eruncommon.EnvironmentTypeRemoteAgent, true},
+		{eruncommon.EnvironmentTypeHost, true},
+		{eruncommon.EnvironmentTypeRuntime, false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		env := eruncommon.EnvConfig{Type: tc.envType}
+		if got := orchestratableEnv(env); got != tc.want {
+			t.Errorf("orchestratableEnv(type=%q) = %v, want %v", tc.envType, got, tc.want)
+		}
+	}
+}
+
+// TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace mirrors the
+// local-agent case: a host env's review directory is exactly its local repo
+// path, with mirrored=false — there is no pod to sync from.
+func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeHost, LocalRepoPath: "/home/erun/work"}
+	dir, mirrored := orchestratorReviewDirectory("frs", env)
+	if dir != "/home/erun/work" || mirrored {
+		t.Fatalf("orchestratorReviewDirectory(host) = (%q, %v), want (%q, false)", dir, mirrored, "/home/erun/work")
+	}
+}
+
 func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
