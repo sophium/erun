@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -81,9 +82,17 @@ func readOrchestratorPacingActivity(id string) (orchestratorPacingActivity, bool
 // orchestratorPacingCandidate is one orchestrator as the reconciler decides for
 // it — gathered so the decision itself is a pure function, testable without
 // touching a file or a lock.
+//
+// This deliberately carries no background-shell fact. It used to gate the
+// nudge on one (orchestrator-shell-activity), reasoning that a shell left
+// running was evidence the orchestrator meant to be quiet — but a background
+// shell is a fact about a *shell*, not about the turn behind it, and a
+// long-running build is the single most likely thing to be in flight when a
+// turn dies mid-response. Gating on it suppressed the nudge exactly when it
+// was needed most (erun#1376). The shell-activity report stays exactly as it
+// is for the shell indicator; pacing just stops reading it.
 type orchestratorPacingCandidate struct {
 	alive        bool
-	shellRunning bool
 	lastActiveAt time.Time
 	nudgeCount   int
 	capped       bool
@@ -97,43 +106,54 @@ const (
 	orchestratorPacingCap
 )
 
+// orchestratorPacingReason names why decideOrchestratorPacing returned what it
+// did, independent of the decision itself: two candidates can both resolve to
+// orchestratorPacingNone for different reasons, and the reconciler logs the
+// reason (not just the decision) so a quiet pane and a suppressed one are
+// distinguishable from the log rather than indistinguishable from silence.
+type orchestratorPacingReason string
+
+const (
+	orchestratorPacingReasonNotAlive      orchestratorPacingReason = "not-alive"
+	orchestratorPacingReasonFresh         orchestratorPacingReason = "fresh"
+	orchestratorPacingReasonAlreadyCapped orchestratorPacingReason = "already-capped"
+	orchestratorPacingReasonCapCrossed    orchestratorPacingReason = "cap-crossed"
+	orchestratorPacingReasonNudge         orchestratorPacingReason = "nudge"
+)
+
 // decideOrchestratorPacing is the whole bound: a session the desktop cannot
-// see, one running a background shell, or one already past the cap gets no
-// nudge (a background shell is a fact independent of the turn's own busy/idle
-// state, per orchestrator_shell_activity.go — it can legitimately keep running
-// after the turn that started it ends, and nudging into it would interrupt
-// something the orchestrator deliberately left going). A candidate that is
-// stale and not yet capped gets nudged; one that just crossed the cap gets the
+// see, or one already past the cap, gets no nudge. A candidate that is stale
+// and not yet capped gets nudged; one that just crossed the cap gets the
 // one-time notice instead.
-func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) orchestratorPacingDecision {
-	if !c.alive || c.shellRunning {
-		return orchestratorPacingNone
+func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orchestratorPacingDecision, orchestratorPacingReason) {
+	if !c.alive {
+		return orchestratorPacingNone, orchestratorPacingReasonNotAlive
 	}
 	if now.Sub(c.lastActiveAt) < orchestratorPacingStaleAfter {
-		return orchestratorPacingNone
+		return orchestratorPacingNone, orchestratorPacingReasonFresh
 	}
 	if c.capped {
-		return orchestratorPacingNone
+		return orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped
 	}
 	if c.nudgeCount >= orchestratorPacingMaxNudges {
-		return orchestratorPacingCap
+		return orchestratorPacingCap, orchestratorPacingReasonCapCrossed
 	}
-	return orchestratorPacingNudge
+	return orchestratorPacingNudge, orchestratorPacingReasonNudge
 }
 
 // orchestratorPacingRow is what the reconciler gathers under a.mu for one
 // orchestrator, before making any decision or doing any file/pty IO outside
 // the lock.
 type orchestratorPacingRow struct {
-	id              string
-	serial          int
-	name            string
-	alive           bool
-	shellRunning    bool
-	startedAt       time.Time
-	nudgeCount      int
-	capped          bool
-	lastNudgeAtUnix int64
+	id               string
+	serial           int
+	name             string
+	alive            bool
+	startedAt        time.Time
+	nudgeCount       int
+	capped           bool
+	lastNudgeAtUnix  int64
+	lastLoggedReason orchestratorPacingReason
 }
 
 // reconcileOrchestratorPacing runs on the same 15s tick that already polls
@@ -150,15 +170,15 @@ func (a *App) reconcileOrchestratorPacing() {
 		}
 		managed := a.sessions[orchestratorSessionKey(id)]
 		rows = append(rows, orchestratorPacingRow{
-			id:              id,
-			serial:          session.serial,
-			name:            session.name,
-			alive:           managed != nil && !managed.closed,
-			shellRunning:    session.shellRunning,
-			startedAt:       session.startedAt,
-			nudgeCount:      session.pacingNudgeCount,
-			capped:          session.pacingCapped,
-			lastNudgeAtUnix: session.pacingLastNudgeAtUnix,
+			id:               id,
+			serial:           session.serial,
+			name:             session.name,
+			alive:            managed != nil && !managed.closed,
+			startedAt:        session.startedAt,
+			nudgeCount:       session.pacingNudgeCount,
+			capped:           session.pacingCapped,
+			lastNudgeAtUnix:  session.pacingLastNudgeAtUnix,
+			lastLoggedReason: session.pacingLastReason,
 		})
 	}
 	a.mu.Unlock()
@@ -166,6 +186,34 @@ func (a *App) reconcileOrchestratorPacing() {
 	for _, row := range rows {
 		a.reconcileOrchestratorPacingOne(row, now)
 	}
+}
+
+// orchestratorPacingActivitySignal is what the reconciler could tell about the
+// orchestrator's last report, carried through to the marker so a session that
+// died mid-turn reads differently from one that simply went quiet after
+// finishing (erun#1376): a report has to exist and say "busy" for the marker
+// to call it a died turn, since idle-then-quiet is the ordinary, unremarkable
+// case the pacing contract expects.
+type orchestratorPacingActivitySignal int
+
+const (
+	orchestratorPacingSignalIdle orchestratorPacingActivitySignal = iota
+	orchestratorPacingSignalNoReport
+	orchestratorPacingSignalDied
+)
+
+// orchestratorPacingSignalFor classifies the last report the reconciler read,
+// independent of whether it was stale enough to nudge on: hasReport is false
+// only when no report has ever been read for this orchestrator (readOrchestratorPacingActivity's
+// ok), and lastBusy is that report's own "busy" field.
+func orchestratorPacingSignalFor(hasReport, lastBusy bool) orchestratorPacingActivitySignal {
+	if !hasReport {
+		return orchestratorPacingSignalNoReport
+	}
+	if lastBusy {
+		return orchestratorPacingSignalDied
+	}
+	return orchestratorPacingSignalIdle
 }
 
 // reconcileOrchestratorPacingOne reads this orchestrator's report, rearms it on
@@ -185,17 +233,45 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 
 	candidate := orchestratorPacingCandidate{
 		alive:        row.alive,
-		shellRunning: row.shellRunning,
 		lastActiveAt: lastActiveAt,
 		nudgeCount:   row.nudgeCount,
 		capped:       row.capped,
 	}
-	switch decideOrchestratorPacing(candidate, now) {
+	elapsed := now.Sub(lastActiveAt)
+	decision, reason := decideOrchestratorPacing(candidate, now)
+	a.logOrchestratorPacingTransition(row, reason, elapsed)
+
+	switch decision {
 	case orchestratorPacingNudge:
-		a.sendOrchestratorPacingNudge(row.id, row.serial, now)
+		signal := orchestratorPacingSignalFor(ok, ok && report.activity.Busy)
+		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal)
 	case orchestratorPacingCap:
 		a.capOrchestratorPacing(row.id, row.serial, row.name)
 	}
+}
+
+// logOrchestratorPacingTransition is the fix for the silent-suppression half of
+// erun#1376: every decision decideOrchestratorPacing can reach — not just
+// "nudge" — gets a durable, one-line record naming the orchestrator, the
+// measured quiet period, and which reason applied, so a quiet pane and a
+// suppressed one are told apart from the log rather than being indistinguishable.
+// It logs only on a transition (this orchestrator's reason changed since the
+// last tick), not on every 15s tick, since most orchestrators spend most of
+// their life in "fresh" and a per-tick line would drown the signal.
+func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason orchestratorPacingReason, elapsed time.Duration) {
+	if reason == row.lastLoggedReason {
+		return
+	}
+	a.mu.Lock()
+	if session := a.orchestrators[row.id]; session != nil {
+		session.pacingLastReason = reason
+	}
+	a.mu.Unlock()
+	label := strings.TrimSpace(row.name)
+	if label == "" {
+		label = row.id
+	}
+	log.Printf("erun-app: orchestrator %s pacing decision=%s quiet=%s", label, reason, elapsed.Round(time.Second))
 }
 
 // rearmOrchestratorPacing clears the nudge count and the cap, so the next
@@ -214,7 +290,7 @@ func (a *App) rearmOrchestratorPacing(id string) {
 // sendOrchestratorPacingNudge records the attempt before writing, so a nudge
 // that fails to write still counts against the cap rather than looping forever
 // against a pty that cannot accept input.
-func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time) {
+func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
 	managed := a.sessions[orchestratorSessionKey(id)]
@@ -230,6 +306,7 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time) 
 		// this does not cost against orchestratorPacingMaxNudges; the
 		// reconciler retries on its next 15s tick once they pause.
 		a.mu.Unlock()
+		log.Printf("erun-app: orchestrator %s pacing nudge deferred: pane is being typed into", id)
 		return
 	}
 	session.pacingNudgeCount++
@@ -238,9 +315,10 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time) 
 	a.mu.Unlock()
 
 	if !a.writeOrchestratorPacingNudge(managed) {
+		log.Printf("erun-app: orchestrator %s pacing nudge write failed", id)
 		return
 	}
-	a.emitOrchestratorPacingMarker(serial, count)
+	a.emitOrchestratorPacingMarker(serial, count, elapsed, signal)
 }
 
 // writeOrchestratorPacingNudge writes the pacing text, then — after a short
@@ -297,13 +375,38 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string) {
 // the same style emitReconnectMarker already uses for terminal status lines —
 // typing into the operator's session without saying so is exactly the
 // state-without-affordance gap this exists to avoid.
-func (a *App) emitOrchestratorPacingMarker(sessionID, count int) {
-	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — no activity report for %s ──\x1b[0m\r\n",
-		count, orchestratorPacingMaxNudges, orchestratorPacingStaleAfter)
+//
+// elapsed is the reconciler's own measured now.Sub(lastActiveAt), never the
+// orchestratorPacingStaleAfter constant: a session quiet for 20 minutes must
+// read as 20 minutes, not as the ten-minute contract restated back at the
+// operator as if it had been honoured (erun#1376).
+func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal) {
+	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
+		count, orchestratorPacingMaxNudges, orchestratorPacingQuietDescription(elapsed, signal))
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
+}
+
+// orchestratorPacingQuietDescription renders the measured quiet period, plus —
+// when the last report this orchestrator wrote said "busy" and was never
+// followed by an idle one — a distinct note that the turn behind it may have
+// died rather than simply gone quiet: a report stuck on "busy" for a full
+// staleness period is the harness never reaching its own turn boundary (a
+// dropped connection, a crash), not an orchestrator that finished and stopped
+// reporting. Without this, both look identical in the pane and the operator
+// has to go read a transcript to tell them apart (erun#1376).
+func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestratorPacingActivitySignal) string {
+	quiet := elapsed.Round(time.Second)
+	switch signal {
+	case orchestratorPacingSignalDied:
+		return fmt.Sprintf("no activity report for %s — last report said mid-turn, so the turn may have died without one", quiet)
+	case orchestratorPacingSignalNoReport:
+		return fmt.Sprintf("no activity report received in the %s since it started", quiet)
+	default:
+		return fmt.Sprintf("no activity report for %s", quiet)
+	}
 }
 
 // emitOrchestratorPacingCappedMarker names the recovery the same way the other
