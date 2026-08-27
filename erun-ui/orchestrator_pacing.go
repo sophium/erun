@@ -8,7 +8,10 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // A turn boundary is not the only place an orchestrator needs the pacing
@@ -27,16 +30,17 @@ import (
 // report of its own: a turn boundary that renews it is exactly the evidence
 // that the session is not stalled, whether the last write said busy or idle.
 
-// orchestratorPacingStaleAfter is how long a report may go unrenewed before the
-// session behind it reads as quiet. A working orchestrator renews the report on
-// every turn boundary and every tool call, so this only fires on a session that
-// has genuinely stopped moving.
-const orchestratorPacingStaleAfter = 10 * time.Minute
-
-// orchestratorPacingMaxNudges bounds how many consecutive un-answered nudges one
-// orchestrator gets before erun stops and says so — one hour of nudging a
-// session that never answers is not recovery, it is erun talking to itself.
-const orchestratorPacingMaxNudges = 6
+// orchestratorPacingStaleAfter and orchestratorPacingMaxNudges are the
+// unconfigured defaults, kept as their own named values (rather than reading
+// eruncommon's constants inline) because orchestrator_pacing_test.go stages
+// candidate timestamps and counts directly off them. They are defined equal to
+// eruncommon.DefaultWhipStaleAfter/DefaultWhipMaxNudges, so an unconfigured
+// install's actual runtime bound (orchestratorWhipConfig, below) always agrees
+// with what these tests stage against.
+const (
+	orchestratorPacingStaleAfter = eruncommon.DefaultWhipStaleAfter
+	orchestratorPacingMaxNudges  = eruncommon.DefaultWhipMaxNudges
+)
 
 // orchestratorPacingNudgeSettle spaces the text write and the carriage return
 // that submits it, mirroring the settle nudgeAIRepaint already uses so the two
@@ -44,12 +48,45 @@ const orchestratorPacingMaxNudges = 6
 // variable so tests can drop it to zero.
 var orchestratorPacingNudgeSettle = 150 * time.Millisecond
 
-// orchestratorPacingNudgeText restates the pacing contract verbatim, plus the
-// one clause that makes it a no-op for a session that is genuinely finished:
-// erun cannot know completion, but the session can, and asking is cheaper than
-// guessing or nudging forever.
-const orchestratorPacingNudgeText = "Keep pacing yourself, on connection errors wait and resume, do not exit this loop. " +
-	"If the assigned task is already complete and verified, say so in one line and stop."
+// orchestratorPacingNudgeText is the unconfigured default nudge text (erun#1379
+// made this editable via ~/.erun/config.yaml's `whip.message`; this constant is
+// what an install that configures nothing keeps getting, verbatim).
+const orchestratorPacingNudgeText = eruncommon.DefaultWhipMessage
+
+// orchestratorWhipConfig is the pacing pass's resolved, live-reloadable
+// configuration (message/stale-threshold/cap), read from the operator's global
+// config once per reconciler tick (refreshOrchestratorWhipConfig) so an edit to
+// ~/.erun/config.yaml takes effect on the next tick without a rebuild or
+// restart. Guarded by a mutex because the manual whip-now entrypoints
+// (whipOrchestratorNow/whipAllOrchestratorsNow) can read it from a different
+// goroutine than the reconciler tick.
+var (
+	orchestratorWhipConfigMu sync.RWMutex
+	orchestratorWhipConfig   = eruncommon.ResolveWhipConfig(nil)
+)
+
+func setOrchestratorWhipConfig(cfg eruncommon.WhipConfig) {
+	orchestratorWhipConfigMu.Lock()
+	orchestratorWhipConfig = cfg
+	orchestratorWhipConfigMu.Unlock()
+}
+
+func getOrchestratorWhipConfig() eruncommon.WhipConfig {
+	orchestratorWhipConfigMu.RLock()
+	defer orchestratorWhipConfigMu.RUnlock()
+	return orchestratorWhipConfig
+}
+
+// refreshOrchestratorWhipConfig re-reads ~/.erun/config.yaml's whip override
+// and resolves it against today's defaults. Best-effort: a missing or
+// unreadable root config resolves to the zero ERunConfig, whose nil Whip
+// override keeps orchestratorWhipConfig on exactly today's behaviour — the same
+// "unconfigured install is unaffected" contract erun-common's ResolveWhipConfig
+// makes for every transport.
+func refreshOrchestratorWhipConfig() {
+	config, _, _ := eruncommon.LoadERunConfig()
+	setOrchestratorWhipConfig(eruncommon.ResolveWhipConfig(config.Whip))
+}
 
 // orchestratorPacingActivity is the parsed report, independent of the TTL
 // readOrchestratorActivity applies for the busy spinner — that bound exists for
@@ -121,24 +158,66 @@ const (
 	orchestratorPacingReasonNudge         orchestratorPacingReason = "nudge"
 )
 
-// decideOrchestratorPacing is the whole bound: a session the desktop cannot
-// see, or one already past the cap, gets no nudge. A candidate that is stale
-// and not yet capped gets nudged; one that just crossed the cap gets the
-// one-time notice instead.
+// decideOrchestratorPacing is the automatic-pass bound (explicit=false): a
+// session the desktop cannot see, or one already past the cap, gets no nudge.
+// A candidate that is stale and not yet capped gets nudged; one that just
+// crossed the cap gets the one-time notice instead. It delegates to
+// eruncommon.DecideWhip (erun#1379's population-agnostic core, shared with the
+// environment-agent pusher and the CLI/MCP transports) against the live
+// orchestratorWhipConfig, so a configured message/threshold/cap changes this
+// decision without a rebuild while every existing caller and test here keeps
+// its original two-argument shape.
 func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orchestratorPacingDecision, orchestratorPacingReason) {
-	if !c.alive {
-		return orchestratorPacingNone, orchestratorPacingReasonNotAlive
+	return decideOrchestratorWhip(c, now, false)
+}
+
+// decideOrchestratorWhip is decideOrchestratorPacing's explicit-aware form: a
+// manual, operator-triggered whip (explicit=true) ignores staleness — the
+// operator clicking/invoking it now is the assertion that this session should
+// be pushed regardless of how recently it moved — but never bypasses the cap
+// or an already-capped session, exactly as DecideWhip's explicit contract
+// requires.
+func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
+	candidate := eruncommon.WhipCandidate{
+		Kind:         eruncommon.WhipTargetOrchestrator,
+		Reachable:    true, // the desktop holds this orchestrator's PTY itself
+		Alive:        c.alive,
+		LastActiveAt: c.lastActiveAt,
+		NudgeCount:   c.nudgeCount,
+		Capped:       c.capped,
 	}
-	if now.Sub(c.lastActiveAt) < orchestratorPacingStaleAfter {
-		return orchestratorPacingNone, orchestratorPacingReasonFresh
+	decision, reason := eruncommon.DecideWhip(candidate, now, getOrchestratorWhipConfig(), explicit)
+	return orchestratorPacingDecisionFromWhip(decision), orchestratorPacingReasonFromWhip(reason)
+}
+
+func orchestratorPacingDecisionFromWhip(decision eruncommon.WhipDecision) orchestratorPacingDecision {
+	switch decision {
+	case eruncommon.WhipDecisionNudge:
+		return orchestratorPacingNudge
+	case eruncommon.WhipDecisionCap:
+		return orchestratorPacingCap
+	default:
+		return orchestratorPacingNone
 	}
-	if c.capped {
-		return orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped
+}
+
+// orchestratorPacingReasonFromWhip translates every reason DecideWhip can
+// return for a Reachable candidate. WhipReasonUnreachable never appears here:
+// an orchestrator's own reconciler always sets Reachable true (it holds the
+// PTY), unlike the CLI/MCP transports, which never can.
+func orchestratorPacingReasonFromWhip(reason eruncommon.WhipReason) orchestratorPacingReason {
+	switch reason {
+	case eruncommon.WhipReasonNotAlive:
+		return orchestratorPacingReasonNotAlive
+	case eruncommon.WhipReasonAlreadyCapped:
+		return orchestratorPacingReasonAlreadyCapped
+	case eruncommon.WhipReasonCapCrossed:
+		return orchestratorPacingReasonCapCrossed
+	case eruncommon.WhipReasonNudge:
+		return orchestratorPacingReasonNudge
+	default:
+		return orchestratorPacingReasonFresh
 	}
-	if c.nudgeCount >= orchestratorPacingMaxNudges {
-		return orchestratorPacingCap, orchestratorPacingReasonCapCrossed
-	}
-	return orchestratorPacingNudge, orchestratorPacingReasonNudge
 }
 
 // orchestratorPacingRow is what the reconciler gathers under a.mu for one
@@ -161,16 +240,32 @@ type orchestratorPacingRow struct {
 // the read is a small file per orchestrator, and the decision only ever does
 // pty IO for a session that has been quiet for the full ten minutes.
 func (a *App) reconcileOrchestratorPacing() {
+	refreshOrchestratorWhipConfig()
 	now := time.Now()
+	for _, row := range a.orchestratorPacingRows("") {
+		a.reconcileOrchestratorPacingOne(row, now, false)
+	}
+}
+
+// orchestratorPacingRows gathers this tick's candidates under a.mu, before any
+// decision or file/pty IO outside the lock. Passing a non-empty id restricts
+// the result to that one orchestrator (the manual whip-one entrypoint); empty
+// gathers every non-transient orchestrator, as the automatic reconciler always
+// has.
+func (a *App) orchestratorPacingRows(id string) []orchestratorPacingRow {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	rows := make([]orchestratorPacingRow, 0, len(a.orchestrators))
-	for id, session := range a.orchestrators {
+	for orchestratorID, session := range a.orchestrators {
+		if id != "" && orchestratorID != id {
+			continue
+		}
 		if session == nil || session.transient {
 			continue
 		}
-		managed := a.sessions[orchestratorSessionKey(id)]
+		managed := a.sessions[orchestratorSessionKey(orchestratorID)]
 		rows = append(rows, orchestratorPacingRow{
-			id:               id,
+			id:               orchestratorID,
 			serial:           session.serial,
 			name:             session.name,
 			alive:            managed != nil && !managed.closed,
@@ -181,11 +276,50 @@ func (a *App) reconcileOrchestratorPacing() {
 			lastLoggedReason: session.pacingLastReason,
 		})
 	}
-	a.mu.Unlock()
+	return rows
+}
 
-	for _, row := range rows {
-		a.reconcileOrchestratorPacingOne(row, now)
+// whipOrchestratorNow is the row-level explicit whip (erun#1379 scope item 2):
+// an operator asserting this orchestrator should be pushed right now,
+// regardless of how recently it moved. It shares every bound the automatic
+// pass enforces — the cap, an already-capped session, the write settle — only
+// the freshness gate is skipped. Returns an error naming the id when no live
+// orchestrator matches it, so a caller (a future UI action, a test) gets a
+// definite answer rather than a silent no-op.
+func (a *App) whipOrchestratorNow(id string) (orchestratorPacingDecision, orchestratorPacingReason, error) {
+	refreshOrchestratorWhipConfig()
+	rows := a.orchestratorPacingRows(id)
+	if len(rows) == 0 {
+		return orchestratorPacingNone, orchestratorPacingReasonNotAlive, fmt.Errorf("no orchestrator %q is running", id)
 	}
+	decision, reason := a.reconcileOrchestratorPacingOne(rows[0], time.Now(), true)
+	return decision, reason, nil
+}
+
+// orchestratorWhipOutcome is one orchestrator's result from an explicit
+// whip-everything pass — the visible record erun#1379 asks for: which
+// orchestrator, what was decided, and why.
+type orchestratorWhipOutcome struct {
+	id       string
+	name     string
+	decision orchestratorPacingDecision
+	reason   orchestratorPacingReason
+}
+
+// whipAllOrchestratorsNow is the section-level explicit whip: every live,
+// non-transient orchestrator, pushed now regardless of staleness, each still
+// bound by its own cap. Named per orchestrator in the return so a caller can
+// report exactly who was pushed and who was skipped, and why skipped.
+func (a *App) whipAllOrchestratorsNow() []orchestratorWhipOutcome {
+	refreshOrchestratorWhipConfig()
+	now := time.Now()
+	rows := a.orchestratorPacingRows("")
+	outcomes := make([]orchestratorWhipOutcome, 0, len(rows))
+	for _, row := range rows {
+		decision, reason := a.reconcileOrchestratorPacingOne(row, now, true)
+		outcomes = append(outcomes, orchestratorWhipOutcome{id: row.id, name: row.name, decision: decision, reason: reason})
+	}
+	return outcomes
 }
 
 // orchestratorPacingActivitySignal is what the reconciler could tell about the
@@ -219,7 +353,7 @@ func orchestratorPacingSignalFor(hasReport, lastBusy bool) orchestratorPacingAct
 // reconcileOrchestratorPacingOne reads this orchestrator's report, rearms it on
 // a fresh busy write, decides, and acts. Split out of reconcileOrchestratorPacing
 // to keep both under this module's complexity budget.
-func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time.Time) {
+func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
 	lastActiveAt := row.startedAt
 	report, ok := readOrchestratorPacingActivity(row.id)
 	if ok && report.at.After(lastActiveAt) {
@@ -238,7 +372,7 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 		capped:       row.capped,
 	}
 	elapsed := now.Sub(lastActiveAt)
-	decision, reason := decideOrchestratorPacing(candidate, now)
+	decision, reason := decideOrchestratorWhip(candidate, now, explicit)
 	a.logOrchestratorPacingTransition(row, reason, elapsed)
 
 	switch decision {
@@ -248,6 +382,7 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	case orchestratorPacingCap:
 		a.capOrchestratorPacing(row.id, row.serial, row.name)
 	}
+	return decision, reason
 }
 
 // logOrchestratorPacingTransition is the fix for the silent-suppression half of
@@ -331,7 +466,7 @@ func (a *App) writeOrchestratorPacingNudge(managed *managedTerminal) bool {
 	if !ok {
 		return false
 	}
-	if _, err := io.WriteString(session, orchestratorPacingNudgeText); err != nil {
+	if _, err := io.WriteString(session, getOrchestratorWhipConfig().Message); err != nil {
 		return false
 	}
 	time.Sleep(orchestratorPacingNudgeSettle)
@@ -382,7 +517,7 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string) {
 // operator as if it had been honoured (erun#1376).
 func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal) {
 	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
-		count, orchestratorPacingMaxNudges, orchestratorPacingQuietDescription(elapsed, signal))
+		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal))
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
@@ -428,5 +563,5 @@ func orchestratorPacingCappedNotice(name string) string {
 		label = "An orchestrator"
 	}
 	return fmt.Sprintf("%s stopped answering pacing nudges after %d attempts over about an hour. "+
-		"Reply in its pane or restart it to resume.", label, orchestratorPacingMaxNudges)
+		"Reply in its pane or restart it to resume.", label, getOrchestratorWhipConfig().MaxNudges)
 }
