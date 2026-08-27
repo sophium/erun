@@ -425,6 +425,29 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_real_run_not_deployed_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_shell_real_run_check_unreachable_errors_without_claiming_absence", func(t *testing.T) {
+		// The deployment presence check can fail without ever getting an
+		// answer — no context, an unreachable API server, credentials or
+		// permissions refused. That is not evidence the deployment is absent,
+		// so ensureRuntimeDeployed must surface the check's own classified
+		// error (naming the cause, carrying kubectl's real output) rather than
+		// the "is not deployed; run erun deploy" text reserved for a confirmed
+		// absence. The generic-error kubectl stub ("Unable to connect to the
+		// server: ... i/o timeout") is the decision input; no ports are needed
+		// because the run errors before the forwards.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlGenericError(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the deployment check could not resolve an answer, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "is not deployed") {
+			t.Fatalf("a check that could not ask the cluster must never read as absence, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_check_unreachable_errors_without_claiming_absence", normalize.Apply(result.Combined))
+	})
+
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
 		// When ~/.zshrc already carries the team-dev alias,
 		// detectOpenNoShellAliasStartupFile reports it configured

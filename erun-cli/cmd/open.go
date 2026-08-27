@@ -605,7 +605,11 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 		return err
 	}
 	if !present {
-		return fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); run `erun deploy %s %s` first",
+		// Builds on common.KubernetesDeploymentAbsentMessageMarker so the
+		// desktop, reading only this text across a CLI subprocess boundary, can
+		// tell a genuine absence apart from a check that could not resolve an
+		// answer without re-deriving kubectl's own error grammar.
+		return fmt.Errorf("runtime for %s/%s "+common.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
 	return nil

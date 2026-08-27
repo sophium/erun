@@ -1,0 +1,1 @@
+could not determine whether deployment "team-devops" is deployed (the kubernetes api server could not be reached): Unable to connect to the server: dial tcp <VERSION>.1:443: i/o timeout

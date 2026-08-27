@@ -118,9 +118,12 @@ func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bo
 }
 
 // surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and
-// recoverable instead of discarding it (Nielsen #1/#9). The reconnect usually
-// fails because the runtime is not deployed — which `open` no longer fixes on
-// its own — so the recovery it points to is an explicit deploy.
+// recoverable instead of discarding it (Nielsen #1/#9). A reconnect failure is
+// not by itself evidence the runtime is down: `erun open --reconnect` can also
+// fail because it could not even ask the cluster (no context, an unreachable
+// API server, credentials or permissions refused) or for a reason this has no
+// way to recognize. Only a confirmed absent deployment gets the deploy
+// action — see runtimeCheckFoundDeploymentAbsent.
 func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	selection = normalizeSelection(selection)
 	// A deploy for this env being in flight IS the recovery this failure would
@@ -153,10 +156,32 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	// lifecycle can clear it once the state it describes moves on. Kind
 	// "warning" (not "warn") is the contract the frontend maps to the
 	// attention icon; an unrecognized kind renders as a neutral info ⓘ.
+	if runtimeCheckFoundDeploymentAbsent(err) {
+		a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
+			"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
+			selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
+		), notificationActionDeploy)
+		return
+	}
+	// Nothing here confirmed the deployment is absent, so a deploy is not
+	// offered: it would roll a runtime that may already be healthy. The
+	// recovery for a check that could not resolve an answer is a connectivity,
+	// credentials, or permissions fix, not a deploy.
 	a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
-		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
+		"Could not tell whether the runtime for %s/%s is up: %s. Check the cluster connection, credentials, and permissions for this environment.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
-	), notificationActionDeploy)
+	), "")
+}
+
+// runtimeCheckFoundDeploymentAbsent reports whether err is the specific
+// "runtime is not deployed" failure ensureRuntimeDeployed
+// (erun-cli/cmd/open.go) raises for a deployment that genuinely does not
+// exist. Any other failure text — kubectl unreachable, an RBAC refusal, a
+// port-forward timeout, or anything unrecognized — must not be read as
+// absence: erun could not establish the runtime's state, so offering a
+// deploy would be acting on a state it never confirmed.
+func runtimeCheckFoundDeploymentAbsent(err error) bool {
+	return err != nil && strings.Contains(err.Error(), eruncommon.KubernetesDeploymentAbsentMessageMarker)
 }
 
 // surfaceEnvRuntimeStopped renders a stopped environment as stopped and names
