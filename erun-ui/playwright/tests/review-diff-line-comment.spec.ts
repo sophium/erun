@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -129,10 +129,7 @@ async function openActiveReviewContext(
   tenant: string,
   environment: string,
 ): Promise<void> {
-  await app.reloadEnvironments();
-  await app.sidebar
-    .envRowButton(tenant, environment)
-    .waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForSeededRow(app, tenant, environment);
   await app.sidebar.openTenantDashboard(tenant);
   await app.tenantDashboard.waitForOpen();
   await app.tenantDashboard.selectTab('Reviews');
