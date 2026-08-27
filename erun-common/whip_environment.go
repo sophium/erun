@@ -12,7 +12,7 @@ import (
 	"github.com/adrg/xdg"
 )
 
-// The environment half of the whip pass (erun#1379) runs where its target
+// The environment half of the whip pass runs where its target
 // lives: `emcp` always runs inside the environment's own runtime pod (see
 // erun-mcp/AGENTS.md), so a tool call against one environment's own edge is
 // already executing on the same filesystem as that environment's dtach

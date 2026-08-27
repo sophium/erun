@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// erun#1379: an operator-triggered pass that pushes every live orchestrator
+// An operator-triggered pass that pushes every live orchestrator
 // and every environment's own agent session with the pacing nudge, and
 // reports who was pushed and who was skipped, and why. The automatic version
 // of this already runs inside the desktop for orchestrators

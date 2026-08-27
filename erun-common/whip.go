@@ -7,7 +7,7 @@ import "time"
 // the desktop's existing 15s tick. This file generalizes the pure decide/report
 // core so the same contract also covers an environment's own agent session and
 // so an operator can trigger a pass by hand instead of waiting for the tick —
-// "one pass, two populations" (erun#1379). It stays transport-agnostic: no
+// "one pass, two populations". It stays transport-agnostic: no
 // pty, no dtach, no MCP SDK. The erun-ui reconciler and the in-pod push in
 // whip_environment.go are the two concrete pushers that act on what this
 // decides.

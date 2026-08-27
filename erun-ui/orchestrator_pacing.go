@@ -48,9 +48,9 @@ const (
 // variable so tests can drop it to zero.
 var orchestratorPacingNudgeSettle = 150 * time.Millisecond
 
-// orchestratorPacingNudgeText is the unconfigured default nudge text (erun#1379
-// made this editable via ~/.erun/config.yaml's `whip.message`; this constant is
-// what an install that configures nothing keeps getting, verbatim).
+// orchestratorPacingNudgeText is the unconfigured default nudge text. The
+// message is now editable via ~/.erun/config.yaml's `whip.message`; this
+// constant is what an install that configures nothing keeps getting, verbatim.
 const orchestratorPacingNudgeText = eruncommon.DefaultWhipMessage
 
 // orchestratorWhipConfig is the pacing pass's resolved, live-reloadable
@@ -162,7 +162,7 @@ const (
 // session the desktop cannot see, or one already past the cap, gets no nudge.
 // A candidate that is stale and not yet capped gets nudged; one that just
 // crossed the cap gets the one-time notice instead. It delegates to
-// eruncommon.DecideWhip (erun#1379's population-agnostic core, shared with the
+// eruncommon.DecideWhip (the population-agnostic core, shared with the
 // environment-agent pusher and the CLI/MCP transports) against the live
 // orchestratorWhipConfig, so a configured message/threshold/cap changes this
 // decision without a rebuild while every existing caller and test here keeps
@@ -279,8 +279,8 @@ func (a *App) orchestratorPacingRows(id string) []orchestratorPacingRow {
 	return rows
 }
 
-// whipOrchestratorNow is the row-level explicit whip (erun#1379 scope item 2):
-// an operator asserting this orchestrator should be pushed right now,
+// whipOrchestratorNow is the row-level explicit whip: an operator
+// asserting this orchestrator should be pushed right now,
 // regardless of how recently it moved. It shares every bound the automatic
 // pass enforces — the cap, an already-capped session, the write settle — only
 // the freshness gate is skipped. Returns an error naming the id when no live
@@ -297,8 +297,8 @@ func (a *App) whipOrchestratorNow(id string) (orchestratorPacingDecision, orches
 }
 
 // orchestratorWhipOutcome is one orchestrator's result from an explicit
-// whip-everything pass — the visible record erun#1379 asks for: which
-// orchestrator, what was decided, and why.
+// whip-everything pass — the visible record an operator judges the feature
+// by: which orchestrator, what was decided, and why.
 type orchestratorWhipOutcome struct {
 	id       string
 	name     string

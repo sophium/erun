@@ -75,7 +75,7 @@ func TestRefreshOrchestratorWhipConfigOverrideWins(t *testing.T) {
 }
 
 // TestWhipOrchestratorNowIgnoresFreshnessButRespectsCap is the red-then-green
-// contract for the manual per-entry whip (erun#1379 scope item 2): a fresh
+// contract for the manual per-entry whip: a fresh
 // session (moved a second ago) is still pushed when explicitly whipped, but an
 // already-capped one stays capped rather than getting a bypassed nudge. Before
 // whipOrchestratorNow existed there was no way to assert this at all -- the
