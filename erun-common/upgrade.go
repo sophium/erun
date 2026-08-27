@@ -188,7 +188,10 @@ func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []Env
 			traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant, env.Name))
 			continue
 		}
-		if !env.HasPod() {
+		// Checked against ResolvedType rather than the broader !HasPod() so a
+		// legacy env with an unresolved type (ResolvedType == "") keeps
+		// upgrading exactly as it did before host existed.
+		if env.ResolvedType() == EnvironmentTypeHost {
 			traceln(fmt.Sprintf("upgrade: %s/%s is a host environment (no runtime pod to upgrade), skipping", tenant, env.Name))
 			continue
 		}
