@@ -107,6 +107,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 	a.recordTerminalActivity(selection)
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
+	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
 	a.spawnStreamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
@@ -297,6 +298,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.mu.Unlock()
 
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
+	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
 	a.spawnStreamSession(managed)
 
 	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))

@@ -142,6 +142,59 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	}
 }
 
+// TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately: a session that
+// joins after a deploy has already started must lock as soon as it joins,
+// not whenever the deploy's poller or completion handler next touches the
+// queue -- lockTerminalForActivity existed but nothing called it from the
+// session-start paths, so a late-joining ERun/AI tab never locked.
+func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
+	})
+
+	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
+	app.mu.Lock()
+	app.sessions[joinSession.key] = joinSession
+	app.mu.Unlock()
+
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+
+	if joinSession.lockedByActivity != entry.ID {
+		t.Fatalf("joinSession.lockedByActivity = %q, want %q", joinSession.lockedByActivity, entry.ID)
+	}
+	if got := len(emits.events(activityQueueLockEvent)); got != 1 {
+		t.Fatalf("lock events emitted = %d, want 1", got)
+	}
+}
+
+// TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy: a session
+// joining an env with no active deploy must not be touched.
+func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
+	app.mu.Lock()
+	app.sessions[joinSession.key] = joinSession
+	app.mu.Unlock()
+
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+
+	if joinSession.lockedByActivity != "" {
+		t.Fatalf("joinSession.lockedByActivity = %q, want empty", joinSession.lockedByActivity)
+	}
+	if got := len(emits.events(activityQueueLockEvent)); got != 0 {
+		t.Fatalf("lock events emitted = %d, want 0", got)
+	}
+}
+
 // TestLockTerminalEventsAlwaysCarryReason: the ActivityLockOverlay carries no
 // fallback string, so every Locked=true event must populate Reason or the
 // overlay header renders blank.

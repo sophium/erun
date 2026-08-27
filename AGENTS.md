@@ -145,6 +145,13 @@ Three distinct failures, all of them dead ends:
 3. **A capability that exists with no way in.** If the CLI or the API can do it
    and the user's surface cannot, that surface has a dead end wherever that
    capability is the answer. "Use the CLI" is not a resolution inside a GUI.
+   `erun-integration`'s desktop-surface gate (`erun-integration/AGENTS.md` §
+   "Desktop-surface gate") enforces exactly this failure mode for the desktop
+   app: a registered CLI command or MCP tool with no reference in
+   `erun-ui/frontend/src` fails the gate unless it is declared agent-facing
+   (`erun-common/mcp_tools.go`'s `AgentFacing` field, or
+   `erun-cli/cmd/command_tree.go`'s `cliOnlyAgentFacingCommands` for a
+   CLI-only command).
 
 **Distinguish causes before writing copy.** "Unauthorized" from the platform API
 is not one condition. *Session expired*, *identity never enrolled*, *tenant

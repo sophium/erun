@@ -206,6 +206,22 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	}
 }
 
+// lockNewlyJoinedSessionIfDeployInFlight locks a session the instant it joins,
+// rather than leaving it unlocked until the deploy's poller or completion
+// handler next touches the queue: a session created after a deploy has
+// already started otherwise shows no lock overlay at all, since
+// lockTerminalsForActivity only locks the sessions that existed at deploy
+// start. Callers are runOpenSession/runAISession, the only two kinds
+// sessionMatchesActivity locks for a deploy.
+func (a *App) lockNewlyJoinedSessionIfDeployInFlight(selection uiSelection, sessionID int) {
+	if a.activityQueue == nil {
+		return
+	}
+	if entry, ok := a.activityQueue.findActiveByCommand("deploy", selection.Tenant, selection.Environment); ok {
+		a.lockTerminalForActivity(sessionID, entry)
+	}
+}
+
 func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
