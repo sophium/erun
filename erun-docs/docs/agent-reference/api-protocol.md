@@ -57,7 +57,7 @@ For every authenticated request:
 5. Resolve the ERun user from `(tenant, iss, sub)` via `user_external_ids`. Unknown subject → `401` — **except** when the resolved tenant has **no users yet**, in which case the first valid token for it is enrolled as that tenant's first user with both `ReadAll` and `WriteAll` (per-tenant first-user bootstrap, below). Once a tenant has any user, unknown subjects for it stay unauthorized.
 6. Authorize the request against the user's roles/permissions; on success, allow and write the audit event.
 
-**First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant, registers its `iss` in `issuers` as single-tenant (`org_field_key` NULL), creates the first user, and grants it both `ReadAll` and `WriteAll`.
+**First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant — named after this platform's declared `ERUN_TENANT` when it is set, or the placeholder `operations` when it is not — registers its `iss` in `issuers` as single-tenant (`org_field_key` NULL), creates the first user, and grants it both `ReadAll` and `WriteAll`. Bootstrap runs exactly once, against an empty `tenants` table, so a platform that bootstrapped before `ERUN_TENANT` was read here — or with it unset at the time — keeps the placeholder name even after `ERUN_TENANT` is later configured; [`POST /v1/tenants/reconcile-name`](#post-v1tenantsreconcile-name) is the migration path for that case, and [`GET /v1/config`](#endpoints)'s `tenant.platformDeclaredName` field reports the disagreement before anyone runs it.
 
 **Per-tenant first-user bootstrap.** Bootstrap is not limited to the empty-`tenants` case. Whenever a token resolves to a tenant (a registered issuer, the right org claim for org-scoped issuers) that has **zero** users, the first such valid token is enrolled as that tenant's first user with `ReadAll` + `WriteAll` — this is how a newly-provisioned tenant gets its first admin without a separate user-management call. **For an org-scoped issuer this means the first valid caller in a freshly-provisioned org becomes that tenant's admin**, so provisioning a tenant + registering its issuer/org is the act that authorizes its first caller. After a tenant has at least one user, unknown subjects for it — and unknown/unregistered issuers anywhere — stay unauthorized.
 
@@ -113,6 +113,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → placement → context bootstrap → namespace → env registration → runtime deploy → auth-edge wiring → exposure) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 | `GET` | `/v1/tenants` | List every tenant (operations-only caller), or a single-item list containing just the caller's own tenant otherwise. | Tenant member (read) |
+| `POST` | `/v1/tenants/reconcile-name` | Rename the caller's own tenant to this platform's declared identity (`ERUN_TENANT`) when the two disagree — idempotent, self-only. Body-less. Response below. | Operations only |
 | `POST` | `/v1/users` | Enroll a user in the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/users` | List the caller's tenant's users, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 | `GET` | `/v1/roles` | List the caller's tenant's roles with their permissions. | Tenant member (read) |
@@ -126,6 +127,8 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/invites/accept` | Consume an invite token and enroll the invitee. **Unauthenticated** — the invite token in the body is the credential. Body below. | None (public) |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
+
+`tenant.platformDeclaredName` is present only when the caller's own tenant is `OPERATIONS` and its `name` disagrees with this platform's declared `ERUN_TENANT` (see [first-identity bootstrap](#tenant-issuers)) — absent, not merely empty, whenever there is nothing to reconcile. It is what turns that disagreement into something a caller can act on with [`POST /v1/tenants/reconcile-name`](#post-v1tenantsreconcile-name) instead of discovering it by querying the database directly.
 
 ### `GET /v1/platform` {#platform-endpoint}
 
@@ -716,6 +719,34 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
+
+### `POST /v1/tenants/reconcile-name` {#post-v1tenantsreconcile-name}
+
+Renames the caller's own tenant to this platform's declared identity (`ERUN_TENANT`) when the two disagree — the migration path for a platform whose `OPERATIONS` tenant bootstrapped under the placeholder name `operations` before `ERUN_TENANT` was read at bootstrap (see [first-identity bootstrap](#tenant-issuers)). It is deliberately **not** a general tenant-rename endpoint: it only ever acts on the caller's own tenant, gated the same way [`POST /v1/tenants`](#post-v1tenants) is — the caller's resolved tenant must be `OPERATIONS` — and it refuses when that tenant already has environments, since the `<tenant>-<env>` runtime namespace is derived from the tenant name and renaming a tenant that already has one would orphan it. Body-less.
+
+```jsonc
+// 200 response
+{
+  "tenant": {
+    "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
+    "name": "frs",
+    "type": "OPERATIONS",
+    "createdAt": "2026-06-24T10:00:00Z",
+    "updatedAt": "2026-08-27T09:12:00Z"
+  },
+  "renamed": true
+}
+```
+
+`renamed` distinguishes "this call is what fixed it" from "it was already fine" — both return `200` with the tenant's current row. The call is a no-op (`renamed: false`, tenant unchanged) when the tenant's `name` already matches this platform's declared `ERUN_TENANT`, or when this platform declares no `ERUN_TENANT` at all — safe to call repeatedly, including on a platform that never needed it.
+
+**Nothing else moves.** Every other table references the tenant by `tenant_id`, never by name (`tenant_id` is the foreign key everywhere — issuer mappings, users, roles, environments, audit events), so a rename is a single-column update with no follow-on writes and no risk of orphaning rows keyed by the old name.
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the same explicit operations gate as [`POST /v1/tenants`](#post-v1tenants)). | Call from an operations-tenant token whose roles permit the write. |
+| `409` | The tenant already has environments — renaming now would orphan their `<tenant>-<env>` runtime namespace. | There is no override; the platform's declared name and its `OPERATIONS` tenant's name are expected to diverge once the tenant is in active use. |
+| `409` | Another tenant is already registered under this platform's declared name (a uniqueness violation on `tenants.name`). | Rename or remove the conflicting tenant first. |
 
 ### `POST /v1/users` and `GET /v1/users` {#post-v1users-and-get-v1users}
 

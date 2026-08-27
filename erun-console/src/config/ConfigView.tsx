@@ -1,4 +1,5 @@
 import {
+  Button,
   Card,
   CardContent,
   CardHeader,
@@ -22,6 +23,9 @@ import {
 import { Cloud, Server } from 'lucide-react';
 import type * as React from 'react';
 
+import { useReconcileTenantNameMutation } from '../app/api/tenantsApi';
+import { queryErrorMessage } from '../app/queryError';
+
 // A pure render of the read model the parent fetched; the fetch/auth lifecycle
 // lives in App. Empty collections render an empty-state card, never an empty
 // table, so an empty view never reads as a disabled input.
@@ -30,11 +34,62 @@ function placeholder(value: string | undefined): string {
   return value && value.length > 0 ? value : '—';
 }
 
-function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
+// TenantNameMismatchBanner surfaces the one disagreement the backend
+// otherwise leaves discoverable only by querying the database: a platform
+// bootstrapped before its own tenant name was read from ERUN_TENANT still
+// carries the legacy placeholder. tenant.platformDeclaredName is present
+// only in that exact case, so its presence alone gates the banner.
+function TenantNameMismatchBanner({
+  tenant,
+  token,
+}: {
+  tenant: Tenant;
+  token: string;
+}): React.ReactElement | null {
+  const [reconcile, { isLoading, error }] = useReconcileTenantNameMutation();
+  const declaredName = tenant.platformDeclaredName;
+  if (declaredName === undefined) {
+    return null;
+  }
   return (
-    <header>
-      <h2 className="text-xl font-semibold text-foreground">{tenant.name}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Tenant · {tenant.type || 'unknown type'}</p>
+    <div
+      role="alert"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-[calc(var(--radius)-2px)] border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400"
+    >
+      <span>
+        This tenant is named &quot;{tenant.name}&quot;, but this platform declares its own identity
+        as &quot;{declaredName}&quot;. Renaming it lets provisioning resolve this platform&apos;s
+        own published runtime image.
+      </span>
+      <div className="flex flex-col items-end gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isLoading}
+          onClick={() => {
+            void reconcile(token);
+          }}
+        >
+          {isLoading ? 'Renaming…' : `Rename to "${declaredName}"`}
+        </Button>
+        {error !== undefined && (
+          <span className="text-xs text-destructive">{queryErrorMessage(error)}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TenantHeader({ tenant, token }: { tenant: Tenant; token: string }): React.ReactElement {
+  return (
+    <header className="grid gap-3">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground">{tenant.name}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Tenant · {tenant.type || 'unknown type'}
+        </p>
+      </div>
+      <TenantNameMismatchBanner tenant={tenant} token={token} />
     </header>
   );
 }
@@ -193,10 +248,16 @@ function ContextsSection({ contexts }: { contexts: CloudContext[] }): React.Reac
   );
 }
 
-export function ConfigView({ config }: { config: TenantConfigView }): React.ReactElement {
+export function ConfigView({
+  config,
+  token,
+}: {
+  config: TenantConfigView;
+  token: string;
+}): React.ReactElement {
   return (
     <div className="grid gap-6">
-      <TenantHeader tenant={config.tenant} />
+      <TenantHeader tenant={config.tenant} token={token} />
       <EnvironmentsSection environments={config.environments} />
       <ContextsSection contexts={config.contexts} />
     </div>

@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
@@ -54,6 +54,20 @@ const EMPTY_CONFIG = {
   contexts: [],
 };
 
+// A pre-#1066 platform: the OPERATIONS tenant is still named "operations",
+// but this platform's own declared identity (ERUN_TENANT) is "frs".
+const MISMATCHED_OPERATIONS_CONFIG = {
+  tenant: { tenantId: 'tn-1', name: 'operations', type: 'OPERATIONS', platformDeclaredName: 'frs' },
+  environments: [],
+  contexts: [],
+};
+
+const RECONCILED_OPERATIONS_CONFIG = {
+  tenant: { tenantId: 'tn-1', name: 'frs', type: 'OPERATIONS' },
+  environments: [],
+  contexts: [],
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -66,6 +80,31 @@ function mockFetch(response: Response): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(() => Promise.resolve(response)),
+  );
+}
+
+// mockFetchForReconcile answers every GET /v1/config in sequence from
+// configResponses (repeating the last one once exhausted) and every
+// reconcile-name POST with reconcileResponse — the shape needed to prove a
+// rename converges the view once RTK Query's tag invalidation refetches.
+function mockFetchForReconcile(configResponses: unknown[], reconcileResponse: unknown): void {
+  let configCallIndex = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: unknown) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/v1/tenants/reconcile-name')) {
+        return Promise.resolve(jsonResponse(reconcileResponse));
+      }
+      if (url.includes('/v1/config')) {
+        const body = configResponses[Math.min(configCallIndex, configResponses.length - 1)];
+        configCallIndex += 1;
+        return Promise.resolve(jsonResponse(body));
+      }
+      // GET /v1/platform: unrelated to this scenario, and its lenient parse
+      // tolerates an empty body.
+      return Promise.resolve(jsonResponse({}));
+    }),
   );
 }
 
@@ -135,6 +174,40 @@ describe('ConfigView via App', () => {
     expect(await screen.findByText('No environments yet.')).toBeInTheDocument();
     expect(screen.getByText('No cloud contexts yet.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
+  });
+
+  it('does not show the tenant-name mismatch banner for a tenant whose name already agrees', async () => {
+    mockFetch(jsonResponse(SAMPLE_CONFIG));
+    renderWithStore(<App />);
+
+    await screen.findByRole('heading', { level: 2, name: 'Acme' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a legacy-named platform tenant and offers to rename it', async () => {
+    mockFetch(jsonResponse(MISMATCHED_OPERATIONS_CONFIG));
+    renderWithStore(<App />);
+
+    const banner = await screen.findByRole('alert');
+    expect(banner.textContent).toContain('operations');
+    expect(banner.textContent).toContain('frs');
+    expect(within(banner).getByRole('button', { name: 'Rename to "frs"' })).toBeInTheDocument();
+  });
+
+  it('renaming the tenant converges the view once the config refetches', async () => {
+    mockFetchForReconcile([MISMATCHED_OPERATIONS_CONFIG, RECONCILED_OPERATIONS_CONFIG], {
+      tenant: RECONCILED_OPERATIONS_CONFIG.tenant,
+      renamed: true,
+    });
+    renderWithStore(<App />);
+
+    const banner = await screen.findByRole('alert');
+    fireEvent.click(within(banner).getByRole('button', { name: 'Rename to "frs"' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'frs' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   // A 401 *with* a token held is not a signed-out caller: the identity provider

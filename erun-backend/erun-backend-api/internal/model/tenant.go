@@ -20,6 +20,13 @@ type Tenant struct {
 	Type          TenantType `json:"type" bun:"type"`
 	CreatedAt     time.Time  `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt     time.Time  `json:"updatedAt" bun:"updated_at,scanonly"`
+	// PlatformDeclaredName is read-only display data populated only by
+	// TenantRepository.Current, and only when the caller's own tenant is
+	// OPERATIONS and its Name disagrees with this platform's declared
+	// identity (ERUN_TENANT). It is what surfaces that disagreement to an
+	// operator instead of leaving it discoverable only by querying the
+	// database directly.
+	PlatformDeclaredName string `json:"platformDeclaredName,omitempty" bun:"-"`
 }
 
 type TenantIssuer struct {

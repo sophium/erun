@@ -40,7 +40,7 @@ const FIXTURE_BODY = {
 };
 
 const EXPECTED: TenantConfigView = {
-  tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY' },
+  tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY', platformDeclaredName: undefined },
   environments: [
     {
       environmentId: 'env-1',

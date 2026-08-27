@@ -17,6 +17,7 @@ import (
 type TenantRepository interface {
 	Create(ctx context.Context, params repository.CreateTenantParams) (model.Tenant, error)
 	List(ctx context.Context) ([]model.Tenant, error)
+	ReconcileSelfName(ctx context.Context) (model.Tenant, bool, error)
 }
 
 type TenantRoutes struct {
@@ -39,6 +40,7 @@ func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantReposi
 	routes := TenantRoutes{tenants: tenants}
 	register(http.MethodPost, "/v1/tenants", http.HandlerFunc(routes.createTenant))
 	register(http.MethodGet, "/v1/tenants", http.HandlerFunc(routes.listTenants))
+	register(http.MethodPost, "/v1/tenants/reconcile-name", http.HandlerFunc(routes.reconcileTenantName))
 }
 
 // listTenants returns every tenant for an operations-scoped caller, or a
@@ -126,6 +128,40 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 		OrgFieldValue: strings.TrimSpace(body.OrgFieldValue),
 		DisplayName:   strings.TrimSpace(body.DisplayName),
 	}, 0, ""
+}
+
+// reconcileTenantNameResponse reports both what the tenant is named now and
+// whether this call is what made it that way, so a caller running the same
+// request twice can tell "I just fixed it" from "it was already fine".
+type reconcileTenantNameResponse struct {
+	Tenant  model.Tenant `json:"tenant"`
+	Renamed bool         `json:"renamed"`
+}
+
+// reconcileTenantName renames the caller's own tenant to this platform's
+// declared identity (ERUN_TENANT) when the two disagree — the migration path
+// for a platform bootstrapped before its tenant name was read from
+// ERUN_TENANT. It only ever acts on the caller's own tenant, gated to an
+// OPERATIONS caller the same way createTenant is, and is a no-op when the
+// name already matches or this platform declares no identity at all.
+func (r TenantRoutes) reconcileTenantName(w http.ResponseWriter, req *http.Request) {
+	tenant, renamed, err := r.tenants.ReconcileSelfName(req.Context())
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrForbidden):
+			writeError(w, http.StatusForbidden, "tenant name reconciliation requires an operations tenant")
+			return
+		case errors.Is(err, repository.ErrTenantHasEnvironments):
+			writeError(w, http.StatusConflict, "tenant already has environments; renaming it now would orphan their runtime namespace")
+			return
+		case errors.Is(err, repository.ErrConflict):
+			writeError(w, http.StatusConflict, "a tenant is already registered under this platform's declared name")
+			return
+		}
+		writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, reconcileTenantNameResponse{Tenant: tenant, Renamed: renamed})
 }
 
 // duplicateIssuerMessage names the (issuer, org) mapping a create collided

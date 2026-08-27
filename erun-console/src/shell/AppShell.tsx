@@ -32,7 +32,7 @@ function SectionContent({
 }): React.ReactElement {
   switch (active) {
     case 'overview':
-      return <ConfigView config={config} />;
+      return <ConfigView config={config} token={token} />;
     case 'environments':
       return (
         <EnvironmentsPanel

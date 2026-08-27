@@ -11,6 +11,11 @@ export interface Tenant {
   // "COMPANY" | "OPERATIONS" on the backend; kept as a string so an unknown
   // future type still renders rather than failing the parse.
   type: string;
+  // Present only when this tenant is the platform's own OPERATIONS tenant
+  // and its name disagrees with what the platform itself declares — the
+  // legacy-naming migration case. Absent (not merely empty) means either
+  // this is not that tenant, or the name already agrees.
+  platformDeclaredName?: string;
 }
 
 // The provisioning lifecycle of a hosted environment: `registered` (row exists,
@@ -124,6 +129,7 @@ export function parseTenant(raw: Record<string, unknown>): Tenant {
     tenantId: asString(raw.tenantId),
     name: asString(raw.name),
     type: asString(raw.type),
+    platformDeclaredName: asOptionalString(raw.platformDeclaredName),
   };
 }
 

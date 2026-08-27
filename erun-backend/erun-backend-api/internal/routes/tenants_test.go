@@ -19,6 +19,10 @@ type stubTenantRepository struct {
 	createParams repository.CreateTenantParams
 	list         []model.Tenant
 	err          error
+
+	reconciled     model.Tenant
+	reconcileCalls int
+	renamed        bool
 }
 
 func (r *stubTenantRepository) Create(_ context.Context, params repository.CreateTenantParams) (model.Tenant, error) {
@@ -39,6 +43,14 @@ func (r *stubTenantRepository) List(_ context.Context) ([]model.Tenant, error) {
 		return nil, r.err
 	}
 	return r.list, nil
+}
+
+func (r *stubTenantRepository) ReconcileSelfName(_ context.Context) (model.Tenant, bool, error) {
+	r.reconcileCalls++
+	if r.err != nil {
+		return model.Tenant{}, false, r.err
+	}
+	return r.reconciled, r.renamed, nil
 }
 
 func postCreateTenant(t *testing.T, tenants *stubTenantRepository, tenantType string, body string) *httptest.ResponseRecorder {
@@ -186,5 +198,62 @@ func TestListTenantsSurfacesRepositoryError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+func postReconcileTenantName(t *testing.T, tenants *stubTenantRepository) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/tenants/reconcile-name", nil)
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants}.reconcileTenantName(rec, req)
+	return rec
+}
+
+func TestReconcileTenantNameReturnsResultingTenant(t *testing.T) {
+	tenants := &stubTenantRepository{
+		reconciled: model.Tenant{TenantID: "tenant-1", Name: "frs", Type: model.TenantTypeOperations},
+		renamed:    true,
+	}
+	rec := postReconcileTenantName(t, tenants)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if tenants.reconcileCalls != 1 {
+		t.Fatalf("expected exactly one ReconcileSelfName call, got %d", tenants.reconcileCalls)
+	}
+	var response reconcileTenantNameResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Renamed || response.Tenant.Name != "frs" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
+func TestReconcileTenantNameForbidsNonOperationsCaller(t *testing.T) {
+	tenants := &stubTenantRepository{err: repository.ErrForbidden}
+	rec := postReconcileTenantName(t, tenants)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReconcileTenantNameRefusesWhenTenantHasEnvironments(t *testing.T) {
+	tenants := &stubTenantRepository{err: repository.ErrTenantHasEnvironments}
+	rec := postReconcileTenantName(t, tenants)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReconcileTenantNameSurfacesNameConflict(t *testing.T) {
+	tenants := &stubTenantRepository{err: repository.ErrConflict}
+	rec := postReconcileTenantName(t, tenants)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
 	}
 }

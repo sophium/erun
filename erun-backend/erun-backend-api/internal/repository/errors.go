@@ -18,6 +18,12 @@ var (
 	// own role management: revoking it would leave no user able to grant roles,
 	// and there would be no recovery lever left inside the product.
 	ErrLastGrantCapableRole = errors.New("revoking this role would leave the tenant with no user able to grant roles")
+	// ErrTenantHasEnvironments guards a tenant-name reconciliation from
+	// orphaning a runtime namespace: the <tenant>-<env> namespace is derived
+	// from the tenant name, so renaming a tenant that already has
+	// environments would leave their namespaces unreachable under the new
+	// name.
+	ErrTenantHasEnvironments = errors.New("tenant has environments")
 )
 
 func normalizeNoRows(err error) error {

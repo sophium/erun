@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -11,10 +12,16 @@ import (
 
 type TenantRepository struct {
 	txs *TxManager
+	// platformTenant is this instance's own declared tenant identity
+	// (ERUN_TENANT) — the name ReconcileSelfName renames the caller's own
+	// OPERATIONS tenant to, and the value Current compares against to report
+	// a legacy-named tenant. Empty means that configuration is genuinely
+	// absent, not merely unset by a caller.
+	platformTenant string
 }
 
-func NewTenantRepository(txs *TxManager) *TenantRepository {
-	return &TenantRepository{txs: txs}
+func NewTenantRepository(txs *TxManager, platformTenant string) *TenantRepository {
+	return &TenantRepository{txs: txs, platformTenant: strings.TrimSpace(platformTenant)}
 }
 
 // CreateTenantParams is the operations-only tenant-registration input: tenant
@@ -141,5 +148,98 @@ func (r *TenantRepository) Current(ctx context.Context) (model.Tenant, error) {
 		`, securityContext.TenantID).Scan(ctx, &tenant)
 		return normalizeNoRows(err)
 	})
-	return tenant, err
+	if err != nil {
+		return model.Tenant{}, err
+	}
+	r.decorateNameMismatch(&tenant)
+	return tenant, nil
+}
+
+// decorateNameMismatch sets PlatformDeclaredName exactly when there is a
+// disagreement worth reporting: tenant is this platform's own OPERATIONS
+// tenant and its Name is not what this instance declares itself to be.
+func (r *TenantRepository) decorateNameMismatch(tenant *model.Tenant) {
+	if tenant.Type == model.TenantTypeOperations && r.platformTenant != "" && tenant.Name != r.platformTenant {
+		tenant.PlatformDeclaredName = r.platformTenant
+	}
+}
+
+// ReconcileSelfName renames the caller's own tenant to this platform's
+// declared identity (ERUN_TENANT) when the two disagree — the migration path
+// for a platform bootstrapped before its own tenant name was read from
+// ERUN_TENANT, whose OPERATIONS tenant is stuck under the name empty-database
+// bootstrap fell back to. It is deliberately not a general tenant-rename
+// endpoint: it only ever acts on the caller's own tenant, only when that
+// tenant is OPERATIONS (a platform's own tenant, never an arbitrary customer
+// tenant a caller happens to administer), and only when it owns no
+// environments yet, since the <tenant>-<env> runtime namespace is derived
+// from the tenant name and renaming a tenant that already has one would
+// orphan it. The environments check and the rename happen in one statement
+// so a concurrent environment create cannot race between them.
+//
+// Idempotent by construction: once Name already matches platformTenant (the
+// common case on a second call, since the first call's rename already
+// converged it), or when this platform declares no ERUN_TENANT at all, this
+// is a no-op that returns the tenant unchanged.
+func (r *TenantRepository) ReconcileSelfName(ctx context.Context) (model.Tenant, bool, error) {
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return model.Tenant{}, false, ErrMissingSecurityContext
+	}
+	if securityContext.TenantType != string(model.TenantTypeOperations) {
+		return model.Tenant{}, false, ErrForbidden
+	}
+	if r.platformTenant == "" {
+		current, err := r.Current(ctx)
+		return current, false, err
+	}
+
+	var tenant model.Tenant
+	var renamed bool
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var txErr error
+		tenant, renamed, txErr = reconcileSelfNameTx(ctx, tx, securityContext.TenantID, r.platformTenant)
+		return txErr
+	})
+	if err != nil {
+		return model.Tenant{}, false, err
+	}
+	return tenant, renamed, nil
+}
+
+// reconcileSelfNameTx does the actual check-and-rename inside an
+// already-open transaction: read the tenant, no-op if its name already
+// matches, otherwise rename it atomically with the environments check baked
+// into the same UPDATE so a concurrent environment create cannot race
+// between checking and renaming.
+func reconcileSelfNameTx(ctx context.Context, tx bun.Tx, tenantID, platformTenant string) (model.Tenant, bool, error) {
+	var tenant model.Tenant
+	if scanErr := tx.NewRaw(`
+		SELECT tenant_id, name, type, created_at, updated_at
+		  FROM tenants
+		 WHERE tenant_id = ?
+	`, tenantID).Scan(ctx, &tenant); scanErr != nil {
+		return model.Tenant{}, false, normalizeNoRows(scanErr)
+	}
+	if tenant.Name == platformTenant {
+		return tenant, false, nil
+	}
+
+	updateErr := tx.NewRaw(`
+		UPDATE tenants
+		   SET name = ?
+		 WHERE tenant_id = ?
+		   AND NOT EXISTS (SELECT 1 FROM environments e WHERE e.tenant_id = tenants.tenant_id)
+		RETURNING tenant_id, name, type, created_at, updated_at
+	`, platformTenant, tenantID).Scan(ctx, &tenant)
+	switch {
+	case updateErr == nil:
+		return tenant, true, nil
+	case isUniqueViolation(updateErr):
+		return model.Tenant{}, false, ErrConflict
+	case errors.Is(normalizeNoRows(updateErr), ErrNotFound):
+		return model.Tenant{}, false, ErrTenantHasEnvironments
+	default:
+		return model.Tenant{}, false, updateErr
+	}
 }

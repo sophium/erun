@@ -272,14 +272,14 @@ type databaseRepositories struct {
 	releases        *repository.ReleaseRepository
 }
 
-func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
+func newDatabaseRepositories(txManager *repository.TxManager, platformTenant string) databaseRepositories {
 	return databaseRepositories{
 		reviews:         repository.NewReviewRepository(txManager),
 		reviewReviewers: repository.NewReviewReviewerRepository(txManager),
 		builds:          repository.NewBuildRepository(txManager),
 		comments:        repository.NewCommentRepository(txManager),
 		tenantIssuers:   repository.NewTenantIssuerRepository(txManager),
-		tenants:         repository.NewTenantRepository(txManager),
+		tenants:         repository.NewTenantRepository(txManager, platformTenant),
 		environments:    repository.NewEnvironmentRepository(txManager),
 		contexts:        repository.NewContextRepository(txManager),
 		tenantQuotas:    repository.NewTenantQuotaRepository(txManager),
@@ -292,7 +292,7 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 // registerDatabaseRoutes registers every route backed by persistence, which is
 // all of them except the health check and the DNS-01 broker.
 func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
-	repos := newDatabaseRepositories(txManager)
+	repos := newDatabaseRepositories(txManager, options.BootstrapTenantName)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
 	// bootstrapping itself already requires), which leaves every context
