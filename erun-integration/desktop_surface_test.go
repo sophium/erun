@@ -239,8 +239,8 @@ func appMethodDecls(t testing.TB, root string) []desktopsurface.AppMethodDecl {
 
 // TestNoUnboundAppMethods fails when a method on *App is unexported and
 // called from nowhere else in erun-ui: Wails binds only exported methods, so
-// that combination is a Wails binding location with no binding (erun#1433,
-// the specific shape whipOrchestratorNow shipped in).
+// that combination is a Wails binding location with no binding -- the
+// specific shape whipOrchestratorNow shipped in.
 func TestNoUnboundAppMethods(t *testing.T) {
 	root := repoRoot(t)
 	decls := appMethodDecls(t, root)

@@ -83,8 +83,8 @@ func FindMissingDesktopSurface(capabilities []Capability, frontendSource Fronten
 // UnboundAppMethod is a method on *App that Wails would silently skip when
 // generating bindings: unexported, so the binding generator never sees it,
 // and referenced by no other Go code in erun-ui, so nothing calls it either.
-// That combination is the whip shape (erun#1433): the author placed the
-// method where a binding belongs, got no binding, and got no error.
+// That combination is the whip shape: the author placed the method where a
+// binding belongs, got no binding, and got no error.
 type UnboundAppMethod struct {
 	Name string
 	File string

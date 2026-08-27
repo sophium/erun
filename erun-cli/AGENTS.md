@@ -17,6 +17,7 @@ Module-specific guidance for `erun-cli`. Follow the repository root `AGENTS.md` 
 
 - In CLI command constructors, keep inline `RunE` closures thin. Use them for Cobra argument adaptation and flag binding, but move real command/application logic into named package functions.
 - If a command already has meaningful application logic such as resolving shared results and rendering them, prefer a named `run...Command` or equivalent helper over leaving that logic inline in the Cobra definition.
+- A new command must be reachable from the desktop app, not just this transport and MCP — see root `AGENTS.md` § "Smooth, Seamless, No Dead Ends". `erun-integration`'s desktop-surface gate (`erun-integration/AGENTS.md` § "Desktop-surface gate") enforces this: any CLI command with no matching MCP tool must have a real reference in `erun-ui/frontend/src`, unless it is Cobra `Hidden`/`Deprecated` (an internal-lifecycle command already marks itself that way) or explicitly declared exempt in `cliOnlyAgentFacingCommands` (`erun-cli/cmd/command_tree.go`) because it is genuinely agent- or tooling-only.
 
 ## CLI Help And MCP Tool Descriptions
 

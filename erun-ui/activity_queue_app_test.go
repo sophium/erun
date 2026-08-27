@@ -145,8 +145,8 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 // TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately: a session that
 // joins after a deploy has already started must lock as soon as it joins,
 // not whenever the deploy's poller or completion handler next touches the
-// queue (erun#1433 -- lockTerminalForActivity existed but nothing called it
-// from the session-start paths, so a late-joining ERun/AI tab never locked).
+// queue -- lockTerminalForActivity existed but nothing called it from the
+// session-start paths, so a late-joining ERun/AI tab never locked.
 func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
