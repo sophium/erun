@@ -306,7 +306,7 @@ func newActivitySampleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sample",
 		Short: "Sample resident build and agent processes and record activity and resource usage",
-		Long:  "Records activity only when a matched process burned CPU since the previous\nsample, so an agent parked at a prompt does not keep the environment awake.\nAlso retains the container's own cgroup CPU and memory counters, which is what\nlets erun recommend a size for this environment from what it has actually done.",
+		Long:  "Records activity only when a matched process burned CPU since the previous\nsample, so an agent parked at a prompt does not keep the environment awake.\nAlso records SSH activity when an sshd child process holds an allocated\npseudo-terminal, so a real interactive session reads as active while\nport-forward re-establishment and background sync traffic do not. Also\nretains the container's own cgroup CPU and memory counters, which is what\nlets erun recommend a size for this environment from what it has actually done.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runActivitySample(cmd, tenant, environment, procRoot, cgroupRoot, jsonOutput)
@@ -317,6 +317,19 @@ func newActivitySampleCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON")
 	return cmd
+}
+
+// recordActivityIf records the given kind only when found is true, so a
+// sampler tick that detects nothing leaves the activity snapshot untouched.
+func recordActivityIf(found bool, tenant, environment, kind string) error {
+	if !found {
+		return nil
+	}
+	return common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+		Tenant:      tenant,
+		Environment: environment,
+		Kind:        kind,
+	})
 }
 
 func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroupRoot string, jsonOutput bool) error {
@@ -337,16 +350,20 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err := retainRuntimeUsage(tenant, environment, cgroupRoot); err != nil {
 		return err
 	}
-	if result.Busy {
-		if err := common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
-			Tenant:      tenant,
-			Environment: environment,
-			Kind:        common.ActivityKindProcess,
-		}); err != nil {
-			return err
-		}
+	if err := recordActivityIf(result.Busy, tenant, environment, common.ActivityKindProcess); err != nil {
+		return err
 	}
-	ctx := commandContext(cmd)
+	interactiveSSH, err := common.ScanInteractiveSSHSession(procRoot)
+	if err != nil {
+		return err
+	}
+	if err := recordActivityIf(interactiveSSH, tenant, environment, common.ActivityKindSSH); err != nil {
+		return err
+	}
+	return writeActivitySampleResult(commandContext(cmd), result, jsonOutput)
+}
+
+func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult, jsonOutput bool) error {
 	if jsonOutput {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}
@@ -354,7 +371,7 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 		_, err := fmt.Fprintln(ctx.Stdout, "no working build or agent processes")
 		return err
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "working: %s\n", strings.Join(result.Processes, ", "))
+	_, err := fmt.Fprintf(ctx.Stdout, "working: %s\n", strings.Join(result.Processes, ", "))
 	return err
 }
 

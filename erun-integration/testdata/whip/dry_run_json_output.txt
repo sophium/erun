@@ -35,5 +35,5 @@
   ]
 }
 audit: erun whip --dry-run --json
-mcp: team/dev edge resolved to http://<LOOPBACK>:17000/mcp
-mcp tools/call http://<LOOPBACK>:17000/mcp whip preview=true
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp tools/call http://<LOOPBACK>:26100/mcp whip preview=true

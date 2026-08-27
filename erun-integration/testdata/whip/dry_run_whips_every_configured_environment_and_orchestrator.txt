@@ -2,7 +2,7 @@
   team/dev: skipped — not-alive: no desktop identity at <DESKTOP_IDENTITY>; open an environment from the ERun desktop app once so the identity exists and deployed runtimes trust it
   orchestrator Eng One: skipped — unreachable-from-transport
 audit: erun whip --dry-run
-mcp: other/staging edge resolved to http://<LOOPBACK>:17000/mcp
-mcp tools/call http://<LOOPBACK>:17000/mcp whip preview=true
-mcp: team/dev edge resolved to http://<LOOPBACK>:17100/mcp
-mcp tools/call http://<LOOPBACK>:17100/mcp whip preview=true
+mcp: other/staging edge resolved to http://<LOOPBACK>:26200/mcp
+mcp tools/call http://<LOOPBACK>:26200/mcp whip preview=true
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+mcp tools/call http://<LOOPBACK>:26100/mcp whip preview=true
