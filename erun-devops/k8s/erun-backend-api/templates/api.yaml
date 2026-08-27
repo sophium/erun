@@ -183,9 +183,35 @@
 {{- if $releaseQueueEnabled }}
 {{- $_ := required "api.releaseQueue.namespace is required when the release queue is enabled: it is the agent environment's namespace the release Job runs in" $releaseNamespace }}
 {{- end }}
-{{- $apiServiceAccountNeeded := or $envDeployerEnabled $releaseQueueEnabled -}}
-{{- $dbosNeeded := or $envDeployerEnabled $releaseQueueEnabled -}}
-{{- if and $releaseQueueEnabled (not $envDeployerEnabled) }}
+{{- /* Opt-in server-side merge queue: promoting a review to MERGE dispatches
+       `internal/mergeexec` to build the prospective squash merge onto the
+       review's current target, gate it with a real `erun build` in the agent
+       environment's own namespace, and push only on green -- so `MERGED` means
+       a merge actually happened and a build actually passed. Off by default --
+       a promotion is still recorded, with nothing to gate it, until an operator
+       advances the queue by hand -- so existing deploys are byte-for-byte
+       unchanged. Unlike the release Job, the merge Job fetches, commits, and
+       pushes, so it needs a real writable checkout with push credentials: the
+       workspace claim and repo path are required, not optional, matching
+       provision.MergeConfig.Configured(). It reuses whatever git/push
+       credentials already exist in that agent environment's own home volume --
+       the chart wires no credential of its own. */ -}}
+{{- $mergeQueue := default dict $api.mergeQueue -}}
+{{- $mergeQueueEnabled := default false $mergeQueue.enabled -}}
+{{- $mergeNamespace := default "" $mergeQueue.namespace -}}
+{{- $mergeSA := default (printf "%s-devops" $tenant) $mergeQueue.serviceAccountName -}}
+{{- $mergeRuntimeVersion := default .Chart.AppVersion $mergeQueue.runtimeVersion -}}
+{{- $mergeHomeClaim := default "" $mergeQueue.homeClaim -}}
+{{- $mergeWorkspaceClaim := default "" $mergeQueue.workspaceClaim -}}
+{{- $mergeRepoPath := default "" $mergeQueue.repoPath -}}
+{{- if $mergeQueueEnabled }}
+{{- $_ := required "api.mergeQueue.namespace is required when the merge queue is enabled: it is the agent environment's namespace the merge gate Job runs in" $mergeNamespace }}
+{{- $_ := required "api.mergeQueue.workspaceClaim is required when the merge queue is enabled: the merge gate Job fetches, commits, and pushes against a real writable checkout" $mergeWorkspaceClaim }}
+{{- $_ := required "api.mergeQueue.repoPath is required when the merge queue is enabled: the in-pod path the workspace claim mounts at" $mergeRepoPath }}
+{{- end }}
+{{- $apiServiceAccountNeeded := or $envDeployerEnabled $releaseQueueEnabled $mergeQueueEnabled -}}
+{{- $dbosNeeded := or $envDeployerEnabled $releaseQueueEnabled $mergeQueueEnabled -}}
+{{- if and (or $releaseQueueEnabled $mergeQueueEnabled) (not $envDeployerEnabled) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -229,6 +255,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $tenant }}-api-release-queue
+---
+{{- end }}
+{{- if $mergeQueueEnabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-api-merge-queue
+  namespace: {{ $mergeNamespace }}
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-api-merge-queue
+  namespace: {{ $mergeNamespace }}
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $apiServiceAccount }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-api-merge-queue
 ---
 {{- end }}
 {{- if $envDeployerEnabled }}
@@ -615,11 +674,11 @@ spec:
               value: {{ $envDeployerExposeTargetIP | quote }}
             {{- end }}
             {{- end }}
-            {{- if $releaseQueueEnabled }}
-            {{- if not $envDeployerEnabled }}
+            {{- if and (or $releaseQueueEnabled $mergeQueueEnabled) (not $envDeployerEnabled) }}
             - name: ERUN_ENV_DEPLOY_REGISTRY
               value: {{ $containerRegistry | quote }}
             {{- end }}
+            {{- if $releaseQueueEnabled }}
             - name: ERUN_RELEASE_NAMESPACE
               value: {{ $releaseNamespace | quote }}
             - name: ERUN_RELEASE_SERVICE_ACCOUNT
@@ -642,6 +701,22 @@ spec:
             - name: ERUN_RELEASE_DRY_RUN
               value: "1"
             {{- end }}
+            {{- end }}
+            {{- if $mergeQueueEnabled }}
+            - name: ERUN_MERGE_NAMESPACE
+              value: {{ $mergeNamespace | quote }}
+            - name: ERUN_MERGE_SERVICE_ACCOUNT
+              value: {{ $mergeSA | quote }}
+            - name: ERUN_MERGE_RUNTIME_VERSION
+              value: {{ $mergeRuntimeVersion | quote }}
+            {{- if $mergeHomeClaim }}
+            - name: ERUN_MERGE_HOME_CLAIM
+              value: {{ $mergeHomeClaim | quote }}
+            {{- end }}
+            - name: ERUN_MERGE_WORKSPACE_CLAIM
+              value: {{ $mergeWorkspaceClaim | quote }}
+            - name: ERUN_MERGE_REPO_PATH
+              value: {{ $mergeRepoPath | quote }}
             {{- end }}
             {{- if $mcpSigningSecretName }}
             - name: ERUN_API_MCP_SIGNING_KEY_PATH
