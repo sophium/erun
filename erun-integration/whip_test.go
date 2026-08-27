@@ -34,13 +34,14 @@ func TestWhip(t *testing.T) {
 	})
 
 	t.Run("dry_run_one_named_environment_not_open_reports_not_alive", func(t *testing.T) {
-		// SeedTenantEnv never sets a local port range, so there is no local MCP
-		// edge to reach -- exactly the state of an environment nobody has open
-		// in the desktop right now. This must resolve to a "not alive" skip,
-		// not a hard command failure: the environment not being open is an
-		// ordinary, expected outcome of a fleet-wide whip.
+		// Pinned to the 26100 range (erun-integration/AGENTS.md's "pin a high
+		// port range") rather than the plain SeedTenantEnv default, or the probe
+		// below can land on whatever a developer's live erun session already
+		// holds on the default 17000 range and read as a stale port-forward
+		// instead of the "nobody has this open" case the scenario means to test.
+		skipIfPortsBusy(t, 26100)
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		result := erun.Run(t, []string{"whip", "--tenant", "team", "--environment", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -54,9 +55,11 @@ func TestWhip(t *testing.T) {
 		// orchestrator. Orchestrators are always reported unreachable from
 		// this transport -- a CLI process has no channel into a desktop-held
 		// PTY -- independent of whether any environment edge is reachable.
+		// Pinned ports for the same reason as the scenario above.
+		skipIfPortsBusy(t, 26100, 26200)
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedTenantEnv(t, setup, "other", "staging")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "other", "staging", 26200)
 		seedOrchestrator(t, setup, "eng-1", "Eng One")
 		result := erun.Run(t, []string{"whip", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -66,8 +69,10 @@ func TestWhip(t *testing.T) {
 	})
 
 	t.Run("dry_run_json_output", func(t *testing.T) {
+		// Pinned ports for the same reason as the scenarios above.
+		skipIfPortsBusy(t, 26100)
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		seedOrchestrator(t, setup, "eng-1", "Eng One")
 		result := erun.Run(t, []string{"whip", "--dry-run", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {

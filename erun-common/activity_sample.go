@@ -143,6 +143,107 @@ func residentActivityCPUBusy(deltaTicks int64, elapsed time.Duration) bool {
 	return rate >= residentActivityCPURateFloor
 }
 
+// ScanInteractiveSSHSession reports whether this pod currently holds a
+// pseudo-terminal allocated for an SSH session - the same discriminator `ps`
+// shows as a real TTY versus "notty". Privilege-separated sshd never assigns
+// the pty as its own controlling terminal: the per-session "sshd: user@ptsN"
+// process holds the pty master and stays tty-less itself, while the command
+// or shell it execs becomes the pty's session leader. The check is therefore
+// two passes - which pids are sshd, then which processes both have a
+// controlling terminal and were forked by one of those pids - rather than a
+// single process's own fields. sshd's listener always daemonizes with no
+// controlling terminal, and neither does a workspace-sync or sftp channel
+// (no pty requested), so this is blind to both by construction: only a
+// genuine interactive session, which requests one, trips it. It is what SSH
+// activity should mean for operator presence, in place of bytes crossing the
+// host-side forward, which erun's own port-forward re-establishment and
+// background sync traffic can produce just as easily as a person typing.
+func ScanInteractiveSSHSession(procRoot string) (bool, error) {
+	root := strings.TrimSpace(procRoot)
+	if root == "" {
+		root = DefaultProcRoot
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	processes, sshdPIDs := scanProcessTreeForSSHDChildren(root, entries)
+	for _, info := range processes {
+		if info.ttyNr != 0 {
+			if _, parentIsSSHD := sshdPIDs[info.ppid]; parentIsSSHD {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+type sshProcessInfo struct {
+	ppid  int64
+	ttyNr int64
+}
+
+// scanProcessTreeForSSHDChildren reads every /proc/[pid]/stat entry once,
+// returning each process's ppid/tty_nr plus the set of pids that are sshd -
+// the two facts ScanInteractiveSSHSession needs to find a pty-holding child
+// of one.
+func scanProcessTreeForSSHDChildren(root string, entries []os.DirEntry) (map[int64]sshProcessInfo, map[int64]struct{}) {
+	processes := make(map[int64]sshProcessInfo)
+	sshdPIDs := make(map[int64]struct{})
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		comm, ppid, ttyNr, ok := readProcessCommPPIDAndTTY(filepath.Join(root, entry.Name(), "stat"))
+		if !ok {
+			continue
+		}
+		processes[int64(pid)] = sshProcessInfo{ppid: ppid, ttyNr: ttyNr}
+		if comm == "sshd" {
+			sshdPIDs[int64(pid)] = struct{}{}
+		}
+	}
+	return processes, sshdPIDs
+}
+
+// readProcessCommPPIDAndTTY reads a /proc/[pid]/stat entry's comm, ppid, and
+// tty_nr fields. tty_nr is 0 when the process has no controlling terminal.
+func readProcessCommPPIDAndTTY(path string) (string, int64, int64, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	line := string(data)
+	open := strings.IndexByte(line, '(')
+	closing := strings.LastIndexByte(line, ')')
+	if open < 0 || closing <= open {
+		return "", 0, 0, false
+	}
+	comm := line[open+1 : closing]
+	fields := strings.Fields(line[closing+1:])
+	// ppid and tty_nr are the fourth and seventh stat columns, and fields
+	// starts at the third column (state), so they land at index 1 and 4.
+	const ppidIndex = 1
+	const ttyNrIndex = 4
+	if len(fields) <= ttyNrIndex {
+		return "", 0, 0, false
+	}
+	ppid, err := strconv.ParseInt(fields[ppidIndex], 10, 64)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	ttyNr, err := strconv.ParseInt(fields[ttyNrIndex], 10, 64)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	return comm, ppid, ttyNr, true
+}
+
 // readResidentActivityProcess reads one /proc entry, returning its name, the
 // pid+start-time key that survives pid reuse, and its accumulated CPU ticks.
 // Entries that are not processes, are the observer itself, or are not work

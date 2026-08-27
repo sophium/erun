@@ -93,12 +93,36 @@ func seedActivitySnapshot(t *testing.T, cacheHome, tenant, environment, kind, bo
 // be running.
 func writeSampleProcess(t *testing.T, root string, pid int, comm string, cpuTicks, startTime int64) {
 	t.Helper()
+	writeSampleProcessWithTTY(t, root, pid, comm, cpuTicks, startTime, 0)
+}
+
+// writeSampleProcessWithTTY is writeSampleProcess with an explicit tty_nr
+// (column 7) and no parent, for a lone process with - or without - an
+// allocated pseudo-terminal.
+func writeSampleProcessWithTTY(t *testing.T, root string, pid int, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
+	writeSampleProcessFull(t, root, pid, 0, comm, cpuTicks, startTime, ttyNr)
+}
+
+// writeSampleProcessFull is writeSampleProcessWithTTY with an explicit ppid
+// (column 4), so a scenario can model the real shape of an SSH session: the
+// per-session "sshd: user@ptsN" process stays tty-less itself while the
+// command it forks becomes the pty's session leader.
+func writeSampleProcessFull(t *testing.T, root string, pid int, ppid int64, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
 	dir := filepath.Join(root, fmt.Sprintf("%d", pid))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	fields := []string{fmt.Sprintf("%d (%s) S", pid, comm)}
-	for i := 0; i < 10; i++ {
+	// Column 4 (ppid).
+	fields = append(fields, fmt.Sprintf("%d", ppid))
+	// Columns 5..6 (pgrp, session) are unused padding.
+	fields = append(fields, "0", "0")
+	// Column 7 (tty_nr): 0 means no controlling terminal.
+	fields = append(fields, fmt.Sprintf("%d", ttyNr))
+	// Columns 8..13 (tpgid through cmajflt) are unused padding.
+	for i := 0; i < 6; i++ {
 		fields = append(fields, "0")
 	}
 	fields = append(fields, fmt.Sprintf("%d", cpuTicks), "0")
@@ -965,6 +989,48 @@ func TestActivity(t *testing.T) {
 		// lives outside the captured streams.
 		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "process.json")); err != nil {
 			t.Errorf("expected the working sample to record process activity: %v", err)
+		}
+	})
+
+	t.Run("sample_records_ssh_activity_for_a_pty_holding_session", func(t *testing.T) {
+		// A real interactive session is an sshd child ("sshd:
+		// user@ptsN", itself tty-less) that forks a shell holding the allocated
+		// pseudo-terminal. That must read as SSH activity even though nothing
+		// crossed the host-side forward that this fixture cannot simulate.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		writeSampleProcessFull(t, procRoot, 401, 1, "sshd", 10, 900, 0)
+		writeSampleProcessFull(t, procRoot, 403, 401, "bash", 10, 901, 34816)
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		body, err := os.ReadFile(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "ssh.json"))
+		if err != nil {
+			t.Fatalf("expected the pty-holding session to record ssh activity: %v", err)
+		}
+		if !strings.Contains(string(body), `"lastActivity"`) {
+			t.Errorf("expected lastActivity recorded for a real session, got:\n%s", body)
+		}
+	})
+
+	t.Run("sample_ignores_a_notty_ssh_child", func(t *testing.T) {
+		// An sshd child whose forked command never allocated a pty -
+		// the shape a port-forward re-establishment or a background sync
+		// channel takes - must never read as SSH activity, or the phantom-session
+		// bug this fixes comes back.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		writeSampleProcessFull(t, procRoot, 402, 1, "sshd", 10, 900, 0)
+		writeSampleProcessFull(t, procRoot, 404, 402, "sftp-server", 10, 901, 0)
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "ssh.json")); !os.IsNotExist(err) {
+			t.Errorf("expected no ssh activity recorded for a notty sshd child, stat err: %v", err)
 		}
 	})
 

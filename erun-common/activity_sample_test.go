@@ -17,14 +17,39 @@ import (
 // that actually breaks naive splitting.
 func writeProcEntry(t *testing.T, root string, pid int, comm string, cpuTicks, startTime int64) {
 	t.Helper()
+	writeProcEntryWithTTY(t, root, pid, comm, cpuTicks, startTime, 0)
+}
+
+// writeProcEntryWithTTY is writeProcEntry with an explicit tty_nr (column 7),
+// so a scenario can lay down a process that holds - or does not hold - an
+// allocated pseudo-terminal.
+func writeProcEntryWithTTY(t *testing.T, root string, pid int, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
+	writeProcEntryFull(t, root, pid, 0, comm, cpuTicks, startTime, ttyNr)
+}
+
+// writeProcEntryFull is writeProcEntryWithTTY with an explicit ppid (column
+// 4), so a scenario can model the real shape of an SSH session: the
+// per-session "sshd: user@ptsN" process stays tty-less itself while the
+// command it forks becomes the pty's session leader.
+func writeProcEntryFull(t *testing.T, root string, pid int, ppid int64, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
 	dir := filepath.Join(root, fmt.Sprintf("%d", pid))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	fields := make([]string, 0, 22)
 	fields = append(fields, fmt.Sprintf("%d (%s) S", pid, comm))
-	// Columns 4..13 (ppid through cmajflt) are unused padding here.
-	for i := 0; i < 10; i++ {
+	// Column 4 (ppid).
+	fields = append(fields, fmt.Sprintf("%d", ppid))
+	// Column 5 (pgrp) is unused padding.
+	fields = append(fields, "0")
+	// Column 6 (session) is unused padding.
+	fields = append(fields, "0")
+	// Column 7 (tty_nr): 0 means no controlling terminal.
+	fields = append(fields, fmt.Sprintf("%d", ttyNr))
+	// Columns 8..13 (tpgid through cmajflt) are unused padding here.
+	for i := 0; i < 6; i++ {
 		fields = append(fields, "0")
 	}
 	// utime + stime, split so the parser has to sum them.
@@ -174,5 +199,54 @@ func TestResidentActivityIgnoresProcessesNobodyWouldCallWork(t *testing.T) {
 	}
 	if second.Busy {
 		t.Errorf("the pod's own long-lived services must not read as work, got %+v", second)
+	}
+}
+
+// TestScanInteractiveSSHSession pins the discriminator that separates an
+// operator at a real shell from erun's own port-forward and sync traffic.
+// Privilege-separated sshd never puts the pty on its own process: the
+// per-session "sshd: user@ptsN" process (measured tty_nr=0, matching a real
+// runtime pod) forks the command or shell that actually becomes the pty's
+// session leader, so the check has to follow that parent/child edge rather
+// than reading one process's own fields.
+func TestScanInteractiveSSHSession(t *testing.T) {
+	root := t.TempDir()
+	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
+		t.Fatalf("expected no session with an empty /proc, got found=%v err=%v", found, err)
+	}
+
+	// The listener itself: daemonized, no controlling terminal, no children.
+	writeProcEntryFull(t, root, 1, 0, "sshd", 10, 100, 0)
+	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
+		t.Fatalf("expected the sshd listener alone to read as no session, got found=%v err=%v", found, err)
+	}
+
+	// A workspace-sync/sftp channel: the per-session sshd child (tty-less,
+	// like the real process) forks a transfer helper that never requested a
+	// pty either - "notty" end to end.
+	writeProcEntryFull(t, root, 2, 1, "sshd", 10, 101, 0)
+	writeProcEntryFull(t, root, 3, 2, "sftp-server", 10, 102, 0)
+	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
+		t.Fatalf("expected a notty session to read as no session, got found=%v err=%v", found, err)
+	}
+
+	// A real interactive session: the per-session sshd child forks a shell
+	// that holds the allocated pty.
+	writeProcEntryFull(t, root, 4, 1, "sshd", 10, 103, 0)
+	writeProcEntryFull(t, root, 5, 4, "bash", 10, 104, 34816)
+	if found, err := ScanInteractiveSSHSession(root); err != nil || !found {
+		t.Fatalf("expected a pty-holding session to read as active, got found=%v err=%v", found, err)
+	}
+}
+
+// TestScanInteractiveSSHSessionIgnoresNonSSHDProcessesWithATTY guards against
+// a broader match than intended: a shell or editor with a real tty must not
+// itself count unless its parent is actually an sshd process.
+func TestScanInteractiveSSHSessionIgnoresNonSSHDProcessesWithATTY(t *testing.T) {
+	root := t.TempDir()
+	writeProcEntryFull(t, root, 10, 1, "tmux", 10, 100, 34816)
+	writeProcEntryFull(t, root, 11, 10, "bash", 10, 101, 34816)
+	if found, err := ScanInteractiveSSHSession(root); err != nil || found {
+		t.Fatalf("expected a tty-holding process with no sshd parent to read as no session, got found=%v err=%v", found, err)
 	}
 }
