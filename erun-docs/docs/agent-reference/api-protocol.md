@@ -115,6 +115,11 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/tenants` | List every tenant (operations-only caller), or a single-item list containing just the caller's own tenant otherwise. | Tenant member (read) |
 | `POST` | `/v1/users` | Enroll a user in the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/users` | List the caller's tenant's users, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
+| `GET` | `/v1/roles` | List the caller's tenant's roles with their permissions. | Tenant member (read) |
+| `POST` | `/v1/roles` | Create a tenant-owned role with one or more permissions. Body below. | Tenant member (write) |
+| `GET` | `/v1/users/{user_id}/roles` | List a user's assigned roles. | Tenant member (read) |
+| `POST` | `/v1/users/{user_id}/roles` | Grant a role to a user. Body below. | Tenant member (write) |
+| `DELETE` | `/v1/users/{user_id}/roles/{role_id}` | Revoke a role from a user; refused if it would leave the tenant with no user able to grant roles. | Tenant member (write) |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
 
@@ -735,7 +740,7 @@ Both act on the caller's own resolved tenant by default. An explicit `tenantId` 
 }
 ```
 
-Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build. Enrollment grants the same predefined `ReadAll`/`WriteAll` roles every bootstrapped user gets — there is no finer-grained role-assignment surface yet.
+Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build. Enrollment grants the same predefined `ReadAll`/`WriteAll` roles every bootstrapped user gets — this is the safe default for a tenant's first user (see [empty-database bootstrap](#tenant-issuers) above), not the only role shape a tenant can hold. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator narrows a user's access after enrollment.
 
 This endpoint requires the caller to already know the enrollee's `issuer`/`subject` from the identity provider. [`POST /v1/identity/users`](/agent-reference/identity-administration) is the higher-level alternative for a platform running its own IdP (Zitadel): it creates the IdP identity itself and calls this same mapping with the subject the IdP returns, in one action, restricted to an `OPERATIONS` tenant.
 
@@ -762,6 +767,64 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 | `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
 | `409` | `POST /v1/users`: a user with that `username` already exists in the target tenant (`users_tenant_username_key`). | Use a different username, or omit `tenantId` if you meant your own tenant. |
+
+### Roles and role assignment {#roles-endpoints}
+
+A **role** is a named, tenant-owned bundle of permissions; a **permission** is one API method + path grant, either an exact pair (`apiMethod`/`apiPath`) or a regex pattern pair (`apiMethodPattern`/`apiPathPattern`) — the same shape `role_permissions` stores and [the capability set](#capability-set) resolves against. `ReadAll` and `WriteAll` are two such roles, predefined per tenant and granted to every bootstrapped user; a tenant can also define its own narrower roles and assign them instead. All five endpoints below act on the caller's own resolved tenant — RLS scopes every read and write, and there is no operations-tenant cross-tenant override (unlike `/v1/users`).
+
+**`GET /v1/roles`** lists the tenant's roles with their permissions. **`POST /v1/roles`** creates one:
+
+```jsonc
+// POST /v1/roles body
+{
+  "name": "ReviewsReader",
+  "permissions": [
+    { "apiMethod": "GET", "apiPath": "/v1/reviews" },
+    { "apiMethodPattern": "^GET$", "apiPathPattern": "^/v1/reviews/.*$" }
+  ]
+}
+
+// 201 response
+{
+  "roleId": "019a7fa5-c2c0-7c55-bc70-714873a71f70",
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "name": "ReviewsReader",
+  "permissions": [
+    { "rolePermissionId": "019a7fa5-…", "tenantId": "019a7fa5-…", "roleId": "019a7fa5-…", "apiMethod": "GET", "apiPath": "/v1/reviews", "createdAt": "…", "updatedAt": "…" },
+    { "rolePermissionId": "019a7fa5-…", "tenantId": "019a7fa5-…", "roleId": "019a7fa5-…", "apiMethodPattern": "^GET$", "apiPathPattern": "^/v1/reviews/.*$", "createdAt": "…", "updatedAt": "…" }
+  ],
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+Each permission needs **exactly one** of the exact pair or the pattern pair (matching `role_permissions_exact_or_pattern_check`); an exact `apiMethod` must be one of `GET`/`HEAD`/`OPTIONS`/`POST`/`PUT`/`PATCH`/`DELETE`, and both pattern fields must compile as regular expressions. At least one permission is required — a role with none could never be granted meaningfully.
+
+**`GET /v1/users/{user_id}/roles`** lists a user's assigned roles. **`POST /v1/users/{user_id}/roles`** grants one; **`DELETE /v1/users/{user_id}/roles/{role_id}`** revokes one:
+
+```jsonc
+// POST /v1/users/019a7fa5-…-f60/roles body
+{ "roleId": "019a7fa5-c2c0-7c55-bc70-714873a71f70" }
+
+// 201 response
+{
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "userId": "019a7fa5-c2c0-7c55-bc70-714873a71f60",
+  "roleId": "019a7fa5-c2c0-7c55-bc70-714873a71f70",
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
+**The lockout guard.** `DELETE /v1/users/{user_id}/roles/{role_id}` refuses when the revoke would leave the tenant with **no user holding a role that can grant roles** (a permission matching `POST /v1/users/{user_id}/roles` itself) — the one failure this feature makes impossible rather than merely recoverable, since there would be no lever left inside the product to undo it. The check runs against every user in the tenant, not just the one being revoked, so revoking a role from one admin while another admin still holds a grant-capable role succeeds normally.
+
+**Error behaviour.** Bare HTTP status, plain-text body, same as `/v1/users`:
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `POST /v1/roles`: `name` is empty, no permissions given, or a permission fails the exact/pattern-exclusivity, method-enum, or regex-compile checks above. `POST /v1/users/{user_id}/roles`: `roleId` is empty. | Fix the request body per the rules above. |
+| `404` | The `role_id` or `user_id` does not exist in the caller's tenant (a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to your own tenant. |
+| `409` | `POST /v1/roles`: a role with this name, or one of its permissions, already exists in the tenant. `POST /v1/users/{user_id}/roles`: the user already holds this role. `DELETE .../roles/{role_id}`: the lockout guard above refused the revoke. | Use a different name, or accept the existing grant; for the lockout case, grant a recovery role to another user (or the same user) before revoking this one. |
 
 ### `PUT /v1/tenants/{tenant_id}/quota` {#put-v1tenantstenant_idquota}
 
