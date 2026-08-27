@@ -45,7 +45,7 @@ export interface UsersController {
   enrollState: EnrollState;
   refresh: () => void;
   enroll: (input: EnrollIdentityUserInput) => void;
-  setActive: (externalId: string, active: boolean) => void;
+  setActive: (externalId: string, active: boolean) => Promise<void>;
   dismissTemporaryPassword: () => void;
 }
 
@@ -98,11 +98,15 @@ export function useUsersController(token: string): UsersController {
     [token, activeRef, createIdentityUser],
   );
 
+  // setActive resolves once the request settles, whether it succeeded or
+  // failed, so a caller gating the call behind a confirmation dialog can
+  // await it to know when to stop showing the in-flight state.
   const setActive = React.useCallback(
-    (externalId: string, active: boolean) => {
+    (externalId: string, active: boolean): Promise<void> => {
       setActionError(undefined);
-      setIdentityUserActive({ token, externalId, active })
+      return setIdentityUserActive({ token, externalId, active })
         .unwrap()
+        .then(() => undefined)
         .catch((error: unknown) => {
           if (activeRef.current) {
             setActionError(queryErrorMessage(error));

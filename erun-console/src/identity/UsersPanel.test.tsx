@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithStore } from '../test/renderWithStore';
@@ -172,7 +172,110 @@ describe('UsersPanel', () => {
     expect(await screen.findByText(/could not be enrolled as an erun user/)).toBeInTheDocument();
   });
 
-  it('deactivates an active user and refreshes the list', async () => {
+  it('does not deactivate a user on a single click', async () => {
+    let deactivateCalled = false;
+    mockFetch((req) => {
+      if (req.method === 'POST' && req.url === '/v1/identity/users/idp-1/deactivate') {
+        deactivateCalled = true;
+        return jsonResponse({});
+      }
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([{ id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('USER_STATE_ACTIVE');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+
+    expect(deactivateCalled).toBe(false);
+    expect(screen.getByText('USER_STATE_ACTIVE')).toBeInTheDocument();
+  });
+
+  it('names the user and the consequence in the deactivate confirmation', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([{ id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('USER_STATE_ACTIVE');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: /alice/ })).toBeInTheDocument();
+    expect(within(dialog).getByText(/next sign-in/)).toBeInTheDocument();
+  });
+
+  it('leaves the user active when the deactivate confirmation is cancelled', async () => {
+    let deactivateCalled = false;
+    mockFetch((req) => {
+      if (req.method === 'POST' && req.url === '/v1/identity/users/idp-1/deactivate') {
+        deactivateCalled = true;
+        return jsonResponse({});
+      }
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([{ id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('USER_STATE_ACTIVE');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+    expect(deactivateCalled).toBe(false);
+    expect(screen.getByText('USER_STATE_ACTIVE')).toBeInTheDocument();
+  });
+
+  it('disables cancel and confirm while the deactivate request is in flight', async () => {
+    let resolveDeactivate: (() => void) | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        const method = init?.method ?? 'GET';
+        if (method === 'POST' && url === '/v1/identity/users/idp-1/deactivate') {
+          return new Promise<Response>((resolve) => {
+            resolveDeactivate = () => {
+              resolve(jsonResponse({}));
+            };
+          });
+        }
+        if (url === '/v1/identity/users') {
+          return Promise.resolve(
+            jsonResponse([{ id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]),
+          );
+        }
+        return Promise.resolve(jsonResponse({}, 404));
+      }),
+    );
+
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('USER_STATE_ACTIVE');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
+
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: /Deactivate/ })).toBeDisabled();
+
+    resolveDeactivate?.();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('deactivates an active user through the confirmation dialog and refreshes the list', async () => {
     let deactivateCalled = false;
     let listCount = 0;
     mockFetch((req) => {
@@ -191,8 +294,35 @@ describe('UsersPanel', () => {
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Deactivate' }));
 
     await screen.findByText('USER_STATE_INACTIVE');
     expect(deactivateCalled).toBe(true);
+  });
+
+  it('reactivates an inactive user on a single click, with no confirmation gate', async () => {
+    let reactivateCalled = false;
+    let listCount = 0;
+    mockFetch((req) => {
+      if (req.method === 'POST' && req.url === '/v1/identity/users/idp-1/reactivate') {
+        reactivateCalled = true;
+        return jsonResponse({});
+      }
+      if (req.url === '/v1/identity/users') {
+        listCount += 1;
+        const state = listCount === 1 ? 'USER_STATE_INACTIVE' : 'USER_STATE_ACTIVE';
+        return jsonResponse([{ id: 'idp-1', username: 'alice', state }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('USER_STATE_INACTIVE');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));
+
+    await screen.findByText('USER_STATE_ACTIVE');
+    expect(reactivateCalled).toBe(true);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
