@@ -194,7 +194,29 @@ Typical end-to-end resume latency: 60–120 seconds on EKS / GKE / AKS, dominate
 | `POD_NOT_READY` | Runtime pod failed to reach Ready within 3 minutes. | `kubectl describe pod` + `kubectl logs`; common causes: image-pull failure, init-container failure. |
 | `LIMIT_EXCEEDED` | Provider returned a service-quota error. | Lower instance count or request a quota increase. |
 
-## Reading the live state
+## AI session status {#ai-session-status}
+
+The same `idle` response also carries `ai_sessions`: the structured status of the env's own AI tool sessions (`ai`, and `contribute-ai` when contribute mode is on), read from the tool's own turn-boundary self-report rather than inferred from PTY output volume or timing. This is what the desktop's sidebar badge and orchestrator hover card render (see [Desktop app · Control panel](/desktop/overview#control-panel)); the MCP edge is the same read for any other Agent client.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `sessionId` | string | The persistent pod session id: `ai` or `contribute-ai`. |
+| `tool` | string | The AI tool launched in this session (`claude`, `codex`, or whatever `EnvConfig.aitool` names). |
+| `state` | string enum | `busy`, `idle`, `awaiting-input`, or `unknown`. See below. |
+| `lastActivity` | RFC3339 UTC timestamp, omitted if never reported | When `state` was last confirmed: the tool's own last self-report, or the process exit time once `outcome` is set. |
+| `outcome` | string enum, omitted while running | `exited` or `oom-killed`, once the session's tool process has ended. `state` is always `idle` once `outcome` is set. |
+| `exitCode` | int, omitted while running | The tool process's exit code. `137` (SIGKILL) is what a container-memory-limit kill looks like, reported as `oom-killed`. |
+
+A session id with no live pod socket at all is omitted from `ai_sessions` entirely — there is nothing to report unknown about. `ai_sessions` itself is omitted when the env has no AI session running.
+
+### States
+
+- **`busy`** — the tool reported it is mid-turn: it received a prompt or is running a tool call and has not yet stopped. For Claude, this is the `UserPromptSubmit` and `PreToolUse` hooks; the latter renews the report on every tool call so a single long-running call does not go stale before it returns.
+- **`awaiting-input`** — the tool reported it is waiting on the operator: a permission prompt, or Claude Code's own idle-on-input notification. This is the state a PTY-output-volume heuristic can never produce, because a session waiting on a human and one that has finished are both silent — and it is the one an operator most needs, since a silent session waiting on them is otherwise indistinguishable from a finished one. Sourced from Claude Code's `Notification` hook.
+- **`idle`** — the tool reported its turn ended (Claude's `Stop` hook), or its process has exited (`outcome` is then set too).
+- **`unknown`** — no structured report exists for this session: the tool has no hook mechanism wired (Codex, or any `aitool` other than `claude`), or it exists but has not reached its first turn boundary yet. This is the honest answer wherever the state would otherwise have to be inferred rather than told — never a guess derived from output volume, cadence, or silence.
+
+### Reading the live state
 
 An Agent that's about to wait on a long operation should check eligibility first:
 
@@ -219,6 +241,9 @@ An Agent that's about to wait on a long operation should check eligibility first
   },
   "leases": [
     { "id": "agent-run", "name": "agent-run", "pid": 4242, "expiresAt": "2026-05-25T14:50:00Z" }
+  ],
+  "ai_sessions": [
+    { "sessionId": "ai", "tool": "claude", "state": "awaiting-input", "lastActivity": "2026-05-25T14:31:40Z" }
   ]
 }
 ```

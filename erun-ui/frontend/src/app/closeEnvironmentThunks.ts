@@ -3,7 +3,7 @@ import type { UISelection } from '@/types';
 import { CloseEnvironmentSessions } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
 import { showTerminalError } from './notificationThunks';
-import { setAIBusyForEnv } from './slices/aiActivitySlice';
+import { setEnvActivityForEnv } from './slices/envStatusSlice';
 import { setSelected } from './slices/selectionSlice';
 import { clearEnvClosing, clearEnvOpening, markEnvClosing } from './slices/sessionsSlice';
 import { clearSelectedSessionForEnv, clearTabsForEnv, setSessionId } from './slices/terminalSlice';
@@ -41,11 +41,15 @@ export const closeEnvironment =
     }
     dispatch(clearTabsForEnv(key));
     dispatch(clearEnvClosing(key));
-    // Close is a definitive teardown of the desktop view; clear the AI-busy
-    // latch so the sidebar row stops spinning even if the backend's busy=false
-    // event is delayed or missed. The pod AI session keeps repainting after
-    // close, so recordAIActivity's idle clear may never fire on its own.
-    dispatch(setAIBusyForEnv({ key, busy: false }));
+    // Close is a definitive teardown of the desktop view; clear the observed
+    // activity (including the AI badge) so the sidebar row stops spinning
+    // even if the environment-activity poller's next tick is still 20s away.
+    dispatch(
+      setEnvActivityForEnv({
+        key,
+        activity: { reachable: false, observed: false, outage: false, busy: false, detail: '' },
+      }),
+    );
     dispatch(clearSelectedSessionForEnv(key));
     dispatch(clearEnvOpening({ tenant, environment }));
     const current = getState().selection.selected;

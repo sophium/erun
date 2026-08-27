@@ -1431,7 +1431,14 @@ func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	// environmentActivityInterval tick.
 	if aiActivityKind(managed.kind) {
 		selection := managed.selection
-		go a.emitEnvActivityIfChanged(a.observeEnvironmentActivity(selection))
+		// observeEnvironmentActivity dials the env's MCP edge (up to
+		// environmentActivityTimeout); it must run inside the goroutine, not
+		// as an argument evaluated before it, or every AI-tab exit blocks
+		// this function's own teardown (and the streamSession loop calling
+		// it) on a network round-trip.
+		go func() {
+			a.emitEnvActivityIfChanged(a.observeEnvironmentActivity(selection))
+		}()
 	}
 	a.mu.Lock()
 	managed.closed = true

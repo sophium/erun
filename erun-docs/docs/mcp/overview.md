@@ -456,7 +456,7 @@ The structured tools take no arguments unless noted. Outputs are typed JSON.
 
 ### `idle`
 
-Resolves the env's idle policy and reports its current activity. Useful for an Agent to decide whether to stop or keep going. Asking never counts as activity itself, however often it's polled — see [Agent reference · Idle policy](/agent-reference/idle-policy#last_terminal_input) for the full list of tools this applies to.
+Resolves the env's idle policy and reports its current activity. Useful for an Agent to decide whether to stop or keep going. Asking never counts as activity itself, however often it's polled — see [Agent reference · Idle policy](/agent-reference/idle-policy#last_terminal_input) for the full list of tools this applies to. The response also reports each of the env's AI tool sessions' own structured status (busy/idle/awaiting-input/unknown) — see [Agent reference · Idle policy · AI session status](/agent-reference/idle-policy#ai-session-status).
 
 ```jsonc
 {
@@ -475,6 +475,9 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
   },
   "leases": [
     { "id": "agent-run", "name": "agent-run", "pid": 4242, "expiresAt": "2026-05-25T14:50:00Z" }
+  ],
+  "ai_sessions": [
+    { "sessionId": "ai", "tool": "claude", "state": "awaiting-input", "lastActivity": "2026-05-25T14:31:40Z" }
   ]
 }
 ```

@@ -16,11 +16,15 @@ import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 // asserts the row still spins. Before the fix this would read idle, because
 // nothing but that missing event could have set it. The event path itself
 // (ai-activity flipping the spinner while the app is already running) is
-// already covered by sidebar-ai-activity.spec.ts; the backend's own re-emit
-// timing is covered by the Go tests in erun-ui/session_heartbeat_test.go
+// covered below by 'the ai-activity event flips the row while the app is
+// already running'; the backend's own re-emit timing is covered by the Go
+// tests in erun-ui/session_heartbeat_test.go
 // (TestReconcileOrchestratorActivityReEmitsEveryTick,
 // TestOrchestratorSnapshotRendersBusyWithoutTheEvent) since the headless
-// harness cannot wait out a real 15s poll deterministically.
+// harness cannot wait out a real 15s poll deterministically. An environment's
+// own AI-tab badge does NOT go through this event any more — see
+// sidebar-ai-activity.spec.ts, which covers the structured per-env model
+// (erun#1105) instead.
 
 const RUNNING_SESSION_ID = 4242;
 
@@ -67,6 +71,35 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
     await app.reboot();
 
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
+    await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
+  });
+
+  test('the ai-activity event flips the row while the app is already running', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(page, false);
+    await app.reboot();
+    await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
+
+    await page.evaluate((sessionId) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
+      runtime.EventsEmit('ai-activity', { sessionId, busy: true });
+    }, RUNNING_SESSION_ID);
+    await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toBeVisible();
+
+    await page.evaluate((sessionId) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
+      runtime.EventsEmit('ai-activity', { sessionId, busy: false });
+    }, RUNNING_SESSION_ID);
     await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
   });
 

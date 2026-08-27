@@ -13,4 +13,10 @@ export interface EnvActivityPayload {
   outage?: boolean;
   busy: boolean;
   detail?: string;
+  // AI* fields mirror UIEnvironmentActivity's — see its doc comment.
+  aiState?: string;
+  aiTool?: string;
+  aiLastActivityUnix?: number;
+  aiOutcome?: string;
+  aiExitCode?: number;
 }

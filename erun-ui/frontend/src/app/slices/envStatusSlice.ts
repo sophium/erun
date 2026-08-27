@@ -33,6 +33,15 @@ export interface EnvObservedActivity {
   outage: boolean;
   busy: boolean;
   detail: string;
+  // AI* fields mirror the env's primary AI session's own structured report —
+  // never inferred from output volume or timing. aiState is undefined when
+  // the env has no AI session running at all, distinct from 'unknown' (a
+  // session exists but has never self-reported).
+  aiState?: string;
+  aiTool?: string;
+  aiLastActivityUnix?: number;
+  aiOutcome?: string;
+  aiExitCode?: number;
 }
 
 export interface EnvStatusState {
@@ -65,25 +74,45 @@ export const envStatusSlice = createSlice({
       // A quiet environment carries no entry, so a repeated "still quiet"
       // observation must leave the slice byte-identical rather than producing a
       // new state object every poll.
-      if (!activity.reachable && !activity.busy && !activity.outage) {
+      if (isEnvActivityQuiet(activity)) {
         if (key in state.activityByEnv) {
           Reflect.deleteProperty(state.activityByEnv, key);
         }
         return;
       }
-      const current = state.activityByEnv[key];
-      if (
-        current?.reachable === activity.reachable &&
-        current.outage === activity.outage &&
-        current.busy === activity.busy &&
-        current.detail === activity.detail
-      ) {
+      if (envActivityUnchanged(state.activityByEnv[key], activity)) {
         return;
       }
       state.activityByEnv[key] = activity;
     },
   },
 });
+
+// isEnvActivityQuiet is true when an observation carries nothing worth
+// keeping an entry for. An actionable AI state (busy, awaiting input, or a
+// session that never reported) keeps the entry even if nothing else about the
+// env is busy, so the badge does not disappear.
+function isEnvActivityQuiet(activity: EnvObservedActivity): boolean {
+  const aiActionable = activity.aiState !== undefined && activity.aiState !== 'idle';
+  return !activity.reachable && !activity.busy && !activity.outage && !aiActionable;
+}
+
+function envActivityUnchanged(
+  current: EnvObservedActivity | undefined,
+  activity: EnvObservedActivity,
+): boolean {
+  return (
+    current?.reachable === activity.reachable &&
+    current.outage === activity.outage &&
+    current.busy === activity.busy &&
+    current.detail === activity.detail &&
+    current.aiState === activity.aiState &&
+    current.aiTool === activity.aiTool &&
+    current.aiLastActivityUnix === activity.aiLastActivityUnix &&
+    current.aiOutcome === activity.aiOutcome &&
+    current.aiExitCode === activity.aiExitCode
+  );
+}
 
 export const { setEnvActivityForEnv, setEnvStatusForEnv } = envStatusSlice.actions;
 export default envStatusSlice.reducer;

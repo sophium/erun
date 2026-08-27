@@ -11,6 +11,7 @@ import { selectSidebarFocus } from '@/app/selectors';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
+import { AwaitingInputIndicator } from '@/components/app/Sidebar.AwaitingInputIndicator';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import {
@@ -205,6 +206,7 @@ function EnvironmentRowOpenButton({
   isHost,
   busy,
   busyLabel,
+  awaitingInput,
 }: {
   environmentName: string;
   rowLabel: string;
@@ -214,6 +216,7 @@ function EnvironmentRowOpenButton({
   isHost: boolean;
   busy: boolean;
   busyLabel: string;
+  awaitingInput: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -237,7 +240,11 @@ function EnvironmentRowOpenButton({
       ) : (
         isLocal && <LocalEnvBadge selected={selected} />
       )}
-      {busy && <BusyRowSpinner label={busyLabel} />}
+      {awaitingInput ? (
+        <AwaitingInputIndicator label={busyLabel} />
+      ) : (
+        busy && <BusyRowSpinner label={busyLabel} />
+      )}
     </button>
   );
 }
@@ -264,12 +271,6 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     }
     return '';
   });
-  const aiBusy = useAppSelector(
-    (state) =>
-      state.aiActivity.aiBusyByEnv[
-        selectionKey({ tenant: tenantName, environment: environmentName })
-      ] === true,
-  );
   const isOpen = useAppSelector((state) => {
     const key = selectionKey({ tenant: tenantName, environment: environmentName });
     return (state.terminal.tabsByEnv[key]?.length ?? 0) > 0;
@@ -318,12 +319,16 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
   const envBusyDetail = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.detail ?? '',
   );
+  // The env's primary AI session's own structured state — never inferred
+  // from output volume or timing. Undefined when the env has no AI session
+  // running at all.
+  const aiState = useAppSelector((state) => state.envStatus.activityByEnv[activityKey]?.aiState);
   return {
     selectedSelection,
     tenants,
     isOpening,
     runningCommand,
-    aiBusy,
+    aiState,
     isOpen,
     reconnecting,
     envState,
@@ -347,7 +352,7 @@ function useEnvironmentRowState(
     tenants,
     isOpening,
     runningCommand,
-    aiBusy,
+    aiState,
     isOpen,
     reconnecting,
     envState,
@@ -364,7 +369,7 @@ function useEnvironmentRowState(
     tenants,
     isOpening,
     runningCommand,
-    aiBusy,
+    aiState,
     reconnecting,
     envBusy,
     envBusyDetail,
@@ -407,6 +412,7 @@ export function EnvironmentRow({
     busy,
     busyLabel,
     busyFromEnvironment,
+    awaitingInput,
     isLocal,
     isHost,
     runtimeVersion,
@@ -440,6 +446,7 @@ export function EnvironmentRow({
         isHost={isHost}
         busy={busy}
         busyLabel={busyLabel}
+        awaitingInput={awaitingInput}
       />
       {/* A host env has no pod, so it is never "running" or "stopped" — it
           simply is. Showing the pod-shaped open/close status dot for it would

@@ -178,7 +178,7 @@ test('a reachable environment is reported on its own terms, not a sticky conditi
 function rowArgs(overrides: {
   isOpening?: boolean;
   runningCommand?: string;
-  aiBusy?: boolean;
+  aiState?: string;
   reconnecting?: boolean;
   envBusy?: boolean;
   envBusyDetail?: string;
@@ -187,7 +187,7 @@ function rowArgs(overrides: {
   return {
     isOpening: false,
     runningCommand: '',
-    aiBusy: false,
+    aiState: undefined,
     reconnecting: false,
     envBusy: false,
     envBusyDetail: '',
@@ -207,7 +207,7 @@ function row(overrides: Parameters<typeof rowArgs>[0]) {
     [],
     input.isOpening,
     input.runningCommand,
-    input.aiBusy,
+    input.aiState,
     input.reconnecting,
     input.envBusy,
     input.envBusyDetail,
@@ -248,23 +248,34 @@ test('each desktop-local reason still spins its own row on its own', () => {
   for (const overrides of [
     { isOpening: true },
     { runningCommand: 'deploy' },
-    { aiBusy: true },
+    { aiState: 'busy' },
     { reconnecting: true },
   ]) {
     assert.equal(row(overrides).busy, true, `expected busy for ${JSON.stringify(overrides)}`);
   }
 });
 
-// The defect: every other input is desktop-local, set when this desktop starts
-// something and cleared when it sees it end. A command driven from a terminal or
-// over MCP, or a session that goes away, leaves a latch nobody can clear — one
-// row span for six hours while the environment reported every marker idle.
+// The defect: runningCommand is desktop-local, set when this desktop starts
+// something and cleared when it sees it end. A command driven from a terminal
+// or over MCP, or a session that goes away, leaves a latch nobody can clear —
+// one row span for six hours while the environment reported every marker idle.
 test('an environment that reports itself idle clears a stale desktop latch', () => {
   const stuckCommand = row({ runningCommand: 'deploy', envObserved: true, envBusy: false });
   assert.equal(stuckCommand.busy, false);
+});
 
-  const stuckAI = row({ aiBusy: true, envObserved: true, envBusy: false });
-  assert.equal(stuckAI.busy, false);
+// aiState is not a desktop-local latch the way runningCommand is: it comes
+// from the same environment-activity observation as envBusy/envObserved, so
+// it is trusted unconditionally rather than gated behind envObserved.
+test("the AI session's own busy/awaiting-input state is trusted even when the generic markers read idle", () => {
+  assert.equal(row({ aiState: 'busy', envObserved: true, envBusy: false }).busy, true);
+  assert.equal(row({ aiState: 'awaiting-input', envObserved: true, envBusy: false }).busy, true);
+  assert.equal(
+    row({ aiState: 'awaiting-input', envObserved: true, envBusy: false }).awaitingInput,
+    true,
+  );
+  assert.equal(row({ aiState: 'idle', envObserved: true, envBusy: false }).busy, false);
+  assert.equal(row({ aiState: 'unknown', envObserved: true, envBusy: false }).busy, false);
 });
 
 // Silence is not an answer. This covers both an environment nobody reached and
@@ -272,7 +283,6 @@ test('an environment that reports itself idle clears a stale desktop latch', () 
 // in both cases because nobody got a verdict, and neither may clear a latch.
 test('an environment that gave no verdict keeps its desktop latch', () => {
   assert.equal(row({ runningCommand: 'deploy', envObserved: false }).busy, true);
-  assert.equal(row({ aiBusy: true, envObserved: false }).busy, true);
 });
 
 // The environment's own answer still wins upward, whoever started the work.
@@ -296,6 +306,17 @@ test('a label describing the environment is marked as the environment own', () =
   const derived = row({ envBusy: true, envBusyDetail: 'holding: gradle-build', envObserved: true });
   assert.equal(derived.busyLabel, 'team / dev is busy — holding: gradle-build');
   assert.equal(derived.busyFromEnvironment, true);
+});
+
+// awaiting-input gets its own wording, distinct from the generic "AI tab
+// working" busy label — the operator needs to see that the Agent is stuck on
+// them, not merely that it is running.
+test('the busy label names awaiting-input distinctly from busy', () => {
+  assert.equal(
+    row({ aiState: 'awaiting-input' }).busyLabel,
+    'Agent is waiting for your input in team / dev',
+  );
+  assert.equal(row({ aiState: 'busy' }).busyLabel, 'AI tab working on team / dev');
 });
 
 test('a label describing an operation this desktop is running is not', () => {

@@ -29,7 +29,7 @@ import {
   selectSelectedIsPendingFor,
 } from './selectors';
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
-import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
+import { setAIBusyForSession } from './slices/aiActivitySlice';
 import { recordDoctorOutcome } from './slices/doctorSlice';
 import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
@@ -59,23 +59,16 @@ import { selectionKey } from './versionSuggestions';
 // controller because both the registry buffers and the live xterm instance
 // live there.
 
-// handleAIActivity surfaces that an AI tab is working in one env while the
-// user is looking at another (Nielsen #1, visibility of system status).
+// handleAIActivity surfaces an orchestrator's own turn-busy self-report on its
+// sidebar row (Nielsen #1, visibility of system status). An environment's AI
+// tab does not go through this event — see handleEnvActivity.
 export const handleAIActivity =
   (payload: AIActivityPayload): AppThunk =>
   (dispatch) => {
-    const tenant = payload.tenant.trim();
-    const environment = payload.environment.trim();
-    if (!tenant || !environment) {
-      // An orchestrator session carries no env to key by. Dropping the event
-      // here is why the orchestrator row never spun while it was working.
-      if (payload.sessionId > 0) {
-        dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
-      }
+    if (payload.sessionId <= 0) {
       return;
     }
-    const key = selectionKey({ tenant, environment });
-    dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
+    dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
   };
 
 // handleOrchestratorShellActivity surfaces that an orchestrator has a
@@ -137,6 +130,11 @@ export const handleEnvActivity =
           outage: payload.outage === true,
           busy: payload.busy,
           detail: (payload.detail ?? '').trim(),
+          aiState: payload.aiState,
+          aiTool: payload.aiTool,
+          aiLastActivityUnix: payload.aiLastActivityUnix,
+          aiOutcome: payload.aiOutcome,
+          aiExitCode: payload.aiExitCode,
         },
       }),
     );

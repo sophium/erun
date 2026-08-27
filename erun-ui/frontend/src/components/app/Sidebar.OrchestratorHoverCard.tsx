@@ -7,6 +7,7 @@ import { orchestratorBusyElapsed } from '@/app/orchestratorBusyLabel';
 import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivity';
 import { orchestratorNudgeSummary } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
+import { AwaitingInputIndicator } from '@/components/app/Sidebar.AwaitingInputIndicator';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // OrchestratorHoverCard gives an orchestrator row the same hover treatment the
@@ -197,7 +198,11 @@ function OrchestratorEnvironments({
               className="mt-0.5 flex w-2.5 flex-none items-center justify-center"
               aria-hidden="true"
             >
-              {line.dot && <StatusDotGlyph state={line.dot} />}
+              {line.state === 'awaiting-input' ? (
+                <AwaitingInputIndicator label="" />
+              ) : (
+                line.dot && <StatusDotGlyph state={line.dot} />
+              )}
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{line.name}</span>

@@ -50,6 +50,12 @@ export interface EnvironmentRowDerived {
   // "<env> is busy — X" inside a card headed "<env>" says the same thing twice
   // while displacing the prose the indicator already owns.
   busyFromEnvironment: boolean;
+  // awaitingInput is true when the env's primary AI session itself reported
+  // it is waiting on the operator (erun-common's AISessionStateAwaitingInput)
+  // — never inferred from silence, which is indistinguishable from "finished"
+  // by output alone. Mutually exclusive with the ordinary busy spinner: the
+  // row renders AwaitingInputIndicator instead when this is true.
+  awaitingInput: boolean;
   isLocal: boolean;
   // isHost is mutually exclusive with the "Local" badge: a host env renders
   // its own badge instead, so a reader never mistakes "no pod" for a pod that
@@ -66,7 +72,7 @@ export function deriveEnvironmentRow(
   tenants: AppState['tenants'],
   isOpening: boolean,
   runningCommand: string,
-  aiBusy: boolean,
+  aiState: string | undefined,
   reconnecting: boolean,
   envBusy: boolean,
   envBusyDetail: string,
@@ -74,19 +80,22 @@ export function deriveEnvironmentRow(
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
+  const aiBusy = aiState === 'busy';
+  const awaitingInput = aiState === 'awaiting-input';
   // busy is scoped to this env and independent of which env is selected, so
   // concurrent work on multiple envs shows a spinner on every row that's actually
   // doing something — not just the one in the active terminal.
   //
   // envBusy is what the environment says about itself, and it is the only input
-  // here that is true regardless of who started the work. The other four are
-  // desktop-local: they report what this desktop launched, so an environment
-  // driven by `erun` from a terminal, by an orchestrator over MCP, or by a
-  // detached job was doing real work behind a row that looked idle.
+  // here that is true regardless of who started the work. aiBusy/awaitingInput
+  // come from the same environment-activity observation (the AI session's own
+  // structured report), so they are trusted unconditionally too, not gated
+  // behind envObserved the way the desktop-local runningCommand fallback is.
   const busy = environmentRowIsBusy(
     isOpening,
     runningCommand,
     aiBusy,
+    awaitingInput,
     reconnecting,
     envBusy,
     envObserved,
@@ -106,6 +115,7 @@ export function deriveEnvironmentRow(
     isOpening,
     runningCommand,
     aiBusy,
+    awaitingInput,
     reconnecting,
     envBusy,
     envBusyDetail,
@@ -120,6 +130,7 @@ export function deriveEnvironmentRow(
     busy,
     busyLabel,
     busyFromEnvironment,
+    awaitingInput,
     isLocal,
     isHost,
     runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
@@ -151,17 +162,18 @@ function environmentRowIsBusy(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  awaitingInput: boolean,
   reconnecting: boolean,
   envBusy: boolean,
   envObserved: boolean,
 ): boolean {
-  if (envBusy || isOpening || reconnecting) {
+  if (envBusy || aiBusy || awaitingInput || isOpening || reconnecting) {
     return true;
   }
   if (envObserved) {
     return false;
   }
-  return runningCommand !== '' || aiBusy;
+  return runningCommand !== '';
 }
 
 function environmentRowBusyLabel(
@@ -170,6 +182,7 @@ function environmentRowBusyLabel(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  awaitingInput: boolean,
   reconnecting: boolean,
   envBusy: boolean,
   envBusyDetail: string,
@@ -187,6 +200,9 @@ function environmentRowBusyLabel(
   }
   if (envBusy) {
     return envBusyDetail !== '' ? `${target} is busy — ${envBusyDetail}` : `${target} is busy`;
+  }
+  if (awaitingInput) {
+    return `Agent is waiting for your input in ${target}`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;

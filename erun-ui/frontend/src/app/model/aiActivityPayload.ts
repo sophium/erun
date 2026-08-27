@@ -1,8 +1,10 @@
-// AIActivityPayload drives a "working" spinner on an env's sidebar row while its AI
-// tab produces output, including when the user has navigated away to a different env.
+// AIActivityPayload carries an orchestrator's own turn-busy self-report to its
+// sidebar row spinner. An environment's AI-session state is a richer model
+// now (EnvActivityPayload's aiState/aiTool/... fields, sourced from the tool's
+// own structured report) and no longer goes through this event — an
+// orchestrator has no pod to report through that path, so it keeps reporting
+// its own turn boundaries directly.
 export interface AIActivityPayload {
   sessionId: number;
-  tenant: string;
-  environment: string;
   busy: boolean;
 }
