@@ -31,9 +31,9 @@ const (
 // CreateReview opens a review. It is a real, immediate write — there is no
 // dashboard preview path, matching every other side-effecting action here.
 func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("opening a review", input.Tenant)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 	name := strings.TrimSpace(input.Name)
 	targetBranch := strings.TrimSpace(input.TargetBranch)
@@ -65,9 +65,9 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 // close` and the MCP review_close tool: always a transition to CLOSED, not a
 // general status setter.
 func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("closing a review", input.Tenant)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
@@ -98,9 +98,9 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 // let the caller route the operator to the threads, or to
 // OverrideAdvanceMergeQueue, instead of hitting a dead end.
 func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("advancing the merge queue", input.Tenant)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 	targetBranch := strings.TrimSpace(input.TargetBranch)
 	if targetBranch == "" {
@@ -133,9 +133,9 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 // gate. Reason is required — the backend refuses a blank one — and is
 // recorded in the platform's audit trail alongside the caller's identity.
 func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("overriding the merge queue's unresolved-thread gate", input.Tenant)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 	targetBranch := strings.TrimSpace(input.TargetBranch)
 	if targetBranch == "" {
@@ -167,8 +167,8 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 // trimmed input, kept apart from the call itself so that function's own
 // branching stays under the module's cyclomatic-complexity cap.
 func validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body string) error {
-	if strings.TrimSpace(tenant) == "" {
-		return fmt.Errorf("tenant is required")
+	if _, err := requireTenant("commenting on a review", tenant); err != nil {
+		return err
 	}
 	if reviewID == "" {
 		return fmt.Errorf("review id is required")
@@ -233,9 +233,13 @@ func (a *App) UnresolveReviewComment(input uiUpdateReviewCommentStatusInput) (ui
 }
 
 func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, status string) (uiReviewComment, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant is required")
+	operation := "resolving a review comment"
+	if status == "OPEN" {
+		operation = "reopening a review comment"
+	}
+	tenant, err := requireTenant(operation, input.Tenant)
+	if err != nil {
+		return uiReviewComment{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {

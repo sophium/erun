@@ -1,2 +1,2 @@
 audit: erun cloud set --alias  team dev
-cloud provider alias is required
+set cloud provider alias for team/dev: no alias given — pass one explicitly (`erun cloud set team dev --alias <alias>`, or the cloud_set tool's alias field)
