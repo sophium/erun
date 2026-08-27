@@ -1,4 +1,4 @@
-.PHONY: integration-test lint test-erun-ui test-frontend check
+.PHONY: integration-test lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -111,6 +111,30 @@ test-frontend:
 	@echo ">> erun-console gates"
 	@(cd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test)
 
+# Helm-render assertions for the erun-devops/k8s charts (erun-devops,
+# erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
+# erun-zitadel, erun-console, erun-docs): each *_test.sh renders its chart with
+# `helm template` and asserts on the output. No cluster, no docker -- pure
+# rendering -- so a pinned `helm` binary is all the image test stage needs to
+# run these (see the Dockerfile's test stage). Iterates the directory rather
+# than naming each script so a new chart's *_test.sh is picked up with no
+# Makefile edit.
+helm-chart-tests:
+	@for t in erun-devops/k8s/*_test.sh; do \
+		echo ">> $$t"; \
+		sh "$$t" || exit 1; \
+	done
+
+# End-to-end proof that a postgres restart cannot destroy committed data,
+# against a real postgres and the real atlas migrations. Deliberately NOT part
+# of `check`: it needs a real docker daemon and the atlas CLI, and the image
+# test stage's bare golang image has neither -- there is no nested docker
+# daemon available inside a `docker build` RUN step. Run this by hand, or via
+# `erun exec job` in an agent env (which does carry both), before merging any
+# change to postgres reset, migrate, or restart behavior.
+test-postgres-restart:
+	sh erun-devops/docker/erun-backend-db/migrate_test.sh
+
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
 # erun-integration/scripts/integration-test.sh; override with
@@ -122,6 +146,8 @@ integration-test:
 	./erun-integration/scripts/integration-test.sh
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests, the frontend
-# kit + console gates, then the integration suite + coverage. The erun-devops
-# image test stage runs this; a failure tags no image.
-check: lint test-erun-ui test-frontend integration-test
+# kit + console gates, the erun-devops/k8s chart tests, then the integration
+# suite + coverage. The erun-devops image test stage runs this; a failure
+# tags no image. test-postgres-restart is deliberately excluded -- see its
+# own comment above for why.
+check: lint test-erun-ui test-frontend helm-chart-tests integration-test

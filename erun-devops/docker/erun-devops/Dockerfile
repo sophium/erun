@@ -1,3 +1,9 @@
+# Declared once at the top so the test stage's own `helm` (for the
+# erun-devops/k8s chart tests, run via `make check`'s helm-chart-tests target)
+# and the final image's `helm` stay pinned to the same version instead of two
+# independent defaults drifting apart.
+ARG HELM_VERSION=v4.2.2
+
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
@@ -38,6 +44,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '\n' < /src/GOLANGCI_LINT_VERSION)}" && \
     GOBIN=/usr/local/bin go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 
+# `helm` for `make check`'s helm-chart-tests target: the erun-devops/k8s
+# chart tests are pure `helm template` assertions -- no cluster, no docker --
+# so a pinned binary is all this bare golang image needs to run them. BUILDARCH
+# is Docker's predefined build-host-arch arg; the stage is pinned to
+# BUILDPLATFORM so it always matches the host actually running this RUN.
+ARG BUILDARCH
+ARG HELM_VERSION
+RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${BUILDARCH}.tar.gz" && \
+    tar -xzf /tmp/helm.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/linux-${BUILDARCH}/helm" /usr/local/bin/helm && \
+    rm -rf /tmp/helm.tar.gz "/tmp/linux-${BUILDARCH}"
+
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
 # the pinned `node` stage above rather than apt/curl-installed, same pattern
 # as `golangci-lint`/`goroot`: a pinned upstream image is the reproducible
@@ -72,10 +90,15 @@ COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
 COPY Formula /src/Formula
 COPY bucket /src/bucket
+# helm-chart-tests renders every erun-devops/k8s chart with `helm template`;
+# only the charts and their *_test.sh scripts are needed, not the rest of
+# erun-devops (docker/, terraform-erun/, etc.).
+COPY erun-devops/k8s /src/erun-devops/k8s
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
-# the frontend kit + console gates, then the integration suite + coverage
-# gate. A failing step fails the build, the builder stage's
+# the frontend kit + console gates, the erun-devops/k8s chart tests, then the
+# integration suite + coverage gate. A failing step fails the build, the
+# builder stage's
 # COPY --from=test /test-ok fails, and no image is tagged. The Yarn cache
 # mount lets `yarn install` reuse fetched packages across builds the same way
 # the Go module/build caches do.
@@ -160,7 +183,9 @@ FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
-ARG HELM_VERSION=v4.2.2
+# HELM_VERSION's default lives in the global ARG at the top of this file,
+# shared with the test stage's own helm install.
+ARG HELM_VERSION
 ARG TERRAFORM_VERSION=1.12.2
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1

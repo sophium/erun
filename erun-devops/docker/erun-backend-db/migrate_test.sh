@@ -17,8 +17,12 @@
 #      CronJob (migrate-repair-cronjob.yaml) invokes on its own schedule.
 #
 # Lives beside migrate.sh rather than in erun-integration: it needs a real
-# docker daemon and the real atlas CLI, like the k8s/*_chart_test.sh scripts
-# need a real helm. Run directly; not part of `make check`.
+# docker daemon and the real atlas CLI, neither of which the erun-devops image
+# test stage carries (there is no nested docker daemon available inside a
+# `docker build` RUN step), unlike the k8s/*_chart_test.sh scripts, which need
+# only `helm` and do run via `make check`'s helm-chart-tests target. Run this
+# one via `make test-postgres-restart` instead -- by hand, or via `erun exec
+# job` in an agent env, which carries both.
 
 set -eu
 
