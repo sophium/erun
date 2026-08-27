@@ -57,6 +57,34 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedHostTenantEnv seeds a host env: a worktree with no pod and no cluster at
+// all, so unlike SeedTenantEnv it carries no kubernetescontext,
+// containerregistry, or runtimeversion — none of those apply to a type with no
+// pod to configure.
+func SeedHostTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"type: host\n",
+	)
+}
+
 // SeedStoppedTenantEnv seeds a tenant env the operator has stopped, so a
 // scenario can exercise the recorded stop intent — the durable half of `erun
 // stop` that makes deploy re-render replicas: 0 and open wake the environment.

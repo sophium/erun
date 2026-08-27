@@ -6,6 +6,35 @@ import type { UISelection, UIWorkingIssue } from '@/types';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
+// EnvTypeBadge shows a host env's distinct badge, a local-agent env's "Local"
+// badge, or nothing for a remote/runtime env.
+function EnvTypeBadge({
+  isLocal,
+  isHost,
+}: {
+  isLocal: boolean;
+  isHost: boolean;
+}): React.ReactElement | null {
+  if (isHost) {
+    return (
+      <span
+        className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground"
+        aria-label="Host environment — no pod, this machine only"
+      >
+        Host
+      </span>
+    );
+  }
+  if (!isLocal) {
+    return null;
+  }
+  return (
+    <span className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground">
+      Local
+    </span>
+  );
+}
+
 // EnvHoverCard shows an env row's details in a Popover rather than a tooltip
 // (a multi-field card doesn't belong in a tooltip; see erun-ui/AGENTS.md),
 // without swallowing the row's own click-to-open and edit affordances.
@@ -15,6 +44,7 @@ export function EnvHoverCard({
   environmentName,
   selection,
   isLocal,
+  isHost,
   runtimeVersion,
   activityLabel,
   indicator,
@@ -25,6 +55,7 @@ export function EnvHoverCard({
   environmentName: string;
   selection: UISelection;
   isLocal: boolean;
+  isHost: boolean;
   runtimeVersion: string;
   activityLabel: string;
   indicator: EnvironmentIndicator;
@@ -85,11 +116,7 @@ export function EnvHoverCard({
             <span className="min-w-0 truncate font-medium">
               {tenantName} / {environmentName}
             </span>
-            {isLocal && (
-              <span className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground">
-                Local
-              </span>
-            )}
+            <EnvTypeBadge isLocal={isLocal} isHost={isHost} />
           </div>
         </div>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">

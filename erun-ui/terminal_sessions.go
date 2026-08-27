@@ -341,10 +341,14 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 
 // StartCreateVersionSession is the explicit "create & deploy new version"
 // action: it builds the env's working tree into a fresh version, pushes it, and
-// deploys it (build -> push -> deploy). Only a local-agent env has local source
-// to build; a runtime/consumer env produces nothing, so this errors and the
-// operator deploys a published version instead. The env-create flow's first
-// deploy runs through here too.
+// deploys it (build -> push -> deploy). Only a local-agent env builds and
+// deploys through this local orchestration; a runtime/consumer env produces
+// nothing, so this errors and the operator deploys a published version
+// instead, and a host env has no pod to deploy to at all regardless of it
+// having local source to build. The env-create flow's first deploy runs
+// through here too. Checked against ResolvedType rather than the broader
+// "BuildsHere() && !RemoteRepo()" combination, which a host env also
+// satisfies.
 func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if a.ctx == nil || strings.TrimSpace(selection.Tenant) == "" || strings.TrimSpace(selection.Environment) == "" {
@@ -356,6 +360,9 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	})
 	if err != nil {
 		return startSessionResult{}, err
+	}
+	if result.EnvConfig.ResolvedType() == eruncommon.EnvironmentTypeHost {
+		return startSessionResult{}, fmt.Errorf("%s/%s is a host environment; it has no pod and no cluster to deploy to", selection.Tenant, selection.Environment)
 	}
 	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
 		return startSessionResult{}, fmt.Errorf("%s/%s has no local source to build; deploy a published version instead", selection.Tenant, selection.Environment)

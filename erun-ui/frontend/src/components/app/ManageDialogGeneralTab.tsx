@@ -50,15 +50,20 @@ export function GeneralTab(): React.ReactElement {
 
   return (
     <>
-      {config.type === 'local-agent' ? (
-        // Only a local-agent env mounts its worktree from a host path, so only
-        // it gets an editable field — letting an operator repoint a moved repo
-        // without hand-editing config.yaml. Remote-agent (PVC) and runtime (no
-        // worktree) repos are not local paths, so they stay read-only.
+      {config.type === 'local-agent' || config.type === 'host' ? (
+        // A local-agent or host env's worktree is a directory on this
+        // machine, so only these get an editable field — letting an operator
+        // repoint a moved repo without hand-editing config.yaml. Remote-agent
+        // (PVC) and runtime (no worktree) repos are not local paths, so they
+        // stay read-only.
         <LocalRepoPathInput
           id="environment-config-repopath"
           label="Repository path"
-          helper="Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy."
+          helper={
+            config.type === 'host'
+              ? 'Absolute path on this machine. This env has no pod — it IS this directory. Applied on Save.'
+              : 'Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy.'
+          }
           value={repoPathValue}
           disabled={fieldsDisabled}
           onChange={(localRepoPath) => {
@@ -125,6 +130,8 @@ function environmentTypeLabel(type: string | undefined): string {
       return 'Remote agent (worktree cloned to PVC)';
     case 'runtime':
       return 'Runtime (no worktree; receives deploys)';
+    case 'host':
+      return 'Host (no pod, no cluster — this machine only)';
     default:
       return 'Unknown';
   }

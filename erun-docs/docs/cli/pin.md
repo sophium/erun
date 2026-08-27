@@ -63,6 +63,7 @@ erun pin my-tenant dev --revert            # back to where you were
 
 | Failure | Behaviour |
 |---|---|
+| The environment is a [host env](/concepts/environment-types#host). | Refused before anything is written: a host env has no pod and no runtime version to pin. |
 | The target version is not published. | Refused before anything is written, naming the registry it checked. |
 | The registry cannot be read and a version was given. | Pins it anyway, tracing that it could not be verified — "I could not check" is not "it is not there". |
 | The registry cannot be read and no version was given. | Errors: resolving *the latest* needs the registry. |

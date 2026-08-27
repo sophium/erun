@@ -1665,6 +1665,9 @@ func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResu
 }
 
 func ResolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+	if err := refuseHostEnvironmentOperation("deploy", target); err != nil {
+		return DeploySpec{}, err
+	}
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 	spec, err := resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
@@ -1702,6 +1705,17 @@ func ResolveCurrentDeploySpecsForDockerTarget(ctx Context, store BuildDeployStor
 }
 
 func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
+	result, err := resolveDeployTargetOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if err := refuseHostEnvironmentOperation("deploy", result); err != nil {
+		return OpenResult{}, err
+	}
+	return result, nil
+}
+
+func resolveDeployTargetOpenResult(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	if strings.TrimSpace(target.Tenant) != "" || strings.TrimSpace(target.Environment) != "" || strings.TrimSpace(target.RepoPath) != "" {
@@ -1726,6 +1740,22 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
+}
+
+// refuseHostEnvironmentOperation refuses a pod-requiring operation (deploy,
+// pin, terraform, ...) against a host environment: it has no pod and no
+// cluster for the operation to act on. Naming the type in the message is the
+// point — this is the resolution a "this operation does not apply" error must
+// carry per root AGENTS.md § "Smooth, Seamless, No Dead Ends". Checked against
+// ResolvedType rather than the broader !HasPod() so an env whose type predates
+// the Type field (ResolvedType == "", see legacyEnvTypeFromRemoteSnapshot)
+// keeps deploying exactly as it did before host existed, instead of being
+// misreported as a host environment it never was.
+func refuseHostEnvironmentOperation(operation string, target OpenResult) error {
+	if target.EnvConfig.ResolvedType() != EnvironmentTypeHost {
+		return nil
+	}
+	return fmt.Errorf("%s %s/%s: %s is a host environment — it has no pod and no cluster to %s against", operation, target.Tenant, target.Environment, target.Environment, operation)
 }
 
 // ResolveDeployTargetScope names the tenant/environment a deploy would act on
@@ -2177,6 +2207,11 @@ func cloudContextRegionFromName(name string) string {
 	return ""
 }
 
+// resolveWorktreeStorage decides the deploy chart's worktree-storage value.
+// Every valid type has an explicit case: a deploy plan must never reach a host
+// env (deploy refuses it before spec-building — see
+// refuseHostEnvironmentOperation), so that case panics rather than silently
+// answering a question a host env does not have.
 func resolveWorktreeStorage(target OpenResult) string {
 	if target.EnvConfig.Type.IsValid() {
 		switch target.EnvConfig.Type {
@@ -2189,8 +2224,13 @@ func resolveWorktreeStorage(target OpenResult) string {
 			return WorktreeStorageNone
 		case EnvironmentTypeRemoteAgent:
 			return WorktreeStoragePVC
+		case EnvironmentTypeLocalAgent:
+			return WorktreeStorageHost
+		case EnvironmentTypeHost:
+			panic("resolveWorktreeStorage: host environments have no pod; a deploy plan must not be built for one")
+		default:
+			panic(fmt.Sprintf("resolveWorktreeStorage: unhandled EnvironmentType %q", target.EnvConfig.Type))
 		}
-		return WorktreeStorageHost
 	}
 	if target.RemoteRepo() {
 		return WorktreeStoragePVC

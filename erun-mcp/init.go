@@ -23,7 +23,7 @@ type InitInput struct {
 	RuntimeMemory            string    `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit; omitted, an existing environment keeps its recorded limit"`
 	KubernetesContext        string    `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string    `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
-	Type                     string    `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
+	Type                     string    `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime, host); takes precedence over remote. host names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
 	Remote                   bool      `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
 	NoGit                    bool      `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string    `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
@@ -102,7 +102,12 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool) (Comman
 
 		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
 			params.Type = envType
-			params.Remote = envType != eruncommon.EnvironmentTypeLocalAgent
+			// The deprecated Remote bool models "not local-agent" for exactly the
+			// two legacy types it predates; deriving it from RemoteWorktree
+			// (rather than repeating "!= local-agent" here) keeps host correctly
+			// reporting false instead of inheriting the old exclusion's wrong
+			// answer for it.
+			params.Remote = (eruncommon.BootstrapInitParams{Type: envType}).RemoteWorktree()
 		} else {
 			params.Remote = input.Remote
 		}

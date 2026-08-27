@@ -27,7 +27,7 @@ Flags:
       --runtime-registry string        Registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls (e.g. ghcr.io/sophium). Set it when the environment's deploy registry holds only this project's images, so erun's chart is not there to pull; persisted as the env's runtimeregistry
       --set-default-tenant             Set the initialized tenant as the default tenant
       --tenant string                  Tenant name to initialize
-      --type string                    Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote). On an existing env this changes the type; omit it and the env keeps the type it has
+      --type string                    Environment type: local-agent, remote-agent, runtime, or host (takes precedence over --remote). host names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials. On an existing env this changes the type; omit it and the env keeps the type it has
       --version string                 Runtime image version to record; omitted, a new env takes this erun's version and an existing env keeps the one it runs. A brand-new remote-worktree env (--type remote-agent or runtime) deploys at this version immediately; on an existing env this only re-pins the version in config — run a separate erun deploy to actually roll it out
   -y, --yes                            Automatically approve initialization prompts
 

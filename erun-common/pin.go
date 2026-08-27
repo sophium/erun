@@ -110,6 +110,9 @@ var erunImageReferencePattern = regexp.MustCompile(`(ghcr\.io/sophium/(erun-[a-z
 // to target would change. It never writes, so a caller can render the plan,
 // refuse it, or apply it.
 func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, target string) (PinPlan, error) {
+	if env.ResolvedType() == EnvironmentTypeHost {
+		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
+	}
 	projectRoot = strings.TrimSpace(projectRoot)
 	target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "v"))
 	if projectRoot == "" {

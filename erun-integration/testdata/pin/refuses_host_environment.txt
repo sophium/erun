@@ -1,0 +1,2 @@
+audit: erun pin --dry-run --version <VERSION> team dev
+pin team/dev: dev is a host environment — it has no pod and no runtime version to pin

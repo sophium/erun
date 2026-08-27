@@ -41,6 +41,17 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/help_init", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		// A host env has no pod and no cluster at all, so terraform must refuse
+		// it by name instead of resolving a plan directory it cannot apply.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "terraform/refuses_host_environment", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_dry_run", func(t *testing.T) {
 		// init is its own operation now (apply/plan/destroy no longer init). With no
 		// committed lock yet, init generates one and records provider hashes for both

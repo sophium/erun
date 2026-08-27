@@ -436,6 +436,14 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfi
 			return fmt.Errorf("%q is not a directory", repoPath)
 		}
 	}
+	// A host env has no pod and no cluster at all, so it has no kubernetes
+	// context to require — every other type deploys into one. Checked against
+	// ResolvedType rather than the broader !HasPod() so a legacy env with an
+	// unresolved type keeps requiring a context exactly as it did before host
+	// existed.
+	if envConfig.ResolvedType() == EnvironmentTypeHost {
+		return nil
+	}
 	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
 		return fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
 	}

@@ -55,7 +55,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
 	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Deprecated: ignored; remote runtimes deploy the published erun-devops chart")
 	_ = cmd.Flags().MarkDeprecated("bootstrap", "remote runtimes deploy the published erun-devops chart; the flag is ignored")
-	cmd.Flags().StringVar(&envType, "type", "", "Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote). On an existing env this changes the type; omit it and the env keeps the type it has")
+	cmd.Flags().StringVar(&envType, "type", "", "Environment type: local-agent, remote-agent, runtime, or host (takes precedence over --remote). host names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials. On an existing env this changes the type; omit it and the env keeps the type it has")
 	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Deprecated alias for --type=remote-agent")
 	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote or --type=remote-agent")
 	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
@@ -139,11 +139,15 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams
 	}
 	parsed := common.EnvironmentType(envType)
 	if !parsed.IsValid() {
-		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, or runtime", envType)
+		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
+	// The deprecated --remote bool models "not local-agent" for exactly the
+	// two legacy types it predates; deriving it from RemoteWorktree (rather
+	// than repeating "!= local-agent" here) keeps host correctly reporting
+	// false instead of inheriting the old exclusion's wrong answer for it.
+	expectedRemote := (common.BootstrapInitParams{Type: parsed}).RemoteWorktree()
 	remoteFlag := cmd.Flags().Lookup("remote")
 	remoteChanged := remoteFlag != nil && remoteFlag.Changed
-	expectedRemote := parsed != common.EnvironmentTypeLocalAgent
 	if remoteChanged && runParams.Remote != expectedRemote {
 		return fmt.Errorf("--type=%s conflicts with --remote=%t", envType, runParams.Remote)
 	}

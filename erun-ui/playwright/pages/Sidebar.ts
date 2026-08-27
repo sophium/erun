@@ -159,6 +159,21 @@ export class Sidebar {
     return label.endsWith('(local)');
   }
 
+  // A host env is also "local" by worktree location, but renders its own
+  // distinct badge instead of the LOCAL pill — see hasLocalBadge/hasHostBadge,
+  // which must never both be true for the same row.
+  async hasHostBadge(tenant: string, env: string): Promise<boolean> {
+    const badge = this.envRowButton(tenant, env).locator(
+      '[aria-label="Host environment — no pod, this machine only"]',
+    );
+    return (await badge.count()) > 0;
+  }
+
+  async rowHasHostSuffix(tenant: string, env: string): Promise<boolean> {
+    const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
+    return label.endsWith('(host)');
+  }
+
   cloudAliasButton(): Locator {
     // Matched by position: its label is the user's variable cloud identity, so there is no stable name to query.
     return this.locator().getByRole('button').last();

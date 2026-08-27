@@ -1,4 +1,4 @@
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
+import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import type { UIEnvironment, UISelection } from '@/types';
@@ -25,9 +25,18 @@ export function pendingForTenant(
 }
 
 // environmentIsLocal reports whether the env runs against a worktree mounted from
-// this machine (a local-agent env).
+// this machine (a local-agent env). A host env is also local by this
+// definition (see environmentTypeIsRemoteWorktree), but it renders its own
+// distinct badge (environmentIsHost) rather than the "Local" one, so it is
+// never presented as a pod that failed to start.
 export function environmentIsLocal(environment: UIEnvironment | undefined): boolean {
   return !environmentTypeIsRemoteWorktree(environment?.type);
+}
+
+// environmentIsHost reports whether the env is a host environment — no pod,
+// no cluster, just a directory on this machine.
+export function environmentIsHost(environment: UIEnvironment | undefined): boolean {
+  return environmentTypeIsHost(environment?.type);
 }
 
 export interface EnvironmentRowDerived {
@@ -42,6 +51,10 @@ export interface EnvironmentRowDerived {
   // while displacing the prose the indicator already owns.
   busyFromEnvironment: boolean;
   isLocal: boolean;
+  // isHost is mutually exclusive with the "Local" badge: a host env renders
+  // its own badge instead, so a reader never mistakes "no pod" for a pod that
+  // is merely local.
+  isHost: boolean;
   runtimeVersion: string;
   selection: UISelection;
 }
@@ -101,12 +114,14 @@ export function deriveEnvironmentRow(
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
   const isLocal = environmentIsLocal(environment);
+  const isHost = environmentIsHost(environment);
   return {
     selected,
     busy,
     busyLabel,
     busyFromEnvironment,
     isLocal,
+    isHost,
     runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
     selection: { tenant: tenantName, environment: environmentName },
   };

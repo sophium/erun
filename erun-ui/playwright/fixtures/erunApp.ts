@@ -4,6 +4,7 @@ import {
   SEED_TENANT,
   removeEnvironment,
   seedEnvironment,
+  seedHostEnvironment,
   seedRuntimeEnvironment,
   uniqueEnvironmentName,
 } from './seedRoot.js';
@@ -21,6 +22,7 @@ export const test = base.extend<{
   app: AppShell;
   seededEnv: SeededEnvironment;
   seededRuntimeEnv: SeededEnvironment;
+  seededHostEnv: SeededEnvironment;
 }>({
   app: async ({ page }, use) => {
     const app = new AppShell(page);
@@ -40,6 +42,15 @@ export const test = base.extend<{
   seededRuntimeEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedRuntimeEnvironment(SEED_TENANT, environment);
+    await waitForSeededRow(app, environment);
+    await use({ tenant: SEED_TENANT, environment });
+    removeEnvironment(SEED_TENANT, environment);
+  },
+  // A per-test inert host-type env (no pod, no cluster at all), for specs
+  // that exercise the host badge and its no-pod-shaped-actions contract.
+  seededHostEnv: async ({ app }, use, testInfo) => {
+    const environment = uniqueEnvironmentName(testInfo.title);
+    seedHostEnvironment(SEED_TENANT, environment);
     await waitForSeededRow(app, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);

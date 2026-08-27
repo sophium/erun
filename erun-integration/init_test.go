@@ -493,6 +493,93 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/type_runtime_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("type_host_dry_run", func(t *testing.T) {
+		// A host env has no pod and no cluster at all, so init never asks for a
+		// kubernetes context or a container registry — unlike local-agent and
+		// remote-agent above, which both require one of those flags here or an
+		// interaction prompt fires. Leaving both off and still getting a clean
+		// dry run is a direct behavioral proof of no cluster contact.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "work",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/type_host_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_host_real_run_persists_config", func(t *testing.T) {
+		// The real run persists exactly a name, type, and local repo path — no
+		// kubernetescontext, containerregistry, or runtimeversion key, since
+		// none of those apply to a type with no pod.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "work",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/type_host_real_run_persists_config", normalize.Apply(result.Combined))
+		// KubernetesContext has no yaml `omitempty`, so it always serializes;
+		// asserting it is empty is the honest form of "unset" for this field.
+		assertEnvConfigContains(t, setup, "team", "work", "type: host", "localrepopath: "+setup.Cwd, `kubernetescontext: ""`)
+		assertEnvConfigLacks(t, setup, "team", "work", "containerregistry", "runtimeversion")
+	})
+
+	t.Run("reinit_retypes_a_local_agent_env_to_host", func(t *testing.T) {
+		// Retyping to host drops the env's pod-oriented fields' relevance but
+		// keeps the same local repo path — it is, after all, the same directory
+		// on the same machine, just with no pod mounting it anymore.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_local_agent_env_to_host", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: host", "localrepopath: "+setup.Cwd)
+	})
+
+	t.Run("reinit_refuses_a_host_retype_with_no_host_repo_path", func(t *testing.T) {
+		// The same refusal local-agent gets: retyping to host needs a host
+		// directory, and this run names neither a git repo cwd nor
+		// --project-root, so there is nothing to record.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "host",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/reinit_refuses_a_host_retype_with_no_host_repo_path", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent")
+	})
+
 	t.Run("type_conflicts_with_remote", func(t *testing.T) {
 		// A --type that disagrees with --remote must error before any side
 		// effect, so the user never ends up with a half-configured env.

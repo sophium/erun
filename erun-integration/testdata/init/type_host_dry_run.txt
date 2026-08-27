@@ -1,0 +1,21 @@
+audit: erun init --confirm-environment --dry-run --project-root <TMP> --set-default-tenant --type host team work
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+Adding new environment
+mkdir -p <TMP>
+write-yaml <TMP>
+==> Initializing team/work
+init: host environment has no pod; no devops scaffold is written
+==> Initialized team/work
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings
