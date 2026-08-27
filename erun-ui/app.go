@@ -73,6 +73,7 @@ type erunUIDeps struct {
 	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
+	launchHostOpener          func(executable string, args []string) error
 	resolveOrchestratorLaunch func(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
 	savePastedFile            func(pastedFileSaveParams) (string, error)
 	listAgentOutputs          func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
@@ -428,6 +429,9 @@ func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.launchHostArtifact == nil {
 		deps.launchHostArtifact = launchHostArtifactDetached
+	}
+	if deps.launchHostOpener == nil {
+		deps.launchHostOpener = launchHostOpenerDetached
 	}
 	return deps
 }
