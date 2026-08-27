@@ -177,4 +177,34 @@ test.describe('manage dialog runtime usage panel', () => {
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });
+
+  // The seeded env is inert and never deployed, so the harness's stub kubectl
+  // (unmocked here, unlike the two tests above) fails the probe for real
+  // rather than through a stubbed response. Visibility of system status
+  // (Nielsen #1) requires the panel to say so rather than render blank.
+  //
+  // The stub kubectl fails fast, so this exercises the classifier's "keep the
+  // raw cause" branch, not the deadline-vs-external-kill classification --
+  // this offline harness cannot make a probe actually time out or get
+  // signal-killed. Those branches are covered by the Go suite instead
+  // (erun-ui/runtime_probe_error_test.go and
+  // TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled in
+  // erun-ui/runtime_usage_test.go).
+  test('an unreachable pod fails soft with a stated reason, never a blank panel', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Cannot read this environment's resource usage");
+    await expect(panel).not.toContainText('signal:');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
 });

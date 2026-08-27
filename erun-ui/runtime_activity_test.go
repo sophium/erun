@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"reflect"
 	goruntime "runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRuntimeActivityGroupsResourceHoldingProcesses covers the leftover case
@@ -81,6 +83,69 @@ func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 	}
 	if !strings.Contains(activity.Message, "Cannot read what the runtime is running") {
 		t.Fatalf("the reason must be visible, got %q", activity.Message)
+	}
+}
+
+// TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled is the reported
+// defect for the "Running in this environment" panel: with the app's own
+// context already past its deadline, probeRuntimeActivity's derived ctx reads
+// as already timed out (context.WithTimeout on an expired parent inherits its
+// Err() immediately), so the panel must name that timeout rather than the
+// "signal: killed" text the mocked exec below deliberately returns.
+func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+			return "", errors.New("signal: killed")
+		},
+	})
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	app.ctx = ctx
+
+	activity, err := app.LoadRuntimeActivity(uiSelection{Tenant: "petios", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
+	}
+	if activity.Available {
+		t.Fatalf("a timed-out probe must not be reported as an available reading: %+v", activity)
+	}
+	if !strings.Contains(activity.Message, "timed out") {
+		t.Fatalf("expected the panel to name its own timeout, got %q", activity.Message)
+	}
+	if strings.Contains(activity.Message, "signal:") {
+		t.Fatalf("the panel must never repeat the raw kill signal on a timeout, got %q", activity.Message)
+	}
+}
+
+// TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout covers a kill
+// this probe did not cause: ctx has not expired, but the pod exec still
+// terminated by signal (an OOM kill, an evicted pod, most likely). That is a
+// different situation from the self-inflicted timeout above and must read
+// differently, without ever naming the bare signal either.
+func TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("signal-terminated exec is a POSIX concept")
+	}
+	app := NewApp(erunUIDeps{
+		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
+			return "", cmd.Run()
+		},
+	})
+	app.ctx = context.Background()
+
+	activity, err := app.LoadRuntimeActivity(uiSelection{Tenant: "petios", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
+	}
+	if strings.Contains(activity.Message, "timed out") {
+		t.Fatalf("a kill this probe did not cause must not be read as its own timeout, got %q", activity.Message)
+	}
+	if strings.Contains(activity.Message, "signal:") {
+		t.Fatalf("the panel must never repeat the raw kill signal, got %q", activity.Message)
+	}
+	if !strings.Contains(activity.Message, "killed") {
+		t.Fatalf("expected the panel to name an external kill, got %q", activity.Message)
 	}
 }
 

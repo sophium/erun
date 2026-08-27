@@ -70,7 +70,7 @@ func (a *App) LoadRuntimeSizing(selection uiSelection) (uiRuntimeSizingRecommend
 		return uiRuntimeSizingRecommendation{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
-			Message:     "Cannot read this environment's sizing recommendation: " + friendlyRuntimeResizeError(err),
+			Message:     "Cannot read this environment's sizing recommendation: " + runtimeProbeFailureMessage(ctx, runtimeSizingTimeout, err, friendlyRuntimeResizeError),
 		}, nil
 	}
 	return runtimeSizingFromOutput(selection, output), nil
@@ -91,7 +91,7 @@ func (a *App) ResizeRuntimeToRecommendation(selection uiSelection, overrideLease
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection, resizeCommandScript(selection, true, overrideLease))
 	if err != nil {
-		return uiRuntimeSizingRecommendation{}, fmt.Errorf("%s", friendlyRuntimeResizeError(err))
+		return uiRuntimeSizingRecommendation{}, fmt.Errorf("%s", runtimeProbeFailureMessage(ctx, runtimeReclaimTimeout, err, friendlyRuntimeResizeError))
 	}
 	result := runtimeSizingFromOutput(selection, output)
 	result.Available = true

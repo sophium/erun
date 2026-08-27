@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -105,7 +106,7 @@ func (a *App) probeRuntimeActivity(selection uiSelection) (uiRuntimeActivity, er
 	output, err := a.execInRuntimePod(ctx, selection,
 		eruncommon.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
 	if err != nil {
-		return uiRuntimeActivity{}, err
+		return uiRuntimeActivity{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeActivityTimeout, err, func(e error) string { return e.Error() }))
 	}
 	return runtimeActivityFromProbe(selection, output), nil
 }
