@@ -59,5 +59,13 @@ test.describe('a terminal opened after a deploy has already started locks immedi
 
     const overlay = page.getByRole('status').filter({ hasText: 'Waiting for deploy to complete' });
     await expect(overlay).toBeVisible();
+
+    // The backend's trace scanner has no way to tell this fake deploy apart
+    // from a real one, so without a matching completion line the activity
+    // entry it started stays "running" in the shared singleton backend for
+    // every spec that runs after this one. Finish it the same way a real
+    // deploy would.
+    await runInSession(page, localSessionId, `echo '==> Deployed ${tenant}/${environment}'`);
+    await expect(overlay).toBeHidden();
   });
 });
