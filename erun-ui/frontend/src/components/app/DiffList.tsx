@@ -14,7 +14,6 @@ import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
 import { StartReviewFromDiffAction } from './DiffList.StartReviewAction';
-import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 export function DiffList(): React.ReactElement {
@@ -77,7 +76,6 @@ function DiffEnvSection({
       )}
     >
       {showHeader && <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />}
-      <ReviewKeyboardShortcutsHint />
       <StartReviewFromDiffAction
         tenant={target.tenant}
         environment={target.environment}

@@ -37,6 +37,10 @@ export class ReviewDetailDialog {
     return this.locator().getByRole('button', { name: 'Keyboard shortcuts' });
   }
 
+  keyboardShortcutsPopover(): Locator {
+    return this.page.locator('[data-slot="popover-content"]');
+  }
+
   async reply(commentIndex: number): Promise<void> {
     await this.locator().getByRole('button', { name: 'Reply' }).nth(commentIndex).click();
   }

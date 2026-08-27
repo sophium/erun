@@ -84,13 +84,18 @@ export function ReviewDetailComments({
       element.removeEventListener('keydown', listener);
     };
   }, []);
-  // Submitting or cancelling a reply unmounts the composer's Input, and the
-  // browser drops focus to <body> when its focused element is removed --
-  // stranding a keyboard user there with no further binding reachable (a
-  // dead end this keyboard model must not introduce). Detect the
+  // Cancelling a reply unmounts the composer's Input, and the browser drops
+  // focus to <body> when its focused element is removed -- stranding a
+  // keyboard user there with no further binding reachable. Detect the
   // replyingTo transition away from the roving-focused thread and reclaim
   // focus for it, the same correction React apps make after any control
-  // that closes itself removes the element that held focus.
+  // that closes itself removes the element that held focus. A successful
+  // submit closes the composer the same way, but loadReviewDetail's own
+  // reload (submitReviewReply's last step) flashes the whole dialog to its
+  // loading state first, unmounting this component before this effect would
+  // run -- true for a mouse-driven Send today too, so it is not this
+  // effect's problem to solve; the remounted list's default roving focus
+  // (the first thread) is still reachable with one more Tab press either way.
   const previousReplyingToRef = React.useRef(detail.replyingTo);
   React.useEffect(() => {
     const closedFor = previousReplyingToRef.current;

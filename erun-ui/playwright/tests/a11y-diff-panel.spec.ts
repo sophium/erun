@@ -144,15 +144,25 @@ test.describe('diff panel accessibility', () => {
 
     // A real click focuses it exactly like Tab landing on it would (browsers
     // refuse to focus an element with no tabindex on click, so this alone
-    // already exercises the fix); the follow-up Tab press is a genuine
-    // keyboard traversal to the very next stop in the DOM. Click near the
+    // already exercises the fix); the follow-up Tab presses are a genuine
+    // keyboard traversal to the next stops in the DOM. Click near the
     // region's top padding, not its center -- the center can land inside the
     // nested hunk scroller for a single short diff. Retried as a whole: the
     // env-open flow schedules its own terminal-focus cascade that can steal
-    // focus back between the click and the Tab press.
+    // focus back between the click and the Tab presses.
+    //
+    // The per-environment section header's own "Start a review" button
+    // (DiffList.StartReviewAction.tsx, #1412) is a real, keyboard-reachable
+    // control that renders between the region and this file's hunk, so it is
+    // a genuine tab stop of its own -- one Tab reaches it, a second reaches
+    // the hunk. This was already true before this test's own regression
+    // check was written, and had gone unnoticed until keyboard navigation
+    // began actually stepping through this exact sequence (#1421).
     await expect(async () => {
       await region.click({ position: { x: 5, y: 5 } });
       await expect(region).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(app.page.getByRole('button', { name: 'Start a review' })).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(hunk).toBeFocused();
     }).toPass();

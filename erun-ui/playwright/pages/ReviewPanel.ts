@@ -35,7 +35,10 @@ export class ReviewPanel {
   // more than one, matching its header text too -- needed for the keyboard
   // navigation specs, which move between a file's own hunks one at a time.
   hunkRegionAt(filePath: string, header: string): Locator {
-    return this.page.getByRole('region', { name: `Diff for ${filePath} at ${header}`, exact: true });
+    return this.page.getByRole('region', {
+      name: `Diff for ${filePath} at ${header}`,
+      exact: true,
+    });
   }
 
   // The "Keyboard shortcuts" popover DiffList.tsx renders per environment
@@ -43,6 +46,13 @@ export class ReviewPanel {
   // discoverability affordance for its keyboard model.
   keyboardShortcutsButton(): Locator {
     return this.page.getByRole('button', { name: 'Keyboard shortcuts' });
+  }
+
+  // Scoped to the popover's own content, not the whole page: the diff panel
+  // already renders "Start a review" as a real button label, which a
+  // page-wide text match would also resolve to.
+  keyboardShortcutsPopover(): Locator {
+    return this.page.locator('[data-slot="popover-content"]');
   }
 
   filterInput(): Locator {
