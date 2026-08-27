@@ -2,9 +2,9 @@ import type { Request, Route } from '@playwright/test';
 
 import { expect, test } from '../fixtures/erunApp.js';
 
-// erun-kit's StatusBadge is the one canonical status badge in the product
-// (#1418). Before this fix, ManageDialog.fields.tsx defined a second,
-// same-named component that hand-branched 'running'/'stopped' into raw
+// erun-kit's StatusBadge is the one canonical status badge in the product.
+// ManageDialog.fields.tsx used to define a second, same-named component that
+// hand-branched 'running'/'stopped' into raw
 // Tailwind colors and rendered no icon at all, so any other status --
 // including an in-progress one like 'starting' -- fell into its destructive
 // catch-all. Both sites below now render through the canonical component;

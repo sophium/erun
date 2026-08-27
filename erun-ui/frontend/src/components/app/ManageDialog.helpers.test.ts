@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { workspaceSyncStatusTone } from './ManageDialog.helpers';
 
-// Before #1418, ManageDialog.fields.tsx's own StatusBadge only distinguished
+// ManageDialog.fields.tsx's own StatusBadge used to only distinguish
 // 'running' (green) and 'stopped' (muted); every other workspaceSyncStatus
 // value -- including 'starting' and 'syncing', which are in-progress rather
 // than failed -- fell into its catch-all destructive (red) branch. The

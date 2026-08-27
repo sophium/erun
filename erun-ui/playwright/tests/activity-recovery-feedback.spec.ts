@@ -1,8 +1,8 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// Before #1420, RecoveryFeedback rendered its outer <section role="status">
-// regardless of outcome, so a failed recovery -- a write the backend refused --
-// was announced no more urgently than a success. It now routes a failure
+// RecoveryFeedback used to render its outer <section role="status"> regardless
+// of outcome, so a failed recovery -- a write the backend refused -- was
+// announced no more urgently than a success. It now routes a failure
 // through InlineAlert (role="alert"), matched here via the accessibility tree
 // rather than an attribute string match.
 //

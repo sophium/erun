@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 // erun-ui/AGENTS.md § "Design-Language Decision Record" names two collisions
 // this repository decided to close for good: a second component named
-// StatusBadge that hand-rolled its own status colors (#1418), and inline
-// failure surfaces that rendered without going through InlineAlert /
-// PermissionNotice (#1420). These tests fail the moment either regresses,
+// StatusBadge that hand-rolled its own status colors, and inline failure
+// surfaces that rendered without going through InlineAlert / PermissionNotice.
+// These tests fail the moment either regresses,
 // rather than relying on a reviewer noticing a new hand-rolled color mapping.
 
 const frontendSrc = fileURLToPath(new URL('.', import.meta.url));
@@ -49,8 +49,8 @@ test('the desktop no longer hand-rolls a destructive color mapping outside Inlin
   // TenantDashboardMessage.tsx's DashboardMessage and ActivityQueueDrawer.tsx's
   // RecoveryFeedback both used to branch their own border/background/text
   // classes on a destructive flag, with no ARIA role naming the failure. Both
-  // now render a refused write through InlineAlert instead (see #1420). Scoped
-  // to the raw Tailwind utility classes rather than the bare word
+  // now render a refused write through InlineAlert instead. Scoped to the
+  // raw Tailwind utility classes rather than the bare word
   // "destructive" so a legitimate `variant="destructive"` Button elsewhere in
   // these files would not false-positive this check.
   const offenders = [
