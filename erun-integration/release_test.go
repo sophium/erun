@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -797,8 +798,9 @@ exit 0
 		// git's push-rejection hint block is worded differently across git
 		// versions, so it cannot be part of a reviewed golden; the `! [rejected]`
 		// line and erun's own retry line are what this scenario locks.
+		combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
 		golden.Equal(t, "release/real_run_absorbs_a_base_branch_that_moved_during_the_build",
-			normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""}))
+			canonicalizeReleaseStageTimingOrder(t, combined))
 
 		// Side effects outside the captured streams, one per contract the
 		// absorbed push has to hold: the repository records the release it
@@ -905,6 +907,64 @@ func seedBareOrigin(t *testing.T, setup env.Setup) string {
 	fixture.RunGit(t, setup.Cwd, "remote", "add", "origin", remoteRoot)
 	fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "main")
 	return remoteRoot
+}
+
+// releaseStageTimingSiblingsToCanonicalize are this scenario's top-level
+// release-stage timing rows other than "publish", the one stage whose
+// duration (a multi-arch image build plus two chart publishes) always
+// dominates by a wide, host-independent margin. These five run sequentially
+// and each does at most a couple of real git subprocess calls, except
+// "push": this scenario's whole point is a rejected push that rebases and
+// retries, so "push" alone does several more real git subprocess calls than
+// its siblings. erun-common/timing.go's orderedTimingRows sorts by measured
+// duration, tie-breaking by name only when two rows land within a fixed
+// noise floor of each other — so whether "push"'s extra real git latency
+// crosses that floor and reorders it ahead of its siblings depends on how
+// fast git subprocesses run on the host, not on anything this scenario
+// controls. Canonicalizing this block's order before comparing keeps the
+// golden asserting what is actually stable: which five stages ran and
+// roughly how long each took, not which one happened to be a few git calls
+// slower on this particular machine.
+var releaseStageTimingSiblingsToCanonicalize = []string{
+	"post-release-version-bump", "push", "release", "sync-remote", "verify-publication",
+}
+
+// canonicalizeReleaseStageTimingOrder reorders the contiguous
+// releaseStageTimingSiblingsToCanonicalize block within a normalized
+// step-timing table into a fixed, alphabetical order, so the golden compares
+// something that does not depend on real subprocess timing. Called after
+// normalize.Apply, so every row already reads "<name> [<ELAPSED>]". Fails the
+// test loudly, rather than silently comparing the wrong thing, if the block
+// is not exactly the expected five rows in a row — a sign the production
+// output's shape changed and this helper needs to change with it.
+func canonicalizeReleaseStageTimingOrder(t *testing.T, output string) string {
+	t.Helper()
+	wantCount := len(releaseStageTimingSiblingsToCanonicalize)
+	want := make(map[string]bool, wantCount)
+	for _, name := range releaseStageTimingSiblingsToCanonicalize {
+		want["    "+name+" [<ELAPSED>]"] = true
+	}
+	lines := strings.Split(output, "\n")
+	start := -1
+	for i, line := range lines {
+		if want[line] {
+			start = i
+			break
+		}
+	}
+	if start == -1 || start+wantCount > len(lines) {
+		t.Fatalf("release stage timing siblings not found in:\n%s", output)
+	}
+	block := lines[start : start+wantCount]
+	seen := make(map[string]bool, wantCount)
+	for _, line := range block {
+		if !want[line] || seen[line] {
+			t.Fatalf("release stage timing siblings not found as the expected contiguous block in:\n%s", output)
+		}
+		seen[line] = true
+	}
+	sort.Strings(block)
+	return strings.Join(lines, "\n")
 }
 
 // remoteMainSubjects reads origin/main's commit subjects through a second
