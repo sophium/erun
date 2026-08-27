@@ -193,7 +193,7 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 | `exec_job_output` | Read a page of a job's output, including while it runs. |
 | `exec_job_cancel` | Signal a running job's work by its recorded process. |
 
-`job`'s five query verbs moved under `exec` (`job_attach`/`job_status`/`job_await`/`job_output`/`job_cancel` are retired aliases, kept callable for one release). The command-starting tool did not move with them: `job_start` is gone outright, split across the two tools that actually start a job now — **`exec_raw` with `wait: false`** for a plain command (see [The escape hatch](#raw--the-escape-hatch)), and **`exec_agent`** for an AI tool. Splitting them means each tool's schema only carries the fields its own mode needs, instead of `job_start`'s single schema carrying both a `command` and an `agent`/`prompt` that excluded each other.
+`job`'s five query verbs moved under `exec` (`job_attach`/`job_status`/`job_await`/`job_output`/`job_cancel` are retired aliases, kept callable for one release). The command-starting tool did not move with them: `job_start`'s capability split across the two tools that actually start a job now — **`exec_raw` with `wait: false`** for a plain command (see [The escape hatch](#raw--the-escape-hatch)), and **`exec_agent`** for an AI tool. `job_start` itself stays registered as a stub: calling it always fails, naming both replacements, so a caller still shaped for the old tool learns what to call instead of seeing a bare "unknown tool". Splitting the capability means each tool's schema only carries the fields its own mode needs, instead of `job_start`'s single schema carrying both a `command` and an `agent`/`prompt` that excluded each other; both new tools also take the optional `tenant`/`environment` pair described above, the same as every other job tool.
 
 **Reach for a backgrounded job instead of a foreground `exec_raw` call for anything you will need to come back to.** A foreground call is request/response: it returns when the process exits, so observing long work through it means re-implementing job bookkeeping in shell — detach the work, redirect it to a log, poll in a loop, invent a sentinel token because the real signal is buffered until exit, and parse that token back out of this envelope. Each of those is a place to get it wrong, and none of them is the interesting problem.
 
@@ -392,6 +392,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_job_await` | `erun exec job await` | Read |
 | exec | `exec_job_output` | `erun exec job output` | Read |
 | exec | `exec_job_cancel` | `erun exec job cancel` | Work |
+| exec | `job_start` | *(removed; see `exec_raw` `wait: false` / `exec_agent`)* | Read |
 | cloud | `cloud_list` | *(MCP-only)* | Read |
 | cloud | `cloud_init_aws` | `erun cloud init aws` | Work |
 | cloud | `cloud_init_cloudflare` | `erun cloud init cloudflare` | Work |

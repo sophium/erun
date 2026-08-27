@@ -161,11 +161,15 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"expose":                 {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"unexpose":               {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 	"terraform":              {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
-	"doctor":                 {Family: "", CLIPath: []string{"doctor"}, Title: "Diagnose an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"observe":                {Family: "", CLIPath: []string{"observe"}, Title: "Observe an environment's live state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"usage":                  {Family: "", CLIPath: []string{"usage"}, Title: "Report an environment's live resource usage", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"resize":                 {Family: "", CLIPath: []string{"resize"}, Title: "Resize the runtime pod's CPU/memory limits", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"delete":                 {Family: "", CLIPath: []string{"delete"}, Title: "Delete an environment and its namespace", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	// job_start has no working handler: it is a removed-tool stub (see
+	// mcpRemovedTools) whose only behavior is to name the tool that took over
+	// its capability.
+	"job_start": {Family: "exec", CLIPath: nil, Title: "Removed: use exec_raw or exec_agent", ReadOnly: true, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
+	"doctor":    {Family: "", CLIPath: []string{"doctor"}, Title: "Diagnose an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"observe":   {Family: "", CLIPath: []string{"observe"}, Title: "Observe an environment's live state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"usage":     {Family: "", CLIPath: []string{"usage"}, Title: "Report an environment's live resource usage", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"resize":    {Family: "", CLIPath: []string{"resize"}, Title: "Resize the runtime pod's CPU/memory limits", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"delete":    {Family: "", CLIPath: []string{"delete"}, Title: "Delete an environment and its namespace", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 }
 
 // MCPToolDescriptorFor returns a tool's descriptor. The second result is false
@@ -249,4 +253,31 @@ func MCPToolCurrentName(tool string) string {
 		return current
 	}
 	return trimmed
+}
+
+// mcpRemovedTools maps a tool this server no longer runs to the guidance a
+// caller needs once it is gone: which live tool now covers its capability.
+// This is deliberately separate from mcpToolRenames: a rename's replacement
+// shares the retired tool's schema and behavior, so aliasing it costs
+// nothing. A removal's capability can split across replacements with
+// incompatible schemas -- job_start's command mode became exec_raw's
+// wait:false path and its agent mode became the separate exec_agent tool, so
+// no single alias could carry both without lying about its own input shape.
+// A tool named here still gets a registration under its retired name (see
+// erun-mcp's registerRemovedTools), so calling it fails with the guidance
+// below rather than the SDK's bare "unknown tool", which names a problem and
+// no action the caller can take.
+var mcpRemovedTools = map[string]string{
+	"job_start": "exec_raw with wait:false for a plain command, or exec_agent for an AI tool",
+}
+
+// MCPRemovedTools returns the retired-to-guidance mapping, so a transport can
+// register a stub under each retired name and a test can assert every stub
+// names a real, described replacement.
+func MCPRemovedTools() map[string]string {
+	removed := make(map[string]string, len(mcpRemovedTools))
+	for name, guidance := range mcpRemovedTools {
+		removed[name] = guidance
+	}
+	return removed
 }

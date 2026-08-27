@@ -190,8 +190,32 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	registerReviewTools(reg, runtime)
 	registerDeliveryTools(reg, runtime)
 	registerInspectionTools(reg, runtime)
+	registerRemovedTools(reg)
 
 	return server
+}
+
+// registerRemovedTools gives every retired tool name in erun-common's
+// removed-tool table a stub, instead of leaving the name unregistered. An
+// unregistered name fails at the SDK's own routing layer with a bare "unknown
+// tool", which names a problem and no action the caller can take; the stub
+// registered here instead fails with the guidance naming the tool that took
+// over its capability. The input type accepts any arguments so a caller still
+// shaped for the retired tool's own schema reaches this handler rather than
+// failing schema validation first.
+func registerRemovedTools(reg toolRegistrar) {
+	for name, guidance := range eruncommon.MCPRemovedTools() {
+		addTool(reg, &mcp.Tool{
+			Name:        name,
+			Description: fmt.Sprintf("Removed; use %s instead.", guidance),
+		}, removedTool(name, guidance))
+	}
+}
+
+func removedTool(name, guidance string) func(context.Context, *mcp.CallToolRequest, map[string]any) (*mcp.CallToolResult, any, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
+		return nil, nil, fmt.Errorf("%s was removed; use %s instead", name, guidance)
+	}
 }
 
 func registerReadModelTools(reg toolRegistrar, info eruncommon.BuildInfo, runtime RuntimeConfig) {

@@ -24,11 +24,11 @@ func TestToolNameEqualsItsCLIPath(t *testing.T) {
 }
 
 // TestMCPOnlyToolsAreTheKnownSet pins the tools with no erun command behind
-// them. #1186 assumed there were none beyond the five renames; there are
-// eleven now (ten wire-level primitives the CLI deliberately expresses
-// differently for a human, plus exec_agent, whose capability the CLI already
-// covers via `erun exec job start --agent`). Pinning the set makes adding a
-// twelfth a decision rather than an accident.
+// them: ten wire-level primitives the CLI deliberately expresses differently
+// for a human, exec_agent (whose capability the CLI already covers via `erun
+// exec job start --agent`), and job_start (a removed-tool stub with no
+// handler at all, see MCPRemovedTools). Pinning the set makes adding another
+// one a decision rather than an accident.
 func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 	want := map[string]struct{}{
 		"activity_lease_list":          {},
@@ -42,6 +42,7 @@ func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 		"cloud_clear_aws_credentials":  {},
 		"terraform":                    {},
 		"exec_agent":                   {},
+		"job_start":                    {},
 	}
 	for _, name := range MCPToolNames() {
 		_, expected := want[name]
@@ -120,6 +121,27 @@ func TestReadOnlyToolsAreNotAlsoDestructive(t *testing.T) {
 		descriptor, _ := MCPToolDescriptorFor(name)
 		if descriptor.ReadOnly && descriptor.Destructive {
 			t.Errorf("%s claims to be both read-only and destructive", name)
+		}
+	}
+}
+
+// TestRemovedToolsAreDistinctFromRenames: a rename keeps a working handler
+// under the old name; a removed tool never does. The two tables must never
+// share a key, or a caller's retired name would resolve to two different
+// meanings depending on which table looked it up first. Each removed name
+// also needs a descriptor (registering it would otherwise panic) and
+// non-empty guidance naming what replaced it.
+func TestRemovedToolsAreDistinctFromRenames(t *testing.T) {
+	renames := MCPToolRenames()
+	for name, guidance := range MCPRemovedTools() {
+		if _, ok := renames[name]; ok {
+			t.Errorf("%s is in both MCPToolRenames and MCPRemovedTools", name)
+		}
+		if _, ok := mcpToolDescriptors[name]; !ok {
+			t.Errorf("%s has no descriptor, so registering its removed-tool stub would panic", name)
+		}
+		if strings.TrimSpace(guidance) == "" {
+			t.Errorf("%s has no guidance naming its replacement", name)
 		}
 	}
 }

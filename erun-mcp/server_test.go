@@ -148,9 +148,11 @@ func TestEndpointURL(t *testing.T) {
 var wantRegisteredTools = []string{
 	// Sorted. The four exec_* names joined the surface with #1186's rename;
 	// diff/raw/write/commit remain as deprecated aliases for one release.
-	// #1246 moved job's five query verbs to exec_job_* (job_* remain as
-	// deprecated aliases for one release) and added exec_agent; job_start is
-	// gone outright, split between exec_raw's wait:false mode and exec_agent.
+	// job's five query verbs moved to exec_job_* (job_* remain as deprecated
+	// aliases for one release) and exec_agent joined the surface; job_start's
+	// capability split between exec_raw's wait:false mode and exec_agent, so
+	// it keeps a registered stub that fails, naming both, rather than
+	// disappearing outright.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
@@ -160,7 +162,7 @@ var wantRegisteredTools = []string{
 	"exec_diff", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
-	"job_cancel", "job_output", "job_status", "list", "observe",
+	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
 	"platform_context_get", "platform_context_list", "platform_env_delete",
 	"platform_env_deploy", "platform_env_get", "platform_env_list",
@@ -172,23 +174,19 @@ var wantRegisteredTools = []string{
 	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
 
-func TestHTTPHandlerExposesVersionTool(t *testing.T) {
-	// newHTTPHandler resolves its auth trust anchor from the ambient environment,
-	// so running this test inside an erun runtime pod (which sets
-	// ERUN_MCP_TRUSTED_ISSUER) would enable auth and reject the unauthenticated
-	// client. Clear the anchors so the tool surface is what is under test.
+// connectTestMCPSession clears the ambient auth anchors (set when this test
+// runs inside an erun runtime pod, which would otherwise reject the
+// unauthenticated test client) and connects a client session to a freshly
+// built handler, so each caller gets a clean session without repeating the
+// setup and its own defer-cleanup.
+func connectTestMCPSession(t *testing.T, info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.ClientSession {
+	t.Helper()
 	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
 		t.Setenv(key, "")
 	}
 	cfg := HTTPConfig{Path: "/mcp"}
-	info := eruncommon.BuildInfo{
-		Version: "1.2.3",
-		Commit:  "abcdef",
-		Date:    "2024-01-01",
-	}
-
-	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, RuntimeConfig{}, nil))
-	defer httpServer.Close()
+	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, runtime, nil))
+	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
@@ -198,9 +196,16 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
-	defer func() {
-		_ = session.Close()
-	}()
+	t.Cleanup(func() { _ = session.Close() })
+	return session
+}
+
+func TestHTTPHandlerExposesVersionTool(t *testing.T) {
+	session := connectTestMCPSession(t, eruncommon.BuildInfo{
+		Version: "1.2.3",
+		Commit:  "abcdef",
+		Date:    "2024-01-01",
+	}, RuntimeConfig{})
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -227,6 +232,40 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
 	}
+}
+
+// TestCallingARemovedToolNamesItsReplacement calls job_start over a real MCP
+// round trip: it is registered (TestHTTPHandlerExposesVersionTool's
+// wantRegisteredTools pins that) but has no working handler, so the call must
+// fail as a tool error naming its replacements, not as a protocol-level
+// "unknown tool" that names a problem and no action the caller can take.
+func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
+	session := connectTestMCPSession(t, eruncommon.BuildInfo{}, RuntimeConfig{})
+
+	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "job_start",
+		Arguments: map[string]any{"command": []string{"echo", "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(job_start) failed at the protocol level: %v", err)
+	}
+	if !removed.IsError {
+		t.Fatalf("expected job_start to report a tool error, got: %+v", removed)
+	}
+	if got := removedToolText(t, removed); !strings.Contains(got, "exec_raw") || !strings.Contains(got, "exec_agent") {
+		t.Fatalf("job_start error should name both replacements, got: %q", got)
+	}
+}
+
+func removedToolText(t *testing.T, result *mcp.CallToolResult) string {
+	t.Helper()
+	var sb strings.Builder
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			sb.WriteString(text.Text)
+		}
+	}
+	return sb.String()
 }
 
 func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
