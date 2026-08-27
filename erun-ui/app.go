@@ -85,6 +85,7 @@ type erunUIDeps struct {
 	loadEnvironmentJobs       func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
 	readEnvironmentJobOutput  func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
 	cancelEnvironmentJob      func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
+	whipEnvironment           func(context.Context, string, string) (eruncommon.WhipResult, error)
 	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
 	syncWorkspace             func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
@@ -485,6 +486,9 @@ func withDefaultEnvironmentJobDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.cancelEnvironmentJob == nil {
 		deps.cancelEnvironmentJob = cancelEnvironmentJobFromMCP
+	}
+	if deps.whipEnvironment == nil {
+		deps.whipEnvironment = whipEnvironmentViaMCP
 	}
 	return deps
 }

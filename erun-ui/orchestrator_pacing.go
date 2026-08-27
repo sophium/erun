@@ -220,6 +220,37 @@ func orchestratorPacingReasonFromWhip(reason eruncommon.WhipReason) orchestrator
 	}
 }
 
+// whipDecisionFromOrchestratorPacing is orchestratorPacingDecisionFromWhip's
+// inverse, used by WhipNow (whip.go) to fold an orchestrator outcome into the
+// same eruncommon.WhipResult shape the environment side reports in.
+func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) eruncommon.WhipDecision {
+	switch decision {
+	case orchestratorPacingNudge:
+		return eruncommon.WhipDecisionNudge
+	case orchestratorPacingCap:
+		return eruncommon.WhipDecisionCap
+	default:
+		return eruncommon.WhipDecisionNone
+	}
+}
+
+// whipReasonFromOrchestratorPacing is orchestratorPacingReasonFromWhip's
+// inverse; see whipDecisionFromOrchestratorPacing.
+func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) eruncommon.WhipReason {
+	switch reason {
+	case orchestratorPacingReasonNotAlive:
+		return eruncommon.WhipReasonNotAlive
+	case orchestratorPacingReasonAlreadyCapped:
+		return eruncommon.WhipReasonAlreadyCapped
+	case orchestratorPacingReasonCapCrossed:
+		return eruncommon.WhipReasonCapCrossed
+	case orchestratorPacingReasonNudge:
+		return eruncommon.WhipReasonNudge
+	default:
+		return eruncommon.WhipReasonFresh
+	}
+}
+
 // orchestratorPacingRow is what the reconciler gathers under a.mu for one
 // orchestrator, before making any decision or doing any file/pty IO outside
 // the lock.

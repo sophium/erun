@@ -6,6 +6,7 @@ import { TitlebarLeftControls, TitlebarRightControls } from '@/components/app/Ti
 import { IdleStatusWidget } from '@/components/app/Titlebar.IdleStatusWidget';
 import { TitlebarStatus } from '@/components/app/Titlebar.Status';
 import { ThemeToggle } from '@/components/app/Titlebar.ThemeToggle';
+import { TitlebarWhipAction } from '@/components/app/Titlebar.WhipAction';
 
 export function Titlebar(): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -28,6 +29,7 @@ export function Titlebar(): React.ReactElement {
       <div className="relative z-[1] flex items-center gap-2 [--wails-draggable:no-drag]">
         <IdleStatusWidget />
         <TitlebarRightControls />
+        <TitlebarWhipAction />
         <ThemeToggle />
       </div>
     </header>

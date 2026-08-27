@@ -21,13 +21,13 @@ erun whip [TENANT ENVIRONMENT] [flags]
 Two populations, each disqualified for its own explicit reason rather than lumped into one generic failure:
 
 - **Environment agents.** Each configured environment has its own AI session (the one `erun open`'s AI tab reattaches to). `whip` calls that environment's own `whip` MCP tool. An environment nobody currently has open in the desktop has no reachable edge and is reported **skipped — not alive**: there is no live session there to push. One that already answered the maximum number of consecutive nudges without showing new activity is reported **skipped — already-capped**, and pushing it again does not restart the count — see [Reply or restart](#reply-or-restart) below.
-- **Orchestrators.** A persisted orchestrator's live session is a PTY held entirely inside the running desktop process — a separate `erun` invocation (this command) has no channel into it. Every configured orchestrator is therefore reported **skipped — unreachable from this transport**, always, regardless of whether it is actually running. Only the desktop's own automatic pass, or a future in-app action, can push an orchestrator; this is a structural limit of the CLI, not a bug.
+- **Orchestrators.** A persisted orchestrator's live session is a PTY held entirely inside the running desktop process — a separate `erun` invocation (this command) has no channel into it. Every configured orchestrator is therefore reported **skipped — unreachable from this transport**, always, regardless of whether it is actually running. Only the desktop itself — its own automatic pass, or the titlebar's whip button (see [Desktop app overview](/desktop/overview#orchestrators)) — can push an orchestrator; this is a structural limit of the CLI, not a bug.
 
 Neither case is a hard command failure — `erun whip` exits 0 and reports every target's outcome. That report *is* the deliverable: naming who was pushed and who was skipped, and why, is what makes "it isn't working" a checkable claim instead of a feeling.
 
 ## Explicit means explicit
 
-Passing `TENANT ENVIRONMENT` (or omitting both to whip everything configured) pushes each live target immediately — it does not wait for that session to have gone quiet for a while first. Clicking (or running) whip is the operator asserting "push this now", the same way the row-level whip described in the desktop plan would work. It never bypasses the per-target cap: a session already at its limit is still reported capped, not pushed a seventh time.
+Passing `TENANT ENVIRONMENT` (or omitting both to whip everything configured) pushes each live target immediately — it does not wait for that session to have gone quiet for a while first. Running whip is the operator asserting "push this now", the same assertion the desktop's own titlebar whip button makes when clicked. It never bypasses the per-target cap: a session already at its limit is still reported capped, not pushed a seventh time.
 
 ## Reply or restart {#reply-or-restart}
 
