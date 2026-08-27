@@ -74,66 +74,6 @@ func TestRefreshOrchestratorWhipConfigOverrideWins(t *testing.T) {
 	}
 }
 
-// TestWhipOrchestratorNowIgnoresFreshnessButRespectsCap is the red-then-green
-// contract for the manual per-entry whip: a fresh
-// session (moved a second ago) is still pushed when explicitly whipped, but an
-// already-capped one stays capped rather than getting a bypassed nudge. Before
-// whipOrchestratorNow existed there was no way to assert this at all -- the
-// automatic reconciler's decideOrchestratorPacing always passed explicit=false,
-// so a fresh session was unconditionally skipped (red: this exact scenario had
-// no code path to reach). Quoting both:
-//
-//	red:   ./... has no whipOrchestratorNow symbol; build fails
-//	green: fresh session pushed=true, capped session pushed=false (below)
-func TestWhipOrchestratorNowIgnoresFreshnessButRespectsCap(t *testing.T) {
-	isolateOrchestratorWhipConfig(t)
-	orchestratorPacingNudgeSettle = 0
-
-	app := NewApp(erunUIDeps{})
-
-	freshSession := newCallRecordingSession()
-	freshKey := orchestratorSessionKey("fresh")
-	app.sessions[freshKey] = &managedTerminal{session: freshSession, key: freshKey, serial: 1, kind: sessionKindOrchestrator}
-	app.orchestrators["fresh"] = &orchestratorSession{id: "fresh", serial: 1, name: "fresh", startedAt: time.Now()}
-
-	decision, reason, err := app.whipOrchestratorNow("fresh")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if decision != orchestratorPacingNudge || reason != orchestratorPacingReasonNudge {
-		t.Fatalf("explicit whip on a fresh session: got decision=%v reason=%v, want nudge/nudge", decision, reason)
-	}
-	if len(freshSession.Calls()) != 2 {
-		t.Fatalf("expected the explicit whip to write the nudge text and its CR, got %v", freshSession.Calls())
-	}
-
-	cappedSession := newCallRecordingSession()
-	cappedKey := orchestratorSessionKey("capped")
-	app.sessions[cappedKey] = &managedTerminal{session: cappedSession, key: cappedKey, serial: 2, kind: sessionKindOrchestrator}
-	app.orchestrators["capped"] = &orchestratorSession{id: "capped", serial: 2, name: "capped", startedAt: time.Now(), pacingCapped: true}
-
-	decision, reason, err = app.whipOrchestratorNow("capped")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if decision != orchestratorPacingNone || reason != orchestratorPacingReasonAlreadyCapped {
-		t.Fatalf("explicit whip on a capped session: got decision=%v reason=%v, want none/already-capped", decision, reason)
-	}
-	if len(cappedSession.Calls()) != 0 {
-		t.Fatalf("expected the cap to still block the write, got %v", cappedSession.Calls())
-	}
-}
-
-// TestWhipOrchestratorNowUnknownIDErrors gives a definite answer instead of a
-// silent no-op when the id names no live orchestrator.
-func TestWhipOrchestratorNowUnknownIDErrors(t *testing.T) {
-	isolateOrchestratorWhipConfig(t)
-	app := NewApp(erunUIDeps{})
-	if _, _, err := app.whipOrchestratorNow("does-not-exist"); err == nil {
-		t.Fatal("expected an error for an unknown orchestrator id")
-	}
-}
-
 // TestWhipAllOrchestratorsNowNamesEveryOutcome is the section-level whip's
 // visible-record contract: every orchestrator appears in the result, named
 // with its own decision and reason -- not just an aggregate "ran" signal.

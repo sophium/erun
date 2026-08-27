@@ -273,24 +273,18 @@ type orchestratorPacingRow struct {
 func (a *App) reconcileOrchestratorPacing() {
 	refreshOrchestratorWhipConfig()
 	now := time.Now()
-	for _, row := range a.orchestratorPacingRows("") {
+	for _, row := range a.orchestratorPacingRows() {
 		a.reconcileOrchestratorPacingOne(row, now, false)
 	}
 }
 
 // orchestratorPacingRows gathers this tick's candidates under a.mu, before any
-// decision or file/pty IO outside the lock. Passing a non-empty id restricts
-// the result to that one orchestrator (the manual whip-one entrypoint); empty
-// gathers every non-transient orchestrator, as the automatic reconciler always
-// has.
-func (a *App) orchestratorPacingRows(id string) []orchestratorPacingRow {
+// decision or file/pty IO outside the lock: every non-transient orchestrator.
+func (a *App) orchestratorPacingRows() []orchestratorPacingRow {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	rows := make([]orchestratorPacingRow, 0, len(a.orchestrators))
 	for orchestratorID, session := range a.orchestrators {
-		if id != "" && orchestratorID != id {
-			continue
-		}
 		if session == nil || session.transient {
 			continue
 		}
@@ -310,23 +304,6 @@ func (a *App) orchestratorPacingRows(id string) []orchestratorPacingRow {
 	return rows
 }
 
-// whipOrchestratorNow is the row-level explicit whip: an operator
-// asserting this orchestrator should be pushed right now,
-// regardless of how recently it moved. It shares every bound the automatic
-// pass enforces — the cap, an already-capped session, the write settle — only
-// the freshness gate is skipped. Returns an error naming the id when no live
-// orchestrator matches it, so a caller (a future UI action, a test) gets a
-// definite answer rather than a silent no-op.
-func (a *App) whipOrchestratorNow(id string) (orchestratorPacingDecision, orchestratorPacingReason, error) {
-	refreshOrchestratorWhipConfig()
-	rows := a.orchestratorPacingRows(id)
-	if len(rows) == 0 {
-		return orchestratorPacingNone, orchestratorPacingReasonNotAlive, fmt.Errorf("no orchestrator %q is running", id)
-	}
-	decision, reason := a.reconcileOrchestratorPacingOne(rows[0], time.Now(), true)
-	return decision, reason, nil
-}
-
 // orchestratorWhipOutcome is one orchestrator's result from an explicit
 // whip-everything pass — the visible record an operator judges the feature
 // by: which orchestrator, what was decided, and why.
@@ -344,7 +321,7 @@ type orchestratorWhipOutcome struct {
 func (a *App) whipAllOrchestratorsNow() []orchestratorWhipOutcome {
 	refreshOrchestratorWhipConfig()
 	now := time.Now()
-	rows := a.orchestratorPacingRows("")
+	rows := a.orchestratorPacingRows()
 	outcomes := make([]orchestratorWhipOutcome, 0, len(rows))
 	for _, row := range rows {
 		decision, reason := a.reconcileOrchestratorPacingOne(row, now, true)
