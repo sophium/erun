@@ -217,7 +217,7 @@ function NewReviewAction({ data }: { data: TenantDashboardData }): React.ReactEl
       type="button"
       size="sm"
       onClick={() => {
-        void dispatch(openCreateReviewDialog());
+        void dispatch(openCreateReviewDialog({ knownCapability: true }));
       }}
     >
       <Plus aria-hidden="true" />
