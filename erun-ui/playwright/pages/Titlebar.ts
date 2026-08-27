@@ -50,6 +50,28 @@ export class Titlebar {
     return this.page.getByRole('button', { name: /Switch to (light|dark) theme/ });
   }
 
+  // The whip control is global (every orchestrator, every environment), so
+  // unlike the env-scoped controls above it renders regardless of which
+  // session tab is active.
+  whipButton(): Locator {
+    return this.page.getByRole('button', { name: /^Whip:/ });
+  }
+
+  whipReportHeading(): Locator {
+    return this.page.getByRole('heading', { name: 'Whip' });
+  }
+
+  // Scoped to the popover's own live region: several seeded rows (the
+  // sidebar row, the terminal tab) already render the same env/orchestrator
+  // name elsewhere on the page, so an unscoped getByText(name) is ambiguous.
+  whipReportBody(): Locator {
+    return this.page.getByRole('status', { name: 'Whip results' });
+  }
+
+  async closeWhipReport(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Close whip report' }).click();
+  }
+
   async toggleTheme(): Promise<void> {
     await this.themeToggleButton().click();
   }
