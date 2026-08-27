@@ -98,6 +98,29 @@ func TestAPIRoutePatternDoesNotMatchAnUnrelatedWordSharingTheLastSegment(t *test
 	}
 }
 
+// TestAPIRoutePatternDoesNotMatchAShorterRoutesPrefixInsideALongerCallSite
+// guards the trap one level up from the "roles" word-collision above: with no
+// literal segment shared, a shorter route's own path can still be a strict
+// prefix of a longer route's path, so an unanchored pattern would count a
+// call site for the longer route as surfacing the shorter one too. This is
+// exactly what happened to "GET /v1/tenants" and "POST /v1/tenants" once
+// erun-console/src/app/api/tenantsApi.ts called "/v1/tenants/reconcile-name":
+// list/create tenants still have no operator entry point, but the
+// unanchored pattern for "/v1/tenants" matched inside the longer path anyway.
+func TestAPIRoutePatternDoesNotMatchAShorterRoutesPrefixInsideALongerCallSite(t *testing.T) {
+	pattern := APIRoutePattern("/v1/tenants")
+	longerRouteCallSite := FrontendSource(`url: '/v1/tenants/reconcile-name',`)
+
+	if longerRouteCallSite.ContainsPattern(pattern) {
+		t.Fatalf("want pattern %q to ignore a call site for the longer /v1/tenants/reconcile-name route, but it matched", pattern)
+	}
+
+	exactCallSite := FrontendSource(`fetch("/v1/tenants")`)
+	if !exactCallSite.ContainsPattern(pattern) {
+		t.Fatalf("want pattern %q to still match a call site for its own exact path", pattern)
+	}
+}
+
 func TestFindMissingDesktopSurfaceUsesPatternOverTokenWhenBothCouldMatch(t *testing.T) {
 	capabilities := []Capability{
 		{

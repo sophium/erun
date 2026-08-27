@@ -117,6 +117,21 @@ func (s FrontendSource) ContainsPattern(pattern string) bool {
 // concatenation, an encodeURIComponent(...) call -- bounded to that one path
 // segment (no "/", quote, or backtick) so the match cannot wander into
 // unrelated code.
+//
+// The pattern is anchored at the end so a route matches only a call site for
+// that exact path, never a call site for a longer route that merely extends
+// it -- "/v1/tenants" must not match inside "/v1/tenants/reconcile-name". Go's
+// regexp package (RE2) has no lookahead, so the anchor is a required
+// terminator character appended to the pattern rather than an assertion: a
+// literal-ending route may be followed by any non-"/" character (or nothing),
+// since there is nothing left to backtrack into and "not another segment" is
+// enough. A param-ending route needs the narrower terminator set of a
+// closing quote/backtick or end of input -- with the permissive "not '/'"
+// terminator, the trailing "{param}" segment's own greedy match can give back
+// characters one at a time until it stops on some inner character of the
+// interpolated expression (e.g. "}" in "${tenantId}") that happens not to be
+// "/", which would make the anchor match trivially at every route sharing the
+// same prefix.
 func APIRoutePattern(path string) string {
 	segments := strings.Split(strings.Trim(path, "/"), "/")
 	parts := make([]string, 0, len(segments))
@@ -127,7 +142,12 @@ func APIRoutePattern(path string) string {
 		}
 		parts = append(parts, regexp.QuoteMeta(segment))
 	}
-	return "/" + strings.Join(parts, "/")
+	lastSegment := segments[len(segments)-1]
+	terminator := "(?:[^/]|$)"
+	if strings.HasPrefix(lastSegment, "{") && strings.HasSuffix(lastSegment, "}") {
+		terminator = "(?:['\"`]|$)"
+	}
+	return "/" + strings.Join(parts, "/") + terminator
 }
 
 // FindMissingDesktopSurface returns every non-agent-facing capability with no
