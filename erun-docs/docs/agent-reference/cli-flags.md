@@ -772,6 +772,72 @@ Changes the runtime pod's CPU/memory limits and rolls it out through the same de
 
 ---
 
+## `erun whip` {#erun-whip}
+
+Pushes the pacing nudge into every reachable target: every configured environment's own AI session (over that environment's MCP `whip` tool — see [MCP overview § `whip`](/mcp/overview#whip)) plus every persisted orchestrator (`ERunConfig.orchestrators`). Same population-agnostic decide/report core (`eruncommon.DecideWhip`/`WhipReport`) the desktop's automatic pacing reconciler and the MCP tool both use.
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | unset | Whip only this environment; requires `--environment`. |
+| `--environment <e>` | string | unset | Whip only this environment; requires `--tenant`. |
+| `--dry-run` | bool | `false` | Still calls each reachable environment's `whip` tool, with `preview: true`, so the report reflects a real decision without ever writing into the session. |
+| `--json` | bool | `false` | Emit the full `WhipReport` as JSON. |
+
+### Resolution algorithm
+
+1. If both `--tenant`/`--environment` are given, the target list is that one pair. If neither is given, list every environment across every configured tenant (`ListTenantConfigs` + `ListEnvConfigs`) — never the ambient current-directory default a bare `resolveOpen` would resolve to. Passing only one of the two errors.
+2. For each environment target: resolve its MCP edge the same way `erun idle`/`erun exec` do (a local port-forward state file `erun open` maintains while the environment is open). An edge that cannot be resolved, or whose call fails, resolves to `{decision: none, reason: "not-alive"}` — not a command failure. A resolved edge is called with `whip {preview: <ctx.DryRun>}`; the decoded `eruncommon.WhipResult` is used verbatim.
+3. Load `~/.erun/config.yaml`'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
+4. Render one line per result (`candidate.id`/name, decision, reason, and the write error if any), or the full `WhipReport` JSON with `--json`.
+
+### `WhipReport` shape
+
+```jsonc
+{
+  "dryRun": false,
+  "results": [
+    {
+      "candidate": { "kind": "environment", "id": "myapp/dev", "name": "myapp/dev", "reachable": true, "alive": true, "lastActiveAt": "...", "nudgeCount": 1, "capped": false },
+      "decision": 1,        // 0 none, 1 nudge, 2 cap
+      "reason": "nudge",    // not-alive | unreachable-from-transport | fresh | already-capped | cap-crossed | nudge
+      "pushed": true
+    },
+    {
+      "candidate": { "kind": "orchestrator", "id": "eng-1", "name": "Eng One", "reachable": false, "alive": false, "nudgeCount": 0, "capped": false },
+      "decision": 0,
+      "reason": "unreachable-from-transport",
+      "pushed": false
+    }
+  ]
+}
+```
+
+### Configuration: `ERunConfig.whip` {#whip-config}
+
+`~/.erun/config.yaml`'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
+
+| Key | Type | Unset behaviour |
+|---|---|---|
+| `message` | string | `eruncommon.DefaultWhipMessage` (the built-in pacing text) |
+| `staleafterseconds` | int | `eruncommon.DefaultWhipStaleAfter` (600 = 10 minutes) |
+| `maxnudges` | int | `eruncommon.DefaultWhipMaxNudges` (6) |
+| `autoenabled` | bool | `true` — gates only the *automatic*, schedule-driven pass; an explicit whip (this command, the MCP tool's default, or a future in-app row action) always ignores it |
+
+Every field is a pointer in the on-disk override so "unset" (keep the default) is distinguishable from an explicit zero/false. The desktop's automatic reconciler re-reads this section once per tick (no rebuild or restart needed); this command and the MCP tool read it fresh on every invocation.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Only one of `--tenant`/`--environment` given. | Errors naming the conflict; nothing is read or pushed. |
+| An environment's MCP edge cannot be resolved or called. | That target resolves to `{decision: none, reason: "not-alive", error: "<the underlying error>"}`; the command still exits 0. |
+| A persisted orchestrator. | Always `{decision: none, reason: "unreachable-from-transport"}`; the command still exits 0. |
+| No environments and no orchestrators configured. | Exits 0 with `results: []` (or omitted under `--json` if empty). |
+
+---
+
 ## `erun outputs`
 
 `erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).
