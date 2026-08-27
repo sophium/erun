@@ -132,7 +132,14 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if cmdCtx.DryRun {
 		return nil
 	}
+	return applyPinCommand(cmdCtx, projectRoot, result, plan, saveEnvConfig)
+}
 
+// applyPinCommand writes a resolved, drifted plan: records the previous
+// version, rewrites every file site, persists the env's own runtimeversion
+// when the plan carries that site, and refreshes any chart lock a rewritten
+// dependency left stale.
+func applyPinCommand(cmdCtx common.Context, projectRoot string, result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
 	// Recorded before anything moves, so a revert has somewhere to go even if the
 	// rewrite fails partway.
 	if err := common.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {

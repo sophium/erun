@@ -29,7 +29,7 @@ func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 }
 
 // TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout covers the reported
-// case (#1439): a sourceless runtime environment has no worktree of its own,
+// case: a sourceless runtime environment has no worktree of its own,
 // but a sibling environment of the same tenant does, and every environment of
 // a tenant shares one repo.
 func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {

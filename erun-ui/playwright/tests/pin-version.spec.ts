@@ -75,7 +75,7 @@ test.describe('change erun version (#744)', () => {
     const dialog = app.page.getByTestId('pin-version-dialog');
     await expect(dialog).toBeVisible();
 
-    // The #1438 regression: the Version select's trigger must show its
+    // The regression: the Version select's trigger must show its
     // "no explicit choice" option's label, not render blank.
     const versionTrigger = dialog.getByRole('combobox', { name: 'Version' });
     await expect(versionTrigger).toContainText('Latest stable');
@@ -104,7 +104,7 @@ test.describe('change erun version (#744)', () => {
     expect(calls.indexOf('PreviewPinVersion')).toBeLessThan(calls.indexOf('ApplyPinVersion'));
   });
 
-  test('the Version select shows the environment current pin as helper text (#1438)', async ({
+  test('the Version select shows the environment current pin as helper text', async ({
     app,
     page,
   }) => {
@@ -132,7 +132,7 @@ test.describe('change erun version (#744)', () => {
     await expect(dialog).toContainText('Currently pinned to 1.0.0.');
   });
 
-  test('a sourceless environment with no known checkout blocks Preview, Apply and Revert (#1439)', async ({
+  test('a sourceless environment with no known checkout blocks Preview, Apply and Revert', async ({
     app,
     page,
   }) => {

@@ -132,7 +132,7 @@ func TestResolvePinPlanFindsAnErunImageReferenceInTerraformVariables(t *testing.
 	}
 }
 
-// The reported corruption (#1447): an erun image reference mentioned only as
+// The reported corruption: an erun image reference mentioned only as
 // an example inside a variable's description prose is not a configured site,
 // and must never be reported or rewritten — reporting it as changed on an
 // already-aligned tree contradicts the "aligned tree reports no changes"
@@ -266,19 +266,13 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 	}
 }
 
-// The reported bug (#1437): frs/prod runs a tenant image
+// The reported bug: frs/prod runs a tenant image
 // (ghcr.io/sophium/frs-devops) versioned on frs's own release line, not
 // erun's. Re-pinning it must leave runtimeversion alone — writing the erun
 // target there would name a tag frs's own line never publishes — while every
 // erun-owned reference in the repo still moves.
 func TestResolvePinPlanLeavesATenantImagedEnvsRuntimeVersionAlone(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "prod", RuntimeVersion: "1.0.76", RuntimeImage: "ghcr.io/sophium/frs-devops:1.0.76"}
-
-	plan, err := ResolvePinPlan(root, "frs", "prod", env, "1.0.175")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	plan := resolveTenantImagedRepoPlan(t)
 	for _, site := range plan.Sites {
 		if site.Kind == PinSiteRuntimeVersion {
 			t.Fatalf("a tenant-imaged env's runtimeversion must not be a pin site: %+v", site)
@@ -293,8 +287,12 @@ func TestResolvePinPlanLeavesATenantImagedEnvsRuntimeVersionAlone(t *testing.T) 
 	if !foundSkipNote {
 		t.Fatalf("expected a skipped note naming the tenant image, got %+v", plan.Skipped)
 	}
+}
 
-	// The rest of the repo's erun-owned references still move.
+// The tenant-imaged guard on runtimeversion must not spill over into the
+// repo's own erun-owned references, which still need to move.
+func TestResolvePinPlanStillPinsErunOwnedReferencesForATenantImagedEnv(t *testing.T) {
+	plan := resolveTenantImagedRepoPlan(t)
 	byKind := map[PinSiteKind][]PinSite{}
 	for _, site := range plan.Sites {
 		byKind[site.Kind] = append(byKind[site.Kind], site)
@@ -302,6 +300,20 @@ func TestResolvePinPlanLeavesATenantImagedEnvsRuntimeVersionAlone(t *testing.T) 
 	if len(byKind[PinSiteTerraformRef]) != 1 || len(byKind[PinSiteHelmDependency]) != 1 {
 		t.Fatalf("erun-owned references must still be pinned, got %+v", plan.Sites)
 	}
+}
+
+// resolveTenantImagedRepoPlan resolves the reported case: frs/prod
+// runs a tenant image (ghcr.io/sophium/frs-devops) versioned on frs's own
+// release line, not erun's.
+func resolveTenantImagedRepoPlan(t *testing.T) PinPlan {
+	t.Helper()
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "prod", RuntimeVersion: "1.0.76", RuntimeImage: "ghcr.io/sophium/frs-devops:1.0.76"}
+	plan, err := ResolvePinPlan(root, "frs", "prod", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	return plan
 }
 
 // Idempotent: re-running finds nothing left to do, which is what makes a re-pin

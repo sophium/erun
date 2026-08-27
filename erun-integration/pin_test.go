@@ -154,7 +154,7 @@ func TestPin(t *testing.T) {
 		golden.Equal(t, "pin/skips_a_tenant_runtimeimage_tag_and_says_so", normalize.Apply(result.Combined))
 	})
 
-	// The reported bug (#1437), for real: applying a re-pin for a tenant-imaged
+	// The reported bug, for real: applying a re-pin for a tenant-imaged
 	// env must not overwrite its persisted runtimeversion — that would name a
 	// tag the tenant's own image line never publishes, guaranteeing an
 	// ImagePullBackOff on the next deploy — while the rest of the repo's
@@ -192,7 +192,7 @@ func TestPin(t *testing.T) {
 		}
 	})
 
-	// The reported bug (#1439), half one: a sourceless runtime env (no
+	// The reported bug, half one: a sourceless runtime env (no
 	// MountSource, no repopath at all — the shape the backend's provisioning
 	// Jobs seed) has no local checkout of its own, and with no sibling
 	// environment of the tenant checked out here either, pin must refuse
@@ -213,7 +213,7 @@ func TestPin(t *testing.T) {
 		}
 	})
 
-	// The reported bug (#1439), half one continued: every environment of a
+	// The reported bug, half one continued: every environment of a
 	// tenant shares one repo, so when a sibling environment ("dev", a
 	// local-agent env) does have a checkout on this machine, the sourceless
 	// runtime env's re-pin resolves to it — deliberately, not by falling back
@@ -238,7 +238,7 @@ func TestPin(t *testing.T) {
 		}
 	})
 
-	// The reported bug (#1439), half two: when no known checkout exists at all
+	// The reported bug, half two: when no known checkout exists at all
 	// and pin falls back to the caller's own working directory, the plan must
 	// say so, name that tree's HEAD, and warn when the tree's own pins disagree
 	// with what the environment has deployed — so the plan is never mistaken
@@ -331,7 +331,7 @@ func TestPin(t *testing.T) {
 		}
 	})
 
-	// The reported nit (#1438): `erun pin --list` is the literal example in this
+	// The reported nit: `erun pin --list` is the literal example in this
 	// command's own --help, and it reads erun's own published registry, which
 	// is the same for every tenant — it must work on a host with no default
 	// tenant configured at all, not just when a tenant happens to be seeded.
