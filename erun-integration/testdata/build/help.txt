@@ -56,6 +56,7 @@ Available Commands:
   upgrade     Redeploy opted-in environments to the latest version for their channel
   usage       Report an environment's live CPU, memory, and disk usage
   version     Print build information
+  whip        Push every live orchestrator and environment agent to keep moving
 
 Flags:
       --dry-run         Resolve and trace mutating actions without executing them.

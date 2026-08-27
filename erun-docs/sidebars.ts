@@ -53,6 +53,7 @@ const sidebars: SidebarsConfig = {
         'cli/outputs',
         'cli/inputs',
         'cli/idle',
+        'cli/whip',
         'cli/observe',
         'cli/usage',
         'cli/resize',

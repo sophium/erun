@@ -434,6 +434,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | idle | `idle_stop_history` | *(MCP-only)* | Read |
 | idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |
 | idle | `idle_stop_cancel` | *(MCP-only)* | Work |
+| whip | `whip` | `erun whip` | Work |
 | activity | `activity_lease_list` | *(MCP-only)* | Read |
 | activity | `activity_lease_take` | *(MCP-only)* | Work |
 | activity | `activity_lease_release` | *(MCP-only)* | Work |
@@ -477,6 +478,30 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
   ]
 }
 ```
+
+### `whip`
+
+Pushes the pacing nudge into this environment's own AI session (the tab `erun open`'s `--ai` flag reattaches to), on demand rather than waiting for the desktop's own schedule-driven pass. It always acts explicitly — ignoring how recently the session moved — but never bypasses the consecutive-nudge cap: a session that already hit the cap stays capped until it shows fresh activity on its own. Set `preview: true` to resolve the decision without writing anything.
+
+```jsonc
+// whip {}
+{
+  "candidate": {
+    "kind": "environment",
+    "id": "myapp/dev",
+    "name": "myapp/dev",
+    "reachable": true,
+    "alive": true,
+    "lastActiveAt": "2026-05-25T14:31:02Z",
+    "nudgeCount": 1
+  },
+  "decision": 1,
+  "reason": "nudge",
+  "pushed": true
+}
+```
+
+`decision` is `0` (none), `1` (nudge), or `2` (cap); `reason` is always one of `not-alive` (no live AI session in this pod to push), `already-capped`, `cap-crossed` (this call just hit the cap), or `nudge`. `pushed` is `false` whenever `preview` was set or the write itself failed (`error` then names why) — never assume a `nudge` decision means the text landed. See [Agent reference · pacing](/agent-reference/skills-spec#periodic-pacing-re-statement-and-crash-auto-resume) for the message text and cap semantics, and [`erun whip`](/cli/whip) for the host-side command that fans this out across every configured environment (and reports every persisted orchestrator as unreachable from this transport, since an MCP server never holds another process's session).
 
 ### `observe`
 
