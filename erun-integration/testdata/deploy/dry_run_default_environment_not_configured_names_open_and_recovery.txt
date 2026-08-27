@@ -1,0 +1,5 @@
+audit: erun deploy --dry-run --version <VERSION>
+deploy: tenant= environment= version-override=<VERSION> components=[] force=false current=false
+deploy: spec resolution failed: default environment is not configured for team, and open has no environment to fall back to — pass an environment explicitly, or run `erun init --tenant team --environment <name>` to set one
+==> Deploy failed: default environment is not configured for team, and open has no environment to fall back to — pass an environment explicitly, or run `erun init --tenant team --environment <name>` to set one
+default environment is not configured for team, and open has no environment to fall back to — pass an environment explicitly, or run `erun init --tenant team --environment <name>` to set one
