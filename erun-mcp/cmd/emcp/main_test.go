@@ -36,11 +36,16 @@ func TestRunUsesDefaultMCPConfig(t *testing.T) {
 	if gotCfg.Host != erunmcp.DefaultHost || gotCfg.Port != erunmcp.DefaultPort || gotCfg.Path != erunmcp.DefaultPath {
 		t.Fatalf("unexpected MCP config: %+v", gotCfg)
 	}
-	if gotMetricsCfg.Host != erunmcp.DefaultMetricsHost || gotMetricsCfg.Port != erunmcp.DefaultMetricsPort || !gotMetricsCfg.Enabled {
-		t.Fatalf("unexpected metrics config: %+v", gotMetricsCfg)
-	}
+	assertMetricsConfig(t, gotMetricsCfg, erunmcp.DefaultMetricsHost, erunmcp.DefaultMetricsPort, true)
 	if gotRuntime.Context != (erunmcp.RuntimeContext{}) {
 		t.Fatalf("unexpected runtime config: %+v", gotRuntime)
+	}
+}
+
+func assertMetricsConfig(t *testing.T, got erunmcp.MetricsConfig, wantHost string, wantPort int, wantEnabled bool) {
+	t.Helper()
+	if got.Host != wantHost || got.Port != wantPort || got.Enabled != wantEnabled {
+		t.Fatalf("unexpected metrics config: %+v", got)
 	}
 }
 
@@ -65,11 +70,14 @@ func TestRunPassesResolvedFlags(t *testing.T) {
 	if gotCfg.Host != "0.0.0.0" || gotCfg.Port != 17001 || gotCfg.Path != "custom" {
 		t.Fatalf("unexpected MCP config: %+v", gotCfg)
 	}
-	if gotMetricsCfg.Host != "0.0.0.0" || gotMetricsCfg.Port != 9101 || gotMetricsCfg.Enabled {
-		t.Fatalf("unexpected metrics config: %+v", gotMetricsCfg)
-	}
-	if gotRuntime.Context.Tenant != "tenant-a" || gotRuntime.Context.Environment != "dev" || gotRuntime.Context.RepoPath != "/tmp/project" || gotRuntime.Context.KubernetesContext != "cluster-dev" || gotRuntime.Context.Namespace != "tenant-a-dev" {
-		t.Fatalf("unexpected runtime config: %+v", gotRuntime)
+	assertMetricsConfig(t, gotMetricsCfg, "0.0.0.0", 9101, false)
+	assertRuntimeContext(t, gotRuntime.Context)
+}
+
+func assertRuntimeContext(t *testing.T, got erunmcp.RuntimeContext) {
+	t.Helper()
+	if got.Tenant != "tenant-a" || got.Environment != "dev" || got.RepoPath != "/tmp/project" || got.KubernetesContext != "cluster-dev" || got.Namespace != "tenant-a-dev" {
+		t.Fatalf("unexpected runtime context: %+v", got)
 	}
 }
 
