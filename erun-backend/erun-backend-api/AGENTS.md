@@ -84,6 +84,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - If a route needs authenticated identity as user-visible input, prefer a small helper that treats missing context as an internal wiring error.
 - Keep route request structs local to `internal/routes` unless the request contract is intentionally shared with CLI or MCP through `erun-common`.
 - Avoid route-to-model response mapping when the model already has the correct JSON shape.
+- `erun-integration`'s desktop-surface gate (`erun-integration/AGENTS.md` § "Desktop-surface gate") audits every route registered here for an operator entry point in `erun-ui/frontend` or `erun-console`, the same standard it already holds CLI commands and MCP tools to. A route with no operator surface and no real one planned for this change needs an explicit exemption in `route_audit.go`'s `InternalAPIRoutes`, with a comment explaining why — silence is never how a route opts out.
 
 ## Reviews And Builds
 

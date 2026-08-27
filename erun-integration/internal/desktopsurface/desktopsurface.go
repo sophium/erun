@@ -1,36 +1,55 @@
 // Package desktopsurface implements the classifier behind
-// TestDesktopSurfaceGate: it flags a user-facing CLI command or MCP tool that
-// has no way in from the desktop app (erun AGENTS.md § "Smooth, Seamless, No
-// Dead Ends", failure mode 3), and separately flags a Wails binding location
-// with no binding -- an unexported *App method no other Go code calls.
+// TestDesktopSurfaceGate: it flags a user-facing CLI command, MCP tool, or
+// API route that has no way in from an operator surface -- erun-ui/frontend
+// or erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
+// mode 3) -- and separately flags a Wails binding location with no binding --
+// an unexported *App method no other Go code calls.
 package desktopsurface
 
 import (
 	"fmt"
 	"go/ast"
+	"regexp"
 	"sort"
 	"strings"
 )
 
-// Capability is one user-reachable action the CLI or MCP surface exposes.
+// Capability is one user-reachable action the CLI, MCP, or API surface
+// exposes.
 type Capability struct {
-	// Name identifies the capability for reporting: an MCP tool name, or a
-	// CLI command path joined with spaces (e.g. "app restart").
+	// Name identifies the capability for reporting: an MCP tool name, a CLI
+	// command path joined with spaces (e.g. "app restart"), or an API route
+	// as "METHOD /path" (e.g. "GET /v1/roles").
 	Name string
 	// Source names where the capability comes from, for the failure message.
 	Source string
-	// Token is searched for, case-insensitively, as a plain substring of
-	// erun-ui/frontend/src. It is deliberately not word-bounded: a capability
-	// name embedded in a camelCase identifier (WhipButton, renderWhipPanel)
-	// must still count as a match.
+	// Token is searched for, case-insensitively, as a plain substring of the
+	// operator surface source. It is deliberately not word-bounded: a
+	// capability name embedded in a camelCase identifier (WhipButton,
+	// renderWhipPanel) must still count as a match. Ignored when Pattern is
+	// set.
 	Token string
-	// AgentFacing marks a capability declared exempt from needing a desktop
-	// entry point. See eruncommon.MCPToolDescriptor.AgentFacing and
-	// erun-cli/cmd.cliOnlyAgentFacingCommands for the two declaration sites.
+	// Pattern, when set, is a regular expression searched for
+	// case-insensitively instead of Token. API routes use this: a
+	// parameterized path's literal segments (e.g. "/v1/users/{user_id}/roles")
+	// never appear contiguously in frontend source once a call site
+	// interpolates the id, and a route's own last segment alone ("roles") is
+	// often an ordinary word that already shows up in unrelated UI copy --
+	// see APIRoutePattern.
+	Pattern string
+	// AgentFacing marks a capability declared exempt from needing an
+	// operator entry point. See eruncommon.MCPToolDescriptor.AgentFacing,
+	// erun-cli/cmd.cliOnlyAgentFacingCommands, and
+	// erun-backend-api/internal/routes.InternalAPIRoutes for the three
+	// declaration sites.
 	AgentFacing bool
+	// DeclarationHint names, in prose, where a capability from this Source
+	// declares itself exempt -- used verbatim in Missing.Message() so the
+	// failure points at the fix instead of a generic pointer.
+	DeclarationHint string
 }
 
-// Missing is a capability the gate could not find any desktop entry point
+// Missing is a capability the gate could not find any operator entry point
 // for.
 type Missing struct {
 	Capability Capability
@@ -41,35 +60,77 @@ type Missing struct {
 // Seamless, No Dead Ends": "the check must name what is missing and where to
 // add it, not merely fail").
 func (m Missing) Message() string {
+	hint := m.Capability.DeclarationHint
+	if hint == "" {
+		hint = "erun-common/mcp_tools.go's AgentFacing field for an MCP tool, " +
+			"erun-cli/cmd/command_tree.go's cliOnlyAgentFacingCommands for a CLI-only command, " +
+			"or erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes for an API route"
+	}
+	what := fmt.Sprintf("%q", m.Capability.Token)
+	if m.Capability.Pattern != "" {
+		what = fmt.Sprintf("anything matching %q", m.Capability.Pattern)
+	}
 	return fmt.Sprintf(
-		"%s %q has no desktop entry point: erun-ui/frontend/src contains no reference to %q.\n"+
-			"    Either add a way to reach it from erun-ui/frontend/src, or if it is genuinely "+
-			"agent-only, declare that explicitly (erun-common/mcp_tools.go's AgentFacing field for "+
-			"an MCP tool, or erun-cli/cmd/command_tree.go's cliOnlyAgentFacingCommands for a CLI-only command).",
-		m.Capability.Source, m.Capability.Name, m.Capability.Token,
+		"%s %q has no operator entry point: neither erun-ui/frontend/src nor erun-console/src reference %s.\n"+
+			"    Either add a way to reach it from one of those trees, or if it is genuinely "+
+			"agent-only or internal, declare that explicitly (%s).",
+		m.Capability.Source, m.Capability.Name, what, hint,
 	)
 }
 
-// FrontendSource is the concatenated text of every frontend source file the
-// gate searches. Callers build this from erun-ui/frontend/src so the
-// classifier itself stays free of filesystem access and is easy to unit test.
+// FrontendSource is the concatenated text of every operator-surface source
+// file the gate searches: the desktop app (erun-ui/frontend/src) and the
+// hosted web console (erun-console/src). Callers build this from those trees
+// so the classifier itself stays free of filesystem access and is easy to
+// unit test.
 type FrontendSource string
 
-// Contains reports whether the frontend source references a token anywhere,
+// Contains reports whether the source references a token anywhere,
 // case-insensitively.
 func (s FrontendSource) Contains(token string) bool {
 	return strings.Contains(strings.ToLower(string(s)), strings.ToLower(token))
 }
 
-// FindMissingDesktopSurface returns every non-agent-facing capability whose
-// token is absent from frontendSource, ordered by name for a stable report.
+// ContainsPattern reports whether the source matches the regular expression
+// pattern anywhere, case-insensitively.
+func (s FrontendSource) ContainsPattern(pattern string) bool {
+	return regexp.MustCompile("(?i)" + pattern).MatchString(string(s))
+}
+
+// APIRoutePattern builds the search pattern for an API route's canonical
+// path template (e.g. "/v1/users/{user_id}/roles", as registered with
+// ProtectedRouteRegistrar). Every literal segment must appear, in order,
+// exactly as written; each "{param}" segment matches whatever a frontend
+// call site interpolates in its place -- a template expression, string
+// concatenation, an encodeURIComponent(...) call -- bounded to that one path
+// segment (no "/", quote, or backtick) so the match cannot wander into
+// unrelated code.
+func APIRoutePattern(path string) string {
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
+			parts = append(parts, "[^/`\"']*")
+			continue
+		}
+		parts = append(parts, regexp.QuoteMeta(segment))
+	}
+	return "/" + strings.Join(parts, "/")
+}
+
+// FindMissingDesktopSurface returns every non-agent-facing capability with no
+// reference in frontendSource, ordered by name for a stable report.
 func FindMissingDesktopSurface(capabilities []Capability, frontendSource FrontendSource) []Missing {
 	var missing []Missing
 	for _, c := range capabilities {
 		if c.AgentFacing {
 			continue
 		}
-		if frontendSource.Contains(c.Token) {
+		if c.Pattern != "" {
+			if frontendSource.ContainsPattern(c.Pattern) {
+				continue
+			}
+		} else if frontendSource.Contains(c.Token) {
 			continue
 		}
 		missing = append(missing, Missing{Capability: c})
