@@ -146,6 +146,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		d.optionalBuildCommand(),
 		d.optionalPushCommand(),
 		d.deployCommand(),
+		d.resizeCommand(),
 		d.publishCommand(),
 		d.upgradeCommand(),
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
@@ -251,6 +252,10 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 // command must exist even where no context resolves.
 func (d rootDependencies) deployCommand() *cobra.Command {
 	return newDeployCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+}
+
+func (d rootDependencies) resizeCommand() *cobra.Command {
+	return newResizeCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) publishCommand() *cobra.Command {

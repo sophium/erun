@@ -140,6 +140,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"doctor":                        {Family: "", CLIPath: []string{"doctor"}, Title: "Diagnose an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"observe":                       {Family: "", CLIPath: []string{"observe"}, Title: "Observe an environment's live state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"usage":                         {Family: "", CLIPath: []string{"usage"}, Title: "Report an environment's live resource usage", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"resize":                        {Family: "", CLIPath: []string{"resize"}, Title: "Resize the runtime pod's CPU/memory limits", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"delete":                        {Family: "", CLIPath: []string{"delete"}, Title: "Delete an environment and its namespace", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 }
 

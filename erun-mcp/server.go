@@ -495,6 +495,10 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call.",
 	}, usageTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "resize",
+		Description: "Change the runtime pod's CPU/memory limits and roll it out, without re-running init to change two numbers. Pass cpu/memory explicitly, or applyRecommendation to size from this environment's own standing sizing recommendation (resolved from usage history retained in this pod) instead of retyping a value already computed. A resize whose resolved size matches the current one is a no-op. Moves only the runtime container's throttle/OOM ceiling and its namespace quota draw -- never the scheduler's fixed request, the erun-dind sidecar, or any PVC. Because a resize rolls the pod (Recreate strategy) and would kill any live session inside it, it first checks this environment's activity leases and refuses, naming every holder, unless overrideLease is set. Supports preview.",
+	}, resizeTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "delete",
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))

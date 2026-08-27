@@ -110,8 +110,10 @@ same reading from a terminal or an MCP-connected orchestrator.
 The figures above describe the node. The environment also has an opinion about *itself*: every
 environment accumulates a standing recommendation — raise memory, drop memory, raise CPU, or leave
 it alone — from its own container's cgroup counters, and [`erun list`](/cli/list#the-sizing-recommendation)
-prints it under `runtime-pod:`. Nothing is applied automatically; resizing means a deploy, and that
-is your call to time.
+prints it under `runtime-pod:`. Nothing is applied automatically: [`erun resize`](/cli/resize) (or the
+Runtime tab's Resize action) is what acts on it, and it refuses to roll the pod out from under a
+build, a deploy, or an agent session already using the environment unless you explicitly override
+that.
 
 It matters because sizing is otherwise set once and never revisited, and both ways of being wrong
 are live. Under-provisioning shows up as a killed agent. Over-provisioning shows up as nothing at

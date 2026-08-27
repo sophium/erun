@@ -102,3 +102,26 @@ export interface UIRuntimeDiskUsage {
   percentUsed?: number;
   percent?: string;
 }
+
+// One resource's resolved change, mirroring eruncommon.RuntimeResizeAction.
+export interface UIRuntimeSizingAction {
+  resource: string;
+  from: string;
+  to: string;
+}
+
+// UIRuntimeSizingRecommendation is the environment's own standing sizing
+// recommendation (erun-common/runtime_sizing.go), read via `erun resize
+// --apply-recommendation --dry-run` run inside the pod — the recommendation is
+// derived from usage history retained there and never leaves it, so the
+// desktop cannot compute this host-side the way it computes UIRuntimeUsage.
+// `available: false` covers both "nothing to recommend yet" and "could not be
+// read", matching UIRuntimeUsage's fail-soft contract.
+export interface UIRuntimeSizingRecommendation {
+  tenant: string;
+  environment: string;
+  available: boolean;
+  message?: string;
+  noOp?: boolean;
+  actions?: UIRuntimeSizingAction[];
+}

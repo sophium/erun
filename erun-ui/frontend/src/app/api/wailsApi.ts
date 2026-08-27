@@ -17,6 +17,7 @@ export const wailsApi = createApi({
     'RuntimeResourceStatus',
     'RuntimeActivity',
     'RuntimeUsage',
+    'RuntimeSizing',
     'VersionSuggestions',
     'CloudContexts',
     'CloudContextApiStop',
@@ -28,3 +29,10 @@ export const wailsApi = createApi({
   ],
   endpoints: () => ({}),
 });
+
+// Lets a domain module (environmentApi.ts) split its endpoint map into a
+// helper function without hand-rolling wailsApi's generic EndpointBuilder
+// instantiation.
+export type EnvironmentApiBuilder = Parameters<
+  Parameters<typeof wailsApi.injectEndpoints>[0]['endpoints']
+>[0];

@@ -1,0 +1,20 @@
+cpu: 4 -> 6
+memory: 8916Mi -> 12288Mi
+==> Resized team/dev
+audit: erun resize --cpu 6 --environment dev --memory 12288Mi --tenant team
+resize: team/dev cpu 4 -> 6
+resize: team/dev memory 8916Mi -> 12288Mi
+resize: team/dev this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC
+resize: team/dev will roll the runtime pod once to apply the new limits
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 5m0s)...
+==> Deployed team/dev <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev <VERSION> [<ELAPSED>]
+timing record written to <TMP>

@@ -47,6 +47,7 @@ Available Commands:
   platform    Operate a hosted erun platform's control-plane API
   publish     Mirror a built version's images to the shared registry
   release     Cut a release: publish the version's images and charts, then tag and announce it
+  resize      Change a runtime pod's CPU/memory limits and roll it out
   review      Review code changes on the erun platform
   sshd        Remote SSH utilities
   stop        Stop an environment's runtime and return its capacity to the node

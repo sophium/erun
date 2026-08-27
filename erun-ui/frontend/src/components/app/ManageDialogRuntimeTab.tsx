@@ -26,6 +26,7 @@ import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivi
 import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
+import { RuntimeSizingField } from '@/components/app/ManageDialogRuntimeSizing';
 import { RuntimeUsageField } from '@/components/app/ManageDialogRuntimeUsage';
 import { RuntimeDeployVersionPicker } from '@/components/app/ManageDialogVersionPicker';
 import { PinVersionAction } from '@/components/app/PinVersionAction';
@@ -86,6 +87,14 @@ export function RuntimeTab(): React.ReactElement {
           the limits those sliders set is the evidence for moving them. */}
       {dialog.selection && (
         <RuntimeUsageField
+          selection={dialog.selection}
+          disabled={dialog.busy || dialog.configLoading}
+        />
+      )}
+      {/* Directly under the usage reading: the recommendation it earns, and the
+          one-click action that applies it instead of retyping the sliders. */}
+      {dialog.selection && (
+        <RuntimeSizingField
           selection={dialog.selection}
           disabled={dialog.busy || dialog.configLoading}
         />

@@ -144,6 +144,30 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-usage-refresh');
   }
 
+  // "Sizing recommendation" turns the environment's own standing
+  // recommendation into a one-click "Resize to this" action, directly under
+  // the usage reading it is derived from.
+  runtimeSizingPanel(): Locator {
+    return this.locator()
+      .locator('div')
+      .filter({ hasText: /^Sizing recommendation/ })
+      .first();
+  }
+
+  runtimeSizingRefreshButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-refresh');
+  }
+
+  runtimeSizingApplyButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-apply');
+  }
+
+  // Shown only after a resize is refused because the environment is held by
+  // another worker; the override is a deliberate second click, never implicit.
+  runtimeSizingOverrideButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-override');
+  }
+
   // "Running in this environment" reports what the pod is actually running —
   // observed sessions and the processes holding memory — beneath the sliders,
   // because that is the next question once the figures read as capped.

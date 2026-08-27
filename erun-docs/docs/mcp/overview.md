@@ -379,6 +379,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `doctor` | `erun doctor` | Work |
 | *(top-level)* | `observe` | `erun observe` | Read |
 | *(top-level)* | `usage` | `erun usage` | Read |
+| *(top-level)* | `resize` | `erun resize` | Work |
 | *(top-level)* | `delete` | `erun delete` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |
@@ -549,6 +550,31 @@ Every field reports its own unavailability rather than failing the call: a clust
 ```
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
+
+### `resize`
+
+Changes the runtime pod's CPU/memory limits and rolls it out, without re-running `init` to change two numbers. Takes either explicit `cpu`/`memory` (each optional; naming only one leaves the other unchanged) or `applyRecommendation: true` to size from this environment's own standing sizing recommendation — resolved from usage history retained inside this pod, so the value is never retyped by the caller. See [Agent reference · `erun resize`](/agent-reference/cli-flags#erun-resize) for exactly what the recommendation reasons about and the resolution algorithm.
+
+```jsonc
+// resize { "applyRecommendation": true }
+{
+  "plan": {
+    "tenant": "myapp", "environment": "prod",
+    "current": { "cpu": "4", "memory": "8916Mi" },
+    "target":  { "cpu": "6", "memory": "8916Mi" },
+    "actions": [ { "resource": "cpu", "from": "4", "to": "6" } ],
+    "noOp": false
+  }
+}
+```
+
+A resize whose resolved target equals the current recorded size is a no-op (`plan.noOp: true`) and does not deploy. It moves only the runtime container's own limits — the throttle/OOM ceiling and the namespace `ResourceQuota` draw those limits count against — never the scheduler's request (a small fixed value independent of this setting), the `erun-dind` sidecar's own limits, or any PVC; disk is out of scope until the chart's PVC sizes are values-driven.
+
+Because a resize rolls the pod (`Recreate` strategy) and would kill any live session inside it, it first loads the environment's activity leases (build, deploy, or an agent session — anything currently held) and refuses, naming every holder, unless `overrideLease: true` is passed. The refusal is a plain tool error (see [Tool-call error responses](#tool-call-error-responses)) whose message names each holder:
+
+> resize refused: this environment is held by orchestrator eng-42, user jane@example.com (lease "exec_job_attach") — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes
+
+`orchestrator` names the calling orchestrator on the resize's own lease and on the override, if one was needed, so a held-lease refusal names a holder to go ask. Set `preview` to resolve and trace the plan (current → target per resource, held leases, whether an override was used) without changing anything.
 
 ### `doctor`
 
