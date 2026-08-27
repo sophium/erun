@@ -216,7 +216,14 @@ func (r identityResolvers) complete() bool {
 func (r *identityResolvers) defaultTo(identities *repository.IdentityRepository) {
 	if r.identity == nil && r.tenant == nil && r.user == nil {
 		r.identity = identities
-	} else if r.tenant == nil {
+	}
+	// Fill the plain tenant resolver even when the combined identity resolver
+	// above is the one auth will use. tenantAndUser prefers identities whenever
+	// it is set, so this cannot move the atomic-bootstrap path — but a consumer
+	// that needs only a tenant is gated on this field, and leaving it nil is why
+	// the hosted registry token service never registered in any deployment that
+	// injects no resolvers of its own.
+	if r.tenant == nil {
 		r.tenant = identities
 	}
 	if r.user == nil {
