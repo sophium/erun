@@ -23,6 +23,20 @@ export class ReviewDetailDialog {
     return this.locator().getByRole('listitem');
   }
 
+  // commentThread locates one thread's own roving-tabindex container
+  // (ReviewDetailDialog.Comments.tsx's CommentThread), by the same
+  // "Comment thread by <author>" accessible name a screen reader announces.
+  commentThread(author: string): Locator {
+    return this.locator().getByRole('region', { name: `Comment thread by ${author}` });
+  }
+
+  // The "Keyboard shortcuts" popover this dialog's header renders
+  // (ReviewKeyboardShortcuts.tsx) -- the same shared affordance the diff
+  // panel exposes, so either entry point teaches the whole keyboard model.
+  keyboardShortcutsButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Keyboard shortcuts' });
+  }
+
   async reply(commentIndex: number): Promise<void> {
     await this.locator().getByRole('button', { name: 'Reply' }).nth(commentIndex).click();
   }

@@ -84,6 +84,26 @@ export function ReviewDetailComments({
       element.removeEventListener('keydown', listener);
     };
   }, []);
+  // Submitting or cancelling a reply unmounts the composer's Input, and the
+  // browser drops focus to <body> when its focused element is removed --
+  // stranding a keyboard user there with no further binding reachable (a
+  // dead end this keyboard model must not introduce). Detect the
+  // replyingTo transition away from the roving-focused thread and reclaim
+  // focus for it, the same correction React apps make after any control
+  // that closes itself removes the element that held focus.
+  const previousReplyingToRef = React.useRef(detail.replyingTo);
+  React.useEffect(() => {
+    const closedFor = previousReplyingToRef.current;
+    previousReplyingToRef.current = detail.replyingTo;
+    if (!closedFor || closedFor === detail.replyingTo) {
+      return;
+    }
+    const index = roots.findIndex((root) => root.commentId === closedFor);
+    if (index < 0 || index !== Math.min(focusedIndex, roots.length - 1)) {
+      return;
+    }
+    threadRefs.current[index]?.focus();
+  }, [detail.replyingTo, roots, focusedIndex]);
 
   if (detail.data?.commentsRestricted) {
     return (

@@ -31,6 +31,20 @@ export class ReviewPanel {
     return this.page.getByRole('region', { name: new RegExp(`^Diff for ${filePath} `) });
   }
 
+  // hunkRegionAt narrows hunkRegion() to one specific hunk of a file that has
+  // more than one, matching its header text too -- needed for the keyboard
+  // navigation specs, which move between a file's own hunks one at a time.
+  hunkRegionAt(filePath: string, header: string): Locator {
+    return this.page.getByRole('region', { name: `Diff for ${filePath} at ${header}`, exact: true });
+  }
+
+  // The "Keyboard shortcuts" popover DiffList.tsx renders per environment
+  // section (ReviewKeyboardShortcuts.tsx) -- the review surface's
+  // discoverability affordance for its keyboard model.
+  keyboardShortcutsButton(): Locator {
+    return this.page.getByRole('button', { name: 'Keyboard shortcuts' });
+  }
+
   filterInput(): Locator {
     return this.page.getByPlaceholder('Filter files...');
   }
