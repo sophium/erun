@@ -1580,22 +1580,7 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return "", nil
 	}
 	if params.ErunRegistry {
-		reference := HostedRegistryReference(tenant)
-		// A dry-run resolves and traces without touching the world, so it does
-		// not probe. Saying so is the point: a dry-run that printed the resolved
-		// reference alone would read as "this choice works", which is the very
-		// impression the probe exists to stop the real run from giving.
-		if s.Context.DryRun {
-			s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + HostedRegistryHost + " and refuses the choice if it is not reachable")
-			return reference, nil
-		}
-		// Refuse rather than seed a registry nothing would receive the images
-		// pushed to it: the failure would otherwise surface at the first build,
-		// far from the flag that chose it.
-		if status := s.probeHostedRegistry(); !status.Available {
-			return "", status.Err()
-		}
-		return reference, nil
+		return s.resolveErunHostedRegistry(tenant)
 	}
 	if params.ContainerRegistry != "" {
 		return params.ContainerRegistry, nil
@@ -1617,6 +1602,26 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return DefaultContainerRegistry, nil
 	}
 	return s.promptContainerRegistry(tenant, envName)
+}
+
+// resolveErunHostedRegistry resolves the reference for the ERun-hosted
+// registry (--erun-registry), probing its reachability on a real run so a
+// registry nothing would receive the images pushed to it fails here rather
+// than at the first build, far from the flag that chose it.
+func (s bootstrapRunner) resolveErunHostedRegistry(tenant string) (string, error) {
+	reference := HostedRegistryReference(tenant)
+	// A dry-run resolves and traces without touching the world, so it does
+	// not probe. Saying so is the point: a dry-run that printed the resolved
+	// reference alone would read as "this choice works", which is the very
+	// impression the probe exists to stop the real run from giving.
+	if s.Context.DryRun {
+		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + HostedRegistryHost + " and refuses the choice if it is not reachable")
+		return reference, nil
+	}
+	if status := s.probeHostedRegistry(); !status.Available {
+		return "", status.Err()
+	}
+	return reference, nil
 }
 
 func (s bootstrapRunner) projectContainerRegistry(projectRoot, envName string) (string, error) {
