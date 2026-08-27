@@ -13,6 +13,7 @@ import {
   submitReviewReply,
   submitUnresolveComment,
 } from '@/app/reviewDetailThunks';
+import { hasShortcutModifier, isTypingTarget } from '@/app/reviewKeyboardShortcuts';
 import type { ReviewDetailState } from '@/app/state';
 import type { UIReviewComment } from '@/types';
 
@@ -45,12 +46,70 @@ const COMMENT_PREVIEW_LENGTH = 400;
 // new top-level thread needs a diff-line anchor this dialog does not have —
 // that's the diff panel's job — so only replying to an existing thread is
 // wired here.
+//
+// Threads share the terminal tab strip's roving-tabindex shape
+// (TerminalTabStrip.tsx): one thread is a real Tab stop at a time, Up/Down
+// roam between them, and the focused thread carries the review surface's
+// `R`/`Enter` bindings for reply and resolve/unresolve (erun-ui/AGENTS.md §
+// "The keyboard model the review surface still owes"). The list container
+// carries one native `keydown` listener (delegated by `data-thread-index`),
+// not per-thread JSX `onKeyDown` -- jsx-a11y's non-interactive-element rules
+// have no ARIA role that satisfies both "needs a role for its handler" and
+// "should not have a handler for its role" at once for a div whose only fit
+// is `role="region"` (TerminalController's own installReviewDiffKeydown hits
+// the identical conflict for the diff panel and resolves it the same way).
 export function ReviewDetailComments({
   detail,
 }: {
   detail: ReviewDetailState;
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const comments = detail.data?.comments ?? [];
+  const roots = comments.filter((comment) => !comment.parentCommentId);
+  const threadRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const [focusedIndex, setFocusedIndex] = React.useState(0);
+  const keydownRef = React.useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const keydownCleanupRef = React.useRef<(() => void) | null>(null);
+  const setListRef = React.useCallback((element: HTMLDivElement | null) => {
+    keydownCleanupRef.current?.();
+    keydownCleanupRef.current = null;
+    if (!element) {
+      return;
+    }
+    const listener = (event: KeyboardEvent): void => {
+      keydownRef.current(event);
+    };
+    element.addEventListener('keydown', listener);
+    keydownCleanupRef.current = () => {
+      element.removeEventListener('keydown', listener);
+    };
+  }, []);
+  // Cancelling a reply unmounts the composer's Input, and the browser drops
+  // focus to <body> when its focused element is removed -- stranding a
+  // keyboard user there with no further binding reachable. Detect the
+  // replyingTo transition away from the roving-focused thread and reclaim
+  // focus for it, the same correction React apps make after any control
+  // that closes itself removes the element that held focus. A successful
+  // submit closes the composer the same way, but loadReviewDetail's own
+  // reload (submitReviewReply's last step) flashes the whole dialog to its
+  // loading state first, unmounting this component before this effect would
+  // run -- true for a mouse-driven Send today too, so it is not this
+  // effect's problem to solve; the remounted list's default roving focus
+  // (the first thread) is still reachable with one more Tab press either way.
+  const previousReplyingToRef = React.useRef(detail.replyingTo);
+  React.useEffect(() => {
+    const closedFor = previousReplyingToRef.current;
+    previousReplyingToRef.current = detail.replyingTo;
+    if (!closedFor || closedFor === detail.replyingTo) {
+      return;
+    }
+    const index = roots.findIndex((root) => root.commentId === closedFor);
+    if (index < 0 || index !== Math.min(focusedIndex, roots.length - 1)) {
+      return;
+    }
+    threadRefs.current[index]?.focus();
+  }, [detail.replyingTo, roots, focusedIndex]);
+
   if (detail.data?.commentsRestricted) {
     return (
       <EmptyState
@@ -62,7 +121,6 @@ export function ReviewDetailComments({
   if (detail.data?.commentsError) {
     return <InlineAlert>{detail.data.commentsError}</InlineAlert>;
   }
-  const roots = comments.filter((comment) => !comment.parentCommentId);
   if (roots.length === 0) {
     return (
       <EmptyState
@@ -71,32 +129,171 @@ export function ReviewDetailComments({
       />
     );
   }
+
+  const focusedRootIndex = Math.min(focusedIndex, roots.length - 1);
+  const focusThread = (index: number): void => {
+    setFocusedIndex(index);
+    threadRefs.current[index]?.focus();
+  };
+  // The reply Input mounts only once setReviewReplyTarget's state update
+  // lands, one render after this dispatch -- the same
+  // dispatch-then-setTimeout(0)-then-query shape reviewThunks.ts's own
+  // selectDiffPath uses to act on an element that has not rendered yet.
+  const focusReplyInput = (index: number): void => {
+    window.setTimeout(() => {
+      threadRefs.current[index]
+        ?.querySelector<HTMLInputElement>('input[aria-label="Reply"]')
+        ?.focus();
+    }, 0);
+  };
+  keydownRef.current = commentThreadKeyDownHandler(
+    dispatch,
+    detail,
+    roots,
+    focusThread,
+    focusReplyInput,
+  );
+
   return (
-    <div className="flex flex-col gap-3">
-      {roots.map((root) => (
+    <div ref={setListRef} className="flex flex-col gap-3">
+      {roots.map((root, index) => (
         <CommentThread
           key={root.commentId}
           root={root}
           replies={comments.filter((comment) => comment.parentCommentId === root.commentId)}
           detail={detail}
+          index={index}
+          focused={index === focusedRootIndex}
+          setRef={(element) => {
+            threadRefs.current[index] = element;
+          }}
         />
       ))}
     </div>
   );
 }
 
+// replyToFocusedThread re-dispatches setReviewReplyTarget only when this
+// thread isn't already the reply target -- doing so unconditionally would
+// wipe an in-progress draftBody every time `R` is pressed again.
+function replyToFocusedThread(
+  dispatch: ReturnType<typeof useAppDispatch>,
+  detail: ReviewDetailState,
+  root: UIReviewComment,
+  index: number,
+  focusReplyInput: (index: number) => void,
+): void {
+  if (!detail.data?.canComment) {
+    return;
+  }
+  if (detail.replyingTo !== root.commentId) {
+    dispatch(setReviewReplyTarget(root.commentId));
+  }
+  focusReplyInput(index);
+}
+
+function resolveOrReopenFocusedThread(
+  dispatch: ReturnType<typeof useAppDispatch>,
+  detail: ReviewDetailState,
+  root: UIReviewComment,
+): void {
+  if (!detail.data?.canResolveComments) {
+    return;
+  }
+  void dispatch(
+    root.status === 'CLOSED'
+      ? submitUnresolveComment(root.commentId)
+      : submitResolveComment(root.commentId),
+  );
+}
+
+// resolveFocusedThread reads which thread the delegated keydown listener's
+// event bubbled up from, via the `data-thread-index` CommentThread stamps on
+// itself -- null when the target isn't (or is no longer) a known thread.
+function resolveFocusedThread(
+  event: KeyboardEvent,
+  roots: UIReviewComment[],
+): { index: number; root: UIReviewComment } | null {
+  const threadElement = (event.target as HTMLElement | null)?.closest<HTMLElement>(
+    '[data-thread-index]',
+  );
+  const index = threadElement ? Number(threadElement.dataset.threadIndex) : NaN;
+  const root = roots[index];
+  return root ? { index, root } : null;
+}
+
+// commentThreadKeyDownHandler mirrors tabStripKeyDownHandler's shape
+// (TerminalTabStrip.tsx): one factory closing over the list-level state,
+// returning one delegated handler that resolves its thread from
+// `data-thread-index` on the event target. Guarded the same way as the diff
+// panel's own handler (reviewKeyboardShortcuts.ts): no binding fires while a
+// text field has focus (the reply composer's Input) or a Cmd/Ctrl/Alt chord
+// is held.
+function commentThreadKeyDownHandler(
+  dispatch: ReturnType<typeof useAppDispatch>,
+  detail: ReviewDetailState,
+  roots: UIReviewComment[],
+  focusThread: (index: number) => void,
+  focusReplyInput: (index: number) => void,
+): (event: KeyboardEvent) => void {
+  return (event: KeyboardEvent): void => {
+    if (isTypingTarget(event.target) || hasShortcutModifier(event)) {
+      return;
+    }
+    const focused = resolveFocusedThread(event, roots);
+    if (!focused) {
+      return;
+    }
+    const { index, root } = focused;
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        focusThread(Math.min(index + 1, roots.length - 1));
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        focusThread(Math.max(index - 1, 0));
+        return;
+      case 'r':
+      case 'R':
+        event.preventDefault();
+        replyToFocusedThread(dispatch, detail, root, index, focusReplyInput);
+        return;
+      case 'Enter':
+        event.preventDefault();
+        resolveOrReopenFocusedThread(dispatch, detail, root);
+        return;
+      default:
+        return;
+    }
+  };
+}
+
 function CommentThread({
   root,
   replies,
   detail,
+  index,
+  focused,
+  setRef,
 }: {
   root: UIReviewComment;
   replies: UIReviewComment[];
   detail: ReviewDetailState;
+  index: number;
+  focused: boolean;
+  setRef: (element: HTMLDivElement | null) => void;
 }): React.ReactElement {
   const resolved = root.status === 'CLOSED';
   return (
-    <div className="rounded-[var(--radius)] border border-border px-3 py-2.5 text-sm">
+    <div
+      ref={setRef}
+      tabIndex={focused ? 0 : -1}
+      role="region"
+      aria-label={`Comment thread by ${commentAuthorDisplay(root)}`}
+      data-thread-index={index}
+      className="rounded-[var(--radius)] border border-border px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
       <div className="flex items-start justify-between gap-2">
         <CommentLine comment={root} />
         <StatusBadge

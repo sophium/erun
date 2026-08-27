@@ -31,6 +31,7 @@ import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
+import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { BranchArrow, RelativeTime } from './TenantDashboardMessage';
 
 // ReviewDetailDialog is the review object's own detail surface, opened from a
@@ -123,6 +124,7 @@ function ReviewDetailLoaded({
         <DialogTitle className="flex items-center gap-2">
           {review.name || review.reviewId}
           <StatusBadge tone={reviewStatusTone(review.status)} label={review.status} />
+          <ReviewKeyboardShortcutsHint />
         </DialogTitle>
         <DialogDescription className="flex min-w-0 items-center gap-1.5">
           <BranchArrow source={review.sourceBranch} target={review.targetBranch} />

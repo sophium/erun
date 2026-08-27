@@ -27,6 +27,7 @@ import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import type { DiffCommit } from '@/types';
 
 import { DiffList } from './DiffList';
+import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { ChangedFileTree } from './ReviewPanel.ChangedFiles';
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
@@ -455,6 +456,7 @@ function ChangedFilesHeader(): React.ReactElement {
         />
       </button>
       <div className="flex min-w-0 flex-none items-center gap-2">
+        <ReviewKeyboardShortcutsHint />
         <IconTooltip label="Refresh diff">
           <Button
             className="size-7 cursor-pointer border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-55 [&_svg]:size-[17px]"
