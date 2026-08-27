@@ -491,6 +491,14 @@ func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, l
 // RestartRequired, and ListOrchestrators keeps reporting it on every poll
 // until a restart actually re-wires the session (GREEN).
 func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
+	// Pin the executable seam, for the same reason
+	// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired does:
+	// StartOrchestrator resolves the erun executable before it writes the
+	// per-orchestrator MCP config, so on a host without one it writes no config
+	// at all and the on-disk assertions below read a file that was never
+	// created. The build's own test stage has no erun on PATH.
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
