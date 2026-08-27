@@ -4,6 +4,7 @@ import * as React from 'react';
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
+import { InvitesPanel } from '../identity/InvitesPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
 import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
@@ -45,6 +46,8 @@ function SectionContent({
       return <ProvisionPanel token={token} />;
     case 'mcp-access':
       return <MCPAccessPanel token={token} environments={config.environments} />;
+    case 'invites':
+      return <InvitesPanel token={token} />;
     case 'users':
       return <UsersPanel token={token} />;
     case 'org-settings':

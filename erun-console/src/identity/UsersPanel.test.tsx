@@ -172,6 +172,39 @@ describe('UsersPanel', () => {
     expect(await screen.findByText(/could not be enrolled as an erun user/)).toBeInTheDocument();
   });
 
+  it('distinguishes a tenant member from a self-registered IdP-only account', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          { id: 'idp-1', username: 'alice', state: 'USER_STATE_ACTIVE', enrolled: true },
+          { id: 'idp-2', username: 'stranger', state: 'USER_STATE_ACTIVE', enrolled: false },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('alice');
+
+    expect(screen.getByText('Tenant member')).toBeInTheDocument();
+    expect(screen.getByText('IdP only, not enrolled')).toBeInTheDocument();
+  });
+
+  it('does not offer Deactivate on the platform own machine accounts', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          { id: 'svc-1', username: 'admin-sa', state: 'USER_STATE_ACTIVE', isMachine: true },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('admin-sa');
+
+    expect(screen.getByText('Machine account')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+  });
+
   it('does not deactivate a user on a single click', async () => {
     let deactivateCalled = false;
     mockFetch((req) => {

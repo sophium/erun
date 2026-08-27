@@ -125,6 +125,16 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	if resolvers := resolveIdentityResolvers(options); options.MCPSigner != nil && options.TokenVerifier != nil && resolvers.tenant != nil {
 		registrytoken.NewHandler(options.TokenVerifier, resolvers.tenant, options.MCPSigner).Register(mux)
 	}
+	// Accepting an invite (#1483) has no bearer token to authenticate with —
+	// the token in the request body is the credential — so it is registered
+	// directly on the mux like the platform route above. It needs the same
+	// Zitadel client identity administration does, so it shares that
+	// optional-dependency gate: unconfigured leaves the route unregistered
+	// entirely rather than present and always failing.
+	if txManager != nil && options.IdentityAdmin != nil {
+		inviteService := service.NewInviteService(repository.NewInviteRepository(txManager), options.IdentityAdmin, repository.NewUserRepository(txManager))
+		routes.RegisterInviteAcceptRoute(mux, inviteService)
+	}
 	registerProtectedRoutes(mux, auth, options, txManager, authorizer)
 	return mux, nil
 }
@@ -350,8 +360,15 @@ func registerIdentityAdminRoutes(register routes.ProtectedRouteRegistrar, option
 	if options.IdentityAdmin == nil {
 		return
 	}
-	identityService := service.NewIdentityService(options.IdentityAdmin, repository.NewUserRepository(txManager))
-	routes.RegisterIdentityRoutes(register, options.IdentityAdmin, identityService)
+	userRepo := repository.NewUserRepository(txManager)
+	identityService := service.NewIdentityService(options.IdentityAdmin, userRepo)
+	routes.RegisterIdentityRoutes(register, options.IdentityAdmin, identityService, userRepo)
+	// Invite creation (#1483) is only meaningful when this platform enrolls
+	// users through the shared Zitadel org identity administration already
+	// depends on — a platform with no IdentityAdmin has no accept path an
+	// invite could ever complete, so it shares that same optional-dependency
+	// gate rather than registering a dead end.
+	routes.RegisterInviteRoutes(register, repository.NewInviteRepository(txManager))
 }
 
 // newEnvironmentProvisioner wires live env provisioning, which needs durable

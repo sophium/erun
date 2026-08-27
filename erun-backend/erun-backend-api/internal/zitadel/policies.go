@@ -69,11 +69,13 @@ type domainSearchResponse struct {
 }
 
 // OrgSettings is the operator-facing view of the org settings an operator
-// actually changes: whether MFA is required, the password complexity rules,
-// and the org's verified domains (read-only here — verifying a domain is a
-// DNS/HTTP challenge flow this surface does not drive).
+// actually changes: whether MFA is required, whether the platform's IdP
+// accepts self-registration, the password complexity rules, and the org's
+// verified domains (read-only here — verifying a domain is a DNS/HTTP
+// challenge flow this surface does not drive).
 type OrgSettings struct {
 	ForceMFA                  bool     `json:"forceMfa"`
+	AllowRegister             bool     `json:"allowRegister"`
 	MinPasswordLength         uint64   `json:"minPasswordLength"`
 	PasswordRequiresUppercase bool     `json:"passwordRequiresUppercase"`
 	PasswordRequiresLowercase bool     `json:"passwordRequiresLowercase"`
@@ -87,6 +89,7 @@ type OrgSettings struct {
 // GET-then-POST round-trip in UpdateOrgSettings.
 type UpdateOrgSettingsParams struct {
 	ForceMFA                  *bool
+	AllowRegister             *bool
 	MinPasswordLength         *uint64
 	PasswordRequiresUppercase *bool
 	PasswordRequiresLowercase *bool
@@ -115,6 +118,7 @@ func (c *Client) GetOrgSettings(ctx context.Context) (OrgSettings, error) {
 	}
 	return OrgSettings{
 		ForceMFA:                  login.ForceMFA,
+		AllowRegister:             login.AllowRegister,
 		MinPasswordLength:         minLength,
 		PasswordRequiresUppercase: complexity.HasUppercase,
 		PasswordRequiresLowercase: complexity.HasLowercase,
@@ -131,8 +135,8 @@ func (c *Client) GetOrgSettings(ctx context.Context) (OrgSettings, error) {
 // URIs) sidesteps a real Zitadel behavior: re-sending an unchanged policy
 // answers 400 "NotChanged" rather than a no-op 200.
 func (c *Client) UpdateOrgSettings(ctx context.Context, params UpdateOrgSettingsParams) (OrgSettings, error) {
-	if params.ForceMFA != nil {
-		if err := c.updateLoginPolicy(ctx, *params.ForceMFA); err != nil {
+	if hasLoginPolicyChange(params) {
+		if err := c.updateLoginPolicy(ctx, params); err != nil {
 			return OrgSettings{}, err
 		}
 	}
@@ -144,21 +148,31 @@ func (c *Client) UpdateOrgSettings(ctx context.Context, params UpdateOrgSettings
 	return c.GetOrgSettings(ctx)
 }
 
+func hasLoginPolicyChange(params UpdateOrgSettingsParams) bool {
+	return params.ForceMFA != nil || params.AllowRegister != nil
+}
+
 func hasPasswordComplexityChange(params UpdateOrgSettingsParams) bool {
 	return params.MinPasswordLength != nil || params.PasswordRequiresUppercase != nil ||
 		params.PasswordRequiresLowercase != nil || params.PasswordRequiresNumber != nil ||
 		params.PasswordRequiresSymbol != nil
 }
 
-func (c *Client) updateLoginPolicy(ctx context.Context, forceMFA bool) error {
+// updateLoginPolicy applies every login-policy field params sets, the same
+// read-modify-write-only-on-diff shape updatePasswordComplexityPolicy
+// already uses: each field is diffed independently via applyBoolField, so
+// adding a new controllable login-policy field means adding one more call
+// here rather than growing a positional parameter list forever.
+func (c *Client) updateLoginPolicy(ctx context.Context, params UpdateOrgSettingsParams) error {
 	login, isDefault, err := c.getLoginPolicy(ctx)
 	if err != nil {
 		return fmt.Errorf("get zitadel login policy: %w", err)
 	}
-	if login.ForceMFA == forceMFA {
+	changed := applyBoolField(&login.ForceMFA, params.ForceMFA)
+	changed = applyBoolField(&login.AllowRegister, params.AllowRegister) || changed
+	if !changed {
 		return nil
 	}
-	login.ForceMFA = forceMFA
 	if err := c.writeLoginPolicy(ctx, login, isDefault); err != nil {
 		return fmt.Errorf("update zitadel login policy: %w", err)
 	}

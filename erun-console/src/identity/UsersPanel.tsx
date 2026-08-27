@@ -268,6 +268,22 @@ function DeactivateUserDialog({
   );
 }
 
+// MembershipBadge tells the operator which of three states a row is in:
+// an enrolled erun user of this tenant, a machine identity (the platform's
+// own service accounts, never a tenant member), or an IdP-only account —
+// someone who exists in the identity provider (most likely via
+// self-registration) but has no erun access at all. Rendering all three
+// identically is exactly the surface #1482 asks not to present.
+function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
+  if (user.isMachine) {
+    return <span className="text-xs text-muted-foreground">Machine account</span>;
+  }
+  if (user.enrolled) {
+    return <span className="text-xs font-medium text-foreground">Tenant member</span>;
+  }
+  return <span className="text-xs text-muted-foreground">IdP only, not enrolled</span>;
+}
+
 function UserRow({
   user,
   onSetActive,
@@ -278,12 +294,19 @@ function UserRow({
   onRequestDeactivate: (user: IdentityUser) => void;
 }): React.ReactElement {
   const active = user.state === 'USER_STATE_ACTIVE';
-  const canToggle = active || user.state === 'USER_STATE_INACTIVE';
+  // The platform's own machine accounts (login-client, admin-sa) are the
+  // IdP's own service identities, not people an operator manages here — a
+  // one-click Deactivate beside them is a footgun on the sign-in path
+  // itself, so they get no toggle at all rather than a confirmation dialog.
+  const canToggle = !user.isMachine && (active || user.state === 'USER_STATE_INACTIVE');
   return (
     <TableRow>
       <TableCell className="font-medium text-foreground">{user.username}</TableCell>
       <TableCell>{user.email ?? ''}</TableCell>
       <TableCell>{user.state}</TableCell>
+      <TableCell>
+        <MembershipBadge user={user} />
+      </TableCell>
       <TableCell>
         {canToggle && (
           <Button
@@ -325,6 +348,7 @@ function UsersTable({
           <TableHead>Username</TableHead>
           <TableHead>Email</TableHead>
           <TableHead>State</TableHead>
+          <TableHead>Membership</TableHead>
           <TableHead />
         </TableRow>
       </TableHeader>

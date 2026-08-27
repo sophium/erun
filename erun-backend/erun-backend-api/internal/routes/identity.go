@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
@@ -32,9 +33,17 @@ type IdentityEnroller interface {
 	Enroll(ctx context.Context, params service.EnrollIdentityParams) (service.EnrollIdentityResult, error)
 }
 
+// EnrolledUserLister is the erun-side half of the Users list: which of the
+// IdP's identities are also enrolled erun users of the caller's own tenant.
+// *repository.UserRepository satisfies it.
+type EnrolledUserLister interface {
+	List(ctx context.Context, filter repository.UserFilter) ([]model.User, error)
+}
+
 type IdentityRoutes struct {
-	admin    IdentityAdminClient
-	enroller IdentityEnroller
+	admin     IdentityAdminClient
+	enroller  IdentityEnroller
+	erunUsers EnrolledUserLister
 }
 
 // RegisterIdentityRoutes registers the identity-administration surface
@@ -48,8 +57,8 @@ type IdentityRoutes struct {
 // is not a company tenant's business, and effective-permission gating still
 // applies on top via the normal role_permissions mechanism every registered
 // route already gets.
-func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdminClient, enroller IdentityEnroller) {
-	routes := IdentityRoutes{admin: admin, enroller: enroller}
+func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdminClient, enroller IdentityEnroller, erunUsers EnrolledUserLister) {
+	routes := IdentityRoutes{admin: admin, enroller: enroller, erunUsers: erunUsers}
 	register(http.MethodGet, "/v1/identity/users", http.HandlerFunc(routes.listUsers))
 	register(http.MethodPost, "/v1/identity/users", http.HandlerFunc(routes.createUser))
 	register(http.MethodPost, "/v1/identity/users/{external_id}/deactivate", http.HandlerFunc(routes.deactivateUser))
@@ -91,16 +100,60 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 	return securityContext, true
 }
 
+// identityUserView reports one identity of the platform's IdP org alongside
+// whether it is also an enrolled erun user of the caller's own tenant. The
+// IdP's user list (zitadel.Client.ListUsers) and erun's own users table are
+// two separate systems — see that method's doc comment — so a row present
+// here with Enrolled=false is a self-registered or otherwise unmapped IdP
+// account that cannot use erun, not a tenant member, and must not render as
+// one.
+type identityUserView struct {
+	zitadel.User
+	Enrolled   bool   `json:"enrolled"`
+	ErunUserID string `json:"erunUserId,omitempty"`
+}
+
 func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
-	if _, ok := r.securityContext(w, req); !ok {
+	securityContext, ok := r.securityContext(w, req)
+	if !ok {
 		return
 	}
-	users, err := r.admin.ListUsers(req.Context())
+	idpUsers, err := r.admin.ListUsers(req.Context())
 	if err != nil {
 		writeIdentityAdminError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, users)
+	erunUsers, err := r.erunUsers.List(req.Context(), repository.UserFilter{TenantID: securityContext.TenantID})
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	views := mergeIdentityUsers(idpUsers, erunUsers)
+	writeJSON(w, http.StatusOK, views)
+}
+
+// mergeIdentityUsers cross-references the IdP's own identities against
+// erun's enrolled users of the caller's tenant by external subject
+// (zitadel.User.ID == model.User.ExternalUserID), so the console can tell a
+// tenant member apart from an IdP-only account instead of rendering every
+// row in the org identically.
+func mergeIdentityUsers(idpUsers []zitadel.User, erunUsers []model.User) []identityUserView {
+	enrolledBySubject := make(map[string]model.User, len(erunUsers))
+	for _, u := range erunUsers {
+		if u.ExternalUserID != "" {
+			enrolledBySubject[u.ExternalUserID] = u
+		}
+	}
+	views := make([]identityUserView, 0, len(idpUsers))
+	for _, u := range idpUsers {
+		view := identityUserView{User: u}
+		if erunUser, ok := enrolledBySubject[u.ID]; ok {
+			view.Enrolled = true
+			view.ErunUserID = erunUser.UserID
+		}
+		views = append(views, view)
+	}
+	return views
 }
 
 type enrollIdentityUserRequest struct {
@@ -231,6 +284,7 @@ func (r IdentityRoutes) getOrgSettings(w http.ResponseWriter, req *http.Request)
 // package's params type, keeping the HTTP contract owned by this layer.
 type updateOrgSettingsRequest struct {
 	ForceMFA                  *bool   `json:"forceMfa,omitempty"`
+	AllowRegister             *bool   `json:"allowRegister,omitempty"`
 	MinPasswordLength         *uint64 `json:"minPasswordLength,omitempty"`
 	PasswordRequiresUppercase *bool   `json:"passwordRequiresUppercase,omitempty"`
 	PasswordRequiresLowercase *bool   `json:"passwordRequiresLowercase,omitempty"`
@@ -249,6 +303,7 @@ func (r IdentityRoutes) updateOrgSettings(w http.ResponseWriter, req *http.Reque
 	}
 	settings, err := r.admin.UpdateOrgSettings(req.Context(), zitadel.UpdateOrgSettingsParams{
 		ForceMFA:                  body.ForceMFA,
+		AllowRegister:             body.AllowRegister,
 		MinPasswordLength:         body.MinPasswordLength,
 		PasswordRequiresUppercase: body.PasswordRequiresUppercase,
 		PasswordRequiresLowercase: body.PasswordRequiresLowercase,

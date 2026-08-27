@@ -41,6 +41,7 @@ function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
 
 const INITIAL_SETTINGS = {
   forceMfa: false,
+  allowRegister: true,
   minPasswordLength: 8,
   passwordRequiresUppercase: true,
   passwordRequiresLowercase: true,
@@ -86,6 +87,30 @@ describe('OrgSettingsPanel', () => {
     expect(patch?.url).toBe('/v1/identity/org-settings');
     expect(patch?.body).toMatchObject({ forceMfa: true });
     await screen.findByRole('checkbox', { name: 'Require multi-factor authentication' });
+  });
+
+  it('closes self-registration and PATCHes allowRegister', async () => {
+    const calls = mockFetch((req) => {
+      if (req.method === 'PATCH') {
+        return jsonResponse({ ...INITIAL_SETTINGS, allowRegister: false });
+      }
+      return jsonResponse(INITIAL_SETTINGS);
+    });
+    renderWithStore(<OrgSettingsPanel token="dev-token" />);
+    await screen.findByText('erun.example.com');
+    expect(
+      screen.getByRole('checkbox', { name: 'Allow anyone to self-register an account' }),
+    ).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByLabelText('Allow anyone to self-register an account'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'PATCH')).toBe(true);
+    });
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.body).toMatchObject({ allowRegister: false });
+    await screen.findByText(/Self-registration is closed/);
   });
 
   it('surfaces a load error', async () => {

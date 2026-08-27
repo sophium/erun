@@ -129,7 +129,12 @@ func TestListUsers(t *testing.T) {
 						"email":   map[string]any{"email": "alice@example.com"},
 					},
 				},
-				{"id": "svc1", "userName": "admin-sa", "state": "USER_STATE_ACTIVE"},
+				{
+					"id":       "svc1",
+					"userName": "admin-sa",
+					"state":    "USER_STATE_ACTIVE",
+					"machine":  map[string]any{"name": "admin-sa"},
+				},
 			},
 		})
 	})
@@ -143,8 +148,8 @@ func TestListUsers(t *testing.T) {
 	if users[0] != (User{ID: "u1", Username: "alice", State: "USER_STATE_ACTIVE", Email: "alice@example.com", FirstName: "Alice", LastName: "Operator"}) {
 		t.Fatalf("users[0] = %+v", users[0])
 	}
-	if users[1].ID != "svc1" || users[1].Email != "" {
-		t.Fatalf("users[1] = %+v, want a machine user with no email", users[1])
+	if users[1].ID != "svc1" || users[1].Email != "" || !users[1].IsMachine {
+		t.Fatalf("users[1] = %+v, want a machine user with no email and IsMachine=true", users[1])
 	}
 }
 

@@ -1,5 +1,14 @@
 import type { TenantConfigView } from 'erun-kit';
-import { Cloud, KeyRound, LayoutDashboard, Mail, Server, Settings, Users } from 'lucide-react';
+import {
+  Cloud,
+  KeyRound,
+  LayoutDashboard,
+  Mail,
+  Server,
+  Settings,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 
 // Identity administration (issue #1209) is restricted server-side to an
 // OPERATIONS tenant; gating the nav entries here too keeps a COMPANY-tenant
@@ -11,6 +20,7 @@ export type ConsoleSectionId =
   | 'environments'
   | 'provisioning'
   | 'mcp-access'
+  | 'invites'
   | 'users'
   | 'org-settings'
   | 'smtp-settings';
@@ -26,6 +36,11 @@ const BASE_SECTIONS: ConsoleSection[] = [
   { id: 'environments', label: 'Environments', icon: Server },
   { id: 'provisioning', label: 'Cloud contexts', icon: Cloud },
   { id: 'mcp-access', label: 'MCP access', icon: KeyRound },
+  // Unlike the OPERATIONS-only sections below, invites (#1483) are every
+  // tenant's own way to add members now that self-registration is closed
+  // (#1482) — a COMPANY tenant needs this exactly as much as an OPERATIONS
+  // one, so it belongs in the base set every tenant type sees.
+  { id: 'invites', label: 'Invites', icon: UserPlus },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [

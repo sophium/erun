@@ -1,17 +1,22 @@
 import * as React from 'react';
 
 import {
+  type CreateInviteInput,
   type EnrollIdentityUserInput,
   type EnrollIdentityUserResult,
   type IdentityUser,
+  type Invite,
   type OrgSettings,
   type SmtpStatus,
   type UpdateOrgSettingsInput,
   type UpdateSmtpSettingsInput,
   useCreateIdentityUserMutation,
+  useCreateInviteMutation,
   useGetOrgSettingsQuery,
   useGetSmtpSettingsQuery,
   useListIdentityUsersQuery,
+  useListInvitesQuery,
+  useRevokeInviteMutation,
   useSetIdentityUserActiveMutation,
   useUpdateOrgSettingsMutation,
   useUpdateSmtpSettingsMutation,
@@ -219,4 +224,84 @@ export function useSmtpSettingsController(token: string): SmtpSettingsController
   })();
 
   return { state, save };
+}
+
+export type InvitesState =
+  | { status: 'loading' }
+  | { status: 'ready'; invites: Invite[] }
+  | { status: 'error'; message: string };
+
+export type CreateInviteState =
+  | { status: 'idle' }
+  | { status: 'creating' }
+  | { status: 'created'; invite: Invite }
+  | { status: 'error'; message: string };
+
+export interface InvitesController {
+  invitesState: InvitesState;
+  createState: CreateInviteState;
+  create: (input: CreateInviteInput) => void;
+  revoke: (inviteId: string) => Promise<void>;
+  dismissCreated: () => void;
+}
+
+// useInvitesController lists, creates, and revokes invites (#1483). Creating
+// or revoking invalidates the list query's tag, the same pattern
+// useUsersController uses for enroll/deactivate.
+export function useInvitesController(token: string): InvitesController {
+  const listQuery = useListInvitesQuery(token);
+  const [createState, setCreateState] = React.useState<CreateInviteState>({ status: 'idle' });
+  const [revokeError, setRevokeError] = React.useState<string | undefined>(undefined);
+  const [createInvite] = useCreateInviteMutation();
+  const [revokeInviteMutation] = useRevokeInviteMutation();
+  const activeRef = useActiveRef();
+
+  const invitesState: InvitesState =
+    revokeError !== undefined
+      ? { status: 'error', message: revokeError }
+      : listQuery.error !== undefined
+        ? { status: 'error', message: queryErrorMessage(listQuery.error) }
+        : listQuery.data !== undefined
+          ? { status: 'ready', invites: listQuery.data }
+          : { status: 'loading' };
+
+  const create = React.useCallback(
+    (input: CreateInviteInput) => {
+      setCreateState({ status: 'creating' });
+      createInvite({ token, input })
+        .unwrap()
+        .then((invite) => {
+          if (activeRef.current) {
+            setCreateState({ status: 'created', invite });
+          }
+        })
+        .catch((error: unknown) => {
+          if (activeRef.current) {
+            setCreateState({ status: 'error', message: queryErrorMessage(error) });
+          }
+        });
+    },
+    [token, activeRef, createInvite],
+  );
+
+  const revoke = React.useCallback(
+    (inviteId: string): Promise<void> => {
+      setRevokeError(undefined);
+      return revokeInviteMutation({ token, inviteId })
+        .unwrap()
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          if (activeRef.current) {
+            setRevokeError(queryErrorMessage(error));
+          }
+        });
+    },
+    [token, activeRef, revokeInviteMutation],
+  );
+
+  const dismissCreated = React.useCallback(() => {
+    setCreateState({ status: 'idle' });
+  }, []);
+
+  return { invitesState, createState, create, revoke, dismissCreated };
 }

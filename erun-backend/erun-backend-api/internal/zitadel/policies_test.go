@@ -132,6 +132,60 @@ func TestUpdateOrgSettingsForceMFAPreservesOtherLoginFields(t *testing.T) {
 	}
 }
 
+// TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields is the
+// registration-control half of the same read-modify-write contract #1482
+// asks for: closing self-registration must not touch forceMfa or any other
+// login-policy field already set on the org.
+func TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields(t *testing.T) {
+	var loginPutBody map[string]any
+	loginPuts, passwordPuts := 0, 0
+	client := routedTestClient(t, []jsonRoute{
+		{method: http.MethodGet, path: "/management/v1/policies/login", body: map[string]any{
+			"policy": map[string]any{"allowUsernamePassword": true, "allowRegister": true, "forceMfa": true, "passwordlessType": "PASSWORDLESS_TYPE_NOT_ALLOWED"},
+		}},
+		{method: http.MethodPut, path: "/management/v1/policies/login", record: func(body map[string]any) {
+			loginPuts++
+			loginPutBody = body
+		}},
+		{method: http.MethodGet, path: "/management/v1/policies/password/complexity", body: map[string]any{"policy": map[string]any{"minLength": "8"}}},
+		{method: http.MethodPut, path: "/management/v1/policies/password/complexity", record: func(map[string]any) { passwordPuts++ }},
+		emptyDomainSearchRoute(),
+	})
+
+	allowRegister := false
+	if _, err := client.UpdateOrgSettings(context.Background(), UpdateOrgSettingsParams{AllowRegister: &allowRegister}); err != nil {
+		t.Fatalf("UpdateOrgSettings(allowRegister): %v", err)
+	}
+	if loginPuts != 1 || passwordPuts != 0 {
+		t.Fatalf("loginPuts=%d passwordPuts=%d, want only the login policy touched", loginPuts, passwordPuts)
+	}
+	if loginPutBody["allowRegister"] != false || loginPutBody["forceMfa"] != true || loginPutBody["allowUsernamePassword"] != true || loginPutBody["passwordlessType"] != "PASSWORDLESS_TYPE_NOT_ALLOWED" {
+		t.Fatalf("login PUT body = %+v, want allowRegister flipped and every other field preserved", loginPutBody)
+	}
+}
+
+// TestGetOrgSettingsReportsRegistrationOpenAndClosed locks the per-state
+// read: GetOrgSettings must report whichever value the org's login policy
+// actually carries, not a hardcoded default.
+func TestGetOrgSettingsReportsRegistrationOpenAndClosed(t *testing.T) {
+	for _, allowRegister := range []bool{true, false} {
+		client := routedTestClient(t, []jsonRoute{
+			{method: http.MethodGet, path: "/management/v1/policies/login", body: map[string]any{
+				"policy": map[string]any{"allowRegister": allowRegister},
+			}},
+			{method: http.MethodGet, path: "/management/v1/policies/password/complexity", body: map[string]any{"policy": map[string]any{"minLength": "8"}}},
+			emptyDomainSearchRoute(),
+		})
+		settings, err := client.GetOrgSettings(context.Background())
+		if err != nil {
+			t.Fatalf("GetOrgSettings: %v", err)
+		}
+		if settings.AllowRegister != allowRegister {
+			t.Fatalf("AllowRegister = %v, want %v", settings.AllowRegister, allowRegister)
+		}
+	}
+}
+
 // TestUpdateOrgSettingsMinPasswordLengthPreservesOtherPasswordFields is the
 // password-policy half of the same read-modify-write contract.
 func TestUpdateOrgSettingsMinPasswordLengthPreservesOtherPasswordFields(t *testing.T) {

@@ -22,7 +22,7 @@ Zitadel's built-in `ORG_USER_MANAGER` role would scope user create/list/deactiva
 
 ## `GET /v1/identity/users`
 
-Lists every identity (human and machine) the platform's IdP knows about.
+Lists every identity (human and machine) the platform's IdP knows about, cross-referenced against erun's own `users` table for the caller's tenant so the response distinguishes an enrolled tenant member from an identity that merely exists in the IdP — the fix for a self-registered account (when `allowRegister` was left open, or an account created before it was closed) rendering identically to an actual member.
 
 ```jsonc
 // 200 response
@@ -33,12 +33,30 @@ Lists every identity (human and machine) the platform's IdP knows about.
     "state": "USER_STATE_ACTIVE",     // Zitadel's own USER_STATE_* value, forwarded verbatim
     "email": "alice@example.com",
     "firstName": "Alice",
-    "lastName": "Operator"
+    "lastName": "Operator",
+    "isMachine": false,
+    "enrolled": true,                  // true only when this subject also has a row in erun's own users table for this tenant
+    "erunUserId": "019a…"              // present only when enrolled is true
+  },
+  {
+    "id": "387728394274144999",
+    "username": "stranger",
+    "state": "USER_STATE_ACTIVE",
+    "email": "stranger@example.com",
+    "isMachine": false,
+    "enrolled": false                  // exists in the IdP (e.g. self-registered) but is not a tenant member
+  },
+  {
+    "id": "387728394274100001",
+    "username": "admin-sa",
+    "state": "USER_STATE_ACTIVE",
+    "isMachine": true,                 // the platform's own service identity, never a tenant member
+    "enrolled": false
   }
 ]
 ```
 
-`email`/`firstName`/`lastName` are omitted for a machine user (e.g. the platform's own `admin-sa`/`login-client` service accounts, which this list includes).
+`email`/`firstName`/`lastName` are omitted for a machine user (e.g. the platform's own `admin-sa`/`login-client` service accounts, which this list includes — `isMachine: true` is how a client tells them apart from a human row with an unset email, and is also what the console uses to withhold the deactivate/reactivate control on those two rows).
 
 ## `POST /v1/identity/users`
 
@@ -104,7 +122,7 @@ The IdP half is created first, since the erun mapping needs the subject the IdP 
 | `404` | (Zitadel's not-found message) | `external_id` does not name a known identity. | Re-check the id from `GET /v1/identity/users`. |
 | `403` | — | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
 
-## `GET /v1/identity/org-settings`
+## `GET /v1/identity/org-settings` {#org-settings}
 
 Reads the org's current login policy, password complexity policy, and verified domains.
 
@@ -112,6 +130,7 @@ Reads the org's current login policy, password complexity policy, and verified d
 // 200 response
 {
   "forceMfa": false,
+  "allowRegister": false,           // whether the platform's IdP accepts self-registration (issue #1482)
   "minPasswordLength": 8,
   "passwordRequiresUppercase": true,
   "passwordRequiresLowercase": true,
@@ -123,13 +142,15 @@ Reads the org's current login policy, password complexity policy, and verified d
 
 `verifiedDomains` is read-only here — verifying a new domain is a DNS/HTTP challenge flow this surface does not drive.
 
+**`allowRegister`.** erun reads this field from Zitadel's own login policy but never wrote it before this endpoint could change it — the whole reported exposure of issue #1482. There is no erun-side default this endpoint imposes: a platform that has never called `PATCH` with `allowRegister` set keeps whatever value its Zitadel org already carries (Zitadel's own instance default is `true`, which is why the exposure went unnoticed). The recommended value for a platform whose access model is invite-only ([`POST /v1/invites`](/agent-reference/api-protocol#invites)) is `false`; erun does not flip it automatically on any existing platform — an operator (or their Agent) sets it explicitly via the `PATCH` below.
+
 ## `PATCH /v1/identity/org-settings`
 
 Applies only the fields present in the body; every other current value is preserved via a server-side read-modify-write against Zitadel (re-sending an unchanged value is skipped rather than sent, since Zitadel answers `400` for a write that carries no real diff). Returns the full settings after the update, same shape as the `GET` above.
 
 ```jsonc
-// request body — change only forceMfa
-{ "forceMfa": true }
+// request body — close self-registration, leave every other field untouched
+{ "allowRegister": false }
 ```
 
 **Error behaviour.**
@@ -208,4 +229,5 @@ Every request above that reaches its handler (i.e. passed authentication, tenant
 
 - [Administering identity](/collaboration/identity-administration) — the Operator view.
 - [erun API protocol](/agent-reference/api-protocol) — sign-in, tenant resolution, and the cross-cutting error model these endpoints share.
+- [`POST /v1/invites` and friends](/agent-reference/api-protocol#invites) — the invite-only registration model `allowRegister: false` above is meant to pair with; every tenant type can create its own invites, unlike this OPERATIONS-only surface.
 - [Audit log](/agent-reference/audit-log) — the event shape every mutation above writes.
