@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,15 @@ import (
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
+
+// deploymentAbsentErrorForTest builds the exact "runtime ... is not deployed"
+// error ensureRuntimeDeployed (erun-cli/cmd/open.go) raises for a genuinely
+// absent deployment, so a test exercises the real marker
+// runtimeCheckFoundDeploymentAbsent looks for rather than an ad hoc string.
+func deploymentAbsentErrorForTest(tenant, environment string) error {
+	return fmt.Errorf("runtime for %s/%s %s %q not found in namespace %q); run `erun deploy %s %s` first",
+		tenant, environment, eruncommon.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
+}
 
 // These tests lock the per-env ensure dedupe: opening an env and respawning
 // its tabs must run the shared ensure once per (re)start window, not once per tab.
@@ -238,6 +248,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 		return nil
 	}, nil)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	absentErr := deploymentAbsentErrorForTest("erun", "remote")
 
 	app.mu.Lock()
 	app.sessions["s1"] = &managedTerminal{
@@ -249,7 +260,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	}
 	app.mu.Unlock()
 
-	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
+	app.surfaceEnvRuntimeEnsureFailure(selection, absentErr)
 
 	if got := len(emits.events(appNotificationEvent)); got != 0 {
 		t.Fatalf("banner emitted %d times during an in-flight deploy, want 0", got)
@@ -261,7 +272,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app.mu.Lock()
 	app.sessions["s1"].lockedByActivity = ""
 	app.mu.Unlock()
-	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
+	app.surfaceEnvRuntimeEnsureFailure(selection, absentErr)
 	notes := emits.events(appNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("banner emitted %d times once the deploy cleared, want 1", len(notes))
@@ -351,5 +362,90 @@ func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	}
 	if payload.Tenant != "erun" || payload.Environment != "remote" || payload.Source != "" {
 		t.Fatalf("clear payload = %+v, want erun/remote with empty (any) source", payload)
+	}
+}
+
+// TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment locks the
+// one branch that still earns the Deploy action: ensureRuntimeDeployed found
+// no deployment at all.
+func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	}, nil)
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, deploymentAbsentErrorForTest("erun", "remote"))
+
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("notification emitted %d times, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	if note.Action != notificationActionDeploy {
+		t.Fatalf("notification action = %q, want %q for a genuinely absent deployment", note.Action, notificationActionDeploy)
+	}
+	if !strings.Contains(note.Message, "Deploy the environment to bring it up") {
+		t.Fatalf("notification must name deploy as the fix, got %q", note.Message)
+	}
+}
+
+// TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk reproduces
+// The reported production case: the deployment is healthy but the
+// check could not resolve an answer because the kube context was unavailable.
+// Following a Deploy button here would roll a healthy runtime, so the
+// notification must not carry the deploy action, and must not claim
+// unreachability the check never established.
+func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	}, nil)
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	checkErr := errors.New(`could not determine whether deployment "frs-devops" is deployed (the configured kubernetes context was not found in kubeconfig): error: context "frs-prod" does not exist`)
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, checkErr)
+
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("notification emitted %d times, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	if note.Action != "" {
+		t.Fatalf("notification action = %q, want none — a could-not-ask failure must not offer deploy", note.Action)
+	}
+	if strings.Contains(note.Message, "Deploy the environment") {
+		t.Fatalf("notification must not suggest deploy for a check that never confirmed absence, got %q", note.Message)
+	}
+	if !strings.Contains(note.Message, "context") {
+		t.Fatalf("notification must carry the underlying cause, got %q", note.Message)
+	}
+}
+
+// TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure locks the
+// The closing principle: an error erun does not recognize must still
+// read as unknown and must not default to offering deploy.
+func TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure(t *testing.T) {
+	app, emits := capturedEnsureApp(t, func(context.Context, eruncommon.OpenResult, func(string)) error {
+		return nil
+	}, nil)
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
+
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("notification emitted %d times, want 1", len(notes))
+	}
+	note, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("notification payload has unexpected type %T", notes[0])
+	}
+	if note.Action != "" {
+		t.Fatalf("notification action = %q, want none for an unrecognized failure", note.Action)
 	}
 }

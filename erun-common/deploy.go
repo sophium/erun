@@ -3603,6 +3603,16 @@ func CheckKubernetesDeployment(ctx Context, params KubernetesDeploymentCheckPara
 // inspect kubectl's stderr (which carries the "context does not
 // exist" string that drives the retry-with-current-context fallback
 // in CheckKubernetesDeployment).
+//
+// A non-nil error here is never evidence the deployment is absent — that
+// case returns (false, output, nil) below. It means the check could not
+// resolve a definite answer, so the message names the recognized cause
+// (missing context, unreachable API server, credentials/permissions
+// refused) or, failing that, says plainly that the error is unrecognized —
+// never silently reads as "not deployed". The message carries kubectl's own
+// output instead of just the process's exit status, so a caller sees the
+// actual cause rather than two layers of the same content-free "exit status
+// 1".
 func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeploymentCheckParams, kubectlContext string) (bool, string, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(kubectlContext) != "" {
@@ -3626,13 +3636,58 @@ func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeployme
 		return deployed, output, matchErr
 	}
 
-	message := strings.ToLower(output)
-	if strings.Contains(message, "notfound") || strings.Contains(message, "not found") || strings.Contains(message, "no resources found") {
+	if KubernetesResourceNotFound(output) || strings.Contains(strings.ToLower(output), "no resources found") {
 		return false, output, nil
 	}
 
-	return false, output, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
+	detail := kubernetesDeploymentCheckFailureDetail(output)
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %w", params.Name, detail, err)
+	}
+	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, trimmed)
 }
+
+// kubernetesDeploymentCheckFailureDetail names why a kubectl deployment
+// presence check failed to resolve a definite answer, distinguishing causes
+// where erun could not ask the cluster at all (no context, an unreachable
+// API server, credentials or permissions refused) from an error it does not
+// recognize. Neither is evidence the deployment is absent. Reuses
+// isKubernetesContextMissingMessage for the context-missing case it already
+// covers instead of a second matcher for the same signal.
+func kubernetesDeploymentCheckFailureDetail(output string) string {
+	if isKubernetesContextMissingMessage(output) {
+		return "the configured kubernetes context was not found in kubeconfig"
+	}
+	message := strings.ToLower(output)
+	switch {
+	case strings.Contains(message, "unable to connect to the server"),
+		strings.Contains(message, "connection refused"),
+		strings.Contains(message, "no such host"),
+		strings.Contains(message, "i/o timeout"),
+		strings.Contains(message, "no configuration has been provided"):
+		return "the kubernetes api server could not be reached"
+	case strings.Contains(message, "forbidden"),
+		strings.Contains(message, "unauthorized"),
+		strings.Contains(message, "must be logged in to the server"),
+		strings.Contains(message, "must provide one of the following credentials"):
+		return "the kubernetes cluster refused the request (credentials or permissions)"
+	default:
+		return "kubectl returned an error erun does not recognize"
+	}
+}
+
+// KubernetesDeploymentAbsentMessageMarker is the fixed substring every
+// "runtime ... is not deployed" message carries when a caller has confirmed
+// a deployment is genuinely absent (checkKubernetesDeploymentWithContext
+// returning (false, _, nil) above; erun-cli/cmd/open.go's
+// ensureRuntimeDeployed builds the actual message). A caller that only has
+// the rendered error text — for example the desktop reading a CLI
+// subprocess's stderr — uses this marker to recognize that specific outcome
+// without re-deriving kubectl's own error grammar, and without mistaking a
+// check that could not resolve an answer (never contains this marker) for a
+// real absence.
+const KubernetesDeploymentAbsentMessageMarker = "is not deployed (deployment"
 
 // isKubernetesContextMissingMessage matches the family of kubectl
 // error messages that indicate the requested --context name is not
