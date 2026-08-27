@@ -1441,9 +1441,9 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
 	}
-	// Mirror the snapshot DB-reset decision so re-installing a snapshot behaves
-	// the same as first deploying one.
-	deployInput.ResetDatabase = deployResetsDatabase(true, deployInput.Version)
+	// The version alone governs the reset decision, same as a fresh build's
+	// deploy below: a released, non-snapshot version must never wipe.
+	deployInput.ResetDatabase = deployResetsDatabase(deployInput.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
 		return DeploySpec{}, err
 	}
@@ -1589,7 +1589,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	deployInput.ResetDatabase = deployResetsDatabase(false, build.Image.Version)
+	deployInput.ResetDatabase = deployResetsDatabase(build.Image.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
 		return DeploySpec{}, err
 	}
@@ -1865,8 +1865,13 @@ func resolveDeployVersionOverride(target DeployTarget, versionOverride string) s
 	return strings.TrimSpace(target.VersionOverride)
 }
 
-func deployResetsDatabase(snapshotEnabled bool, version string) bool {
-	return snapshotEnabled || strings.Contains(strings.TrimSpace(version), "-snapshot-")
+// deployResetsDatabase reports whether installing version arms the postgres
+// reset. A snapshot's data is disposable by convention; a released version's
+// is not, so only the version decides — a bool parameter here would let a
+// caller short-circuit it back to unconditional, which is the bug this
+// signature exists to make impossible.
+func deployResetsDatabase(version string) bool {
+	return strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
 
 func resolveDeployContextForTarget(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, target OpenResult, componentName string) (KubernetesDeployContext, error) {

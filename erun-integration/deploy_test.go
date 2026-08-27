@@ -2694,6 +2694,48 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_snapshot_version_resets_postgres_database", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_released_version_does_not_reset_postgres_database", func(t *testing.T) {
+		// The regression this locks: resolveInstallExistingVersionDeploySpec
+		// used to pass a literal true into deployResetsDatabase, which
+		// short-circuited past the version check via snapshotEnabled ||, so
+		// installing an already-published RELEASED version armed the wipe
+		// exactly like a snapshot did. This scenario is identical to
+		// dry_run_snapshot_version_resets_postgres_database except the
+		// version carries no -snapshot- marker, and must resolve
+		// --set api.postgres.reset=false.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		templates := filepath.Join(setup.Cwd, "team-devops", "k8s", "erun-backend-postgres", "templates")
+		if err := os.MkdirAll(templates, 0o755); err != nil {
+			t.Fatalf("mkdir templates: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(templates, "postgres.yaml"), strings.Join([]string{
+			"apiVersion: apps/v1",
+			"kind: Deployment",
+			"spec:",
+			"  template:",
+			"    spec:",
+			"      containers:",
+			"        - image: registry.example/team/erun-backend-postgres:18.3 # pinned wrapper",
+			"",
+		}, "\n"))
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.5",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_released_version_does_not_reset_postgres_database", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_chart_cwd_resolves_single_chart_context", func(t *testing.T) {
 		// When deploy runs with cwd inside the chart directory itself,
 		// ResolveCurrentKubernetesDeployContexts takes the direct-context

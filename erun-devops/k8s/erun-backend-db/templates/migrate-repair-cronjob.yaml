@@ -1,0 +1,53 @@
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $api := default dict .Values.api -}}
+{{- $postgres := default dict $api.postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+# The migrate Job above only runs on a Helm install/upgrade. A database that
+# loses its schema by some means outside a Helm operation (a bug, a manual
+# reset, a restore onto an empty volume) would otherwise stay schema-less
+# indefinitely — nothing re-applies migrations until someone happens to
+# deploy. This CronJob runs the identical migrate.sh on a short interval so
+# the same repair happens on its own; atlas migrate apply is a fast no-op
+# once the schema is already at head, so this is safe to run continuously.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $tenant }}-backend-db-migrate-repair
+  labels:
+    app: {{ $tenant }}-backend-db-migrate-repair
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: {{ $tenant }}-backend-db-migrate-repair
+        spec:
+          restartPolicy: Never
+          containers:
+            - image: {{ $backendDBImage }}
+              name: erun-backend-db-migrate-repair
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: HOME
+                  value: /home/erun
+                - name: ERUN_POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $postgresPasswordSecretName }}
+                      key: {{ $postgresPasswordSecretKey }}
+                - name: ERUN_DATABASE_URL
+                  value: {{ $databaseURL | quote }}
