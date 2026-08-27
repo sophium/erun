@@ -423,6 +423,30 @@ func (c EnvConfig) EffectiveLocalRepoPath() string {
 	return strings.TrimSpace(c.LocalRepoPath)
 }
 
+// TenantLocalCheckoutRoot finds a tenant's repo on this machine through one of
+// its other environments, for a caller whose own target environment has no
+// worktree here — a sourceless runtime env (no MountSource) chief among them.
+// Every environment of a tenant shares the same repo, so a sibling env whose
+// worktree lives on this host (RemoteWorktree false) and whose recorded path
+// still exists on disk is the tenant's own checkout, not a guess from the
+// caller's unrelated working directory.
+func TenantLocalCheckoutRoot(envs []EnvConfig) (string, bool) {
+	for _, candidate := range envs {
+		if candidate.RemoteWorktree() {
+			continue
+		}
+		path := candidate.EffectiveLocalRepoPath()
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			continue
+		}
+		return path, true
+	}
+	return "", false
+}
+
 type ProjectEnvironmentConfig struct {
 	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty"`
 	Docker              ProjectDockerConfig `yaml:"docker,omitempty"`

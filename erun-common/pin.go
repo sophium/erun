@@ -67,6 +67,14 @@ type PinPlan struct {
 	// reference was deliberately left out of Sites, so a caller reading the
 	// plan is not left assuming it was covered.
 	Skipped []string `json:"skipped,omitempty"`
+	// ProjectRootNote is set only when ProjectRoot was not read from the
+	// environment's own recorded repo path or a sibling environment's — i.e. it
+	// fell back to the caller's working directory, which may or may not be the
+	// environment's real repo at all. It names that tree's HEAD and, when the
+	// tree's own pinned versions disagree with what the environment has
+	// deployed, warns that the plan may not describe the environment's real
+	// drift. Empty whenever ProjectRoot came from a known checkout.
+	ProjectRootNote string `json:"projectRootNote,omitempty"`
 }
 
 // Changes is the sites that would actually move. A plan whose changes are empty
@@ -93,18 +101,29 @@ var erunTerraformRefPattern = regexp.MustCompile(`(github\.com/sophium/erun\.git
 // which are versioned independently, are left alone.
 var erunHelmDependencyPattern = regexp.MustCompile(`(?ms)(-\s+name:\s*(\S+)[^\n]*\n(?:\s+[^\n]*\n)*?\s+repository:\s*[^\n]*sophium[^\n]*\n(?:\s+[^\n]*\n)*?\s+version:\s*)(\S+)`)
 
-// erunDevopsImagePattern matches a build-env base image tag.
-var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"']*)`)
+// erunDevopsImagePattern matches a build-env base image tag. The version
+// class excludes `\` so an escaped quote right after it (as in an HCL string)
+// is never swallowed into the captured version.
+var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"'\\]*)`)
 
 // erunImageReferencePattern matches a published erun image reference
-// (ghcr.io/sophium/erun-<component>:<version>) inside a Terraform file or
-// variables file. A tenant's own terraform can set one of these directly — the
-// cluster-edge module's dns01_webhook_image is the reported case — and it names
-// an erun release exactly like the module ref above it, just as a variable's
-// value instead of a module source string. erun-devops is excluded: a bare
-// build-env tag is already the dedicated site above, and matching it here too
-// would report the same reference twice.
-var erunImageReferencePattern = regexp.MustCompile(`(ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):)([0-9][^\s"']*)`)
+// (ghcr.io/sophium/erun-<component>:<version>) that is itself a whole quoted
+// assignment value — anchored on `=\s*"` immediately before the reference and
+// a plain, unescaped closing `"` immediately after the version. A tenant's own
+// terraform can set one of these directly — the cluster-edge module's
+// dns01_webhook_image is the reported case — and it names an erun release
+// exactly like the module ref above it, just as a variable's value instead of
+// a module source string. The anchor is what keeps this from matching the same
+// reference when it only appears as an example inside a variable's
+// `description` prose: prose has other text between the `=` and the quoted
+// reference, and its escaped inner quotes (`\"`) leave a `\` between the
+// version and the next `"` rather than the version butting straight up
+// against it. Excluding `\` from the version class also means a match can
+// never consume that escape backslash, so a rewrite can never turn `\"` into a
+// bare `"` and break the surrounding HCL string. erun-devops is excluded: a
+// bare build-env tag is already the dedicated site above, and matching it here
+// too would report the same reference twice.
+var erunImageReferencePattern = regexp.MustCompile(`(=\s*")(ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):)([0-9][^\s"'\\]*)"`)
 
 // ResolvePinPlan reads every pin site under projectRoot and reports what moving
 // to target would change. It never writes, so a caller can render the plan,
@@ -129,13 +148,22 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 		ProjectRoot: projectRoot,
 		Previous:    strings.TrimSpace(env.RuntimeVersion),
 	}
-	plan.Sites = append(plan.Sites, PinSite{
-		Kind:    PinSiteRuntimeVersion,
-		Detail:  tenant + "/" + environment,
-		Current: strings.TrimSpace(env.RuntimeVersion),
-		Target:  target,
-	})
-	if image := strings.TrimSpace(env.RuntimeImage); image != "" {
+	image := strings.TrimSpace(env.RuntimeImage)
+	// A tenant-imaged env's runtimeversion is versioned on that image's own
+	// release line, not erun's (frs/prod on ghcr.io/sophium/frs-devops:1.0.76 is
+	// the reported case) — rewriting it to the erun target names a tag that line
+	// never publishes, guaranteeing an ImagePullBackOff on the next deploy.
+	if image != "" && !runtimeImageIsStockDevops(image) {
+		plan.Skipped = append(plan.Skipped, "runtimeversion "+tenant+"/"+environment+" rides "+image+"'s own release line, not erun's, so pin leaves it alone; it moves on the tenant's own next build/release")
+	} else {
+		plan.Sites = append(plan.Sites, PinSite{
+			Kind:    PinSiteRuntimeVersion,
+			Detail:  tenant + "/" + environment,
+			Current: strings.TrimSpace(env.RuntimeVersion),
+			Target:  target,
+		})
+	}
+	if image != "" {
 		if _, version, ok := splitImageTag(image); ok {
 			// Only the stock erun-devops image's tag is an erun version; a
 			// tenant's own <tenant>-devops image rides the tenant's own release
@@ -160,6 +188,36 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	}
 	plan.Sites = append(plan.Sites, fileSites...)
 	return plan, nil
+}
+
+// DescribeCwdFallbackProjectRoot names a resolved project root's HEAD and
+// warns when the tree's own pinned versions disagree with what the
+// environment has deployed. Callers use it only when ProjectRoot came from
+// falling back to the caller's working directory rather than a checkout known
+// to belong to this environment or its tenant, since that tree's identity was
+// never actually verified. Best-effort: a HEAD that cannot be read still
+// leaves the note naming the fallback, and an unreadable HEAD never fails the
+// plan this only annotates.
+func DescribeCwdFallbackProjectRoot(ctx Context, plan PinPlan) string {
+	note := "project root resolved from the caller's working directory, not a known checkout of this environment or its tenant"
+	if head, err := GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
+		note += "; HEAD is " + strings.TrimSpace(head)
+	}
+	deployed := strings.TrimSpace(plan.Previous)
+	if deployed == "" {
+		return note
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeVersion {
+			continue
+		}
+		current := strings.TrimSpace(site.Current)
+		if current != "" && current != deployed {
+			return note + fmt.Sprintf("; this tree's own %s reference is at %s, which disagrees with %s/%s's deployed version (%s) — it may be stale or may not be this environment's repo at all",
+				site.Kind, current, plan.Tenant, plan.Environment, deployed)
+		}
+	}
+	return note
 }
 
 func splitImageTag(image string) (repository, tag string, ok bool) {
@@ -243,10 +301,10 @@ func pinSitesInFile(path, relative, name, target string) ([]PinSite, error) {
 	}
 	if pinTerraformFile(name) {
 		for _, match := range erunImageReferencePattern.FindAllStringSubmatch(content, -1) {
-			if match[2] == "erun-devops" {
+			if match[3] == "erun-devops" {
 				continue
 			}
-			sites = append(sites, PinSite{Kind: PinSiteImageReference, Path: relative, Detail: match[2], Current: match[3], Target: target})
+			sites = append(sites, PinSite{Kind: PinSiteImageReference, Path: relative, Detail: match[3], Current: match[4], Target: target})
 		}
 	}
 	return sites, nil
@@ -315,7 +373,7 @@ func rewritePinnedVersions(content, target string) string {
 	content = erunTerraformRefPattern.ReplaceAllString(content, "${1}v"+target)
 	content = erunHelmDependencyPattern.ReplaceAllString(content, "${1}"+target)
 	content = erunDevopsImagePattern.ReplaceAllString(content, "${1}"+target)
-	content = erunImageReferencePattern.ReplaceAllString(content, "${1}"+target)
+	content = erunImageReferencePattern.ReplaceAllString(content, "${1}${2}"+target+`"`)
 	return content
 }
 

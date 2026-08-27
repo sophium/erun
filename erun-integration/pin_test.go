@@ -154,6 +154,124 @@ func TestPin(t *testing.T) {
 		golden.Equal(t, "pin/skips_a_tenant_runtimeimage_tag_and_says_so", normalize.Apply(result.Combined))
 	})
 
+	// The reported bug, for real: applying a re-pin for a tenant-imaged
+	// env must not overwrite its persisted runtimeversion — that would name a
+	// tag the tenant's own image line never publishes, guaranteeing an
+	// ImagePullBackOff on the next deploy — while the rest of the repo's
+	// erun-owned references still move.
+	t.Run("real_run_leaves_a_tenant_imaged_runtimeversion_alone", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimeimage: ghcr.io/sophium/team-devops:1.0.76\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		terraform := readPinnedFile(t, setup.Cwd, "terraform-team/dev/main.tf")
+		if !strings.Contains(terraform, "?ref=v1.0.175") {
+			t.Fatalf("erun terraform ref not re-pinned:\n%s", terraform)
+		}
+		after, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config after: %v", err)
+		}
+		if !strings.Contains(string(after), "runtimeversion: 1.0.0") {
+			t.Fatalf("a tenant-imaged env's runtimeversion must be left alone:\n%s", after)
+		}
+	})
+
+	// The reported bug, half one: a sourceless runtime env (no
+	// MountSource, no repopath at all — the shape the backend's provisioning
+	// Jobs seed) has no local checkout of its own, and with no sibling
+	// environment of the tenant checked out here either, pin must refuse
+	// cleanly by naming the environment and the tenant rather than falling
+	// back to guessing at the caller's unrelated working directory.
+	t.Run("refuses_a_sourceless_runtime_env_with_no_tenant_checkout", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "prod")
+
+		result := erun.Run(t, []string{"pin", "frs", "prod", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal, got exit 0: %s", result.Combined)
+		}
+		for _, want := range []string{"frs/prod", "no local checkout", "no other frs environment"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the refusal:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	// The reported bug, half one continued: every environment of a
+	// tenant shares one repo, so when a sibling environment ("dev", a
+	// local-agent env) does have a checkout on this machine, the sourceless
+	// runtime env's re-pin resolves to it — deliberately, not by falling back
+	// to whatever the caller's cwd happens to be.
+	t.Run("resolves_a_sourceless_runtime_envs_root_from_a_sibling_checkout", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "dev")
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "prod")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "frs", "prod", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{"terraform-ref", "helm-dependency"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the plan:\n%s", want, result.Combined)
+			}
+		}
+		if strings.Contains(result.Combined, "caller's working directory") {
+			t.Fatalf("a sibling checkout resolved the root; it must not read as a cwd guess:\n%s", result.Combined)
+		}
+	})
+
+	// The reported bug, half two: when no known checkout exists at all
+	// and pin falls back to the caller's own working directory, the plan must
+	// say so, name that tree's HEAD, and warn when the tree's own pins disagree
+	// with what the environment has deployed — so the plan is never mistaken
+	// for a statement about the environment's real drift.
+	t.Run("cwd_fallback_names_the_head_and_warns_when_stale", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "prod")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "prod", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimeversion: 1.0.50\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "frs", "prod", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"caller's working directory",
+			"HEAD is",
+			"disagrees with frs/prod's deployed version (1.0.50)",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the plan:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	// The reported gap: dns01_webhook_image, set directly in a tenant's own
 	// terraform variables, is an erun-published image reference just like the
 	// module ref above it, and pin's dry-run must name it as a site to move
@@ -205,6 +323,33 @@ func TestPin(t *testing.T) {
 		result := erun.Run(t, []string{"pin", "team", "dev", "--list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	// The reported nit: `erun pin --list` is the literal example in this
+	// command's own --help, and it reads erun's own published registry, which
+	// is the same for every tenant — it must work on a host with no default
+	// tenant configured at all, not just when a tenant happens to be seeded.
+	t.Run("list_works_without_a_default_tenant_configured", func(t *testing.T) {
+		setup := env.New(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+		}))
+		defer server.Close()
+		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
+
+		result := erun.Run(t, []string{"pin", "--list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "default tenant is not configured") {
+			t.Fatalf("--list must not require a default tenant:\n%s", result.Combined)
 		}
 		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
 			if !strings.Contains(result.Combined, want) {

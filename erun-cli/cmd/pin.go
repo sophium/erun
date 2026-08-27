@@ -18,7 +18,7 @@ import (
 // It edits the source of truth and stops there. Realizing the new version —
 // terraform apply, deploy — stays a separate explicit step, so changing a pin is
 // never a rollout by accident.
-func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
 	target := common.OpenParams{}
@@ -41,6 +41,13 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
+			// --list only reads the registry — it needs no tenant or environment,
+			// so it must not require one to be resolvable. `erun pin --list` is the
+			// literal example in this command's own --help; a default tenant being
+			// unconfigured must not break it.
+			if list {
+				return runPinListCommand(cmd.Context(), ctx)
+			}
 			params, err := resolveOpenParams(args, target)
 			if err != nil {
 				return err
@@ -49,14 +56,11 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 			if err != nil {
 				return err
 			}
-			if list {
-				return runPinListCommand(cmd.Context(), ctx, result)
-			}
 			return runPinCommand(cmd.Context(), ctx, result, pinRequest{
 				Version: version,
 				Latest:  latest,
 				Revert:  revert,
-			}, saveEnvConfig, findProjectRoot)
+			}, saveEnvConfig, listEnvConfigs, findProjectRoot)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -76,8 +80,10 @@ type pinRequest struct {
 }
 
 // runPinListCommand answers "what can I pin to" from the registry, so choosing a
-// version is recognition rather than recall.
-func runPinListCommand(ctx context.Context, cmdCtx common.Context, result common.OpenResult) error {
+// version is recognition rather than recall. It reads erun's own published
+// registry, which is the same for every tenant and environment, so it needs
+// neither resolved — unlike a real re-pin, it never touches a project root.
+func runPinListCommand(ctx context.Context, cmdCtx common.Context) error {
 	versions, err := resolvePinRegistryVersions(ctx)
 	if err != nil {
 		return err
@@ -100,8 +106,8 @@ func orNone(value string) string {
 	return value
 }
 
-func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.OpenResult, request pinRequest, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc) error {
-	projectRoot, err := resolvePinProjectRoot(result, findProjectRoot)
+func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.OpenResult, request pinRequest, saveEnvConfig func(string, common.EnvConfig) error, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) error {
+	projectRoot, viaCwdFallback, err := resolvePinProjectRoot(result, listEnvConfigs, findProjectRoot)
 	if err != nil {
 		return err
 	}
@@ -114,6 +120,9 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if err != nil {
 		return err
 	}
+	if viaCwdFallback {
+		plan.ProjectRootNote = common.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
+	}
 	tracePinPlan(cmdCtx, plan)
 
 	if plan.Aligned() {
@@ -123,7 +132,14 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if cmdCtx.DryRun {
 		return nil
 	}
+	return applyPinCommand(cmdCtx, projectRoot, result, plan, saveEnvConfig)
+}
 
+// applyPinCommand writes a resolved, drifted plan: records the previous
+// version, rewrites every file site, persists the env's own runtimeversion
+// when the plan carries that site, and refreshes any chart lock a rewritten
+// dependency left stale.
+func applyPinCommand(cmdCtx common.Context, projectRoot string, result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
 	// Recorded before anything moves, so a revert has somewhere to go even if the
 	// rewrite fails partway.
 	if err := common.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
@@ -132,7 +148,7 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if err := common.ApplyPinPlan(plan); err != nil {
 		return err
 	}
-	if err := savePinnedRuntimeVersion(result, plan.Target, saveEnvConfig); err != nil {
+	if err := savePinnedRuntimeVersion(result, plan, saveEnvConfig); err != nil {
 		return err
 	}
 	// The rewritten Chart.yaml and the lock beside it have to agree, or the next
@@ -210,30 +226,63 @@ func resolvePinRegistryVersions(ctx context.Context) (common.RuntimeRegistryVers
 }
 
 // resolvePinProjectRoot finds the tree whose pins are being rewritten. The
-// environment's repo path is authoritative when it has one; otherwise the
-// discovered project root is.
-func resolvePinProjectRoot(result common.OpenResult, findProjectRoot common.ProjectFinderFunc) (string, error) {
+// environment's own repo path is authoritative when it has one on this
+// machine. A sourceless remote env (a runtime env with no MountSource, or any
+// remote-worktree env run from the host rather than the pod) has none of its
+// own, so the next-best answer is a sibling environment of the same tenant
+// that does — every environment of a tenant shares the same repo. Only as a
+// last resort, and only when the caller can be told so, does this fall back
+// to the caller's own working directory, which may not be the tenant's repo
+// at all. viaCwdFallback reports which of those two ways the root was found,
+// so the caller can annotate the plan instead of presenting an unverified
+// tree as if it were known-good.
+func resolvePinProjectRoot(result common.OpenResult, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
-		return path, nil
+		return path, false, nil
+	}
+	if listEnvConfigs != nil {
+		if envs, err := listEnvConfigs(result.Tenant); err == nil {
+			if root, ok := common.TenantLocalCheckoutRoot(envs); ok {
+				return root, false, nil
+			}
+		}
 	}
 	if findProjectRoot != nil {
 		if _, root, err := findProjectRoot(); err == nil && strings.TrimSpace(root) != "" {
-			return root, nil
+			return root, true, nil
 		}
 	}
-	return "", fmt.Errorf("could not resolve the project root whose erun references would be re-pinned; run from inside the tenant repository")
+	return "", false, fmt.Errorf("%s/%s has no local checkout of its repo on this machine, and no other %s environment does either — pin rewrites files in that checkout, so run it from a machine (or shell) that has the tenant repo checked out",
+		result.Tenant, result.Environment, result.Tenant)
 }
 
-func savePinnedRuntimeVersion(result common.OpenResult, target string, saveEnvConfig func(string, common.EnvConfig) error) error {
+// savePinnedRuntimeVersion persists the env's own runtimeversion — but only
+// when ResolvePinPlan actually included that site. A tenant-imaged env's
+// runtimeversion rides the tenant's own release line, not erun's, and
+// ResolvePinPlan already decided to leave it alone (plan.Skipped names why);
+// writing it here regardless would silently undo that decision.
+func savePinnedRuntimeVersion(result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
 	}
-	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == strings.TrimSpace(target) {
+	if !pinPlanHasRuntimeVersionSite(plan) {
 		return nil
 	}
-	updated.RuntimeVersion = target
+	updated := result.EnvConfig
+	if strings.TrimSpace(updated.RuntimeVersion) == strings.TrimSpace(plan.Target) {
+		return nil
+	}
+	updated.RuntimeVersion = plan.Target
 	return saveEnvConfig(result.Tenant, updated)
+}
+
+func pinPlanHasRuntimeVersionSite(plan common.PinPlan) bool {
+	for _, site := range plan.Sites {
+		if site.Kind == common.PinSiteRuntimeVersion {
+			return true
+		}
+	}
+	return false
 }
 
 // tracePinPlan renders every site and its old→new value. Emitted for a real run
@@ -241,6 +290,9 @@ func savePinnedRuntimeVersion(result common.OpenResult, target string, saveEnvCo
 // should see which without diffing afterwards.
 func tracePinPlan(cmdCtx common.Context, plan common.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
+	if plan.ProjectRootNote != "" {
+		cmdCtx.Trace("  " + plan.ProjectRootNote)
+	}
 	for _, site := range plan.Sites {
 		state := "change"
 		if site.Aligned() {

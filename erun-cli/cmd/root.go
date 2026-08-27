@@ -204,7 +204,7 @@ func (d rootDependencies) openCommand() *cobra.Command {
 func (d rootDependencies) pinCommand() *cobra.Command {
 	return newPinCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, d.store)
-	}, d.resolveOpen, d.store.SaveEnvConfig, common.FindProjectRoot)
+	}, d.resolveOpen, d.store.SaveEnvConfig, d.store.ListEnvConfigs, common.FindProjectRoot)
 }
 
 func (d rootDependencies) sshdCommand() *cobra.Command {

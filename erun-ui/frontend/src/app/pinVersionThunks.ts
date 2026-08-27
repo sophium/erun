@@ -3,6 +3,7 @@ import type { UISelection } from '@/types';
 import {
   ApplyPinVersion,
   ListPinnableVersions,
+  PinRepoCheckoutStatus,
   PreviewPinVersion,
   RevertPinVersion,
 } from '../../wailsjs/go/main/App';
@@ -11,17 +12,31 @@ import type { PinPlanView } from './slices/pinVersionSlice';
 import {
   closePinVersionDialog,
   openPinVersionDialog,
+  PIN_LATEST_STABLE_TARGET,
   setPinApplying,
   setPinError,
   setPinPlan,
   setPinPreviewing,
+  setPinRepoCheckoutStatus,
   setPinVersions,
   setPinVersionsError,
 } from './slices/pinVersionSlice';
 import type { AppThunk } from './store';
 
+// resolvePinTargetForCall maps the dialog's "no explicit choice" sentinel back
+// to '', which is what erun pin (via the Go bindings) has always read as
+// "resolve the latest published stable release" — the sentinel exists only so
+// the Version select has a real, selectable value for that choice.
+function resolvePinTargetForCall(target: string): string {
+  return target === PIN_LATEST_STABLE_TARGET ? '' : target;
+}
+
 // openPinVersion opens the picker and loads the versions this environment can
-// actually be pinned to, so choosing one is recognition rather than recall.
+// actually be pinned to, so choosing one is recognition rather than recall. It
+// also checks up front whether this environment's references even have a
+// resolvable local checkout — a sourceless runtime environment has none of
+// its own, and the dialog needs to say so before offering Preview/Apply that
+// can never resolve, not just report it after a failed click.
 export const openPinVersion =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -31,6 +46,14 @@ export const openPinVersion =
       dispatch(setPinVersions(versions));
     } catch (error) {
       dispatch(setPinVersionsError(readError(error)));
+    }
+    try {
+      const status = await PinRepoCheckoutStatus(selection);
+      dispatch(
+        setPinRepoCheckoutStatus({ resolvable: status.resolvable, reason: status.reason ?? '' }),
+      );
+    } catch (error) {
+      dispatch(setPinRepoCheckoutStatus({ resolvable: false, reason: readError(error) }));
     }
   };
 
@@ -43,7 +66,10 @@ export const previewPin = (): AppThunk<Promise<void>> => async (dispatch, getSta
   }
   dispatch(setPinPreviewing(true));
   try {
-    const plan = (await PreviewPinVersion(selection, target)) as PinPlanView;
+    const plan = (await PreviewPinVersion(
+      selection,
+      resolvePinTargetForCall(target),
+    )) as PinPlanView;
     dispatch(setPinPlan({ plan, applied: false }));
   } catch (error) {
     dispatch(setPinError(readError(error)));
@@ -57,7 +83,7 @@ export const applyPin = (): AppThunk<Promise<void>> => async (dispatch, getState
   }
   dispatch(setPinApplying(true));
   try {
-    const plan = (await ApplyPinVersion(selection, target)) as PinPlanView;
+    const plan = (await ApplyPinVersion(selection, resolvePinTargetForCall(target))) as PinPlanView;
     dispatch(setPinPlan({ plan, applied: true }));
   } catch (error) {
     dispatch(setPinError(readError(error)));
