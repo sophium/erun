@@ -82,6 +82,10 @@ type orchestratorSession struct {
 	pacingNudgeCount      int
 	pacingCapped          bool
 	pacingLastNudgeAtUnix int64
+	// pacingLastReason is the reason decideOrchestratorPacing last returned for
+	// this orchestrator, so the reconciler logs a transition rather than
+	// repeating the same line every 15s tick. See logOrchestratorPacingTransition.
+	pacingLastReason orchestratorPacingReason
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
