@@ -97,7 +97,6 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		serial:                 serial,
 		slot:                   slot,
 		kind:                   kind,
-		appSession:             appSessionID,
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 		respawn: func() (terminalSession, error) {

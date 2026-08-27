@@ -45,8 +45,8 @@ func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 // where the poller itself stops producing results entirely (e.g.
 // RefreshCloudContextStatuses fails at the list-contexts step, before any
 // per-context Unknown is even produced): the read path must age the
-// observation out on its own, mirroring session_heartbeat.go's
-// heartbeatSaysRunning.
+// observation out on its own, the same self-aging-out shape
+// readOrchestratorActivity applies to a stale turn-boundary report.
 func TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{

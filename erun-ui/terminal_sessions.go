@@ -93,7 +93,6 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		serial:                 serial,
 		slot:                   slot,
 		kind:                   sessionKindOpen,
-		appSession:             fmt.Sprintf("open-%d", slot),
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 		respawn: func() (terminalSession, error) {
@@ -279,13 +278,12 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.nextSerial++
 	serial := a.nextSerial
 	managed := &managedTerminal{
-		session:    session,
-		selection:  selection,
-		key:        key,
-		serial:     serial,
-		slot:       slot,
-		kind:       sessionKindAI,
-		appSession: "ai",
+		session:   session,
+		selection: selection,
+		key:       key,
+		serial:    serial,
+		slot:      slot,
+		kind:      sessionKindAI,
 		respawn: func() (terminalSession, error) {
 			return a.deps.startTerminal(reconnectSessionParams(params))
 		},
@@ -1035,10 +1033,6 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	// per configured env, so without this a closed env keeps an rsync-over-ssh
 	// poller running; reopening the env restarts it.
 	a.stopWorkspaceSyncForSelection(selection)
-	// The env's pod observation describes sessions that no longer have a tab.
-	// Dropping it means reopening the env starts from a fresh reading rather
-	// than one taken before the close (or before a deploy replaced the pod).
-	a.forgetSessionHeartbeats(selection)
 	return closeManagedTerminals(targets)
 }
 
@@ -1248,7 +1242,6 @@ func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOu
 		Data:      base64.StdEncoding.EncodeToString(chunk),
 	})
 	a.feedActivityTraceFromTerminal(managed, chunk)
-	a.recordAIActivity(managed)
 	a.maybeNudgeAIRepaint(managed, chunk)
 	if managed.clearIdleBlockOnOutput {
 		a.mu.Lock()
@@ -1431,7 +1424,15 @@ func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool
 }
 
 func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
-	a.finalizeAIActivity(managed)
+	// An AI tab's own exit is the one moment its structured status can go
+	// stale without a corresponding self-report: the tool never got to run
+	// its Stop hook if the pty itself dropped. Re-observing immediately
+	// clears the sidebar badge promptly instead of waiting for the next
+	// environmentActivityInterval tick.
+	if aiActivityKind(managed.kind) {
+		selection := managed.selection
+		go a.emitEnvActivityIfChanged(a.observeEnvironmentActivity(selection))
+	}
 	a.mu.Lock()
 	managed.closed = true
 	if existing := a.sessions[managed.key]; existing == managed {
@@ -1849,173 +1850,30 @@ func (a *App) emitReconnectFailureMarker(sessionID int, err error) {
 	})
 }
 
-// aiActivitySustainedThreshold is how long the AI session must keep
-// producing output before we flip the sidebar busy badge on. Chosen
-// large enough to suppress single-line Codex responses (~1 s of output)
-// while still catching real multi-second Claude generations.
-const aiActivitySustainedThreshold = 5 * time.Second
-
-// aiActivityIdleThreshold is how long the AI session must be silent
-// before we flip the busy badge back off. Codex's "thinking..." spinner
-// updates in bursts; this window swallows the gaps between bursts so
-// the sidebar does not flicker mid-generation.
-const aiActivityIdleThreshold = 3 * time.Second
-
-// recordAIActivity is called from streamSession on every output read for
-// every managed terminal; it only does work for sessionKindAI sessions.
-// It implements the debounced "AI tab is working" signal described in
-// erun-ui/AGENTS.md: Nielsen #1 (visibility of system status) requires
-// the sidebar to show, at a glance, which env's AI tab is producing
-// output — even when the user has navigated to a different env.
-//
-// Policy:
-//   - busy=true fires after aiActivitySustainedThreshold of sustained
-//     output (5 s), where "sustained" means continued output with gaps
-//     no longer than aiActivityIdleThreshold (3 s). Short single-burst
-//     responses do not toggle the badge.
-//   - busy=false fires after aiActivityIdleThreshold (3 s) of silence.
-//   - Session close emits busy=false via finalizeAIActivity.
-//
 // aiActivityKind reports whether a session of this kind should drive the
-// sidebar's working spinner. An orchestrator runs the same agent an AI tab
-// does, and it is the row most likely to be working, so gating this on
-// sessionKindAI alone left the one row that is always driving work as the only
-// row that never showed it.
+// sidebar's working spinner via the ai-activity event. Only orchestrators use
+// it today: an environment's AI tab status is read from the structured model
+// (erun-common's AISessionStatus, surfaced through environment_activity.go's
+// EnvObservedActivity) instead, because that is the tool's own report rather
+// than a guess from output volume. An orchestrator has no pod to report
+// through that path, so it reports its own turn boundaries directly
+// (orchestrator_activity.go) and this event is still how that reaches the
+// sidebar.
 //
 // It takes the kind rather than the session so each caller keeps its own
 // `managed == nil` guard visible: folding the nil check in here hid it from
 // static analysis, which then read every later field access as a possible nil
 // dereference.
-//
-// An orchestrator is deliberately NOT here. It runs an interactive agent TUI,
-// which repaints its prompt and counters continuously, so "this terminal is
-// emitting bytes" is true forever and the silence rule that releases the latch
-// never fires — the row span forever and the desktop burned CPU reading redraws
-// to keep it that way. An env's AI tab survives the same weakness only because
-// the pod heartbeat independently observes its program exit. An orchestrator has
-// no pod, so it reports its own turn boundaries instead (orchestrator_activity.go).
 func aiActivityKind(kind sessionKind) bool {
 	return kind == sessionKindAI
 }
 
-func (a *App) recordAIActivity(managed *managedTerminal) {
-	if managed == nil || !aiActivityKind(managed.kind) {
-		return
-	}
-	now := time.Now()
-	a.mu.Lock()
-	if managed.closed {
-		a.mu.Unlock()
-		return
-	}
-	if managed.aiActiveSince.IsZero() || now.Sub(managed.aiLastOutput) > aiActivityIdleThreshold {
-		managed.aiActiveSince = now
-	}
-	managed.aiLastOutput = now
-	shouldFireBusy := !managed.aiBusyEmitted && now.Sub(managed.aiActiveSince) >= aiActivitySustainedThreshold
-	if shouldFireBusy {
-		managed.aiBusyEmitted = true
-	}
-	if managed.aiInactivityTimer != nil {
-		managed.aiInactivityTimer.Stop()
-	}
-	managed.aiInactivityTimer = time.AfterFunc(aiActivityIdleThreshold, func() {
-		a.clearAIActivityIfQuiet(managed)
-	})
-	selection := managed.selection
-	serial := managed.serial
-	a.mu.Unlock()
-	if shouldFireBusy {
-		a.emitAIActivity(serial, selection, true)
-	}
-}
-
-// clearAIActivityIfQuiet fires from recordAIActivity's AfterFunc and clears the
-// busy latch only if the session has stayed quiet. If newer output arrived, a
-// later recordAIActivity already reset the timer, so this firing is stale and a
-// no-op.
-//
-// Silence alone is not enough to declare the work finished: an agent waiting on
-// a compile, and a session whose output stream dropped, are both silent while
-// the program in the pod keeps running. So a session the pod recently observed
-// as running keeps the latch — the heartbeat poller releases it when the pod
-// agrees it has stopped (applySessionHeartbeat).
-func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
-	if managed == nil {
-		return
-	}
-	if a.heartbeatSaysRunning(managed) {
-		return
-	}
-	a.releaseAIActivityIfQuiet(managed)
-}
-
-func (a *App) releaseAIActivityIfQuiet(managed *managedTerminal) {
-	a.mu.Lock()
-	if managed.closed || !managed.aiBusyEmitted {
-		a.mu.Unlock()
-		return
-	}
-	if time.Since(managed.aiLastOutput) < aiActivityIdleThreshold {
-		a.mu.Unlock()
-		return
-	}
-	managed.aiBusyEmitted = false
-	managed.aiActiveSince = time.Time{}
-	selection := managed.selection
-	serial := managed.serial
-	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
-}
-
-// releaseAIActivity drops the busy latch regardless of how recently the session
-// printed. Used when the pod itself reports the session's program is gone: the
-// stream may still be dribbling reconnect noise, but the work is over.
-func (a *App) releaseAIActivity(managed *managedTerminal) {
-	a.mu.Lock()
-	if managed.closed || !managed.aiBusyEmitted {
-		a.mu.Unlock()
-		return
-	}
-	managed.aiBusyEmitted = false
-	managed.aiActiveSince = time.Time{}
-	selection := managed.selection
-	serial := managed.serial
-	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
-}
-
-// finalizeAIActivity ensures the sidebar busy latch is released when an
-// AI session exits while busy=true is in flight (e.g. user closes the
-// tab mid-generation, or the underlying PTY drops). Caller must not
-// hold a.mu.
-func (a *App) finalizeAIActivity(managed *managedTerminal) {
-	if managed == nil || !aiActivityKind(managed.kind) {
-		return
-	}
-	a.mu.Lock()
-	if managed.aiInactivityTimer != nil {
-		managed.aiInactivityTimer.Stop()
-		managed.aiInactivityTimer = nil
-	}
-	if !managed.aiBusyEmitted {
-		a.mu.Unlock()
-		return
-	}
-	managed.aiBusyEmitted = false
-	managed.aiActiveSince = time.Time{}
-	selection := managed.selection
-	serial := managed.serial
-	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
-}
-
-func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
+// emitAIActivity publishes an orchestrator's turn-busy signal. Environments no
+// longer go through this event — see aiActivityKind's doc comment.
+func (a *App) emitAIActivity(sessionID int, busy bool) {
 	a.emitEvent(aiActivityEvent, aiActivityPayload{
-		SessionID:   sessionID,
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-		Busy:        busy,
+		SessionID: sessionID,
+		Busy:      busy,
 	})
 }
 
@@ -2182,24 +2040,6 @@ type managedTerminal struct {
 	// back and the two windows would fight. Clicking the env in the
 	// sidebar starts a fresh session, which is the deliberate take-back.
 	takenOver bool
-
-	// appSession is the persistent pod session id this terminal attaches to
-	// (`ai`, `open-2`, `contribute-ai`, …), empty for sessions with no pod
-	// session. The heartbeat poller keys its observations on it, so what the pod
-	// reports is matched to the tab by identity rather than re-derived.
-	appSession string
-
-	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
-	// drive the debounced AI activity signal that powers the sidebar
-	// "Claude is working" spinner. Only populated for sessionKindAI
-	// managed terminals. See recordAIActivity for the debounce policy
-	// (5 s sustained output to flip on, 3 s silence to flip off) and
-	// session_heartbeat.go for the observed-liveness override that keeps a
-	// quiet-but-running session from reading as finished.
-	aiActiveSince     time.Time
-	aiLastOutput      time.Time
-	aiBusyEmitted     bool
-	aiInactivityTimer *time.Timer
 
 	// readyMu / readyCh / readyErr / readyClosed track the
 	// "session is past its setup phase" signal. The desktop action

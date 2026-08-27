@@ -132,12 +132,6 @@ type App struct {
 	// stops cannot alias: they have different recoveries, and a runtime stop
 	// flagged as a cloud-context stop would name the wrong one.
 	runtimeStops map[string]struct{}
-	// sessionHeartbeats holds the most recent pod observation per environment:
-	// which persistent sessions still have a live program behind them. It is
-	// what keeps a quiet-but-running AI tab from reading as finished, and what
-	// makes the rendered session count and the running state one observation
-	// rather than two guesses. See session_heartbeat.go.
-	sessionHeartbeats map[string]sessionHeartbeat
 	// envActivity is the last observation published per environment, so the
 	// sweep announces transitions rather than restating a quiet environment
 	// every tick. See environment_activity.go.
@@ -249,7 +243,6 @@ func NewApp(deps erunUIDeps) *App {
 		idleStops:            make(map[string]struct{}),
 		intentionalStops:     make(map[string]struct{}),
 		runtimeStops:         make(map[string]struct{}),
-		sessionHeartbeats:    make(map[string]sessionHeartbeat),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		orchestrators:        make(map[string]*orchestratorSession),

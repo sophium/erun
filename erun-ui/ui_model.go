@@ -51,6 +51,17 @@ type uiEnvironmentActivitySnapshot struct {
 	Outage    bool   `json:"outage"`
 	Busy      bool   `json:"busy"`
 	Detail    string `json:"detail,omitempty"`
+	// AIState/AITool/AILastActivityUnix/AIOutcome/AIExitCode mirror
+	// eruncommon.AISessionStatus for this env's primary AI session (see
+	// environment_activity.go's reduceAISessionStatus): the tool's own
+	// structured report, never inferred from PTY output volume or timing.
+	// AIState is one of "busy"/"idle"/"awaiting-input"/"unknown", or "" when
+	// the env has no AI session running at all (not even unknown).
+	AIState            string `json:"aiState,omitempty"`
+	AITool             string `json:"aiTool,omitempty"`
+	AILastActivityUnix int64  `json:"aiLastActivityUnix,omitempty"`
+	AIOutcome          string `json:"aiOutcome,omitempty"`
+	AIExitCode         int    `json:"aiExitCode,omitempty"`
 }
 
 // uiWorkingIssue backs the sidebar hover card's "what is this env working on".
@@ -108,6 +119,12 @@ type envActivityPayload struct {
 	Outage bool   `json:"outage"`
 	Busy   bool   `json:"busy"`
 	Detail string `json:"detail,omitempty"`
+	// AI* fields mirror uiEnvironmentActivitySnapshot's — see its doc comment.
+	AIState            string `json:"aiState,omitempty"`
+	AITool             string `json:"aiTool,omitempty"`
+	AILastActivityUnix int64  `json:"aiLastActivityUnix,omitempty"`
+	AIOutcome          string `json:"aiOutcome,omitempty"`
+	AIExitCode         int    `json:"aiExitCode,omitempty"`
 }
 
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
@@ -986,14 +1003,16 @@ type terminalExitPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// aiActivityPayload carries the debounced AI-session "busy" signal the sidebar
-// uses to spin env rows whose AI tab is actively producing output. Busy flips
-// true after ~5 s of sustained output and back to false after ~3 s of silence.
+// aiActivityPayload carries an orchestrator's own turn-busy self-report (see
+// orchestrator_activity.go) to the sidebar's orchestrator row spinner. An
+// environment's AI-session state is a different, richer model now
+// (envActivityPayload's AI* fields, sourced from eruncommon.AISessionStatus)
+// and no longer goes through this event — an orchestrator has no pod to
+// report through that path, so it keeps reporting its own turn boundaries
+// directly.
 type aiActivityPayload struct {
-	SessionID   int    `json:"sessionId"`
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Busy        bool   `json:"busy"`
+	SessionID int  `json:"sessionId"`
+	Busy      bool `json:"busy"`
 }
 
 // orchestratorShellActivityPayload carries whether an orchestrator's

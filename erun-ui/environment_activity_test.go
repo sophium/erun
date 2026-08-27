@@ -93,6 +93,78 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 	}
 }
 
+// TestReduceAISessionStatus locks the sidebar's reduction of an env's AI
+// sessions to the one line the badge renders: no session at all reads as
+// empty state (distinct from AISessionStateUnknown, a session that exists but
+// never reported), and when two sessions disagree the more actionable one
+// (awaiting-input, then busy) wins over idle/unknown.
+func TestReduceAISessionStatus(t *testing.T) {
+	at := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name           string
+		sessions       []eruncommon.AISessionStatus
+		wantState      eruncommon.AISessionState
+		wantTool       string
+		wantLastActive time.Time
+		wantOutcome    eruncommon.AISessionOutcome
+		wantExitCode   int
+	}{
+		{
+			name:      "no sessions is empty state, not unknown",
+			sessions:  nil,
+			wantState: "",
+		},
+		{
+			name: "a single unknown session passes through",
+			sessions: []eruncommon.AISessionStatus{
+				{SessionID: "ai", Tool: "codex", State: eruncommon.AISessionStateUnknown},
+			},
+			wantState: eruncommon.AISessionStateUnknown,
+			wantTool:  "codex",
+		},
+		{
+			name: "awaiting-input outranks busy — the operator needs to see the blocker",
+			sessions: []eruncommon.AISessionStatus{
+				{SessionID: "ai", Tool: "claude", State: eruncommon.AISessionStateBusy, LastActivity: at},
+				{SessionID: "contribute-ai", Tool: "claude", State: eruncommon.AISessionStateAwaitingInput, LastActivity: at.Add(time.Minute)},
+			},
+			wantState:      eruncommon.AISessionStateAwaitingInput,
+			wantTool:       "claude",
+			wantLastActive: at.Add(time.Minute),
+		},
+		{
+			name: "busy outranks idle and unknown",
+			sessions: []eruncommon.AISessionStatus{
+				{SessionID: "ai", Tool: "claude", State: eruncommon.AISessionStateIdle},
+				{SessionID: "contribute-ai", Tool: "claude", State: eruncommon.AISessionStateBusy},
+			},
+			wantState: eruncommon.AISessionStateBusy,
+			wantTool:  "claude",
+		},
+		{
+			name: "an exited session carries its outcome",
+			sessions: []eruncommon.AISessionStatus{
+				{SessionID: "ai", Tool: "claude", State: eruncommon.AISessionStateIdle, Outcome: eruncommon.AISessionOutcomeOOMKilled, ExitCode: 137, LastActivity: at},
+			},
+			wantState:      eruncommon.AISessionStateIdle,
+			wantTool:       "claude",
+			wantLastActive: at,
+			wantOutcome:    eruncommon.AISessionOutcomeOOMKilled,
+			wantExitCode:   137,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, tool, lastActive, outcome, exitCode := reduceAISessionStatus(tc.sessions)
+			if state != tc.wantState || tool != tc.wantTool || !lastActive.Equal(tc.wantLastActive) || outcome != tc.wantOutcome || exitCode != tc.wantExitCode {
+				t.Fatalf("got state=%q tool=%q lastActive=%v outcome=%q exitCode=%d, want state=%q tool=%q lastActive=%v outcome=%q exitCode=%d",
+					state, tool, lastActive, outcome, exitCode,
+					tc.wantState, tc.wantTool, tc.wantLastActive, tc.wantOutcome, tc.wantExitCode)
+			}
+		})
+	}
+}
+
 // TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation is the
 // regression for erun#1216 bug 2: a Redux reset that does not restart the Go
 // process (the ErrorBoundary "Reload app" button) must not lose a busy

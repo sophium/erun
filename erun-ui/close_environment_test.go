@@ -112,12 +112,10 @@ func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 // behind the "sidebar keeps spinning after close" bug. Closing an env must
 // mark each live session closed (and release its idle-stop block) so
 // tryReconnect refuses to respawn it — which is what lets streamSession reach
-// finalizeSessionExit -> finalizeAIActivity and emit AI busy=false, clearing
-// the sidebar spinner. Before the fix CloseEnvironmentSessions closed the PTY
-// without marking closed, so the AI session reconnected the still-live pod
-// session, finalize never ran, and a continuously repainting Claude TUI (never
-// quiet for the 3s idle-clear) left the aiBusy latch — and the row — spinning
-// forever.
+// finalizeSessionExit and emit the terminal-exit event, clearing the sidebar
+// spinner. Before the fix CloseEnvironmentSessions closed the PTY without
+// marking closed, so the AI session reconnected the still-live pod session and
+// finalize never ran, leaving the row spinning forever.
 func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
@@ -132,7 +130,6 @@ func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
 		serial:         1,
 		key:            "ai",
 		kind:           sessionKindAI,
-		aiBusyEmitted:  true,
 		blocksIdleStop: true,
 		respawn:        func() (terminalSession, error) { return newStubTerminalSession(), nil },
 	}

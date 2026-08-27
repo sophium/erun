@@ -61,6 +61,17 @@ type environmentActivityState struct {
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
+	// aiState/aiTool/aiLastActivity/aiOutcome/aiExitCode mirror the primary AI
+	// session's own structured report (see reduceAISessionStatus) — never
+	// inferred from PTY output volume or timing. aiState is empty when the env
+	// has no AI session running at all, distinct from
+	// eruncommon.AISessionStateUnknown (a session exists but has never
+	// self-reported).
+	aiState        eruncommon.AISessionState
+	aiTool         string
+	aiLastActivity time.Time
+	aiOutcome      eruncommon.AISessionOutcome
+	aiExitCode     int
 }
 
 func (a *App) runEnvironmentActivityPoller(stop <-chan struct{}) {
@@ -171,7 +182,54 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	a.forgetForwardRepair(selection)
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	observation.state.aiState, observation.state.aiTool, observation.state.aiLastActivity,
+		observation.state.aiOutcome, observation.state.aiExitCode = reduceAISessionStatus(status.AISessions)
 	return observation
+}
+
+// unixOrZero converts a possibly-zero time.Time to a unix timestamp,
+// preserving zero rather than emitting the 1970 epoch for "never happened".
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
+// reduceAISessionStatus reduces an environment's AI sessions to the one the
+// sidebar badge renders. An env can run two AI-kind sessions at once (the "ai"
+// tab and, with contribute mode on, "contribute-ai"); busy or awaiting-input
+// beats idle or unknown, because the more actionable state is what the
+// operator needs to see at a glance. aiState is empty (not
+// AISessionStateUnknown) when the env has no AI session at all, so the sidebar
+// can tell "nothing running" from "something is running but never reported".
+func reduceAISessionStatus(sessions []eruncommon.AISessionStatus) (eruncommon.AISessionState, string, time.Time, eruncommon.AISessionOutcome, int) {
+	if len(sessions) == 0 {
+		return "", "", time.Time{}, "", 0
+	}
+	best := sessions[0]
+	for _, session := range sessions[1:] {
+		if aiSessionStatusRank(session.State) > aiSessionStatusRank(best.State) {
+			best = session
+		}
+	}
+	return best.State, best.Tool, best.LastActivity, best.Outcome, best.ExitCode
+}
+
+// aiSessionStatusRank orders states by how much an operator needs to see them:
+// a session waiting on a human or actively working outranks one that is idle
+// or has never reported.
+func aiSessionStatusRank(state eruncommon.AISessionState) int {
+	switch state {
+	case eruncommon.AISessionStateAwaitingInput:
+		return 3
+	case eruncommon.AISessionStateBusy:
+		return 2
+	case eruncommon.AISessionStateUnknown:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // environmentBusyFromIdleStatus reduces the environment's own markers to the one
@@ -241,11 +299,16 @@ func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
 				continue
 			}
 			env.Activity = &uiEnvironmentActivitySnapshot{
-				Reachable: observed.reachable,
-				Observed:  observed.observed,
-				Outage:    observed.outage,
-				Busy:      observed.busy,
-				Detail:    observed.detail,
+				Reachable:          observed.reachable,
+				Observed:           observed.observed,
+				Outage:             observed.outage,
+				Busy:               observed.busy,
+				Detail:             observed.detail,
+				AIState:            string(observed.aiState),
+				AITool:             observed.aiTool,
+				AILastActivityUnix: unixOrZero(observed.aiLastActivity),
+				AIOutcome:          string(observed.aiOutcome),
+				AIExitCode:         observed.aiExitCode,
 			}
 		}
 	}
@@ -270,12 +333,17 @@ func (a *App) envActivitySnapshot() map[string]environmentActivityState {
 
 func (a *App) emitEnvActivity(observation environmentActivity) {
 	a.emitEvent(envActivityEvent, envActivityPayload{
-		Tenant:      observation.selection.Tenant,
-		Environment: observation.selection.Environment,
-		Reachable:   observation.state.reachable,
-		Observed:    observation.state.observed,
-		Outage:      observation.state.outage,
-		Busy:        observation.state.busy,
-		Detail:      observation.state.detail,
+		Tenant:             observation.selection.Tenant,
+		Environment:        observation.selection.Environment,
+		Reachable:          observation.state.reachable,
+		Observed:           observation.state.observed,
+		Outage:             observation.state.outage,
+		Busy:               observation.state.busy,
+		Detail:             observation.state.detail,
+		AIState:            string(observation.state.aiState),
+		AITool:             observation.state.aiTool,
+		AILastActivityUnix: unixOrZero(observation.state.aiLastActivity),
+		AIOutcome:          string(observation.state.aiOutcome),
+		AIExitCode:         observation.state.aiExitCode,
 	})
 }
