@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -37,17 +38,25 @@ func TestHostOpenCommandPerOS(t *testing.T) {
 }
 
 func TestHostRevealCommandPerOS(t *testing.T) {
-	executable, args, err := hostRevealCommand("darwin", "/tmp/x.xlsx")
-	if err != nil || executable != "open" || len(args) != 2 || args[0] != "-R" || args[1] != "/tmp/x.xlsx" {
-		t.Fatalf("darwin reveal: got (%q, %v, %v)", executable, args, err)
+	cases := []struct {
+		goos       string
+		target     string
+		executable string
+		args       []string
+	}{
+		{"darwin", "/tmp/x.xlsx", "open", []string{"-R", "/tmp/x.xlsx"}},
+		{"linux", "/tmp/dir/x.xlsx", "xdg-open", []string{"/tmp/dir"}},
+		{"windows", `C:\Users\me\x.xlsx`, "explorer", []string{"/select,", `C:\Users\me\x.xlsx`}},
 	}
-	executable, args, err = hostRevealCommand("linux", "/tmp/dir/x.xlsx")
-	if err != nil || executable != "xdg-open" || len(args) != 1 || args[0] != "/tmp/dir" {
-		t.Fatalf("linux reveal: got (%q, %v, %v)", executable, args, err)
-	}
-	executable, args, err = hostRevealCommand("windows", `C:\Users\me\x.xlsx`)
-	if err != nil || executable != "explorer" || len(args) != 2 || args[0] != "/select," {
-		t.Fatalf("windows reveal: got (%q, %v, %v)", executable, args, err)
+	for _, c := range cases {
+		executable, args, err := hostRevealCommand(c.goos, c.target)
+		requireWorkspaceSyncNoError(t, err, c.goos+" reveal command")
+		if executable != c.executable {
+			t.Fatalf("%s: expected executable %q, got %q", c.goos, c.executable, executable)
+		}
+		if !slices.Equal(args, c.args) {
+			t.Fatalf("%s: expected args %v, got %v", c.goos, c.args, args)
+		}
 	}
 }
 
