@@ -41,6 +41,18 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_seeded_tenant_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_seeded_host_env", func(t *testing.T) {
+		// A host env lists like any other environment, with its type named
+		// plainly — it is not shown as a pod that failed to start.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_seeded_host_env", normalize.Apply(result.Combined))
+	})
+
 	t.Run("platform_account_env_shows_enabled", func(t *testing.T) {
 		// An env flagged platformaccount:true surfaces `platform-account: enabled`
 		// in its detail block, so an operator can see the env holds cluster-admin.

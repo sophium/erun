@@ -219,6 +219,17 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		// A host env has no pod and no cluster to open a kubectl-exec shell
+		// into — its worktree is already the operator's own directory, so open
+		// refuses and points there instead of resolving a kubernetes context
+		// (of which it has none) or attempting a port-forward.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "open/refuses_host_environment", normalize.Apply(result.Combined))
+	})
+
 	t.Run("no_shell_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

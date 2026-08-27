@@ -882,6 +882,13 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 	if envProjectRoot == "" {
 		return fmt.Errorf("cannot create %s/%s as type %s: %s", s.tenant, s.envName, EnvironmentTypeHost, hostRepoPathRequirement(EnvironmentTypeHost))
 	}
+	// Skipping the cluster/cloud/registry resolution below is what "no cluster
+	// contact" means for host, but creating a new environment still asks for
+	// the same confirmation every other type does — that step is local and
+	// interactive, not cluster-touching.
+	if err := s.runner.confirmEnvironment(s.params, s.tenant, s.envName); err != nil {
+		return err
+	}
 	s.runner.Context.Trace("Adding new environment")
 	s.envConfig = EnvConfig{
 		Name:          s.envName,

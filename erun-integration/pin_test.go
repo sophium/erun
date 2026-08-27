@@ -83,6 +83,15 @@ func TestPin(t *testing.T) {
 		golden.Equal(t, "pin/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		// A host env has no pod and no runtime version at all, so pin must
+		// refuse it by name instead of resolving a plan with nothing to pin.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "pin/refuses_host_environment", normalize.Apply(result.Combined))
+	})
+
 	// A dry run resolves the whole plan — every site, old and new — and leaves
 	// the tree exactly as it found it. A re-pin edits files across a repo, so
 	// being able to see it first is the difference between a safe motion and a

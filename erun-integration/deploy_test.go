@@ -54,6 +54,15 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		// A host env has no pod and no cluster at all, so deploy must refuse it
+		// by name instead of resolving a helm plan that cannot run anywhere.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/refuses_host_environment", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_stopped_env_renders_replicas_zero", func(t *testing.T) {
 		// deploy reconciles the operator's stop rather than overriding it: an env
 		// carrying `stopped: true` threads --set stopped=true so the chart renders

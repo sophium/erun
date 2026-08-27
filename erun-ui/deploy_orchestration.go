@@ -24,7 +24,7 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 	dir := resolveTerminalStartDir(result.RepoPath)
 	onLine := newActivityTraceLineHandler(a, selection, sessionKindLocal)
 
-	if result.EnvConfig.BuildsHere() && !result.RemoteRepo() {
+	if result.EnvConfig.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
 		return a.runBuildPushDeployOrchestration(ctx, cli, dir, onLine, selection, force)
 	}
 	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
@@ -96,13 +96,17 @@ func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 }
 
 // deployNeedsBuildOrchestration encodes the desktop's per-env-type deploy policy
-// (root AGENTS.md § "Command primitives vs orchestration"): a builds-here env
-// with source on this machine rebuilds from scratch, while a runtime env or a
-// pinned published version installs by reference. A forced deploy is the
-// rebuild-&-redeploy recovery, so it always rebuilds; remote-agent envs build in
-// their own pod, not through this local orchestration.
+// (root AGENTS.md § "Command primitives vs orchestration"): a local-agent env
+// rebuilds from scratch, while a runtime env or a pinned published version
+// installs by reference. A forced deploy is the rebuild-&-redeploy recovery, so
+// it always rebuilds; remote-agent envs build in their own pod, not through
+// this local orchestration; a host env has no pod to deploy to at all, so it
+// never needs build orchestration either — deploy refuses it outright (see
+// EnvConfig.ResolvedType/HasPod in erun-common). Checked against ResolvedType
+// rather than the broader "BuildsHere() && !RemoteRepo()" combination, which a
+// host env also satisfies.
 func deployNeedsBuildOrchestration(result eruncommon.OpenResult, version string, force bool) bool {
-	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
+	if result.EnvConfig.ResolvedType() != eruncommon.EnvironmentTypeLocalAgent {
 		return false
 	}
 	return force || strings.TrimSpace(version) == ""

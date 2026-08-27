@@ -1,0 +1,6 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: spec resolution failed: deploy team/dev: dev is a host environment — it has no pod and no cluster to deploy against
+==> Deploy failed team/dev: deploy team/dev: dev is a host environment — it has no pod and no cluster to deploy against
+deploy team/dev: dev is a host environment — it has no pod and no cluster to deploy against
