@@ -13,6 +13,7 @@ import { refreshIdleStatus } from './idleThunks';
 import { reconcileSidebarForViewport } from './layoutThunks';
 import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
 import { showTerminalError } from './notificationThunks';
+import { ReviewDiffKeyboardNav } from './reviewDiffKeyboardNav';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
 import { loadSavedTerminalScreenReaderMode } from './storage';
@@ -79,6 +80,11 @@ export class TerminalController {
   private readonly wailsEvents = new TerminalWailsEvents();
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
+  private readonly reviewDiffKeyboardNav = new ReviewDiffKeyboardNav({
+    getDiffList: () => this._diffList,
+    getTreeContainer: () => this.treeContainer,
+  });
+  private reviewDiffKeydownDisposable: (() => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
   // further output, restore the cursor so an unmatched hide leaked by
   // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
@@ -199,6 +205,7 @@ export class TerminalController {
     this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
     this.installClipboardHandlers(elements.terminalRoot);
+    this.reviewDiffKeydownDisposable = this.reviewDiffKeyboardNav.install(elements.reviewMain);
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
@@ -266,6 +273,8 @@ export class TerminalController {
     this.reattachRepaint.clear();
     this.stopReviewDiffRefresh();
     this.removeClipboardHandlers();
+    this.reviewDiffKeydownDisposable?.();
+    this.reviewDiffKeydownDisposable = null;
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;

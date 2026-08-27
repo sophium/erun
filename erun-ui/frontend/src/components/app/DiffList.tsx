@@ -14,6 +14,7 @@ import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
 import { StartReviewFromDiffAction } from './DiffList.StartReviewAction';
+import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 export function DiffList(): React.ReactElement {
@@ -66,12 +67,17 @@ function DiffEnvSection({
   const targetBranchHint = slot.diff?.reviewBase?.branch?.trim() ?? '';
   const header = (
     <div
+      // data-env-key lets keyboard navigation (TerminalController's
+      // startReviewForFocusedDiffEnv) find this section's own "Start a
+      // review" button without duplicating the dialog-opening logic here.
+      data-env-key={target.envKey}
       className={cn(
         'sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background px-3 py-1',
         showHeader ? 'justify-between' : 'justify-end',
       )}
     >
       {showHeader && <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />}
+      <ReviewKeyboardShortcutsHint />
       <StartReviewFromDiffAction
         tenant={target.tenant}
         environment={target.environment}
@@ -125,6 +131,7 @@ function DiffEnvSection({
           <DiffFileView
             key={file.path}
             file={file}
+            envKey={target.envKey}
             selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
             commitHash={commitHash}
             tenant={target.tenant}
@@ -330,11 +337,13 @@ function CopyErrorButton({ text }: { text: string }): React.ReactElement {
 
 function DiffFileView({
   file,
+  envKey,
   selected,
   commitHash,
   tenant,
 }: {
   file: DiffFile;
+  envKey: string;
   selected: boolean;
   commitHash: string;
   tenant: string;
@@ -343,6 +352,10 @@ function DiffFileView({
     <section
       className="diff-file scroll-mt-4"
       data-path={file.path}
+      // Lets keyboard navigation resolve which environment section a
+      // focused hunk belongs to (TerminalController.startReviewForFocusedDiffEnv)
+      // without threading envKey through every hunk element individually.
+      data-env-key={envKey}
       data-selected={selected || undefined}
     >
       <header className="flex items-center justify-between gap-4 px-1.5 pb-2.5 text-[13px] font-semibold text-foreground">
