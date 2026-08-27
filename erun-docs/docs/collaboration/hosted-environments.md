@@ -17,6 +17,8 @@ erun cloud login --alias erun+api.<tenant>.services.<your-domain>@erun
 
 `login` opens a device-code sign-in (or a browser tab if your issuer has no device flow) and confirms you're in by printing your tenant.
 
+In the [desktop app](/desktop/overview), the same alias can be created without a terminal: the tenant dashboard's **Connect** action, or **Settings → Cloud aliases → Add erun platform**, both ask for just the API URL and sign in the same way.
+
 ## Create and deploy an environment
 
 ```bash
