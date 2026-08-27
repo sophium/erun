@@ -14,6 +14,7 @@ import type {
   UIRuntimeActivity,
   UIRuntimeReclaimInput,
   UIRuntimeReclaimResult,
+  UIRuntimeSizingRecommendation,
   UIRuntimeUsage,
 } from '@/uiRuntimeTypes';
 
@@ -28,13 +29,16 @@ import {
   LoadEnvironmentConfig,
   LoadRuntimeActivity,
   LoadRuntimeResourceStatus,
+  LoadRuntimeSizing,
   LoadRuntimeUsage,
   LoadVersionSuggestions,
   ReclaimRuntimeResources,
+  ResizeRuntimeToRecommendation,
   SaveEnvironmentConfig,
   StopEnvironment,
   UnexposeEnvironment,
 } from '../../../wailsjs/go/main/App';
+import type { EnvironmentApiBuilder } from './wailsApi';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
 
@@ -64,8 +68,78 @@ interface ExposeServiceArgs {
   input: UIExposeServiceInput;
 }
 
+// Split out of the main endpoints map to keep it within its line budget: the
+// node-capacity reading, this environment's own usage/sizing/activity
+// readings, and the reclaim/resize actions that act on them all belong
+// together as "what the Runtime tab shows and does".
+function runtimeTabEndpoints(builder: EnvironmentApiBuilder) {
+  return {
+    getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
+      queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>((args) =>
+        LoadRuntimeResourceStatus(args),
+      ),
+      providesTags: ['RuntimeResourceStatus'],
+    }),
+    getClusterRegistry: builder.query<UIClusterRegistryStatus, RuntimeResourceArgs>({
+      queryFn: wailsQueryFn<RuntimeResourceArgs, UIClusterRegistryStatus>((args) =>
+        LoadClusterRegistry(args),
+      ),
+      providesTags: ['RuntimeResourceStatus'],
+    }),
+    // What the runtime pod is running right now: sessions and the processes
+    // holding memory. Read-only — nothing here reclaims anything.
+    getRuntimeActivity: builder.query<UIRuntimeActivity, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeActivity>((selection) =>
+        LoadRuntimeActivity(selection),
+      ),
+      providesTags: ['RuntimeActivity'],
+    }),
+    // A reclaim changes both what the pod holds and what the node has free, so
+    // it invalidates the activity reading and the capacity figures together —
+    // the operator must be able to see the effect of what they just did.
+    reclaimRuntimeResources: builder.mutation<UIRuntimeReclaimResult, UIRuntimeReclaimInput>({
+      queryFn: wailsQueryFn<UIRuntimeReclaimInput, UIRuntimeReclaimResult>((input) =>
+        ReclaimRuntimeResources(input),
+      ),
+      invalidatesTags: ['RuntimeActivity', 'RuntimeResourceStatus'],
+    }),
+    // This environment's own CPU, memory and disk usage against its cgroup
+    // limits — the reading that turns the sliders above from a guess into a
+    // decision.
+    getRuntimeUsage: builder.query<UIRuntimeUsage, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeUsage>((selection) =>
+        LoadRuntimeUsage(selection),
+      ),
+      providesTags: ['RuntimeUsage'],
+    }),
+    // The environment's own opinion of its size — read inside the pod (see
+    // LoadRuntimeSizing's comment for why this cannot be a host-side read the
+    // way getRuntimeUsage is).
+    getRuntimeSizing: builder.query<UIRuntimeSizingRecommendation, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeSizingRecommendation>((selection) =>
+        LoadRuntimeSizing(selection),
+      ),
+      providesTags: ['RuntimeSizing'],
+    }),
+    // Applies the standing recommendation for real. Rolls the pod, so it
+    // invalidates the same tags a redeploy would; the sizing reading itself is
+    // also re-fetched since a successful resize changes what it reports.
+    resizeRuntimeToRecommendation: builder.mutation<
+      UIRuntimeSizingRecommendation,
+      { selection: UISelection; overrideLease: boolean }
+    >({
+      queryFn: wailsQueryFn<
+        { selection: UISelection; overrideLease: boolean },
+        UIRuntimeSizingRecommendation
+      >(({ selection, overrideLease }) => ResizeRuntimeToRecommendation(selection, overrideLease)),
+      invalidatesTags: ['RuntimeSizing', 'RuntimeUsage', 'RuntimeResourceStatus', 'AppState'],
+    }),
+  };
+}
+
 export const environmentApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
+    ...runtimeTabEndpoints(builder),
     getEnvironmentConfig: builder.query<UIEnvironmentConfig, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentConfig>((selection) =>
         LoadEnvironmentConfig(selection),
@@ -103,18 +177,6 @@ export const environmentApi = wailsApi.injectEndpoints({
       ),
       providesTags: ['VersionSuggestions'],
     }),
-    getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
-      queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>((args) =>
-        LoadRuntimeResourceStatus(args),
-      ),
-      providesTags: ['RuntimeResourceStatus'],
-    }),
-    getClusterRegistry: builder.query<UIClusterRegistryStatus, RuntimeResourceArgs>({
-      queryFn: wailsQueryFn<RuntimeResourceArgs, UIClusterRegistryStatus>((args) =>
-        LoadClusterRegistry(args),
-      ),
-      providesTags: ['RuntimeResourceStatus'],
-    }),
     // Stopping frees the env's runtime and dind limits, so the node capacity
     // the Runtime tab offers every other env changes the moment it lands —
     // invalidate the resource status rather than leaving stale maxima on screen.
@@ -123,32 +185,6 @@ export const environmentApi = wailsApi.injectEndpoints({
         StopEnvironment(selection),
       ),
       invalidatesTags: ['RuntimeResourceStatus', 'RuntimeActivity', 'RuntimeUsage', 'AppState'],
-    }),
-    // What the runtime pod is running right now: sessions and the processes
-    // holding memory. Read-only — nothing here reclaims anything.
-    getRuntimeActivity: builder.query<UIRuntimeActivity, UISelection>({
-      queryFn: wailsQueryFn<UISelection, UIRuntimeActivity>((selection) =>
-        LoadRuntimeActivity(selection),
-      ),
-      providesTags: ['RuntimeActivity'],
-    }),
-    // A reclaim changes both what the pod holds and what the node has free, so
-    // it invalidates the activity reading and the capacity figures together —
-    // the operator must be able to see the effect of what they just did.
-    reclaimRuntimeResources: builder.mutation<UIRuntimeReclaimResult, UIRuntimeReclaimInput>({
-      queryFn: wailsQueryFn<UIRuntimeReclaimInput, UIRuntimeReclaimResult>((input) =>
-        ReclaimRuntimeResources(input),
-      ),
-      invalidatesTags: ['RuntimeActivity', 'RuntimeResourceStatus'],
-    }),
-    // This environment's own CPU, memory and disk usage against its cgroup
-    // limits — the reading that turns the sliders above from a guess into a
-    // decision.
-    getRuntimeUsage: builder.query<UIRuntimeUsage, UISelection>({
-      queryFn: wailsQueryFn<UISelection, UIRuntimeUsage>((selection) =>
-        LoadRuntimeUsage(selection),
-      ),
-      providesTags: ['RuntimeUsage'],
     }),
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
@@ -191,4 +227,6 @@ export const {
   useGetRuntimeActivityQuery,
   useReclaimRuntimeResourcesMutation,
   useGetRuntimeUsageQuery,
+  useGetRuntimeSizingQuery,
+  useResizeRuntimeToRecommendationMutation,
 } = environmentApi;

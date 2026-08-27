@@ -1,0 +1,133 @@
+import type { Page } from '@playwright/test';
+
+import { test, expect } from '../fixtures/erunApp.js';
+
+// Stubs LoadRuntimeSizing/ResizeRuntimeToRecommendation instead of falling
+// through to the harness's stub kubectl (which has no cluster and so cannot
+// exec `erun resize` into a pod). Mirrors manage-runtime-usage.spec.ts's
+// stubRuntimeUsage pattern. LoadRuntimeSizing is stateful (reads `current`)
+// so that a successful resize's invalidation-triggered refetch reflects the
+// new state, exactly as the real in-pod command would on a second read.
+async function stubRuntimeSizing(
+  page: Page,
+  options: {
+    initial: unknown;
+    resize?: (overrideLease: boolean) => unknown;
+  },
+): Promise<void> {
+  let current = options.initial;
+  await page.route('**/__erun_invoke', async (route, request) => {
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string; args: unknown[] };
+    if (body.method === 'LoadRuntimeSizing') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: current }),
+      });
+    }
+    if (body.method === 'ResizeRuntimeToRecommendation' && options.resize) {
+      const overrideLease = body.args[1] as boolean;
+      const result = options.resize(overrideLease);
+      if (result instanceof Error) {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ error: result.message }),
+        });
+      }
+      current = result;
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: result }),
+      });
+    }
+    await route.continue();
+  });
+}
+
+test.describe('manage dialog sizing recommendation panel', () => {
+  test('applying the recommendation resizes without retyping the suggested values', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeSizing(app.page, {
+      initial: {
+        tenant,
+        environment,
+        available: true,
+        actions: [
+          { resource: 'cpu', from: '4', to: '6' },
+          { resource: 'memory', from: '8916Mi', to: '12288Mi' },
+        ],
+      },
+      resize: () => ({ tenant, environment, available: true, noOp: true }),
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeSizingPanel();
+    await expect(panel).toBeVisible();
+    await expect(app.manageDialog.runtimeSizingRefreshButton()).toBeVisible();
+
+    // The exact suggested values render, so an operator can see what "Resize
+    // to this" will apply before clicking it -- nothing here is retyped.
+    await expect(panel).toContainText('cpu: 4 → 6');
+    await expect(panel).toContainText('memory: 8916Mi → 12288Mi');
+
+    await app.manageDialog.runtimeSizingApplyButton().click();
+
+    // The invalidated query re-fetches, and the stub's post-resize response
+    // (no actions left) is what the panel must reflect -- proof the click
+    // actually drove the resize rather than only rendering a plan.
+    await expect(panel).not.toContainText('cpu: 4 → 6');
+    await expect(app.manageDialog.runtimeSizingOverrideButton()).toHaveCount(0);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  test('a resize held by another worker refuses and requires a deliberate override', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    const refusal =
+      'resize refused: this environment is held by orchestrator eng-42, user jane@example.com (lease "exec_job_attach") — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes';
+    await stubRuntimeSizing(app.page, {
+      initial: {
+        tenant,
+        environment,
+        available: true,
+        actions: [{ resource: 'cpu', from: '4', to: '6' }],
+      },
+      resize: (overrideLease) =>
+        overrideLease ? { tenant, environment, available: true, actions: [] } : new Error(refusal),
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeSizingPanel();
+    await app.manageDialog.runtimeSizingApplyButton().click();
+
+    // The refusal names the holder, and the override affordance only appears
+    // after that refusal -- it is never offered up front.
+    await expect(panel).toContainText('orchestrator eng-42');
+    await expect(panel).toContainText('user jane@example.com');
+    await expect(panel).toContainText('pass the override to resize anyway');
+    const overrideButton = app.manageDialog.runtimeSizingOverrideButton();
+    await expect(overrideButton).toBeVisible();
+
+    await overrideButton.click();
+
+    // The explicit second click succeeds (the stub's overrideLease branch),
+    // and the refusal clears.
+    await expect(panel).not.toContainText('resize refused');
+    await expect(overrideButton).toHaveCount(0);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+});

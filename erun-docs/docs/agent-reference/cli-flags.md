@@ -718,6 +718,60 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 
 ---
 
+## `erun resize` {#erun-resize}
+
+Changes the runtime pod's CPU/memory limits and rolls it out through the same deploy composition `erun deploy` uses (`ResolveCurrentDeploySpecs`/`RunDeploySpecs`), so it reuses the existing rollout mechanism rather than inventing a second one. Same operation as the MCP `resize` tool (see [MCP overview § `resize`](/mcp/overview#resize)).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit. Merged onto the current value — naming only `--cpu` leaves memory unchanged. |
+| `--memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit. Merged onto the current value the same way. |
+| `--apply-recommendation` | bool | `false` | Size from `RecommendRuntimeSizing`'s per-resource verdicts (see [`erun list` § the sizing recommendation](/cli/list#the-sizing-recommendation)) instead of `--cpu`/`--memory`. Mutually exclusive with them. |
+| `--override-lease` | bool | `false` | Proceed even though `LoadEnvironmentActivityLeases` reports a held lease. |
+| `--orchestrator <id>` | string | `""` | Recorded as `EnvironmentActivityLeaseHolder.Orchestrator` on the resize's own exclusive lease. |
+| `--dry-run` | bool | `false` | Resolve and trace the plan; performs no write. |
+
+### Resolution algorithm
+
+1. Resolve tenant/environment/`EnvConfig` (`ResolveOpen`, the same resolver every other typed command uses).
+2. Resolve the target `RuntimePodResources`:
+   - `--apply-recommendation`: load the standing recommendation the same way `erun list` does (`LoadRuntimeUsageHistory` + `RecommendRuntimeSizing`, scoped to **this process's own** cache directory — see [Idle policy § activity leases](/agent-reference/idle-policy#activity-leases) for why that is in-pod-only for a remote/runtime environment). For each verdict whose `action` is `raise` or `lower`, adopt its `suggested` value; a verdict of `hold`/`insufficient-evidence` leaves that resource unchanged. No recommendation available → error.
+   - Explicit `--cpu`/`--memory`: merge onto the current `EnvConfig.runtimepod`, matching `erun init`'s own merge semantics for the same field.
+3. Normalize and validate the resolved pair (`ValidateRuntimePodResources`), then validate it against `EnvConfig.namespacequota` if one is set: a `ResourceQuota` counts every container in the pod, so the target CPU/memory plus the `erun-dind` sidecar's own fixed limit (`DefaultRuntimeDindCPU`/`DefaultRuntimeDindMemory`) must not exceed the quota. A violation errors naming the resource, the sidecar's share, and how much is actually available to the runtime container.
+4. If the resolved target equals the current recorded value, stop: report a no-op, no lease check, no deploy.
+5. Load every currently held activity lease for the environment (`LoadEnvironmentActivityLeases` — plain and exclusive alike, the same predicate the desktop's own AI-session spawn uses to decide occupancy). Any result and `--override-lease` unset → refuse, naming every holder (`EnvironmentActivityLeaseHolder.String()` plus the lease's `name`). An override is traced explicitly when used.
+6. `--dry-run` stops here, after tracing the per-resource `current -> target` lines and the occupancy decision.
+7. Take an exclusive lease (scope `worktree`, name `resize`) for the duration of the write — this is what a *second, concurrent* resize call collides with, distinct from step 5's occupancy check against other workers. Persist `EnvConfig.runtimepod` to the resolved target, then run the same deploy composition `erun deploy` uses with no explicit version override (redeploys the environment's own recorded `runtimeversion`), so the runtime chart's `--set-string runtime.resources.limits.cpu/memory` rerenders with the new values and the `Recreate`-strategy Deployment rolls exactly once. Release the lease when the deploy finishes (or fails).
+
+### What moves and what doesn't
+
+| Quantity | Affected by `resize`? |
+|---|---|
+| Runtime container's `resources.limits.cpu`/`.memory` (the throttle/OOM ceiling) | Yes — this is the whole point. |
+| The namespace `ResourceQuota`'s draw from this environment | Yes, indirectly: quota accounting is limits-based. |
+| Runtime container's `resources.requests` (what the scheduler reserves) | No — pinned to a small fixed default (`DefaultLimitRangeDefaultRequestCPU`/`Memory`) independent of `runtimepod`. |
+| `erun-dind` sidecar's own limits/requests | No — not addressable by this command. |
+| Any PVC (home, docker state, worktree) | No — PVC sizes are chart literals today, not values-driven. |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any read or write. |
+| Neither `--cpu`/`--memory` nor `--apply-recommendation`, or both. | Errors naming the conflict. |
+| `--apply-recommendation` with no retained history for this environment. | Errors, and names the explicit-values fallback. |
+| Resolved target would exceed `EnvConfig.namespacequota` once the `erun-dind` sidecar's limit is counted. | Errors naming the resource, the sidecar's share, and the remainder actually available. |
+| Another holder's lease is present (`LoadEnvironmentActivityLeases` non-empty) and `--override-lease` is unset. | Errors naming every holder (`orchestrator`, `user`, lease `name`). |
+| A second resize is already running (`TakeEnvironmentActivityLease` with `Exclusive: true` conflicts). | Errors naming that holder. |
+| The deploy step fails (chart resolution, helm rollout). | Errors as `erun deploy` would for the same failure; `EnvConfig.runtimepod` has already been persisted to the new value at this point, since deploy is what makes it live and a retry should redeploy the same target rather than resolve a stale one. |
+| Resolved target equals the current recorded value. | No-op: reports "already sized", takes no lease, and does not deploy. |
+
+---
+
 ## `erun outputs`
 
 `erun outputs` lists and downloads files an agent produced in an environment's runtime pod outputs directory (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`). Both subcommands resolve the pod from tenant/environment scope and read it over `kubectl exec`; the MCP `outputs_list`/`outputs_download` tools cover the same operations for in-pod callers (which read the filesystem directly).

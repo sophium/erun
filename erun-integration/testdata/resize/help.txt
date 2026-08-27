@@ -1,0 +1,44 @@
+Change the runtime container's own CPU/memory limits — the throttle/OOM ceiling
+and the namespace ResourceQuota draw those limits count against — without
+re-running `erun init` to change two numbers. Pass --cpu and/or --memory
+explicitly, or --apply-recommendation to size from the environment's own
+standing sizing recommendation instead of retyping a value the product already
+computed. A resize whose resolved size already matches the current one is a
+no-op that says so.
+
+A resize rolls the runtime pod (Recreate strategy), which kills any live agent
+session inside it, so it first checks the environment's activity leases and
+refuses, naming the holder, when the environment is not idle; pass
+--override-lease to roll it anyway.
+
+--apply-recommendation needs retained usage history, which is only readable
+from inside the environment's own runtime pod (this command run there, or its
+MCP resize tool) — a host-side laptop/desktop invocation has no trend to read
+and refuses rather than guessing. This does not resize the scheduler's request
+(a small fixed value, unaffected by this command), the erun-dind sidecar, or
+any PVC.
+
+Usage:
+  erun resize [flags]
+
+Examples:
+  erun resize --tenant team --environment dev --cpu 6 --memory 12Gi
+  erun resize --tenant team --environment dev --apply-recommendation
+  erun resize --tenant team --environment dev --apply-recommendation --dry-run
+  erun resize --tenant team --environment dev --cpu 6 --override-lease
+
+Flags:
+      --apply-recommendation   Size from the environment's own standing sizing recommendation instead of --cpu/--memory
+      --cpu string             Explicit CPU limit (Kubernetes quantity, e.g. 6); omit to leave CPU unchanged unless --apply-recommendation
+      --dry-run                Resolve and trace mutating actions without executing them.
+      --environment string     Target a specific environment; requires --tenant
+  -h, --help                   help for resize
+      --memory string          Explicit memory limit (Kubernetes quantity, e.g. 12Gi); omit to leave memory unchanged unless --apply-recommendation
+      --orchestrator string    The calling orchestrator's own id, recorded on the resize's lease and on the override if one was needed
+      --override-lease         Roll the runtime pod even though the environment is currently held by another worker
+      --tenant string          Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

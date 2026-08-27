@@ -52,9 +52,9 @@ sizing: memory lower to 18432Mi from 23552Mi (peak 12153Mi of 23552Mi (52%), no 
 sizing-evidence: 31h12m observed, 240 samples, 1 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
 ```
 
-The lines are advisory. ERun never resizes an environment for you: acting on a recommendation means
-changing `runtimepod` and running [`erun deploy`](/cli/deploy), which restarts the pod, and that is
-a decision for you to make and time.
+The lines are advisory: ERun never resizes an environment on its own. Acting on one is
+[`erun resize --apply-recommendation`](/cli/resize), which applies the computed value without
+retyping it and restarts the pod — a decision for you to make and time.
 
 ### Where the figures come from
 
