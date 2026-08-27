@@ -16,7 +16,7 @@ Signed in as an Operator on an **OPERATIONS** tenant, the console's **Users** vi
   - **When outbound mail is configured** (see below), enrolling emails the new person a sign-in link, the normal invite flow.
   - **When it is not**, there is no mail path for that link to travel, so the backend does not pretend to send one: it generates a temporary password instead and returns it once. This is deliberate — an invite that silently waited on an email that could never arrive would look successful and never resolve. The console shows this password in a dialog right after enrollment, copyable in one click, and says plainly it will not be shown again. Hand it to the new person before closing the dialog — closing it drops the password from the console's own state for good.
 - **List every identity** the platform's IdP knows about, with its current state.
-- **Deactivate** a user, which blocks their next sign-in immediately.
+- **Deactivate** a user, which blocks their next sign-in immediately. The console asks you to confirm before it takes effect, naming the person and the consequence.
 - **Reactivate** a deactivated user.
 
 The **Org settings** view lets you read and change:

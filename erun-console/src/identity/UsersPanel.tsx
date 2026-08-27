@@ -20,7 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from 'erun-kit';
-import { Users } from 'lucide-react';
+import { LoaderCircle, Users } from 'lucide-react';
 import * as React from 'react';
 
 import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
@@ -214,12 +214,68 @@ function EnrollForm({
   );
 }
 
+// DeactivateUserDialog gates the access-revoking half of the toggle behind an
+// explicit confirmation (erun-ui/AGENTS.md's design-language record, #1419):
+// deactivating blocks the user's next sign-in immediately, and the row it was
+// clicked from looks identical to every other row, so a misclick is easy and
+// its consequence is invisible until the person locked out reports it.
+// Reactivating restores access rather than revoking it, so it stays a single
+// click — only the deactivate half needs this gate.
+function DeactivateUserDialog({
+  user,
+  onCancel,
+  onConfirm,
+}: {
+  user: IdentityUser;
+  onCancel: () => void;
+  onConfirm: (externalId: string, active: boolean) => Promise<void>;
+}): React.ReactElement {
+  const [busy, setBusy] = React.useState(false);
+
+  const confirm = (): void => {
+    setBusy(true);
+    void onConfirm(user.id, false).then(onCancel);
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) {
+          onCancel();
+        }
+      }}
+    >
+      <DialogContent aria-labelledby="deactivate-user-heading">
+        <DialogHeader>
+          <DialogTitle id="deactivate-user-heading">Deactivate {user.username}?</DialogTitle>
+          <DialogDescription>
+            {user.username} will not be able to sign in again until reactivated. This takes effect
+            on their next sign-in.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" disabled={busy} onClick={confirm}>
+            {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+            Deactivate
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UserRow({
   user,
   onSetActive,
+  onRequestDeactivate,
 }: {
   user: IdentityUser;
-  onSetActive: (externalId: string, active: boolean) => void;
+  onSetActive: (externalId: string, active: boolean) => Promise<void>;
+  onRequestDeactivate: (user: IdentityUser) => void;
 }): React.ReactElement {
   const active = user.state === 'USER_STATE_ACTIVE';
   const canToggle = active || user.state === 'USER_STATE_INACTIVE';
@@ -235,7 +291,11 @@ function UserRow({
             variant="outline"
             size="sm"
             onClick={() => {
-              onSetActive(user.id, !active);
+              if (active) {
+                onRequestDeactivate(user);
+              } else {
+                void onSetActive(user.id, true);
+              }
             }}
           >
             {active ? 'Deactivate' : 'Reactivate'}
@@ -249,9 +309,11 @@ function UserRow({
 function UsersTable({
   users,
   onSetActive,
+  onRequestDeactivate,
 }: {
   users: IdentityUser[];
-  onSetActive: (externalId: string, active: boolean) => void;
+  onSetActive: (externalId: string, active: boolean) => Promise<void>;
+  onRequestDeactivate: (user: IdentityUser) => void;
 }): React.ReactElement {
   if (users.length === 0) {
     return <EmptyState icon={<Users />} heading="No users enrolled yet." />;
@@ -268,7 +330,12 @@ function UsersTable({
       </TableHeader>
       <TableBody>
         {users.map((user) => (
-          <UserRow key={user.id} user={user} onSetActive={onSetActive} />
+          <UserRow
+            key={user.id}
+            user={user}
+            onSetActive={onSetActive}
+            onRequestDeactivate={onRequestDeactivate}
+          />
         ))}
       </TableBody>
     </Table>
@@ -278,9 +345,11 @@ function UsersTable({
 function UsersBody({
   usersState,
   onSetActive,
+  onRequestDeactivate,
 }: {
   usersState: UsersState;
-  onSetActive: (externalId: string, active: boolean) => void;
+  onSetActive: (externalId: string, active: boolean) => Promise<void>;
+  onRequestDeactivate: (user: IdentityUser) => void;
 }): React.ReactElement {
   if (usersState.status === 'loading') {
     return (
@@ -296,7 +365,13 @@ function UsersBody({
       </p>
     );
   }
-  return <UsersTable users={usersState.users} onSetActive={onSetActive} />;
+  return (
+    <UsersTable
+      users={usersState.users}
+      onSetActive={onSetActive}
+      onRequestDeactivate={onRequestDeactivate}
+    />
+  );
 }
 
 // UsersPanel is the console's IdP-identity administration surface (issue
@@ -308,13 +383,20 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
     useUsersController(token);
   const temporaryPassword =
     enrollState.status === 'enrolled' ? enrollState.result.temporaryPassword : undefined;
+  const [pendingDeactivate, setPendingDeactivate] = React.useState<IdentityUser | undefined>(
+    undefined,
+  );
   return (
     <Card aria-labelledby="identity-users-heading">
       <CardHeader>
         <CardTitle id="identity-users-heading">Users</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-6">
-        <UsersBody usersState={usersState} onSetActive={setActive} />
+        <UsersBody
+          usersState={usersState}
+          onSetActive={setActive}
+          onRequestDeactivate={setPendingDeactivate}
+        />
         <EnrollForm enroll={enrollState} onEnroll={enroll} />
       </CardContent>
       {temporaryPassword !== undefined && enrollState.status === 'enrolled' && (
@@ -322,6 +404,15 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
           username={enrollState.result.idpUser.username}
           password={temporaryPassword}
           onDismiss={dismissTemporaryPassword}
+        />
+      )}
+      {pendingDeactivate !== undefined && (
+        <DeactivateUserDialog
+          user={pendingDeactivate}
+          onCancel={() => {
+            setPendingDeactivate(undefined);
+          }}
+          onConfirm={setActive}
         />
       )}
     </Card>
