@@ -479,10 +479,40 @@ func newReleaseRunner(options HandlerOptions) service.ReleaseRunner {
 // dispatcher nil: triggers are still recorded and are runnable once the queue is
 // configured.
 func newReleaseQueue(options HandlerOptions, coordinator provision.ReleaseCoordinator) routes.ReleaseDispatcher {
-	if options.DBOSContext == nil || options.KubeClient == nil || !options.Release.Configured() {
+	if reasons := missingReleaseQueueConfig(options); len(reasons) > 0 {
+		log.Printf("erun api release queue disabled: %s", strings.Join(reasons, "; "))
 		return nil
 	}
+	log.Print("erun api release queue wired: an accepted review's release will run as a Job")
 	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release, newRuntimeImageChecker(options))
+}
+
+// missingReleaseQueueConfig names every unmet precondition for the release
+// queue, so the startup log names exactly what is missing instead of an
+// operator having to read ReleaseConfig.Configured() to find out the queue is
+// off.
+func missingReleaseQueueConfig(options HandlerOptions) []string {
+	var reasons []string
+	if options.DBOSContext == nil {
+		reasons = append(reasons, "DBOS_SYSTEM_DATABASE_URL is not set")
+	}
+	if options.KubeClient == nil {
+		reasons = append(reasons, "no in-cluster Kubernetes client")
+	}
+	release := options.Release
+	if release.Registry == "" {
+		reasons = append(reasons, "Release.Registry is not set")
+	}
+	if release.RuntimeVersion == "" {
+		reasons = append(reasons, "Release.RuntimeVersion is not set")
+	}
+	if release.Namespace == "" {
+		reasons = append(reasons, "Release.Namespace is not set")
+	}
+	if release.ServiceAccount == "" {
+		reasons = append(reasons, "Release.ServiceAccount is not set")
+	}
+	return reasons
 }
 
 // newMergeRunner wires the merge-gate Job launcher. Without an in-cluster
@@ -501,10 +531,45 @@ func newMergeRunner(options HandlerOptions) service.MergeRunner {
 // leaves the dispatcher nil: a review still reaches MERGE, just with nothing to
 // gate it until an operator advances the queue again by hand.
 func newMergeQueue(options HandlerOptions, coordinator provision.MergeCoordinator, tenants provision.MergeTenantResolver) service.MergeQueueDispatcher {
-	if options.DBOSContext == nil || options.KubeClient == nil || !options.Merge.Configured() {
+	if reasons := missingMergeQueueConfig(options); len(reasons) > 0 {
+		log.Printf("erun api merge queue disabled: a review promoted to MERGE will record the promotion with nothing to gate it: %s", strings.Join(reasons, "; "))
 		return nil
 	}
+	log.Print("erun api merge queue wired: a review promoted to MERGE will be gated by a real erun build before it pushes")
 	return provision.NewMergeQueue(options.DBOSContext, coordinator, options.Merge, tenants, newRuntimeImageChecker(options))
+}
+
+// missingMergeQueueConfig names every unmet precondition for the merge queue,
+// so the startup log names exactly what is missing instead of an operator
+// having to read MergeConfig.Configured() to find out the gate is off.
+func missingMergeQueueConfig(options HandlerOptions) []string {
+	var reasons []string
+	if options.DBOSContext == nil {
+		reasons = append(reasons, "DBOS_SYSTEM_DATABASE_URL is not set")
+	}
+	if options.KubeClient == nil {
+		reasons = append(reasons, "no in-cluster Kubernetes client")
+	}
+	merge := options.Merge
+	if merge.Registry == "" {
+		reasons = append(reasons, "Merge.Registry is not set")
+	}
+	if merge.RuntimeVersion == "" {
+		reasons = append(reasons, "Merge.RuntimeVersion is not set")
+	}
+	if merge.Namespace == "" {
+		reasons = append(reasons, "Merge.Namespace is not set")
+	}
+	if merge.ServiceAccount == "" {
+		reasons = append(reasons, "Merge.ServiceAccount is not set")
+	}
+	if merge.WorkspaceClaim == "" {
+		reasons = append(reasons, "Merge.WorkspaceClaim is not set")
+	}
+	if merge.RepoPath == "" {
+		reasons = append(reasons, "Merge.RepoPath is not set")
+	}
+	return reasons
 }
 
 func registerHealthRoute(mux *http.ServeMux) {

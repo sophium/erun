@@ -96,6 +96,15 @@ func run(args []string) error {
 			RepoPath:       cfg.ReleaseRepoPath,
 			DryRun:         cfg.ReleaseDryRun,
 		},
+		Merge: provision.MergeConfig{
+			Registry:       cfg.EnvDeployRegistry,
+			RuntimeVersion: cfg.MergeRuntimeVersion,
+			Namespace:      cfg.MergeNamespace,
+			ServiceAccount: cfg.MergeServiceAccount,
+			HomeClaim:      cfg.MergeHomeClaim,
+			WorkspaceClaim: cfg.MergeWorkspaceClaim,
+			RepoPath:       cfg.MergeRepoPath,
+		},
 		Platform: routes.PlatformInfo{
 			Issuer:          cfg.PlatformIssuer,
 			APIURL:          cfg.PlatformAPIURL,
@@ -317,6 +326,18 @@ type apiConfig struct {
 	ReleaseWorkspaceClaim string
 	ReleaseRepoPath       string
 	ReleaseDryRun         bool
+	// Server-side merge-gate executor. Unlike the release executor, the merge
+	// Job fetches, commits, and pushes, so it needs a real writable checkout
+	// with push credentials -- MergeWorkspaceClaim and MergeRepoPath are
+	// required, not optional (provision.MergeConfig.Configured()).
+	// MergeRuntimeVersion tags the runtime image the gate build runs IN, not a
+	// version it mints -- the gate publishes nothing.
+	MergeNamespace      string
+	MergeServiceAccount string
+	MergeRuntimeVersion string
+	MergeHomeClaim      string
+	MergeWorkspaceClaim string
+	MergeRepoPath       string
 	// Platform is this instance's own self-describing config, served
 	// unauthenticated at GET /v1/platform so a client can discover it (issuer,
 	// API/console URLs, OIDC client ids, brand) before it has a token. Every
@@ -380,6 +401,13 @@ func configFromEnv() apiConfig {
 		ReleaseRepoPath:       strings.TrimSpace(os.Getenv("ERUN_RELEASE_REPO_PATH")),
 		ReleaseDryRun:         strings.TrimSpace(os.Getenv("ERUN_RELEASE_DRY_RUN")) == "1",
 
+		MergeNamespace:      strings.TrimSpace(os.Getenv("ERUN_MERGE_NAMESPACE")),
+		MergeServiceAccount: strings.TrimSpace(os.Getenv("ERUN_MERGE_SERVICE_ACCOUNT")),
+		MergeRuntimeVersion: strings.TrimSpace(os.Getenv("ERUN_MERGE_RUNTIME_VERSION")),
+		MergeHomeClaim:      strings.TrimSpace(os.Getenv("ERUN_MERGE_HOME_CLAIM")),
+		MergeWorkspaceClaim: strings.TrimSpace(os.Getenv("ERUN_MERGE_WORKSPACE_CLAIM")),
+		MergeRepoPath:       strings.TrimSpace(os.Getenv("ERUN_MERGE_REPO_PATH")),
+
 		PlatformIssuer:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_ISSUER")),
 		PlatformAPIURL:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_API_URL")),
 		PlatformConsoleURL:      strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_URL")),
@@ -395,13 +423,15 @@ func configFromEnv() apiConfig {
 	}
 }
 
-// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy
-// executor uses. A blank deployer ServiceAccount disables the executor (env
-// creation only registers the row); a set SA outside a cluster is a hard
+// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy,
+// release, and merge executors share. A blank deployer/release/merge
+// ServiceAccount disables the corresponding executor (env creation only
+// registers the row, a release trigger only records, a review promoted to
+// MERGE has nothing to gate it); a set SA outside a cluster is a hard
 // misconfiguration (the SA is only ever set by the in-cluster deploy), so we
 // fail fast rather than silently disabling.
 func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
-	if cfg.EnvDeployerServiceAccount == "" && cfg.ReleaseServiceAccount == "" {
+	if cfg.EnvDeployerServiceAccount == "" && cfg.ReleaseServiceAccount == "" && cfg.MergeServiceAccount == "" {
 		return nil, nil
 	}
 	restConfig, err := rest.InClusterConfig()
