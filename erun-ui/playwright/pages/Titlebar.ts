@@ -1,8 +1,15 @@
 import type { Locator, Page } from '@playwright/test';
 
-// One banner rendered as status or alert depending on the terminalMessage kind.
+// One banner rendered as status or alert depending on the terminalMessage
+// kind. Scoped to the titlebar's own <header> (Titlebar.tsx) because
+// TerminalBusyOverlay renders an unrelated role="status" aria-live="polite"
+// node over the terminal pane with the same signature -- an unscoped
+// selector's .first() can resolve to that overlay's "Opening <tenant> /
+// <environment>..." text instead of the titlebar's own banner whenever a
+// session is mid-open, which is exactly the default env this harness
+// auto-opens on every boot.
 const TITLEBAR_BANNER_SELECTOR =
-  '[role="status"][aria-live="polite"], [role="alert"][aria-live="assertive"]';
+  'header [role="status"][aria-live="polite"], header [role="alert"][aria-live="assertive"]';
 
 export class Titlebar {
   constructor(public readonly page: Page) {}
