@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -125,5 +128,42 @@ func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 	}
 	if len(usage.Warnings) != 1 {
 		t.Fatalf("warnings must be carried through verbatim, got %+v", usage.Warnings)
+	}
+}
+
+// TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled is the reported defect,
+// reproduced through the real production wiring (loadRuntimeUsageViaKubectl is
+// not mocked): with the app's own context already past its deadline, the
+// probe's internal runtimeUsageTimeout bound reads as already exceeded before
+// the kubectl exec even runs, so no kubectl binary is required for this test
+// to reach the same classification a real timeout would. The memory panel's
+// message must say so instead of "signal: killed" -- the exact phrase this
+// panel would otherwise misread as an OOM kill.
+func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"petios": {Name: "petios", DefaultEnvironment: "local"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"petios/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "test-context"},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	app.ctx = ctx
+
+	usage, err := app.LoadRuntimeUsage(uiSelection{Tenant: "petios", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeUsage must not surface a probe failure as an error: %v", err)
+	}
+	if usage.Available {
+		t.Fatalf("a timed-out probe must not be reported as an available reading: %+v", usage)
+	}
+	if !strings.Contains(usage.Message, "timed out") {
+		t.Fatalf("expected the memory panel to name its own timeout, got %q", usage.Message)
+	}
+	if strings.Contains(usage.Message, "signal:") {
+		t.Fatalf("the memory panel must never say anything that reads as an OOM kill on a timeout, got %q", usage.Message)
 	}
 }

@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"os/exec"
 	"reflect"
+	goruntime "runtime"
+	"strings"
 	"testing"
+	"time"
 )
 
 // TestRuntimeSizingFromOutputParsesActions covers the happy path: the resize
@@ -86,3 +92,63 @@ func TestFriendlyRuntimeResizeErrorStripsWrapper(t *testing.T) {
 type wrappedError struct{ msg string }
 
 func (e *wrappedError) Error() string { return e.msg }
+
+// TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled is the reported defect
+// for the sizing panel: with the app's own context already past its deadline,
+// LoadRuntimeSizing's derived ctx reads as already timed out, so the panel
+// must name that timeout rather than the "signal: killed" text the mocked
+// exec below deliberately returns.
+func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+			return "", errors.New("signal: killed")
+		},
+	})
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	app.ctx = ctx
+
+	recommendation, err := app.LoadRuntimeSizing(uiSelection{Tenant: "myapp", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
+	}
+	if recommendation.Available {
+		t.Fatalf("a timed-out probe must not be reported as an available reading: %+v", recommendation)
+	}
+	if !strings.Contains(recommendation.Message, "timed out") {
+		t.Fatalf("expected the panel to name its own timeout, got %q", recommendation.Message)
+	}
+	if strings.Contains(recommendation.Message, "signal:") {
+		t.Fatalf("the panel must never repeat the raw kill signal on a timeout, got %q", recommendation.Message)
+	}
+}
+
+// TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout covers a kill
+// this probe did not cause, which must read differently from the
+// self-inflicted timeout above and must never name the bare signal either.
+func TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("signal-terminated exec is a POSIX concept")
+	}
+	app := NewApp(erunUIDeps{
+		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
+			return "", cmd.Run()
+		},
+	})
+	app.ctx = context.Background()
+
+	recommendation, err := app.LoadRuntimeSizing(uiSelection{Tenant: "myapp", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
+	}
+	if strings.Contains(recommendation.Message, "timed out") {
+		t.Fatalf("a kill this probe did not cause must not be read as its own timeout, got %q", recommendation.Message)
+	}
+	if strings.Contains(recommendation.Message, "signal:") {
+		t.Fatalf("the panel must never repeat the raw kill signal, got %q", recommendation.Message)
+	}
+	if !strings.Contains(recommendation.Message, "killed") {
+		t.Fatalf("expected the panel to name an external kill, got %q", recommendation.Message)
+	}
+}

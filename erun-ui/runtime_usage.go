@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -66,7 +67,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 
 	reading, err := eruncommon.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), req, eruncommon.RuntimeUsageParams{})
 	if err != nil {
-		return uiRuntimeUsage{}, err
+		return uiRuntimeUsage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
 	}
 	return uiRuntimeUsageFromReading(reading), nil
 }

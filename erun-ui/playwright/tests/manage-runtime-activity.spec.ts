@@ -27,9 +27,19 @@ test.describe('manage dialog runtime activity panel', () => {
     // cannot read a pod. Visibility of system status (Nielsen #1) requires the
     // panel to say so rather than render empty, which would read as "nothing is
     // running" — the exact false-negative this work exists to remove.
+    //
+    // The stub kubectl fails fast, so this exercises the classifier's "keep the
+    // raw cause" branch (erun-ui/runtime_probe_error.go), not the
+    // deadline-vs-external-kill classification -- this offline harness cannot
+    // make a probe actually time out or get signal-killed. Those branches are
+    // covered by the Go suite instead (erun-ui/runtime_probe_error_test.go and
+    // TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled /
+    // TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout in
+    // erun-ui/runtime_activity_test.go).
     await expect(panel).toContainText(
       /Cannot read what the runtime is running|Open the environment to see what it is running/,
     );
+    await expect(panel).not.toContainText('signal:');
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

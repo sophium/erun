@@ -130,4 +130,34 @@ test.describe('manage dialog sizing recommendation panel', () => {
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });
+
+  // Unlike the two tests above, this one does not stub LoadRuntimeSizing, so
+  // the seeded (inert, never-deployed) env's real probe runs against the
+  // harness's stub kubectl and fails for real.
+  //
+  // The stub kubectl fails fast, so this exercises the classifier's "keep the
+  // raw cause" branch, not the deadline-vs-external-kill classification --
+  // this offline harness cannot make a probe actually time out or get
+  // signal-killed. Those branches are covered by the Go suite instead
+  // (erun-ui/runtime_probe_error_test.go and
+  // TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled /
+  // TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout in
+  // erun-ui/runtime_sizing_test.go).
+  test('an unreachable pod fails soft with a stated reason, never a blank panel', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeSizingPanel();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Cannot read this environment's sizing recommendation");
+    await expect(panel).not.toContainText('signal:');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
 });
