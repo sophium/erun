@@ -21,6 +21,15 @@
   (the value GET /v1/platform hands clients), falling back to this chart's own
   externalDomain — never a literal. console.apexRedirectEnabled overrides the
   default for a platform whose apex is used for something else.
+
+  An unset platform.baseDomain is not a misconfiguration by itself — most
+  deploys (local, dev, any tenant with no public apex) never set it and never
+  want the redirect — so this can't fail loudly the way the required host
+  checks below do without breaking every one of them. Instead, the resolved
+  on/off decision and its reason always render as a ConfigMap (below), so
+  whoever inspects the release (kubectl, helm get manifest, or a --dry-run)
+  can see whether the redirect is on, and why it's off when it isn't, rather
+  than inferring it from an absent resource.
 */}}
 {{- $tenant := default "erun" .Values.tenant -}}
 {{- $platform := default dict .Values.platform -}}
@@ -46,7 +55,8 @@
        keeping the same hasKey idiom as tlsSecretName/adminPasswordChangeRequired
        above avoids relying on default()'s "" handling here too). */ -}}
 {{- $apexRedirectEnabled := ne $baseDomain "" -}}
-{{- if hasKey $console "apexRedirectEnabled" -}}
+{{- $apexRedirectExplicit := hasKey $console "apexRedirectEnabled" -}}
+{{- if $apexRedirectExplicit -}}
 {{- $apexRedirectEnabled = $console.apexRedirectEnabled -}}
 {{- end -}}
 {{- $apexHost := default $baseDomain $console.apexHost -}}
@@ -237,3 +247,24 @@ spec:
             requests:
               cpu: "50m"
               memory: 64Mi
+---
+# Always renders, whether the redirect is on or off, so the disabled state is
+# never a silent absence of resources — see the header comment above.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-console-apex-status
+  labels:
+    app: {{ $tenant }}-console
+data:
+  enabled: {{ $apexRedirectEnabled | quote }}
+  {{- if $apexRedirectEnabled }}
+  apexHost: {{ $apexHost | quote }}
+  wwwHost: {{ $wwwHost | quote }}
+  redirectTarget: {{ $redirectTarget | quote }}
+  reason: {{ printf "enabled: %s and %s redirect to %s" $apexHost $wwwHost $redirectTarget | quote }}
+  {{- else if $apexRedirectExplicit }}
+  reason: "disabled: console.apexRedirectEnabled is set to false"
+  {{- else }}
+  reason: "disabled: no platform.baseDomain and no console.apexHost is configured — set one of those to enable the redirect, or set console.apexRedirectEnabled=false to record that this platform's apex is intentionally not redirected"
+  {{- end }}

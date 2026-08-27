@@ -58,6 +58,17 @@ grep -q 'console-apex-redirect' "${rendered}" &&
 [ "$(grep -c '^kind: Ingress$' "${rendered}")" = "1" ] ||
     fail "exactly one Ingress (the canonical console host) should render by default"
 
+# The disabled state must still be legible: an unset baseDomain switches the
+# redirect off exactly like the case above, but it must not do so silently —
+# a status ConfigMap always renders and says the redirect is off and why.
+status="${work_root}/status-unset.yaml"
+document "${rendered}" ConfigMap team-console-apex-status >"${status}"
+[ -s "${status}" ] || fail "a status ConfigMap must render even when the redirect is off by default"
+grep -q '^  enabled: "false"$' "${status}" ||
+    fail "the status ConfigMap must record enabled: \"false\" when no base domain or apex host is configured"
+grep -q 'no platform.baseDomain and no console.apexHost is configured' "${status}" ||
+    fail "the status ConfigMap must name the reason the redirect is off — an unset baseDomain must never disable it in silence"
+
 # --- 2. platform.baseDomain set: the redirect is on by default ---
 rendered=$(render --set-string platform.baseDomain=erunpaas.com --set-string console.certManagerIssuer=erun-cloudflare)
 
@@ -95,6 +106,16 @@ grep -q '^    - host: console.erunpaas.com$' "${canonical_ingress}" ||
 grep -q 'router.middlewares' "${canonical_ingress}" &&
     fail "the redirect Middleware must never attach to the canonical Ingress; its rule is the only one allowed to reach the Service"
 
+status="${work_root}/status-enabled.yaml"
+document "${rendered}" ConfigMap team-console-apex-status >"${status}"
+[ -s "${status}" ] || fail "a status ConfigMap must render when the redirect is enabled"
+grep -q '^  enabled: "true"$' "${status}" ||
+    fail "the status ConfigMap must record enabled: \"true\" once platform.baseDomain is known"
+grep -q '^  apexHost: "erunpaas.com"$' "${status}" ||
+    fail "the status ConfigMap must record the resolved apex host"
+grep -q '^  wwwHost: "www.erunpaas.com"$' "${status}" ||
+    fail "the status ConfigMap must record the resolved www host"
+
 # --- 3. The shared certificate covers all three hosts, so the redirect
 #        Ingress's TLS terminates before Traefik would otherwise present the
 #        controller's self-signed default ---
@@ -122,6 +143,17 @@ grep -q 'console-apex-redirect' "${rendered}" &&
     fail "console.apexRedirectEnabled=false must render no apex-redirect Ingress"
 document "${rendered}" Ingress team-console | grep -q '^    - host: console.erunpaas.com$' ||
     fail "the canonical console Ingress must still work when the apex redirect is disabled"
+
+# An explicit opt-out gets its own reason, distinct from an unset baseDomain's
+# — the same "false" outcome must not collapse two different causes into one
+# sentence (root AGENTS.md's "Distinguish causes before writing copy").
+status="${work_root}/status-explicit-off.yaml"
+document "${rendered}" ConfigMap team-console-apex-status >"${status}"
+[ -s "${status}" ] || fail "a status ConfigMap must render when the redirect is explicitly disabled"
+grep -q '^  enabled: "false"$' "${status}" ||
+    fail "the status ConfigMap must record enabled: \"false\" when console.apexRedirectEnabled=false"
+grep -q 'console.apexRedirectEnabled is set to false' "${status}" ||
+    fail "an explicit opt-out must be recorded with its own reason, not the unset-baseDomain reason"
 
 # --- 6. console.apexHost / console.wwwHost override the derived defaults,
 #        e.g. for an apex that differs from platform.baseDomain ---
