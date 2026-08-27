@@ -291,6 +291,33 @@ func executeTerraformSteps(ctx Context, result TerraformResult, steps []terrafor
 	return nil
 }
 
+// resolveTerraformTargetEnvironment resolves the tenant and environment the run
+// targets and confirms the environment can host one at all. Confirming the env
+// is configured before its root is derived turns a typo into a named error
+// rather than an opaque "no such directory".
+func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (string, string, error) {
+	tenant, environment, err := resolveTerraformScope(store, params)
+	if err != nil {
+		return "", "", err
+	}
+	if err := ValidateTenantName(tenant); err != nil {
+		return "", "", err
+	}
+	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return "", "", err
+	}
+	// terraform apply/plan/destroy read back cluster state (e.g. an RFC2136
+	// TSIG secret) and apply/destroy target the runtime pod's own cluster; a
+	// host env has neither. Checked against ResolvedType, not the broader
+	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
+	// as it did before host existed.
+	if envConfig.ResolvedType() == EnvironmentTypeHost {
+		return "", "", fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
+	}
+	return tenant, environment, nil
+}
+
 func resolveTerraformPlan(params TerraformParams, store TerraformStore) (TerraformResult, []terraformStep, error) {
 	op := params.Operation
 	if err := validateTerraformOperation(op); err != nil {
@@ -301,26 +328,9 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		return TerraformResult{}, nil, fmt.Errorf("project root is required")
 	}
 
-	tenant, environment, err := resolveTerraformScope(store, params)
+	tenant, environment, err := resolveTerraformTargetEnvironment(params, store)
 	if err != nil {
 		return TerraformResult{}, nil, err
-	}
-	if err := ValidateTenantName(tenant); err != nil {
-		return TerraformResult{}, nil, err
-	}
-	// Confirm the env is configured before deriving its root, so a typo fails
-	// here rather than with an opaque "no such directory".
-	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
-	if err != nil {
-		return TerraformResult{}, nil, err
-	}
-	// terraform apply/plan/destroy read back cluster state (e.g. an RFC2136
-	// TSIG secret) and apply/destroy target the runtime pod's own cluster; a
-	// host env has neither. Checked against ResolvedType, not the broader
-	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
-	// as it did before host existed.
-	if envConfig.ResolvedType() == EnvironmentTypeHost {
-		return TerraformResult{}, nil, fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
 	}
 
 	paths, err := loadProjectPaths(projectRoot)
