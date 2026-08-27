@@ -21,10 +21,18 @@ import type { AppThunk, RootState } from './store';
 // New review button has neither — it derives tenant/environment from the
 // tenant dashboard the way it always has, and target branch defaults to
 // 'main' the way it always has.
+// knownCapability lets a caller that already resolved canCreateReview from a
+// loaded tenant dashboard (the Reviews tab's own New review button, gated on
+// that same field — TenantDashboardPanels.Reviews.tsx) skip the dialog's
+// independent network probe entirely. Without it, opening the dialog re-runs
+// TenantReviewCreateCapability's own platform resolution on every open, which
+// can disagree with the dashboard's already-current answer (and did, for the
+// two write flows this broke — see tenant-dashboard-review-write.spec.ts).
 export interface CreateReviewDialogContext {
-  tenant: string;
-  environment: string;
+  tenant?: string;
+  environment?: string;
   targetBranch?: string;
+  knownCapability?: boolean;
 }
 
 // resolveCreateReviewDialogContext fills in whatever the caller did not
@@ -64,6 +72,7 @@ export const openCreateReviewDialog =
       context,
       getState(),
     );
+    const knownCapability = context?.knownCapability ?? false;
     dispatch(
       patchCreateReviewDialog({
         ...resetCreateReviewDialogState(),
@@ -72,11 +81,13 @@ export const openCreateReviewDialog =
         environment,
         targetBranch,
         branchLoading: Boolean(environment),
-        capabilityLoading: Boolean(tenant),
+        capabilityLoading: !knownCapability && Boolean(tenant),
       }),
     );
     await Promise.all([
-      tenant ? dispatch(loadCreateReviewDialogCapability(tenant)) : Promise.resolve(),
+      knownCapability || !tenant
+        ? Promise.resolve()
+        : dispatch(loadCreateReviewDialogCapability(tenant)),
       environment ? dispatch(loadCreateReviewDialogBranch(tenant, environment)) : Promise.resolve(),
     ]);
   };
