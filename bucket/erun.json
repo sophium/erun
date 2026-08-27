@@ -1,5 +1,5 @@
 {
-  "version": "1.0.203",
+  "version": "1.0.204",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
@@ -9,9 +9,9 @@
     "nodejs",
     "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.203.zip",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.204.zip",
   "hash": "ce73e0bbeee2aab1496607e2fa3afdb61db84dde7b68e420844eb56012e00e2d",
-  "extract_dir": "erun-1.0.203",
+  "extract_dir": "erun-1.0.204",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
