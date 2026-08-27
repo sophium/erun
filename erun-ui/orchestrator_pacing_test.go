@@ -72,7 +72,8 @@ func TestDecideOrchestratorPacing(t *testing.T) {
 		{"not alive (session gone) is never nudged", orchestratorPacingCandidate{alive: false, lastActiveAt: stale}, orchestratorPacingNone, orchestratorPacingReasonNotAlive},
 		{
 			"a stale session nudges even with a background shell recorded running: pacing no longer reads that fact",
-			orchestratorPacingCandidate{alive: true, lastActiveAt: stale}, orchestratorPacingNudge, orchestratorPacingReasonNudge,
+			orchestratorPacingCandidate{alive: true, lastActiveAt: stale},
+			orchestratorPacingNudge, orchestratorPacingReasonNudge,
 		},
 		{"already capped stays silent", orchestratorPacingCandidate{alive: true, lastActiveAt: stale, capped: true}, orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped},
 		{"crossing the max count caps instead of nudging", orchestratorPacingCandidate{alive: true, lastActiveAt: stale, nudgeCount: orchestratorPacingMaxNudges}, orchestratorPacingCap, orchestratorPacingReasonCapCrossed},
