@@ -308,16 +308,30 @@ func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
 	recorder.setTerminalInputSecondsSinceLast(secondsSinceLastTerminalInput(status, now))
 }
 
-// secondsSinceLastTerminalInput sources "terminal input" from the ssh
-// activity kind: an SSH session is the one channel that is unambiguously a
-// human typing at a terminal (erun-common/activity.go's own reasoning for
-// treating "ssh" as the sole operator-presence marker applies here too).
+// terminalInputActivityKinds mirrors idle-policy.md's `last_terminal_input`
+// definition: an SSH keystroke, a successful in-pod erun invocation, or any
+// MCP tools/call that is not an idle probe. The MCP snapshot already excludes
+// idle probes (activityHTTPMiddleware never records one), so taking the max
+// LastActivity across these three kinds is the same value that page already
+// documents, computed from the same on-disk activity snapshots the `idle`
+// tool reads rather than a metrics-only redefinition.
+var terminalInputActivityKinds = []string{eruncommon.ActivityKindSSH, eruncommon.ActivityKindCLI, eruncommon.ActivityKindMCP}
+
 func secondsSinceLastTerminalInput(status eruncommon.EnvironmentIdleStatus, now time.Time) float64 {
-	snapshot, ok := status.Activity[eruncommon.ActivityKindSSH]
-	if !ok || snapshot.LastActivity.IsZero() {
+	var last time.Time
+	for _, kind := range terminalInputActivityKinds {
+		snapshot, ok := status.Activity[kind]
+		if !ok || snapshot.LastActivity.IsZero() {
+			continue
+		}
+		if snapshot.LastActivity.After(last) {
+			last = snapshot.LastActivity
+		}
+	}
+	if last.IsZero() {
 		return 0
 	}
-	seconds := now.Sub(snapshot.LastActivity).Seconds()
+	seconds := now.Sub(last).Seconds()
 	if seconds < 0 {
 		return 0
 	}

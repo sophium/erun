@@ -189,6 +189,39 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	}
 }
 
+// TestTerminalInputUnionsSSHCLIAndMCPActivity proves the gauge follows
+// idle-policy.md's already-published `last_terminal_input` definition (a
+// union of ssh, cli, and non-idle-probe mcp activity), not just SSH: a more
+// recent CLI invocation must win over an older SSH keystroke.
+func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	now := time.Now()
+	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant: "acme", Environment: "dev", Kind: eruncommon.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
+	}); err != nil {
+		t.Fatalf("RecordEnvironmentActivity(ssh) failed: %v", err)
+	}
+	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant: "acme", Environment: "dev", Kind: eruncommon.ActivityKindCLI, Now: now.Add(-2 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordEnvironmentActivity(cli) failed: %v", err)
+	}
+
+	status := eruncommon.EnvironmentIdleStatus{}
+	activity, err := eruncommon.LoadEnvironmentActivity("acme", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnvironmentActivity failed: %v", err)
+	}
+	status.Activity = activity
+
+	got := secondsSinceLastTerminalInput(status, now)
+	if got < 1 || got > 10 {
+		t.Fatalf("secondsSinceLastTerminalInput = %v, want roughly 2 seconds (the more recent CLI activity, not the older SSH activity)", got)
+	}
+}
+
 // TestTrafficWindowTracksByteDeltasNotARunningTotal proves
 // erun_traffic_window_bytes reports the bytes seen since the previous sample
 // — a tumbling window — rather than a cumulative total or a constant: a quiet
