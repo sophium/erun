@@ -29,6 +29,10 @@ type ERunConfig struct {
 	// set reappears across desktop restarts; the running session itself is
 	// ephemeral and re-spawned on demand.
 	Orchestrators []OrchestratorConfig `yaml:"orchestrators,omitempty" json:"orchestrators,omitempty"`
+	// Whip overrides the pacing nudge's message/threshold/cap/automatic-pass
+	// defaults (see WhipConfig, ResolveWhipConfig). Nil keeps every unconfigured
+	// install on exactly today's behaviour.
+	Whip *WhipConfigOverride `yaml:"whip,omitempty" json:"whip,omitempty"`
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An
