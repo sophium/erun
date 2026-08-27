@@ -162,6 +162,52 @@ rendered=$(render)
 grep -q '^  replicas: 1$' "${rendered}" ||
     fail "an environment with no stop recorded should render replicas: 1"
 
+# --- 8. An enabled metrics listener gets its containerPort, its env vars, and
+# a NetworkPolicy that keeps ssh/mcp exactly as unrestricted as before this
+# chart rendered any NetworkPolicy, while actually restricting the new port to
+# same-namespace traffic plus a namespace labelled as a scraper (erun#1323) ---
+rendered=$(render)
+grep -q '^            - name: ERUN_METRICS_ENABLED$' "${rendered}" ||
+    fail "ERUN_METRICS_ENABLED should be wired on the runtime container"
+grep -A1 '^            - name: ERUN_METRICS_ENABLED$' "${rendered}" | grep -q '"true"' ||
+    fail "ERUN_METRICS_ENABLED should default to true"
+grep -q '^              name: metrics$' "${rendered}" ||
+    fail "the metrics containerPort should be declared"
+[ "$(grep -c '^              name: metrics$' "${rendered}")" = "1" ] ||
+    fail "the metrics containerPort should be declared exactly once"
+
+grep -q '^kind: NetworkPolicy$' "${rendered}" ||
+    fail "an enabled metrics listener should render a NetworkPolicy"
+netpol_block="${work_root}/netpol.yaml"
+awk '/^kind: NetworkPolicy$/{f=1} f{print} f && /^---$/{exit}' "${rendered}" >"${netpol_block}"
+grep -q '^  name: test-metrics$' "${netpol_block}" ||
+    fail "the NetworkPolicy should be named after the release"
+grep -q '^      app: test$' "${netpol_block}" ||
+    fail "the NetworkPolicy should select this release's pods"
+# ssh (17022) and mcp (17000) each get their own ports-only, from-less rule so
+# they stay reachable from anywhere -- exactly as unrestricted as they were
+# with no NetworkPolicy at all, since selecting a pod with any NetworkPolicy
+# makes every other port on it default-deny unless a rule allows it.
+grep -q '^        - port: 17022$' "${netpol_block}" ||
+    fail "the NetworkPolicy should keep the ssh port open"
+grep -q '^        - port: 17000$' "${netpol_block}" ||
+    fail "the NetworkPolicy should keep the mcp port open"
+grep -q '^        - port: 9100$' "${netpol_block}" ||
+    fail "the NetworkPolicy should scope the metrics port"
+grep -q 'network-policy/erun-metrics-scraper: "true"$' "${netpol_block}" ||
+    fail "the NetworkPolicy should admit a namespace labelled as a metrics scraper"
+
+# --- 9. A disabled metrics listener renders no containerPort and no
+# NetworkPolicy at all, so a deploy that turns metrics off is byte-for-byte
+# the pre-metrics pod shape rather than an empty/broken policy ---
+rendered=$(render --set metricsEnabled=false)
+grep -A1 '^            - name: ERUN_METRICS_ENABLED$' "${rendered}" | grep -q '"false"' ||
+    fail "metricsEnabled=false should reach the container env"
+grep -q '^              name: metrics$' "${rendered}" &&
+    fail "a disabled metrics listener should advertise no containerPort"
+grep -q '^kind: NetworkPolicy$' "${rendered}" &&
+    fail "a disabled metrics listener should render no NetworkPolicy"
+
 # --- 8. An AWS env with a region exports it ---
 rendered=$(render --set-string cloudContext.provider=aws --set-string cloudContext.region=eu-west-2)
 grep -A1 '^            - name: AWS_REGION$' "${rendered}" | grep -q '"eu-west-2"' ||
