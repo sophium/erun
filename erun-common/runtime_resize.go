@@ -65,38 +65,21 @@ func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodReso
 	current = NormalizeRuntimePodResources(current)
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
-
-	if input.ApplyRecommendation && (explicitCPU != "" || explicitMemory != "") {
-		return RuntimeResizePlan{}, fmt.Errorf("resize: pass either apply-recommendation or explicit cpu/memory values, not both")
-	}
-	if !input.ApplyRecommendation && explicitCPU == "" && explicitMemory == "" {
-		return RuntimeResizePlan{}, fmt.Errorf("resize: pass cpu and/or memory, or apply-recommendation to size from the environment's standing recommendation")
+	if err := validateRuntimeResizeInputSelection(input.ApplyRecommendation, explicitCPU, explicitMemory); err != nil {
+		return RuntimeResizePlan{}, err
 	}
 
-	target := current
+	var target RuntimePodResources
+	var err error
 	if input.ApplyRecommendation {
-		if recommendation == nil {
-			return RuntimeResizePlan{}, fmt.Errorf("resize: no standing recommendation is available for %s/%s yet — it needs retained usage history, which is only readable from inside the environment's own runtime pod (its resize tool over MCP), not from the host; run `erun usage` a few times first, or resize with explicit --cpu/--memory instead", tenant, environment)
-		}
-		for _, verdict := range recommendation.Verdicts {
-			if verdict.Action != RuntimeSizingRaise && verdict.Action != RuntimeSizingLower {
-				continue
-			}
-			switch verdict.Resource {
-			case "cpu":
-				target.CPU = verdict.Suggested
-			case "memory":
-				target.Memory = verdict.Suggested
-			}
-		}
+		target, err = applyRuntimeSizingRecommendation(tenant, environment, current, recommendation)
 	} else {
-		if explicitCPU != "" {
-			target.CPU = explicitCPU
-		}
-		if explicitMemory != "" {
-			target.Memory = explicitMemory
-		}
+		target = applyExplicitRuntimeResize(current, explicitCPU, explicitMemory)
 	}
+	if err != nil {
+		return RuntimeResizePlan{}, err
+	}
+
 	target = NormalizeRuntimePodResources(target)
 	if err := ValidateRuntimePodResources(target); err != nil {
 		return RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
@@ -105,14 +88,7 @@ func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodReso
 		return RuntimeResizePlan{}, err
 	}
 
-	var actions []RuntimeResizeAction
-	if target.CPU != current.CPU {
-		actions = append(actions, RuntimeResizeAction{Resource: "cpu", From: current.CPU, To: target.CPU})
-	}
-	if target.Memory != current.Memory {
-		actions = append(actions, RuntimeResizeAction{Resource: "memory", From: current.Memory, To: target.Memory})
-	}
-
+	actions := diffRuntimeResizeActions(current, target)
 	return RuntimeResizePlan{
 		Tenant:      tenant,
 		Environment: environment,
@@ -121,6 +97,68 @@ func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodReso
 		Actions:     actions,
 		NoOp:        len(actions) == 0,
 	}, nil
+}
+
+// validateRuntimeResizeInputSelection enforces that a resize request names
+// exactly one of "size from the standing recommendation" or "size to these
+// explicit values" — never both, never neither.
+func validateRuntimeResizeInputSelection(applyRecommendation bool, explicitCPU, explicitMemory string) error {
+	if applyRecommendation && (explicitCPU != "" || explicitMemory != "") {
+		return fmt.Errorf("resize: pass either apply-recommendation or explicit cpu/memory values, not both")
+	}
+	if !applyRecommendation && explicitCPU == "" && explicitMemory == "" {
+		return fmt.Errorf("resize: pass cpu and/or memory, or apply-recommendation to size from the environment's standing recommendation")
+	}
+	return nil
+}
+
+// applyRuntimeSizingRecommendation resolves the target size from the
+// environment's standing recommendation: every resource with a raise/lower
+// verdict moves to its suggested value, everything else stays at its current
+// size.
+func applyRuntimeSizingRecommendation(tenant, environment string, current RuntimePodResources, recommendation *RuntimeSizingRecommendation) (RuntimePodResources, error) {
+	if recommendation == nil {
+		return RuntimePodResources{}, fmt.Errorf("resize: no standing recommendation is available for %s/%s yet — it needs retained usage history, which is only readable from inside the environment's own runtime pod (its resize tool over MCP), not from the host; run `erun usage` a few times first, or resize with explicit --cpu/--memory instead", tenant, environment)
+	}
+	target := current
+	for _, verdict := range recommendation.Verdicts {
+		if verdict.Action != RuntimeSizingRaise && verdict.Action != RuntimeSizingLower {
+			continue
+		}
+		switch verdict.Resource {
+		case "cpu":
+			target.CPU = verdict.Suggested
+		case "memory":
+			target.Memory = verdict.Suggested
+		}
+	}
+	return target, nil
+}
+
+// applyExplicitRuntimeResize resolves the target size from the caller's
+// explicit CPU/memory: naming only one leaves the other at its current value.
+func applyExplicitRuntimeResize(current RuntimePodResources, explicitCPU, explicitMemory string) RuntimePodResources {
+	target := current
+	if explicitCPU != "" {
+		target.CPU = explicitCPU
+	}
+	if explicitMemory != "" {
+		target.Memory = explicitMemory
+	}
+	return target
+}
+
+// diffRuntimeResizeActions reports which resources actually change between
+// the current and resolved target size.
+func diffRuntimeResizeActions(current, target RuntimePodResources) []RuntimeResizeAction {
+	var actions []RuntimeResizeAction
+	if target.CPU != current.CPU {
+		actions = append(actions, RuntimeResizeAction{Resource: "cpu", From: current.CPU, To: target.CPU})
+	}
+	if target.Memory != current.Memory {
+		actions = append(actions, RuntimeResizeAction{Resource: "memory", From: current.Memory, To: target.Memory})
+	}
+	return actions
 }
 
 // validateRuntimeResizeAgainstQuota refuses a target the namespace
@@ -244,10 +282,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 		ctx.Trace(fmt.Sprintf("resize: %s/%s is already sized at cpu=%s memory=%s; no change", tenant, environment, plan.Current.CPU, plan.Current.Memory))
 		return RuntimeResizeResult{Plan: plan}, nil
 	}
-	for _, action := range plan.Actions {
-		ctx.Trace(fmt.Sprintf("resize: %s/%s %s %s -> %s", tenant, environment, action.Resource, action.From, action.To))
-	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC", tenant, environment))
+	traceRuntimeResizePlan(ctx, tenant, environment, plan)
 
 	now := time.Now()
 	if deps.Now != nil {
@@ -257,13 +292,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 	if err != nil {
 		return RuntimeResizeResult{}, err
 	}
-	if len(leases) > 0 {
-		holders := make([]string, 0, len(leases))
-		for _, lease := range leases {
-			holders = append(holders, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-		}
-		ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), strings.Join(holders, "; ")))
-	}
+	traceRuntimeResizeOccupancyOverride(ctx, tenant, environment, leases)
 
 	ctx.TraceCommand("", "resize", tenant, environment, "cpu="+plan.Target.CPU, "memory="+plan.Target.Memory)
 	ctx.Trace(fmt.Sprintf("resize: %s/%s will roll the runtime pod once to apply the new limits", tenant, environment))
@@ -271,11 +300,44 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 		return RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil
 	}
 
+	if err := rollRuntimeResize(ctx, deps, target, tenant, environment, plan, params.Holder, now); err != nil {
+		return RuntimeResizeResult{}, err
+	}
+	return RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil
+}
+
+// traceRuntimeResizePlan emits the per-resource change lines and the standing
+// "what this does and does not touch" explanation, for a plan already known
+// not to be a no-op.
+func traceRuntimeResizePlan(ctx Context, tenant, environment string, plan RuntimeResizePlan) {
+	for _, action := range plan.Actions {
+		ctx.Trace(fmt.Sprintf("resize: %s/%s %s %s -> %s", tenant, environment, action.Resource, action.From, action.To))
+	}
+	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC", tenant, environment))
+}
+
+// traceRuntimeResizeOccupancyOverride traces which held leases a resize is
+// about to interrupt; a no-op when nothing is held.
+func traceRuntimeResizeOccupancyOverride(ctx Context, tenant, environment string, leases []EnvironmentActivityLease) {
+	if len(leases) == 0 {
+		return
+	}
+	holders := make([]string, 0, len(leases))
+	for _, lease := range leases {
+		holders = append(holders, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
+	}
+	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), strings.Join(holders, "; ")))
+}
+
+// rollRuntimeResize is RunRuntimeResize's real-run half: take the exclusive
+// lease, persist the new size, and roll the runtime pod through the same
+// deploy composition `erun deploy` uses.
+func rollRuntimeResize(ctx Context, deps RuntimeResizeDependencies, target OpenResult, tenant, environment string, plan RuntimeResizePlan, holder EnvironmentActivityLeaseHolder, now time.Time) error {
 	lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
-		Tenant: tenant, Environment: environment, Name: "resize", Exclusive: true, Holder: params.Holder, Now: now,
+		Tenant: tenant, Environment: environment, Name: "resize", Exclusive: true, Holder: holder, Now: now,
 	})
 	if err != nil {
-		return RuntimeResizeResult{}, fmt.Errorf("resize: %w", err)
+		return fmt.Errorf("resize: %w", err)
 	}
 	defer func() {
 		_ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
@@ -284,7 +346,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 	updatedConfig := target.EnvConfig
 	updatedConfig.RuntimePod = plan.Target
 	if err := deps.SaveEnvConfig(tenant, updatedConfig); err != nil {
-		return RuntimeResizeResult{}, fmt.Errorf("resize: saving the new runtime pod size: %w", err)
+		return fmt.Errorf("resize: saving the new runtime pod size: %w", err)
 	}
 
 	specs, err := ResolveCurrentDeploySpecs(ctx, deps.Store, deps.FindProjectRoot, deps.ResolveDockerBuildContext, deps.ResolveKubernetesDeployContext, deps.Now, DeployTarget{
@@ -293,14 +355,10 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 		RepoPath:    target.RepoPath,
 	})
 	if err != nil {
-		return RuntimeResizeResult{}, err
+		return err
 	}
 	if err := RunDeploySpecs(ctx, specs, deps.DeployHelmChart); err != nil {
-		return RuntimeResizeResult{}, err
+		return err
 	}
-	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, ResolveDeployedHelmReleaseVersion); err != nil {
-		return RuntimeResizeResult{}, err
-	}
-
-	return RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil
+	return PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, ResolveDeployedHelmReleaseVersion)
 }

@@ -155,7 +155,31 @@ func aiSessionExitReportCommandIn(dir, tenant, environment, id string) string {
 // answer for a tool with no hook mechanism wired (or one that has not reached
 // its first turn boundary yet), never a guess derived from silence.
 func ResolveAISessionStatuses(tenant, environment, aiTool string) []AISessionStatus {
-	return resolveAISessionStatusesIn(RemoteAppSessionSocketDir, RemoteAppSessionStatusDir, tenant, environment, aiTool)
+	return resolveAISessionStatusesIn(aiSessionSocketDirOverride(), aiSessionStatusDirOverride(), tenant, environment, aiTool)
+}
+
+// aiSessionSocketDirOverride/aiSessionStatusDirOverride honor
+// ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE / ERUN_AI_SESSION_STATUS_DIR_OVERRIDE as
+// test seams, the same idiom as ERUN_HOST_OS_OVERRIDE (host_runtime.go): a
+// deliberate seam for the integration suite, not a production knob. Reading
+// the pod-local self-reports has no other way to be exercised from the
+// compiled binary — the sockets and status files it reads are written by a
+// real Claude Code hook or a real dtach session, neither of which the
+// integration harness can start, and the real paths are process-global
+// (`/tmp/erun-sessions*`) rather than something a scenario's isolated
+// HOME/XDG root already scopes.
+func aiSessionSocketDirOverride() string {
+	if override := strings.TrimSpace(os.Getenv("ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE")); override != "" {
+		return override
+	}
+	return RemoteAppSessionSocketDir
+}
+
+func aiSessionStatusDirOverride() string {
+	if override := strings.TrimSpace(os.Getenv("ERUN_AI_SESSION_STATUS_DIR_OVERRIDE")); override != "" {
+		return override
+	}
+	return RemoteAppSessionStatusDir
 }
 
 func resolveAISessionStatusesIn(socketDir, statusDir, tenant, environment, aiTool string) []AISessionStatus {

@@ -117,6 +117,77 @@ func TestIdle(t *testing.T) {
 		}
 	})
 
+	t.Run("ai_session_awaiting_input_is_not_reported_as_idle", func(t *testing.T) {
+		// erun#1105: the load-bearing case a PTY-output-volume heuristic can
+		// never produce. A session silently waiting on the operator (Claude
+		// Code's Notification hook) must render distinctly from both busy and
+		// idle, never collapse into "idle" the way silence-based detection
+		// would. ERUN_AI_SESSION_*_DIR_OVERRIDE is the deliberate test seam
+		// (erun-common/ai_session_status.go) for reading self-reports that a
+		// real Claude Code hook / dtach session would otherwise have to write
+		// into the process-global /tmp/erun-sessions* paths.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		socketDir, statusDir := seedAISessionStatusDirs(t)
+		writeAISessionSocket(t, socketDir, "team", "dev", "ai")
+		writeAISessionStatusReport(t, statusDir, "team", "dev", "ai", `{"state":"awaiting-input","atUnix":1}`)
+
+		envVars := append(inEnvironment(setup.Env()),
+			"ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE="+socketDir,
+			"ERUN_AI_SESSION_STATUS_DIR_OVERRIDE="+statusDir)
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "ai session ai: claude, awaiting-input") {
+			t.Fatalf("expected the awaiting-input state, got:\n%s", result.Stdout)
+		}
+		if strings.Contains(result.Stdout, "ai session ai: claude, idle") {
+			t.Fatalf("a session awaiting input must not read as idle:\n%s", result.Stdout)
+		}
+	})
+
+	t.Run("ai_session_with_no_self_report_is_unknown_not_busy", func(t *testing.T) {
+		// A tool with no structured self-report mechanism (or one that has not
+		// reached its first turn boundary yet) must degrade to "unknown" —
+		// never inferred as busy from a chatty-but-stuck tool, and never
+		// inferred as idle from a quiet-but-working one.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		socketDir, statusDir := seedAISessionStatusDirs(t)
+		writeAISessionSocket(t, socketDir, "team", "dev", "ai")
+
+		envVars := append(inEnvironment(setup.Env()),
+			"ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE="+socketDir,
+			"ERUN_AI_SESSION_STATUS_DIR_OVERRIDE="+statusDir)
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "ai session ai: claude, unknown") {
+			t.Fatalf("expected the unknown state for a session with no self-report, got:\n%s", result.Stdout)
+		}
+	})
+
+	t.Run("ai_session_records_the_oom_outcome", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		socketDir, statusDir := seedAISessionStatusDirs(t)
+		writeAISessionSocket(t, socketDir, "team", "dev", "ai")
+		writeAISessionExitReport(t, statusDir, "team", "dev", "ai", `{"outcome":"oom-killed","exitCode":137,"atUnix":1}`)
+
+		envVars := append(inEnvironment(setup.Env()),
+			"ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE="+socketDir,
+			"ERUN_AI_SESSION_STATUS_DIR_OVERRIDE="+statusDir)
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "ai session ai: claude, idle (oom-killed, exit 137)") {
+			t.Fatalf("expected the oom-killed outcome, got:\n%s", result.Stdout)
+		}
+	})
+
 	t.Run("missing_env_errors", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"idle", "missing", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -200,6 +271,42 @@ func TestIdle(t *testing.T) {
 			t.Errorf("expected legacy stop error surfaced, got:\n%s", result.Stdout)
 		}
 	})
+}
+
+// seedAISessionStatusDirs allocates the two directories
+// ERUN_AI_SESSION_SOCKET_DIR_OVERRIDE / ERUN_AI_SESSION_STATUS_DIR_OVERRIDE
+// point at, isolated per test rather than the real process-global
+// /tmp/erun-sessions* paths a live pod would use.
+func seedAISessionStatusDirs(t *testing.T) (socketDir, statusDir string) {
+	t.Helper()
+	return t.TempDir(), t.TempDir()
+}
+
+// writeAISessionSocket fabricates the presence check ResolveAISessionStatuses
+// makes (a stat, not a real dtach socket) so a scenario can put a session
+// "in existence" without starting a real dtach master.
+func writeAISessionSocket(t *testing.T, socketDir, tenant, environment, id string) {
+	t.Helper()
+	name := tenant + "-" + environment + "-" + id + ".dtach"
+	if err := os.WriteFile(filepath.Join(socketDir, name), nil, 0o644); err != nil {
+		t.Fatalf("write ai session socket placeholder: %v", err)
+	}
+}
+
+func writeAISessionStatusReport(t *testing.T, statusDir, tenant, environment, id, json string) {
+	t.Helper()
+	name := tenant + "-" + environment + "-" + id + ".status.json"
+	if err := os.WriteFile(filepath.Join(statusDir, name), []byte(json), 0o644); err != nil {
+		t.Fatalf("write ai session status report: %v", err)
+	}
+}
+
+func writeAISessionExitReport(t *testing.T, statusDir, tenant, environment, id, json string) {
+	t.Helper()
+	name := tenant + "-" + environment + "-" + id + ".exit.json"
+	if err := os.WriteFile(filepath.Join(statusDir, name), []byte(json), 0o644); err != nil {
+		t.Fatalf("write ai session exit report: %v", err)
+	}
 }
 
 func seedIdleEnvWithIdleBlock(t *testing.T, setup env.Setup, idleBlock string) {

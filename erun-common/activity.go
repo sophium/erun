@@ -122,6 +122,13 @@ type EnvironmentIdleStatus struct {
 	StopPendingSince       string `json:"stopPendingSince,omitempty"`
 	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
+	// AISessions is the structured status of this environment's AI sessions
+	// (ai, contribute-ai) — the replacement for inferring "is the Agent
+	// working" from PTY output volume. See ai_session_status.go. Populated only
+	// by ResolveStoredEnvironmentIdleStatus, which runs in-pod and can read the
+	// self-report files directly; ResolveEnvironmentIdleStatus (the pure,
+	// store-free resolver) leaves it empty.
+	AISessions []AISessionStatus `json:"aiSessions,omitempty"`
 }
 
 func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
@@ -280,6 +287,7 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	}
 	status.StopError = loadEnvironmentIdleStopError(tenant, environment)
 	status = overlayStopPending(status, tenant, environment, now)
+	status.AISessions = ResolveAISessionStatuses(tenant, environment, config.AITool)
 	return status, nil
 }
 

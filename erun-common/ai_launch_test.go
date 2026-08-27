@@ -335,82 +335,86 @@ func TestResolveClaudeEffort(t *testing.T) {
 // assertions own the contract; the launcher's composition into the dtach script
 // is locked by the open --ai dry-run goldens.
 func TestAISessionLaunchLines(t *testing.T) {
-	t.Run("claude guard wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
-		script := normalizeClaudeSettingsFlag(t, strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev", "ai"), "\n"))
-		for _, want := range []string{
-			"ai_status=0",
-			"fi || ai_status=$?",
-			`[ "$ai_status" = 137 ]`,
-			"likely out of memory; consider raising Memory in the environment Runtime settings",
-			"Claude exited (exit %s)",
-			"Claude session ended",
-			"resume with: %s",
-			// The exit outcome is recorded before the human-facing banner: a
-			// client reading the status file must never see the banner without
-			// the file it renders being already true.
-			`"/tmp/erun-sessions-status/team-dev-ai.exit.json"`,
-		} {
-			if !strings.Contains(script, want) {
-				t.Fatalf("wrapper missing %q:\n%s", want, script)
-			}
-		}
-		if strings.Index(script, "ai.exit.json") > strings.Index(script, "resume with") {
-			t.Fatalf("exit outcome must be recorded before the resume banner is printed:\n%s", script)
-		}
-		// The resume is shell-quoted because it embeds single quotes itself
-		// (the --settings placeholder still carries its original brackets).
-		if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings <HOOKS+ULTRACODE> --model opus --remote-control team/dev'`) {
-			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
-		}
-	})
+	t.Run("claude guard wraps with status capture, OOM hint, and quoted resume", assertClaudeGuardWrapsWithStatusCaptureAndQuotedResume)
+	t.Run("the wrapper executes: 137 yields the OOM marker, the exit report, and the intact resume", assertWrapperExecutionRecordsOOMExitAndIntactResume)
+	t.Run("a verbatim tool keeps its own resume, a tool-neutral label, and still records its exit", assertVerbatimToolKeepsItsOwnResumeAndStillRecordsExit)
+}
 
-	t.Run("the wrapper executes: 137 yields the OOM marker, the exit report, and the intact resume", func(t *testing.T) {
-		// The exit-report command writes to the real RemoteAppSessionStatusDir
-		// constant; redirect it into a temp dir by rewriting that one path in
-		// the generated script rather than touching the process's real /tmp.
-		statusDir := t.TempDir()
-		lines := AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev", "ai")
-		// Swap the launch (line index 1 by construction) for a bare 137 exit to
-		// simulate the OOM kill; running the rest through a real sh verifies the
-		// printf escapes, the exit-report write, and the shell-quoted resume end
-		// to end.
-		lines[1] = "(exit 137) || ai_status=$?"
-		for i, line := range lines {
-			lines[i] = strings.ReplaceAll(line, RemoteAppSessionStatusDir, statusDir)
+func assertClaudeGuardWrapsWithStatusCaptureAndQuotedResume(t *testing.T) {
+	script := normalizeClaudeSettingsFlag(t, strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev", "ai"), "\n"))
+	for _, want := range []string{
+		"ai_status=0",
+		"fi || ai_status=$?",
+		`[ "$ai_status" = 137 ]`,
+		"likely out of memory; consider raising Memory in the environment Runtime settings",
+		"Claude exited (exit %s)",
+		"Claude session ended",
+		"resume with: %s",
+		// The exit outcome is recorded before the human-facing banner: a
+		// client reading the status file must never see the banner without
+		// the file it renders being already true.
+		`"/tmp/erun-sessions-status/team-dev-ai.exit.json"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("wrapper missing %q:\n%s", want, script)
 		}
-		out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
-		if err != nil {
-			t.Fatalf("wrapper script failed: %v\n%s", err, out)
-		}
-		text := string(out)
-		if !strings.Contains(text, "Claude was killed (exit 137)") {
-			t.Fatalf("expected the OOM marker, got:\n%s", text)
-		}
-		exit, ok := readAISessionExitReport(statusDir, "team", "dev", "ai")
-		if !ok || exit.Outcome != AISessionOutcomeOOMKilled || exit.ExitCode != 137 {
-			t.Fatalf("expected an oom-killed/137 exit report, got %+v (ok=%v)", exit, ok)
-		}
-		if !strings.Contains(text, "resume with: CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '") {
-			t.Fatalf("expected the resume command with its settings flag intact, got:\n%s", text)
-		}
-		if !strings.Contains(text, "--model opus --remote-control team/dev") {
-			t.Fatalf("expected the resume command's trailing flags intact, got:\n%s", text)
-		}
-	})
+	}
+	if strings.Index(script, "ai.exit.json") > strings.Index(script, "resume with") {
+		t.Fatalf("exit outcome must be recorded before the resume banner is printed:\n%s", script)
+	}
+	// The resume is shell-quoted because it embeds single quotes itself
+	// (the --settings placeholder still carries its original brackets).
+	if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings <HOOKS+ULTRACODE> --model opus --remote-control team/dev'`) {
+		t.Fatalf("resume command not safely shell-quoted:\n%s", script)
+	}
+}
 
-	t.Run("a verbatim tool keeps its own resume, a tool-neutral label, and still records its exit", func(t *testing.T) {
-		script := strings.Join(AISessionLaunchLines("codex", EnvironmentClaudeConfig{}, "team", "dev", "ai"), "\n")
-		if !strings.Contains(script, "codex || ai_status=$?") {
-			t.Fatalf("verbatim tool must run unmodified ahead of the wrapper:\n%s", script)
-		}
-		if !strings.Contains(script, "The AI tool exited (exit %s)") {
-			t.Fatalf("verbatim tool label wrong:\n%s", script)
-		}
-		if !strings.Contains(script, "'codex'") {
-			t.Fatalf("verbatim tool resume should be the tool itself:\n%s", script)
-		}
-		if !strings.Contains(script, `"/tmp/erun-sessions-status/team-dev-ai.exit.json"`) {
-			t.Fatalf("a non-claude tool must still record its exit outcome (degrade to unknown state, not unknown outcome):\n%s", script)
-		}
-	})
+func assertWrapperExecutionRecordsOOMExitAndIntactResume(t *testing.T) {
+	// The exit-report command writes to the real RemoteAppSessionStatusDir
+	// constant; redirect it into a temp dir by rewriting that one path in
+	// the generated script rather than touching the process's real /tmp.
+	statusDir := t.TempDir()
+	lines := AISessionLaunchLines("", EnvironmentClaudeConfig{}, "team", "dev", "ai")
+	// Swap the launch (line index 1 by construction) for a bare 137 exit to
+	// simulate the OOM kill; running the rest through a real sh verifies the
+	// printf escapes, the exit-report write, and the shell-quoted resume end
+	// to end.
+	lines[1] = "(exit 137) || ai_status=$?"
+	for i, line := range lines {
+		lines[i] = strings.ReplaceAll(line, RemoteAppSessionStatusDir, statusDir)
+	}
+	out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("wrapper script failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "Claude was killed (exit 137)") {
+		t.Fatalf("expected the OOM marker, got:\n%s", text)
+	}
+	exit, ok := readAISessionExitReport(statusDir, "team", "dev", "ai")
+	if !ok || exit.Outcome != AISessionOutcomeOOMKilled || exit.ExitCode != 137 {
+		t.Fatalf("expected an oom-killed/137 exit report, got %+v (ok=%v)", exit, ok)
+	}
+	if !strings.Contains(text, "resume with: CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '") {
+		t.Fatalf("expected the resume command with its settings flag intact, got:\n%s", text)
+	}
+	if !strings.Contains(text, "--model opus --remote-control team/dev") {
+		t.Fatalf("expected the resume command's trailing flags intact, got:\n%s", text)
+	}
+}
+
+func assertVerbatimToolKeepsItsOwnResumeAndStillRecordsExit(t *testing.T) {
+	script := strings.Join(AISessionLaunchLines("codex", EnvironmentClaudeConfig{}, "team", "dev", "ai"), "\n")
+	if !strings.Contains(script, "codex || ai_status=$?") {
+		t.Fatalf("verbatim tool must run unmodified ahead of the wrapper:\n%s", script)
+	}
+	if !strings.Contains(script, "The AI tool exited (exit %s)") {
+		t.Fatalf("verbatim tool label wrong:\n%s", script)
+	}
+	if !strings.Contains(script, "'codex'") {
+		t.Fatalf("verbatim tool resume should be the tool itself:\n%s", script)
+	}
+	if !strings.Contains(script, `"/tmp/erun-sessions-status/team-dev-ai.exit.json"`) {
+		t.Fatalf("a non-claude tool must still record its exit outcome (degrade to unknown state, not unknown outcome):\n%s", script)
+	}
 }

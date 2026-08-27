@@ -39,6 +39,28 @@ func refuseOpenForHostEnvironment(result common.OpenResult) error {
 	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
 }
 
+// resolveOpenExecutionTarget resolves everything RunE needs before it can
+// build the open plan: the parsed target, init-stop handling (initRan true
+// means init already ran and there is nothing left to open), the
+// host-environment refusal, and local port range persistence. Pulled out of
+// newOpenCmd's RunE closure to keep that closure's own branching shallow —
+// this is the multi-step resolution, not the command's flag wiring.
+func resolveOpenExecutionTarget(ctx common.Context, args []string, target common.OpenParams, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForOpen func(common.Context, common.OpenParams) error, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, bool, error) {
+	params, err := resolveOpenParams(args, target)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+	if err != nil || initRan {
+		return result, initRan, err
+	}
+	if err := refuseOpenForHostEnvironment(result); err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	return result, false, err
+}
+
 func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
@@ -78,23 +100,12 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if vscode && intellij {
 				return fmt.Errorf("--vscode and --intellij cannot be used together")
 			}
-			params, err := resolveOpenParams(args, target)
-			if err != nil {
-				return err
-			}
-			result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+			result, initRan, err := resolveOpenExecutionTarget(ctx, args, target, resolveOpen, runInitForOpen, saveEnvConfig)
 			if err != nil {
 				return err
 			}
 			if initRan {
 				return nil
-			}
-			if err := refuseOpenForHostEnvironment(result); err != nil {
-				return err
-			}
-			result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
-			if err != nil {
-				return err
 			}
 			allowLocalBuilds := result.EnvConfig.BuildsHere()
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{

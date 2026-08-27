@@ -93,7 +93,26 @@ func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) er
 			return err
 		}
 	}
+	for _, session := range status.AISessions {
+		if err := writeLabeledValue(ctx, "ai session "+session.SessionID, aiSessionStatusValue(session)); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// aiSessionStatusValue renders one AI session's structured status the way
+// idleMarkerValue renders a marker: the tool, its state, and — once the tool
+// process has exited — the outcome. State is never inferred here; it is
+// exactly what common.AISessionStatus already resolved (see
+// erun-common/ai_session_status.go), including AISessionStateUnknown for a
+// tool with no structured self-report.
+func aiSessionStatusValue(session common.AISessionStatus) string {
+	value := fmt.Sprintf("%s, %s", session.Tool, session.State)
+	if session.Outcome != "" {
+		value += fmt.Sprintf(" (%s, exit %d)", session.Outcome, session.ExitCode)
+	}
+	return value
 }
 
 func writeOptionalIdleValue(ctx common.Context, label, value string) error {

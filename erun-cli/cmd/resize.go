@@ -84,12 +84,14 @@ func writeResizeResult(ctx common.Context, result common.RuntimeResizeResult) er
 		return nil
 	}
 	if result.Plan.NoOp {
-		fmt.Fprintf(ctx.Stdout, "%s/%s is already sized at cpu=%s memory=%s; no change\n", result.Plan.Tenant, result.Plan.Environment, result.Plan.Current.CPU, result.Plan.Current.Memory)
-		return nil
+		_, err := fmt.Fprintf(ctx.Stdout, "%s/%s is already sized at cpu=%s memory=%s; no change\n", result.Plan.Tenant, result.Plan.Environment, result.Plan.Current.CPU, result.Plan.Current.Memory)
+		return err
 	}
 	for _, action := range result.Plan.Actions {
-		fmt.Fprintf(ctx.Stdout, "%s: %s -> %s\n", action.Resource, action.From, action.To)
+		if _, err := fmt.Fprintf(ctx.Stdout, "%s: %s -> %s\n", action.Resource, action.From, action.To); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintf(ctx.Stdout, "==> Resized %s/%s\n", result.Plan.Tenant, result.Plan.Environment)
-	return nil
+	_, err := fmt.Fprintf(ctx.Stdout, "==> Resized %s/%s\n", result.Plan.Tenant, result.Plan.Environment)
+	return err
 }
