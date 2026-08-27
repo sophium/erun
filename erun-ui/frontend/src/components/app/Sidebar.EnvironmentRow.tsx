@@ -15,6 +15,7 @@ import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import {
   deriveEnvironmentRow,
+  environmentCardActivityLabel,
   type EnvironmentIndicator,
   environmentIndicator,
   type EnvironmentRowDerived,
@@ -428,7 +429,12 @@ export function EnvironmentRow({
       isLocal={isLocal}
       isHost={isHost}
       runtimeVersion={runtimeVersion}
-      activityLabel={busy && !busyFromEnvironment ? busyLabel : ''}
+      activityLabel={environmentCardActivityLabel(
+        busy,
+        busyFromEnvironment,
+        busyLabel,
+        indicator.dot,
+      )}
       indicator={indicator}
     >
       <EnvironmentRowOpenButton

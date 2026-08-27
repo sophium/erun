@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { deriveEnvironmentRow, environmentIndicator } from './Sidebar.helpers';
+import {
+  deriveEnvironmentRow,
+  environmentCardActivityLabel,
+  environmentIndicator,
+} from './Sidebar.helpers';
 
 // One derived row state from three inputs: the sticky condition the desktop set,
 // what the environment reports about itself, and whether the desktop owns tabs.
@@ -307,4 +311,89 @@ test('a label describing an operation this desktop is running is not', () => {
 
   assert.equal(row({ isOpening: true, envBusy: true }).busyFromEnvironment, false);
   assert.equal(row({ reconnecting: true, envBusy: true }).busyFromEnvironment, false);
+});
+
+// The card either repeats the row's busy reason or defers to the condition
+// indicator — never neither. busyFromEnvironment blanks the row's own label on
+// the assumption the indicator will say 'busy' on its own, which is only true
+// when no sticky condition outranks it.
+function indicatorDot(envState: string, busy: boolean) {
+  return environmentIndicator({
+    name: 'team / dev',
+    envState,
+    isOpen: true,
+    reachable: false,
+    outage: false,
+    busy,
+    detail: '',
+  }).dot;
+}
+
+test('environmentCardActivityLabel repeats the row label unless the indicator already will', () => {
+  assert.equal(environmentCardActivityLabel(false, false, 'unused', 'running'), '');
+  assert.equal(
+    environmentCardActivityLabel(true, false, 'Building team / dev', 'running'),
+    'Building team / dev',
+  );
+  assert.equal(environmentCardActivityLabel(true, true, 'team / dev is busy', 'busy'), '');
+  assert.equal(
+    environmentCardActivityLabel(true, true, 'team / dev is busy — a lease', 'stopped'),
+    'team / dev is busy — a lease',
+  );
+  assert.equal(
+    environmentCardActivityLabel(true, true, 'team / dev is busy — a lease', 'failed'),
+    'team / dev is busy — a lease',
+  );
+});
+
+// The defect: the activity poller that sets envBusy and the lifecycle
+// event that sets the sticky envState run on separate cycles, so a fresh
+// "the environment is busy" observation can land while envState still reads
+// stopped/failed from before. environmentStatusDot gives that sticky
+// condition priority over busy, so the indicator alone would say "Stopped" —
+// and blanking the row's own label handed that stale answer to the card while
+// the row kept spinning for a real, current reason right beside it.
+test('the card never asserts a bare Stopped/Failed while the row spins from a fresh envBusy', () => {
+  for (const envState of ['stopped', 'runtime-stopped', 'failed']) {
+    const derived = row({
+      envBusy: true,
+      envBusyDetail: 'holding: gradle-build',
+      envObserved: true,
+    });
+    const dot = indicatorDot(envState, true);
+    assert.equal(derived.busy, true, envState);
+    const cardLabel = environmentCardActivityLabel(
+      derived.busy,
+      derived.busyFromEnvironment,
+      derived.busyLabel,
+      dot,
+    );
+    assert.equal(cardLabel, derived.busyLabel, envState);
+    assert.doesNotMatch(cardLabel, /^(Stopped|Deploy failed)/, envState);
+  }
+});
+
+// isOpening/reconnecting were suspected of the same class of bug (an
+// envObserved-stopped row with a lingering desktop-local flag), but they
+// cannot reproduce it: environmentRowCommandLabel always names them directly,
+// so the label handed to the row's spinner and the card is the same string
+// whether or not the flag is stale. They are also, independently, always
+// cleared on the failure path rather than left stale — openSelection's
+// `finally` clears openingByEnv even when StartSession throws
+// (sessionThunks.ts), and confirmReconnect's catch moves reconnect.status to
+// 'error' rather than leaving it on 'running' (reviewThunks.ts) — so this
+// pins the agreement rather than a hypothetical staleness fix.
+test('a lingering isOpening/reconnecting flag never disagrees with the card', () => {
+  for (const overrides of [{ isOpening: true }, { reconnecting: true }]) {
+    const derived = row({ ...overrides, envObserved: true });
+    const dot = indicatorDot('stopped', false);
+    assert.equal(derived.busy, true, JSON.stringify(overrides));
+    const cardLabel = environmentCardActivityLabel(
+      derived.busy,
+      derived.busyFromEnvironment,
+      derived.busyLabel,
+      dot,
+    );
+    assert.equal(cardLabel, derived.busyLabel, JSON.stringify(overrides));
+  }
 });

@@ -194,6 +194,32 @@ function environmentRowBusyLabel(
   return '';
 }
 
+// environmentCardActivityLabel decides whether the hover card repeats the
+// row's busy reason or defers to the condition indicator. busyFromEnvironment
+// assumes the indicator will say so on its own — but environmentStatusDot
+// gives a sticky stopped/failed condition priority over busy, and that
+// condition can still be the last one recorded while a fresher observation
+// has already reported real work (the two are set by separate pollers on
+// separate cycles). Blanking the label in that window let the card assert a
+// bare "Stopped" — telling the operator to start something already busy —
+// while the row kept spinning with the true reason right beside it. Blank
+// only when the indicator will actually read 'busy', so the two surfaces can
+// never name different things for the same spinner.
+export function environmentCardActivityLabel(
+  busy: boolean,
+  busyFromEnvironment: boolean,
+  busyLabel: string,
+  dot: StatusDotState,
+): string {
+  if (!busy) {
+    return '';
+  }
+  if (busyFromEnvironment && dot === 'busy') {
+    return '';
+  }
+  return busyLabel;
+}
+
 // The operations this desktop is running itself, in the order that decides
 // which one names the row. Split out from the label so a caller can ask whether
 // there is one at all without re-deriving the precedence.

@@ -95,7 +95,97 @@ test.describe('sidebar env hover card', () => {
     // closeEnvironment already asserts the row went quiet and stayed quiet.
     await app.sidebar.closeEnvironment(tenant, environment);
   });
+
+  // The activity poller (env-activity) and the sticky-condition setter
+  // (env-status) run on separate cycles, so a fresh "the environment is busy"
+  // observation can land while env-status still says stopped from before —
+  // the row's spinner is honest about it, but the card fell back to a bare
+  // "Stopped — start it from the titlebar" because the indicator's dot gives
+  // the sticky stopped condition priority over busy. The row and the card must
+  // never say different things about the same spinner.
+  test('a fresh busy observation never lets the card say a bare Stopped', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+
+    await app.sidebar.openEnvironment(tenant, environment);
+    const dot = app.sidebar.envOpenDot(tenant, environment);
+    await expect(dot).toBeVisible();
+
+    const card = app.sidebar.envHoverCard(tenant, environment);
+    const activity = card.locator('dd').nth(2);
+    const activitySettlesTo = async (matcher: RegExp | string): Promise<void> => {
+      await expect(async () => {
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(tenant, environment);
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        await expect(activity).toContainText(matcher, { timeout: 1_000 });
+      }).toPass();
+    };
+
+    await activitySettlesTo('Idle');
+    await emitEnvStatusEvent(page, tenant, environment, 'stopped');
+    await activitySettlesTo('Stopped');
+
+    // The backend's own sweep runs on a timer against this inert (never
+    // deployed) env and will legitimately overwrite the injected busy
+    // observation with "unreachable" — re-drive it until the assertion holds,
+    // bounded by a real timeout rather than a guessed delay.
+    await expect(async () => {
+      await emitEnvActivityEvent(page, {
+        tenant,
+        environment,
+        reachable: true,
+        observed: true,
+        busy: true,
+        detail: 'holding: gradle-build',
+      });
+      await page.mouse.move(0, 0);
+      await app.sidebar.hoverEnvironmentRow(tenant, environment);
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(activity).toContainText('holding: gradle-build', { timeout: 1_000 });
+      await expect(activity).not.toContainText('Stopped');
+    }).toPass({ timeout: 20_000 });
+
+    // Reset the injected state so it doesn't leak into later specs (shared backend).
+    await emitEnvActivityEvent(page, {
+      tenant,
+      environment,
+      reachable: false,
+      observed: false,
+      busy: false,
+    });
+    await emitEnvStatusEvent(page, tenant, environment, '');
+    await app.sidebar.closeEnvironment(tenant, environment);
+  });
 });
+
+interface EnvActivityEvent {
+  tenant: string;
+  environment: string;
+  reachable: boolean;
+  observed: boolean;
+  outage?: boolean;
+  busy: boolean;
+  detail?: string;
+}
+
+// Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.
+async function emitEnvActivityEvent(
+  page: import('@playwright/test').Page,
+  event: EnvActivityEvent,
+): Promise<void> {
+  await page.evaluate((payload) => {
+    const runtime = (
+      window as unknown as {
+        runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
+      }
+    ).runtime;
+    runtime.EventsEmit('env-activity', payload);
+  }, event);
+}
 
 // Injecting env-status is a faithful stand-in: the Go side emits the same event
 // from tryReconnect's refusal paths and the open/respawn clears.
