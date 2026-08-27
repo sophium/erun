@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -70,12 +71,17 @@ var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 // cwd's existing session or starts fresh. It runs once when the dtach session
 // is created; reattaches never re-run it. Centralised so `erun open --ai` can
 // launch it pod-side and survive a disconnect.
-func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenant, environment string) string {
+//
+// sessionID is the persistent pod session id ("ai", "contribute-ai") this
+// launch is running in; claude launches carry it into their turn-boundary
+// hooks (claudeLaunchFlags) so the self-report files ResolveAISessionStatuses
+// reads are addressed to the right session.
+func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenant, environment, sessionID string) string {
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool
 	}
 	prefix := claudeLaunchEnvPrefix(claude)
-	flags := claudeLaunchFlags(claude, tenant, environment)
+	flags := claudeLaunchFlags(claude, tenant, environment, sessionID)
 	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then ` + prefix + `claude --continue` + flags + `; else ` + prefix + `claude` + flags + `; fi`
 }
 
@@ -84,10 +90,15 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenan
 // silently falls through to the trailing interactive shell — a tab labelled
 // "AI" showing a bare bash prompt — so the wrapper makes the exit state
 // explicit and puts the resume command one paste away.
-func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant, environment string) []string {
-	launch := AISessionLaunchCommand(aiTool, claude, tenant, environment)
+//
+// The same exit wrapper is also the one place a session's tool process exit is
+// known for certain, so it records the structured outcome
+// (AISessionExitReportCommand) alongside the printed banner: the banner is for
+// the human looking at this tab, the file is for a client that is not.
+func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant, environment, sessionID string) []string {
+	launch := AISessionLaunchCommand(aiTool, claude, tenant, environment, sessionID)
 	label := "Claude"
-	resume := claudeLaunchEnvPrefix(claude) + "claude --continue" + claudeLaunchFlags(claude, tenant, environment)
+	resume := claudeLaunchEnvPrefix(claude) + "claude --continue" + claudeLaunchFlags(claude, tenant, environment, sessionID)
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		label = "The AI tool"
 		resume = tool
@@ -95,6 +106,7 @@ func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant,
 	return []string{
 		"ai_status=0",
 		launch + " || ai_status=$?",
+		AISessionExitReportCommand(tenant, environment, sessionID),
 		`if [ "$ai_status" = 137 ]; then printf '\n\033[2;33m── ` + label + ` was killed (exit 137) — likely out of memory; consider raising Memory in the environment Runtime settings ──\033[0m\n'; elif [ "$ai_status" != 0 ]; then printf '\n\033[2;33m── ` + label + ` exited (exit %s) ──\033[0m\n' "$ai_status"; else printf '\n\033[2;33m── ` + label + ` session ended ──\033[0m\n'; fi`,
 		// shellQuote, not inlining: the resume command can carry single quotes
 		// (the ultracode --settings JSON) that would break the printf format.
@@ -102,8 +114,12 @@ func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant,
 	}
 }
 
-func claudeLaunchFlags(claude EnvironmentClaudeConfig, tenant, environment string) string {
-	flags := claudeEffortFlags(resolveClaudeEffort(claude))
+func claudeLaunchFlags(claude EnvironmentClaudeConfig, tenant, environment, sessionID string) string {
+	effort := resolveClaudeEffort(claude)
+	flags := claudeSettingsFlag(effort, tenant, environment, sessionID)
+	if effort != claudeEffortUltracode {
+		flags += " --effort " + effort
+	}
 	if model := resolveClaudeLaunchModel(claude); model != "" {
 		flags += " --model " + model
 	}
@@ -164,15 +180,48 @@ func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig) string {
 	return ""
 }
 
-// claudeEffortFlags maps a resolved effort level to its launch flags. ultracode
-// launches as `--settings '{"ultracode":true}'`, single-quoted because the
-// guard is a sh one-liner in which nothing may interpolate.
-func claudeEffortFlags(effort string) string {
-	switch {
-	case effort == claudeEffortUltracode:
-		return ` --settings '{"ultracode":true}'`
-	case validClaudeEffort(effort):
-		return " --effort " + effort
+// claudeSettingsFlag builds the one `--settings` flag every managed claude
+// launch carries: the turn-boundary hooks that replace the output-volume
+// heuristic (see ai_session_status.go), plus `"ultracode":true` when the
+// resolved effort is ultracode (ultracode is not a `claude --effort` value;
+// this is the only way to enable it). Single JSON blob, single-quoted, because
+// the guard is a sh one-liner in which nothing may interpolate.
+func claudeSettingsFlag(effort, tenant, environment, sessionID string) string {
+	settings := claudeAISessionStatusHooks(tenant, environment, sessionID)
+	if effort == claudeEffortUltracode {
+		settings["ultracode"] = true
 	}
-	return ""
+	data, err := json.Marshal(settings)
+	if err != nil {
+		// settings is built entirely from strings, bools, and slices/maps of
+		// those — json.Marshal cannot fail on it.
+		return ""
+	}
+	return " --settings " + shellQuote(string(data))
+}
+
+// claudeAISessionStatusHooks wires Claude Code's own turn-boundary hooks to
+// AISessionStatusReportCommand, so the tool tells the pod what it is doing
+// instead of the pod guessing from output volume. UserPromptSubmit and
+// PreToolUse both report busy: a prompt starts a turn, and a tool call renews
+// the report for a long-running single call so it does not look idle by the
+// time the call returns. Stop is the turn ending. Notification is Claude Code
+// waiting on the operator — a permission prompt, or its own "still here?"
+// idle-on-input check — which is exactly the awaiting-input signal a
+// volume-only heuristic cannot produce.
+func claudeAISessionStatusHooks(tenant, environment, sessionID string) map[string]any {
+	busy := AISessionStatusReportCommand(tenant, environment, sessionID, AISessionStateBusy)
+	idle := AISessionStatusReportCommand(tenant, environment, sessionID, AISessionStateIdle)
+	awaitingInput := AISessionStatusReportCommand(tenant, environment, sessionID, AISessionStateAwaitingInput)
+	hookEntry := func(command string) []any {
+		return []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}}}
+	}
+	return map[string]any{
+		"hooks": map[string]any{
+			"UserPromptSubmit": hookEntry(busy),
+			"PreToolUse":       hookEntry(busy),
+			"Stop":             hookEntry(idle),
+			"Notification":     hookEntry(awaitingInput),
+		},
+	}
 }

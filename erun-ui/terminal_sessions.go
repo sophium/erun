@@ -1113,7 +1113,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		return false, fmt.Errorf("tenant and environment are required")
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
-		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment)
+		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment, "ai")
 		if launch == strings.TrimSpace(envConfig.AITool) {
 			return false, nil
 		}

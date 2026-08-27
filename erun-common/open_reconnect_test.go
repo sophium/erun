@@ -74,7 +74,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		// SIGWINCH redraws it.
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
 		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
-		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
+		normalized := normalizeClaudeSettingsFlagFor(t, script, "erun", "local", "ai")
+		assertScriptHas(t, normalized, `claude --continue --settings <HOOKS+ULTRACODE>`, "AI tab must launch the claude guard at the default effort (ultracode)")
 		// Claude's exit must surface to the user, not silently fall through to
 		// the shell.
 		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
