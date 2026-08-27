@@ -32,7 +32,7 @@ export const test = base.extend<{
   seededEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedEnvironment(SEED_TENANT, environment);
-    await waitForSeededRow(app, environment);
+    await waitForSeededRow(app, SEED_TENANT, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },
@@ -42,7 +42,7 @@ export const test = base.extend<{
   seededRuntimeEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedRuntimeEnvironment(SEED_TENANT, environment);
-    await waitForSeededRow(app, environment);
+    await waitForSeededRow(app, SEED_TENANT, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },
@@ -51,7 +51,7 @@ export const test = base.extend<{
   seededHostEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedHostEnvironment(SEED_TENANT, environment);
-    await waitForSeededRow(app, environment);
+    await waitForSeededRow(app, SEED_TENANT, environment);
     await use({ tenant: SEED_TENANT, environment });
     removeEnvironment(SEED_TENANT, environment);
   },
@@ -67,12 +67,19 @@ export const test = base.extend<{
 // snapshot taken *before* the config was written, and nothing re-triggers.
 // Re-driving the reload until the row appears converges on the observable
 // condition instead of betting on one round-trip winning the race — a genuinely
-// missing row still never converges, so the step still fails.
-async function waitForSeededRow(app: AppShell, environment: string): Promise<void> {
+// missing row still never converges, so the step still fails. Exported so any
+// spec that seeds its own env config directly (rather than through the
+// fixtures above) can key its wait to the same observable precondition
+// instead of a single fixed-timeout reload+waitFor.
+export async function waitForSeededRow(
+  app: AppShell,
+  tenant: string,
+  environment: string,
+): Promise<void> {
   await expect(async () => {
     await app.reloadEnvironments();
     await app.sidebar
-      .envRowButton(SEED_TENANT, environment)
+      .envRowButton(tenant, environment)
       .waitFor({ state: 'visible', timeout: 2_000 });
   }).toPass({ timeout: 30_000 });
 }
