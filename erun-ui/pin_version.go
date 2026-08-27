@@ -194,3 +194,46 @@ func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 	}
 	return versions.Tags, nil
 }
+
+// uiPinRepoCheckoutStatus answers, ahead of Preview/Apply, whether this
+// environment's erun references have a resolvable local checkout on this
+// machine. A sourceless runtime environment (no MountSource) has none of its
+// own, and the dialog needs to know before it offers a plan `erun pin` can
+// never resolve — rather than only discovering it once a Preview click fails.
+type uiPinRepoCheckoutStatus struct {
+	Resolvable bool   `json:"resolvable"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// PinRepoCheckoutStatus mirrors resolvePinProjectRoot's own decision
+// (erun-cli/cmd/pin.go) without running the CLI: an environment whose worktree
+// lives on this machine always has one; a remote-worktree environment
+// (remote-agent or runtime) needs a sibling environment of the same tenant
+// that does, since every environment of a tenant shares one repo.
+func (a *App) PinRepoCheckoutStatus(selection uiSelection) (uiPinRepoCheckoutStatus, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return uiPinRepoCheckoutStatus{}, fmt.Errorf("tenant and environment are required")
+	}
+	target, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiPinRepoCheckoutStatus{}, err
+	}
+	if !target.RemoteWorktree() {
+		return uiPinRepoCheckoutStatus{Resolvable: true}, nil
+	}
+	siblings, err := a.deps.store.ListEnvConfigs(selection.Tenant)
+	if err != nil {
+		return uiPinRepoCheckoutStatus{}, err
+	}
+	if _, ok := eruncommon.TenantLocalCheckoutRoot(siblings); ok {
+		return uiPinRepoCheckoutStatus{Resolvable: true}, nil
+	}
+	return uiPinRepoCheckoutStatus{
+		Resolvable: false,
+		Reason: fmt.Sprintf(
+			"%s/%s has no local checkout of its repo on this machine, and no other %s environment does either. "+
+				"Pin rewrites files in that checkout — check out the tenant repo somewhere on this machine, or run `erun pin` from a machine that already has it.",
+			selection.Tenant, selection.Environment, selection.Tenant),
+	}, nil
+}

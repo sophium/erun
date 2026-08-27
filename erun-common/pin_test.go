@@ -57,6 +57,15 @@ RUN apt-get update
 	write("terraform-acme/prod/prod.tfvars", `dns01_webhook_image = "ghcr.io/sophium/erun-dns01-webhook:1.0.102"
 broker_url          = "https://api.acme-prod.services.example.com/v1/dns01"
 `)
+	// The reported corruption: a variable's own description mentions an erun
+	// image reference only as documentation prose, with the reference wrapped in
+	// an HCL-escaped inner quote. This must not be read as a configured site.
+	write("terraform-acme/dev/variables.tf", `variable "dns01_webhook_image" {
+  description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Optional: left empty (the default), it resolves automatically."
+  type        = string
+  default     = ""
+}
+`)
 	// A vendored copy of a pulled chart: a build artifact of a pin, not a pin.
 	write("acme-api/charts/erun-backend-api/Chart.yaml", `apiVersion: v2
 name: erun-backend-api
@@ -120,6 +129,35 @@ func TestResolvePinPlanFindsAnErunImageReferenceInTerraformVariables(t *testing.
 	}
 	if found[0].Detail != "erun-dns01-webhook" || found[0].Current != "1.0.102" {
 		t.Fatalf("image reference = %+v, want erun-dns01-webhook at 1.0.102", found[0])
+	}
+}
+
+// The reported corruption (#1447): an erun image reference mentioned only as
+// an example inside a variable's description prose is not a configured site,
+// and must never be reported or rewritten — reporting it as changed on an
+// already-aligned tree contradicts the "aligned tree reports no changes"
+// contract, and rewriting it would eat the HCL escape backslash right before
+// it and break the surrounding string.
+func TestResolvePinPlanDoesNotTreatDescriptionProseAsAnImageReferenceSite(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	before := readPinFile(t, root, "terraform-acme/dev/variables.tf")
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", EnvConfig{Name: "dev"}, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Path == "terraform-acme/dev/variables.tf" {
+			t.Fatalf("a description-only mention must not be reported as a pin site: %+v", site)
+		}
+	}
+
+	if err := ApplyPinPlan(plan); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	after := readPinFile(t, root, "terraform-acme/dev/variables.tf")
+	if after != before {
+		t.Fatalf("description prose must stay byte-identical:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -225,6 +263,44 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 		if site.Kind == PinSiteImageReference {
 			t.Fatalf("erun-devops must not also surface as an image-reference site: %+v", site)
 		}
+	}
+}
+
+// The reported bug (#1437): frs/prod runs a tenant image
+// (ghcr.io/sophium/frs-devops) versioned on frs's own release line, not
+// erun's. Re-pinning it must leave runtimeversion alone — writing the erun
+// target there would name a tag frs's own line never publishes — while every
+// erun-owned reference in the repo still moves.
+func TestResolvePinPlanLeavesATenantImagedEnvsRuntimeVersionAlone(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "prod", RuntimeVersion: "1.0.76", RuntimeImage: "ghcr.io/sophium/frs-devops:1.0.76"}
+
+	plan, err := ResolvePinPlan(root, "frs", "prod", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeVersion {
+			t.Fatalf("a tenant-imaged env's runtimeversion must not be a pin site: %+v", site)
+		}
+	}
+	foundSkipNote := false
+	for _, note := range plan.Skipped {
+		if strings.Contains(note, "runtimeversion") && strings.Contains(note, "frs-devops") {
+			foundSkipNote = true
+		}
+	}
+	if !foundSkipNote {
+		t.Fatalf("expected a skipped note naming the tenant image, got %+v", plan.Skipped)
+	}
+
+	// The rest of the repo's erun-owned references still move.
+	byKind := map[PinSiteKind][]PinSite{}
+	for _, site := range plan.Sites {
+		byKind[site.Kind] = append(byKind[site.Kind], site)
+	}
+	if len(byKind[PinSiteTerraformRef]) != 1 || len(byKind[PinSiteHelmDependency]) != 1 {
+		t.Fatalf("erun-owned references must still be pinned, got %+v", plan.Sites)
 	}
 }
 

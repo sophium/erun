@@ -2,6 +2,17 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { UISelection } from '@/types';
 
+// PIN_LATEST_STABLE_TARGET is the Version select's "no explicit choice" option.
+// It has to be a real, non-empty value: Radix Select reads an empty SelectItem
+// value as invalid and treats '' as "nothing selected" (SelectField passes
+// `value || undefined` to the underlying Select), which is exactly why the
+// trigger rendered blank instead of "Latest stable". It is deliberately not a
+// version-shaped string, since the registry can publish a literal `latest`
+// tag (docker's own convention) and this must never collide with that.
+// pinVersionThunks maps it back to '' at the Go call boundary, where an empty
+// target has always meant "resolve the latest published stable release".
+export const PIN_LATEST_STABLE_TARGET = '__erun_pin_latest_stable__';
+
 // One erun version is recorded in several places — the Terraform refs, each
 // umbrella's erun chart dependencies, the build-env image tag, the environment's
 // own runtime version — and they only work when they agree. This dialog moves
@@ -39,13 +50,19 @@ export interface PinVersionState {
   applied: boolean;
   error: string;
   status: string;
+  // checkoutResolvable is optimistic (true) until the check comes back, so the
+  // dialog does not flash a blocking notice for the common case while it
+  // loads. checkoutReason explains a false result — a sourceless runtime
+  // environment with no known checkout of its repo on this machine.
+  checkoutResolvable: boolean;
+  checkoutReason: string;
 }
 
 const initialState: PinVersionState = {
   open: false,
   selection: null,
   available: [],
-  target: '',
+  target: PIN_LATEST_STABLE_TARGET,
   loadingVersions: false,
   previewing: false,
   applying: false,
@@ -53,6 +70,8 @@ const initialState: PinVersionState = {
   applied: false,
   error: '',
   status: '',
+  checkoutResolvable: true,
+  checkoutReason: '',
 };
 
 export const pinVersionSlice = createSlice({
@@ -112,6 +131,13 @@ export const pinVersionSlice = createSlice({
       state.applying = false;
       state.error = action.payload;
     },
+    setPinRepoCheckoutStatus(
+      state,
+      action: PayloadAction<{ resolvable: boolean; reason: string }>,
+    ) {
+      state.checkoutResolvable = action.payload.resolvable;
+      state.checkoutReason = action.payload.reason;
+    },
     closePinVersionDialog() {
       return initialState;
     },
@@ -127,6 +153,7 @@ export const {
   setPinApplying,
   setPinPlan,
   setPinError,
+  setPinRepoCheckoutStatus,
   closePinVersionDialog,
 } = pinVersionSlice.actions;
 export default pinVersionSlice.reducer;
