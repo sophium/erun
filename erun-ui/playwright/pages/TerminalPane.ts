@@ -96,6 +96,36 @@ export class TerminalPane {
     await this.emitOutput(sessionId, `\x1b[2J\x1b[H${text}`);
   }
 
+  // Moves the mouse over the start of the first rendered row without
+  // clicking -- xterm resolves a link provider (which can be asynchronous,
+  // e.g. one that calls the backend) on hover, before a click can activate
+  // it. Callers that need to wait for that resolution (a pointer-cursor
+  // decoration, or the backend call the resolution makes) do so between this
+  // and clickFirstRow.
+  async hoverFirstRow(): Promise<void> {
+    const box = await this.screen().boundingBox();
+    if (!box) {
+      throw new Error('terminal screen is not rendered');
+    }
+    await this.page.mouse.move(box.x + 4, box.y + 4);
+  }
+
+  // Clicks near the start of the first rendered row -- the way an operator
+  // clicks a link the session printed at the start of a freshly cleared
+  // screen (see printOnlyLine). A plain click, not a drag: xterm only
+  // activates a link on a click that does not also select text. Callers whose
+  // link resolves asynchronously should hoverFirstRow and wait for that to
+  // settle first (see hoverFirstRow); the move this performs on an
+  // already-hovered position is a no-op to xterm, so it is safe to call
+  // either on its own or after hoverFirstRow.
+  async clickFirstRow(): Promise<void> {
+    const box = await this.screen().boundingBox();
+    if (!box) {
+      throw new Error('terminal screen is not rendered');
+    }
+    await this.page.mouse.click(box.x + 4, box.y + 4);
+  }
+
   // Drags across the first rendered row, the way an operator selects a URL the
   // session printed.
   async selectFirstRow(): Promise<void> {

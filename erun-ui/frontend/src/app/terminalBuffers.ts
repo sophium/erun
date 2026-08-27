@@ -2,6 +2,60 @@ import type { TerminalWriteData } from './model';
 import type { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { cleanTerminalOutput } from './terminalStatus';
 
+// xterm keeps only this many lines of scrollback, so retaining or replaying
+// more than this budget is pure memory/parse cost xterm immediately
+// discards on write. TERMINAL_SCROLLBACK must match the `scrollback` option
+// TerminalController constructs the xterm instance with.
+export const TERMINAL_SCROLLBACK = 5000;
+// A little more than the scrollback (long lines wrap into several rows), but
+// never more than a hard byte ceiling so a sparse-newline stream can't blow
+// the cap. Both bound cost to O(scrollback), never O(total session history) --
+// this is also the hard memory bound on a single session's retained buffer
+// (documented at erun-docs/docs/desktop/overview.md).
+export const MAX_RETAINED_LINES = TERMINAL_SCROLLBACK * 2;
+export const MAX_RETAINED_BYTES = 2_000_000;
+
+// Exported so TerminalSessionRegistry can maintain a running per-session
+// line/byte total incrementally (O(1) per append) instead of re-summing the
+// whole retained array on every single output chunk -- see appendDisplayBuffer.
+export function countNewlines(chunk: TerminalWriteData): number {
+  let count = 0;
+  if (typeof chunk === 'string') {
+    for (const ch of chunk) {
+      if (ch === '\n') count++;
+    }
+    return count;
+  }
+  for (const byte of chunk) {
+    if (byte === 10) count++;
+  }
+  return count;
+}
+
+// trimChunksToBudget keeps only the tail of a chunk array worth keeping --
+// enough to fill xterm's scrollback, not the whole session history. Returns
+// the original array reference when nothing needs trimming. Used both to
+// bound retention as chunks are appended and (for a session with no snapshot
+// yet) to bound a cold-start replay.
+export function trimChunksToBudget(
+  chunks: TerminalWriteData[],
+  maxLines: number,
+  maxBytes: number,
+): TerminalWriteData[] {
+  let lines = 0;
+  let bytes = 0;
+  let start = 0;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    start = i;
+    const chunk = chunks[i];
+    if (chunk === undefined) continue;
+    lines += countNewlines(chunk);
+    bytes += chunk.length;
+    if (lines >= maxLines || bytes >= maxBytes) break;
+  }
+  return start === 0 ? chunks : chunks.slice(start);
+}
+
 export function failedTerminalOutput(
   sessions: TerminalSessionRegistry,
   sessionId: number,
@@ -12,22 +66,6 @@ export function failedTerminalOutput(
   const output =
     chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
   return cleanTerminalOutput(output) || fallback;
-}
-
-export function rebuildTerminalDisplayBuffer(
-  sessions: TerminalSessionRegistry,
-  sessionId: number,
-): void {
-  const chunks = sessions.sessionBuffer(sessionId);
-  const displayBuffer: TerminalWriteData[] = [];
-  for (const chunk of chunks) {
-    displayBuffer.push(filterTerminalDisplayData(chunk));
-  }
-  const finalState = bufferCursorVisibility(displayBuffer);
-  if (!finalState.altScreen && finalState.cursorHidden) {
-    displayBuffer.push(SHOW_CURSOR_SEQUENCE);
-  }
-  sessions.replaceDisplayBuffer(sessionId, displayBuffer);
 }
 
 // Strip terminal query *responses* that leak into the displayed output as
