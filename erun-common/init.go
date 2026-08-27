@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -251,8 +252,16 @@ type BootstrapInitDependencies struct {
 	RunRemoteCommand          RemoteCommandRunnerFunc
 	DeployHelmChart           HelmChartDeployerFunc
 	Sleep                     SleepFunc
-	Context                   Context
+	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
+	// to. Unset defaults to a real probe, so a caller that wires nothing still
+	// refuses an unreachable registry instead of writing config whose pushes
+	// fail later, far from the choice that caused it.
+	ProbeHostedRegistry HostedRegistryProbeFunc
+	Context             Context
 }
+
+// HostedRegistryProbeFunc reports the hosted registry's current availability.
+type HostedRegistryProbeFunc func(context.Context) HostedRegistryStatus
 
 type bootstrapRunner struct {
 	BootstrapInitDependencies
@@ -1571,6 +1580,12 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return "", nil
 	}
 	if params.ErunRegistry {
+		// Refuse rather than seed a registry nothing would receive the images
+		// pushed to it: the failure would otherwise surface at the first build,
+		// far from the flag that chose it.
+		if status := s.probeHostedRegistry(); !status.Available {
+			return "", status.Err()
+		}
 		return HostedRegistryReference(tenant), nil
 	}
 	if params.ContainerRegistry != "" {
@@ -1849,4 +1864,14 @@ func normalizeImagePullSecrets(names []string) []string {
 		normalized = append(normalized, name)
 	}
 	return normalized
+}
+
+// probeHostedRegistry runs the availability probe the hosted-registry choice is
+// gated on, defaulting to the real one when no dependency was injected.
+func (s bootstrapRunner) probeHostedRegistry() HostedRegistryStatus {
+	probe := s.ProbeHostedRegistry
+	if probe == nil {
+		probe = func(ctx context.Context) HostedRegistryStatus { return ProbeHostedRegistry(ctx, nil) }
+	}
+	return probe(context.Background())
 }
