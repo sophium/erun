@@ -148,9 +148,11 @@ func TestEndpointURL(t *testing.T) {
 var wantRegisteredTools = []string{
 	// Sorted. The four exec_* names joined the surface with #1186's rename;
 	// diff/raw/write/commit remain as deprecated aliases for one release.
-	// #1246 moved job's five query verbs to exec_job_* (job_* remain as
-	// deprecated aliases for one release) and added exec_agent; job_start is
-	// gone outright, split between exec_raw's wait:false mode and exec_agent.
+	// job's five query verbs moved to exec_job_* (job_* remain as deprecated
+	// aliases for one release) and exec_agent joined the surface; job_start's
+	// capability split between exec_raw's wait:false mode and exec_agent, so
+	// it keeps a registered stub that fails, naming both, rather than
+	// disappearing outright.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
@@ -160,7 +162,7 @@ var wantRegisteredTools = []string{
 	"exec_diff", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
-	"job_cancel", "job_output", "job_status", "list", "observe",
+	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
 	"platform_context_get", "platform_context_list", "platform_env_delete",
 	"platform_env_deploy", "platform_env_get", "platform_env_list",
@@ -227,6 +229,34 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
 	}
+
+	// job_start is registered (it appears in gotTools above) but has no
+	// working handler: the call must fail as a tool error naming its
+	// replacement, not as a protocol-level "unknown tool".
+	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "job_start",
+		Arguments: map[string]any{"command": []string{"echo", "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(job_start) failed at the protocol level: %v", err)
+	}
+	if !removed.IsError {
+		t.Fatalf("expected job_start to report a tool error, got: %+v", removed)
+	}
+	if got := removedToolText(t, removed); !strings.Contains(got, "exec_raw") || !strings.Contains(got, "exec_agent") {
+		t.Fatalf("job_start error should name both replacements, got: %q", got)
+	}
+}
+
+func removedToolText(t *testing.T, result *mcp.CallToolResult) string {
+	t.Helper()
+	var sb strings.Builder
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			sb.WriteString(text.Text)
+		}
+	}
+	return sb.String()
 }
 
 func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {

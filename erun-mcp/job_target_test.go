@@ -32,6 +32,16 @@ func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 
 	_, _, err = idleStopHistoryTool(runtime)(ctx, nil, IdleStopHistoryInput{Tenant: "tenant-b", Environment: "prod"})
 	assertRefusedForeignTarget(t, "idle_stop_history", err)
+
+	_, _, err = rawTool(runtime)(ctx, nil, RawInput{
+		Command: []string{"true"}, Wait: boolPtr(false), Tenant: "tenant-b", Environment: "prod",
+	})
+	assertRefusedForeignTarget(t, "exec_raw (wait:false)", err)
+
+	_, _, err = agentTool(runtime)(ctx, nil, AgentInput{
+		Agent: "claude", Prompt: "x", Tenant: "tenant-b", Environment: "prod",
+	})
+	assertRefusedForeignTarget(t, "exec_agent", err)
 }
 
 // assertRefusedForeignTarget insists the tool refused BECAUSE the target is not
@@ -61,5 +71,45 @@ func TestJobToolsAcceptTheirOwnScope(t *testing.T) {
 	}
 	if _, _, err := jobStatusTool(runtime)(ctx, nil, JobStatusInput{}); err != nil {
 		t.Errorf("job_status refused an omitted scope: %v", err)
+	}
+}
+
+// TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools
+// guards against exec_raw's wait:false path and exec_agent reading
+// runtime.Context.Tenant/Environment directly again, with no field a caller
+// could use to supply or restate them and no foreign-target refusal --
+// unlike every sibling job tool, which resolves through resolveLocalTarget.
+// Preview mode and a placeholder supervisor path (never exec'd, since preview
+// short-circuits before the process would start) let this exercise the same
+// resolution the live call makes without spawning anything.
+func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
+	runtime := normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name        string
+		tenant      string
+		environment string
+	}{
+		{"omitted", "", ""},
+		{"restated", "tenant-a", "dev"},
+	} {
+		t.Run("exec_raw/"+tc.name, func(t *testing.T) {
+			if _, _, err := rawTool(runtime)(ctx, nil, RawInput{
+				Command: []string{"true"}, Wait: boolPtr(false), Preview: true,
+				Tenant: tc.tenant, Environment: tc.environment,
+			}); err != nil {
+				t.Errorf("exec_raw (wait:false) refused %s scope: %v", tc.name, err)
+			}
+		})
+		t.Run("exec_agent/"+tc.name, func(t *testing.T) {
+			if _, _, err := agentTool(runtime)(ctx, nil, AgentInput{
+				Agent: "claude", Prompt: "x", Preview: true,
+				Tenant: tc.tenant, Environment: tc.environment,
+			}); err != nil {
+				t.Errorf("exec_agent refused %s scope: %v", tc.name, err)
+			}
+		})
 	}
 }
