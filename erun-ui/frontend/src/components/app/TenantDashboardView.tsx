@@ -16,6 +16,7 @@ import {
 } from '@/app/tenantDialogThunks';
 import type { UITenant } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
 import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
 import { TenantPlatformStateCard } from './TenantPlatformState';
@@ -155,7 +156,7 @@ function GenericLoadFailure({
 }): React.ReactElement {
   return (
     <div className="grid gap-3">
-      <DashboardMessage message={message} destructive />
+      <InlineAlert>{message}</InlineAlert>
       <Button
         type="button"
         variant="outline"

@@ -1,4 +1,4 @@
-import { Button, cn, Input, Label } from 'erun-kit';
+import { Button, cn, Input, Label, StatusBadge } from 'erun-kit';
 import { FolderOpen, Server, Stethoscope } from 'lucide-react';
 import * as React from 'react';
 
@@ -14,8 +14,11 @@ import {
 import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { selectionKey } from '@/app/versionSuggestions';
-import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
-import { relativeTimeFromNow } from '@/components/app/ManageDialog.helpers';
+import { CheckboxField, ReadonlyField } from '@/components/app/ManageDialog.fields';
+import {
+  relativeTimeFromNow,
+  workspaceSyncStatusTone,
+} from '@/components/app/ManageDialog.helpers';
 
 type ManageDialog = AppState['manageDialog'];
 
@@ -194,7 +197,7 @@ function WorkspaceSyncStatus({
       className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-[13px] leading-[1.35]"
       role={status === 'error' ? 'alert' : 'status'}
     >
-      <StatusBadge status={status} />
+      <StatusBadge tone={workspaceSyncStatusTone(status)} label={status.replace(/_/g, ' ')} />
       <span
         className={cn(
           'min-w-0 [overflow-wrap:anywhere]',

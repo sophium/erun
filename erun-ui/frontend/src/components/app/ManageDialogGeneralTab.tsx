@@ -15,8 +15,9 @@ import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesField';
 import { EnvironmentHealthSection } from '@/components/app/EnvironmentHealthSection';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
 import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
-import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
+import { ReadonlyField } from '@/components/app/ManageDialog.fields';
 import { PullCoordinatesFields } from '@/components/app/ManageDialogPullCoordinates';
 import {
   EnvironmentTypeValues,
@@ -326,7 +327,7 @@ function CloudContextField({
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="truncate">{context.kubernetesContext || context.name}</span>
-            <StatusBadge status={context.status} />
+            <CloudStatusBadge status={context.status} />
           </div>
           <div className="truncate text-xs text-muted-foreground">
             {[context.cloudProviderAlias, context.region, context.instanceType, context.instanceId]

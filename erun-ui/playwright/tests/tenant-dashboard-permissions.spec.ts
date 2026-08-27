@@ -145,6 +145,15 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       // hidden the way a missing permission is.
       await app.tenantDashboard.selectTab('Builds');
       await expect(app.tenantDashboard.activePanel()).toContainText('http 500');
+      // PanelBody's error branch used to render through a bespoke
+      // DashboardMessage <div> with no ARIA role at all, so a screen reader
+      // never announced it. It now renders through InlineAlert (role="alert"),
+      // queried here via the accessibility tree rather than an attribute match.
+      await expect(app.tenantDashboard.activePanel().getByRole('alert')).toContainText('http 500');
+      await page.screenshot({ path: 'test-results/dashboard-panel-error-alert-light.png' });
+      await app.titlebar.toggleTheme();
+      await page.screenshot({ path: 'test-results/dashboard-panel-error-alert-dark.png' });
+      await app.titlebar.toggleTheme();
 
       await app.tenantDashboard.selectTab('Audit log');
       await expect(app.tenantDashboard.auditRows()).toHaveCount(1);

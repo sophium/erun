@@ -7,8 +7,8 @@ import type {
   UITenantDashboardUser,
 } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
 import {
-  DashboardMessage,
   DataCell,
   DataTable,
   PanelBody,
@@ -139,7 +139,11 @@ function AuditEventsTable({ events }: { events: UITenantDashboardAudit[] }): Rea
 
 function APILogPanel({ log, error }: { log: string; error: string }): React.ReactElement {
   if (error) {
-    return <DashboardMessage message={error} destructive />;
+    return (
+      <div className="mt-4">
+        <InlineAlert>{error}</InlineAlert>
+      </div>
+    );
   }
   if (!log.trim()) {
     return (
