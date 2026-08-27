@@ -169,6 +169,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newTerraformCmd(d.configStore, common.FindProjectRoot),
 		newContributeCmd(common.GitCommandRunner),
 		newIdleCmd(d.configStore, d.resolveOpen),
+		newWhipCmd(d.configStore, d.resolveOpen),
 		deprecatedTopLevelJobCmd(d.resolveOpen),
 		newReleaseCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push),
 		newVersionCmd(func() (versionCommandInfo, error) {

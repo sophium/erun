@@ -1,0 +1,2 @@
+audit: erun whip --dry-run --tenant team
+whip: pass both --tenant and --environment to target one environment, or neither to whip everything configured
