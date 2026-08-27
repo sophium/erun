@@ -39,6 +39,45 @@ func refuseOpenForHostEnvironment(result common.OpenResult) error {
 	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
 }
 
+// resolveOpenTarget runs the resolution chain that must complete before a
+// runtime can be opened: flag validation, parameter resolution, the init
+// hand-off, the host-environment refusal, and persisting the local port range.
+// done reports that init already handled the request, so the caller returns
+// without opening anything.
+func resolveOpenTarget(
+	ctx common.Context,
+	args []string,
+	target common.OpenParams,
+	vscode bool,
+	intellij bool,
+	resolveOpen func(common.OpenParams) (common.OpenResult, error),
+	runInitForOpen func(common.Context, common.OpenParams) error,
+	saveEnvConfig func(string, common.EnvConfig) error,
+) (common.OpenResult, bool, error) {
+	if vscode && intellij {
+		return common.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
+	}
+	params, err := resolveOpenParams(args, target)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	if initRan {
+		return common.OpenResult{}, true, nil
+	}
+	if err := refuseOpenForHostEnvironment(result); err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	return result, false, nil
+}
+
 func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
@@ -75,26 +114,12 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
-			if vscode && intellij {
-				return fmt.Errorf("--vscode and --intellij cannot be used together")
-			}
-			params, err := resolveOpenParams(args, target)
+			result, done, err := resolveOpenTarget(ctx, args, target, vscode, intellij, resolveOpen, runInitForOpen, saveEnvConfig)
 			if err != nil {
 				return err
 			}
-			result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
-			if err != nil {
-				return err
-			}
-			if initRan {
+			if done {
 				return nil
-			}
-			if err := refuseOpenForHostEnvironment(result); err != nil {
-				return err
-			}
-			result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
-			if err != nil {
-				return err
 			}
 			allowLocalBuilds := result.EnvConfig.BuildsHere()
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
