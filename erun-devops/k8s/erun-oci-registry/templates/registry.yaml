@@ -122,15 +122,23 @@ spec:
           ports:
             - containerPort: 5000
               name: registry
+          # tcpSocket, not httpGet. This registry delegates every request to the
+          # bearer token service, so an unauthenticated GET /v2/ answers 401 by
+          # design — and kubelet counts only 2xx/3xx as success. An HTTP probe
+          # here therefore asserts the opposite of correct behaviour: the better
+          # the registry is configured, the more certainly it never goes ready,
+          # and the startup probe eventually kills a container that is working.
+          # Nothing on the pod answers 2xx unauthenticated (/v2/ and
+          # /v2/_catalog are 401, /metrics is 404), so there is no path to point
+          # an HTTP probe at either. Readiness for a component whose
+          # authorization lives elsewhere is "the port serves".
           readinessProbe:
-            httpGet:
-              path: /v2/
+            tcpSocket:
               port: registry
             periodSeconds: 5
             timeoutSeconds: 2
           startupProbe:
-            httpGet:
-              path: /v2/
+            tcpSocket:
               port: registry
             periodSeconds: 2
             timeoutSeconds: 2

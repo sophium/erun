@@ -102,4 +102,17 @@ printf '%s\n' "$(document "${overridden}" Deployment)" | grep -q 'image: ghcr.io
 printf '%s\n' "${service}" | grep -q 'port: 5000' || fail "the Service must expose port 5000"
 printf '%s\n' "${service}" | grep -q 'targetPort: registry' || fail "the Service must target the named registry port"
 
+# --- 9. No probe asserts a status this registry must never return ---
+# An unauthenticated GET /v2/ is 401 here by design — that is the bearer
+# challenge the whole auth model rests on — and kubelet counts only 2xx/3xx as
+# success. An httpGet probe therefore inverts the contract: the better the auth
+# is configured, the more certainly the pod never goes ready and its own startup
+# probe kills a container that is working. Nothing on the pod answers 2xx
+# unauthenticated, so there is no path to aim one at.
+if printf '%s\n' "${deployment}" | grep -q 'httpGet:'; then
+    fail "no probe may use httpGet: an unauthenticated GET against this registry is 401 by design, which kubelet treats as a failed probe"
+fi
+printf '%s\n' "${deployment}" | grep -q 'tcpSocket:' ||
+    fail "the container must be probed on its port: readiness for a registry whose authorization is delegated is that the port serves"
+
 echo "OK: erun-oci-registry chart"
