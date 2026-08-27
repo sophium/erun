@@ -201,7 +201,11 @@ not want from a lifecycle change.
 
 ## The database reset
 
-A deploy that includes the `erun-backend-postgres` component **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when the version is unchanged and `deploy` would otherwise skip that chart's helm step (the dry-run trace names the decision). Reserve the postgres component for agent and throwaway envs; runtime envs that must keep their data should not include it.
+A deploy that includes the `erun-backend-postgres` component resets the environment's Postgres database **only when the version being installed is a snapshot** (its version string contains `-snapshot-`). A released version never resets, no matter how many times you redeploy it or which components you include — a snapshot environment's data is disposable by convention, a released one's is not. The dry-run trace names the decision either way (`--set api.postgres.reset=true`/`false` on the postgres chart's helm call).
+
+The reset itself runs as a Helm hook Job, once per deploy of the postgres chart — it is not a step inside the running Postgres pod, so an unplanned pod restart (a crash, an eviction, a node reboot, a `rollout restart`) never re-triggers it, only a deploy does. If a database somehow loses its schema outside of a deploy, `erun-backend-db`'s own repair CronJob re-applies migrations on a short interval so it does not stay schema-less waiting for someone to redeploy.
+
+Reserve snapshot versions for agent and throwaway envs; runtime envs that must keep their data should always deploy a released version.
 
 On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open`, `deploy --current`, or `upgrade` reuses them.
 
