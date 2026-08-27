@@ -1,4 +1,4 @@
-import { Button, cn, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
 import { X } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import * as React from 'react';
@@ -14,6 +14,7 @@ import {
   activityTargetLabel,
   isHistoryStatus,
 } from '@/components/app/ActivityQueueDrawer.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 interface ActivityQueueDrawerProps {
   open: boolean;
@@ -235,34 +236,43 @@ function RecoveryFeedback({
   result: ActivityRecoveryResult;
   onDismiss: () => void;
 }): React.ReactElement {
+  const header = (
+    <div className="flex w-full items-start justify-between gap-2">
+      <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Dismiss recovery message"
+        onClick={onDismiss}
+      >
+        <X aria-hidden="true" className="size-3.5" />
+      </Button>
+    </div>
+  );
+  const output = result.output && (
+    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-background/40 p-2 font-mono text-[10.5px] text-foreground">
+      {result.output}
+    </pre>
+  );
+  if (!result.ok) {
+    return (
+      <InlineAlert>
+        <div className="grid w-full gap-1 text-xs">
+          {header}
+          {result.error && <p className="break-words font-mono text-[10.5px]">{result.error}</p>}
+          {output}
+        </div>
+      </InlineAlert>
+    );
+  }
   return (
     <section
       role="status"
-      className={cn(
-        'rounded-md border px-3 py-2 text-xs',
-        result.ok
-          ? 'border-green-600/35 bg-green-600/10 text-foreground'
-          : 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive',
-      )}
+      className="rounded-md border border-green-600/35 bg-green-600/10 px-3 py-2 text-xs text-foreground"
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Dismiss recovery message"
-          onClick={onDismiss}
-        >
-          <X aria-hidden="true" className="size-3.5" />
-        </Button>
-      </div>
-      {result.error && <p className="mt-1 break-words font-mono text-[10.5px]">{result.error}</p>}
-      {result.output && (
-        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-background/40 p-2 font-mono text-[10.5px] text-foreground">
-          {result.output}
-        </pre>
-      )}
+      {header}
+      {output}
     </section>
   );
 }

@@ -8,6 +8,7 @@ import {
   relativeDashboardDate,
   tenantDashboardPanel,
 } from '@/app/tenantDashboardPanels';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 export type TenantDashboardData = AppState['tenantDashboard']['data'];
 
@@ -40,7 +41,11 @@ export function PanelBody({
     );
   }
   if (panel?.error) {
-    return <DashboardMessage message={panel.error} destructive />;
+    return (
+      <div className="mt-4">
+        <InlineAlert>{panel.error}</InlineAlert>
+      </div>
+    );
   }
   if (!children) {
     return <div className="mt-4">{empty}</div>;
@@ -48,21 +53,20 @@ export function PanelBody({
   return <>{children}</>;
 }
 
-// DashboardMessage carries a status line or a failure for one dashboard surface.
-// It is deliberately not input-shaped: an empty panel uses EmptyState instead,
-// so nothing reads as a disabled field.
+// DashboardMessage is the one case an inline dashboard message isn't a
+// failure or a permission state: a transient loading line. Failures route
+// through InlineAlert instead (see PanelBody and GenericLoadFailure).
 export function DashboardMessage({
   message,
   icon,
-  destructive,
 }: {
   message: string;
   icon?: React.ReactElement;
-  destructive?: boolean;
 }): React.ReactElement {
   return (
     <div
-      className={`mt-4 flex items-center gap-2 rounded-[var(--radius)] border px-3 py-2.5 text-sm ${destructive ? 'border-destructive/35 text-destructive' : 'border-border text-muted-foreground'}`}
+      role="status"
+      className="mt-4 flex items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-2.5 text-sm text-muted-foreground"
     >
       {icon}
       <span>{message}</span>
