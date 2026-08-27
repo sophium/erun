@@ -504,17 +504,29 @@ type uiPortStatus struct {
 }
 
 // uiExposureList is the Ports tab's read model for an environment's public
-// exposures. Configured is false when the project has no platform block at
-// all, which the tab renders as "not applicable" rather than an empty list —
+// exposures. Configured is false when exposure cannot apply here at all,
+// which the tab renders as "not applicable" rather than an empty list —
 // distinct from Restricted (the caller cannot see the answer) and from a
 // genuinely empty Services list (configured, nothing exposed yet). Error
 // carries a listing failure that is neither of those two named cases.
+// NotConfiguredReason names which of two distinct causes made Configured
+// false, since they call for different copy and different recovery: a host
+// environment has no cluster and can never be exposed, while a cluster-backed
+// environment whose project simply hasn't declared a platform: block yet is
+// the fixable case.
 type uiExposureList struct {
-	Configured bool               `json:"configured"`
-	Restricted bool               `json:"restricted"`
-	Error      string             `json:"error,omitempty"`
-	Services   []uiExposedService `json:"services"`
+	Configured          bool               `json:"configured"`
+	Restricted          bool               `json:"restricted"`
+	Error               string             `json:"error,omitempty"`
+	Services            []uiExposedService `json:"services"`
+	NotConfiguredReason string             `json:"notConfiguredReason,omitempty"`
 }
+
+// uiExposureNotConfiguredReason enumerates uiExposureList.NotConfiguredReason values.
+const (
+	uiExposureNotConfiguredHostEnvironment = "host-environment"
+	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
+)
 
 // uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
 type uiExposedService struct {

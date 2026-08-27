@@ -6,7 +6,18 @@ export interface UIExposureList {
   restricted: boolean;
   error?: string;
   services: UIExposedService[];
+  // notConfiguredReason distinguishes the two reasons configured can be
+  // false, which call for different copy and different recovery: a host
+  // environment has no cluster and can never be exposed
+  // ("host-environment"), while a cluster-backed environment whose project
+  // has no platform: block yet just hasn't been set up for it
+  // ("no-platform-block", the fixable case). Empty when configured is true.
+  // Bare string to match the Wails binding, which widens the Go string
+  // constant; narrow against UIExposureNotConfiguredReason at the read site.
+  notConfiguredReason?: string;
 }
+
+export type UIExposureNotConfiguredReason = 'host-environment' | 'no-platform-block';
 
 export interface UIExposedService {
   service: string;
