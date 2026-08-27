@@ -12,10 +12,12 @@ Loaded tenant configuration
 Loading environment configuration
 kubectl --context test-context get namespace team-dev -o name
 deploy: namespace team-dev is created if the check above reports it missing
+init: --erun-registry resolves to registry.erunpaas.com/team; the real run probes registry.erunpaas.com and refuses the choice if it is not reachable
 Adding new environment
 mkdir -p <TMP>
 write-yaml <TMP>
 ==> Initializing team/dev
+init: --erun-registry resolves to registry.erunpaas.com/team; the real run probes registry.erunpaas.com and refuses the choice if it is not reachable
 deploy: runtime chart team-devops <VERSION> not found in registry.erunpaas.com/team (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in registry.erunpaas.com/team (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.erunpaas.com/team/charts/erun-devops version <VERSION>

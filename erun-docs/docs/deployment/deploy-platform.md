@@ -120,10 +120,14 @@ Three things are yours to supply; the chart does the rest.
 --set-string registry.tokenRealm=https://api.<base-domain>/v2/token
 ```
 
-**2. The signing-key Secret.** The registry trusts exactly the public half of the erun API's own registry-signing key (the same key that also signs mcp-token and dns01-token — distinct audiences, one key). Copy that key out of the API's signing-key Secret and into a Secret named for the registry, once, in the platform env's namespace:
+**2. The signing-key Secret.** The registry trusts exactly the public half of the erun API's own registry-signing key (the same key that also signs mcp-token and dns01-token — distinct audiences, one key). Create it once, in the platform env's namespace.
+
+The API's Secret holds only the **private** key, under `signing.key` — there is
+no `public.pem` in it to copy — so derive the public half on the way across:
 
 ```bash
-kubectl -n <tenant>-prod get secret <tenant>-api-mcp-signing-key -o jsonpath='{.data.public\.pem}' | base64 -d \
+kubectl -n <tenant>-prod get secret <tenant>-api-mcp-signing -o jsonpath='{.data.signing\.key}' | base64 -d \
+  | openssl pkey -pubout \
   | kubectl -n <tenant>-prod create secret generic <tenant>-oci-registry-signing-key --from-file=public.pem=/dev/stdin
 ```
 
