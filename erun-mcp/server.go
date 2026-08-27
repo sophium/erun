@@ -182,6 +182,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	reg := toolRegistrar{server: server, identity: identity, metrics: metrics}
 	registerReadModelTools(reg, info, runtime)
 	registerIdleStopTools(reg, runtime)
+	registerWhipTools(reg, runtime)
 	registerJobTools(reg, runtime)
 	registerCloudTools(reg, runtime)
 	registerContextTools(reg, runtime)

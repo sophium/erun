@@ -116,6 +116,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"idle_stop_history":             {Family: "idle", CLIPath: nil, Title: "List recorded auto-stop decisions", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"idle_stop_record":              {Family: "idle", CLIPath: nil, Title: "Record an auto-stop decision", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"idle_stop_cancel":              {Family: "idle", CLIPath: nil, Title: "Cancel a pending auto-stop", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
+	"whip":                          {Family: "whip", CLIPath: []string{"whip"}, Title: "Push this environment's own AI session with the pacing nudge, on demand", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
 	"activity_lease_list":           {Family: "activity", CLIPath: nil, Title: "List activity leases held on an environment", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"activity_lease_take":           {Family: "activity", CLIPath: nil, Title: "Take an activity lease, deferring auto-stop", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
 	"activity_lease_release":        {Family: "activity", CLIPath: nil, Title: "Release an activity lease", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
