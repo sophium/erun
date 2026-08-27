@@ -7,6 +7,15 @@
 {{- if hasKey .Values "mcpEnabled" -}}
   {{- $mcpEnabled = toString .Values.mcpEnabled -}}
 {{- end -}}
+{{- /* The Prometheus exposition listener (erun-docs/docs/agent-reference/
+       metrics-spec.md). On by default, same hasKey resolution as mcpEnabled
+       above; the NetworkPolicy below is what actually restricts who can reach
+       it, since the port itself carries no authentication. */ -}}
+{{- $metricsPort := default 9100 .Values.metricsPort -}}
+{{- $metricsEnabled := "true" -}}
+{{- if hasKey .Values "metricsEnabled" -}}
+  {{- $metricsEnabled = toString .Values.metricsEnabled -}}
+{{- end -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
 {{- /*
 worktreeStorage selects how the runtime pod sources its worktree.
@@ -707,6 +716,10 @@ spec:
               value: {{ $mcpPort | quote }}
             - name: ERUN_MCP_ENABLED
               value: {{ $mcpEnabled | quote }}
+            - name: ERUN_METRICS_PORT
+              value: {{ $metricsPort | quote }}
+            - name: ERUN_METRICS_ENABLED
+              value: {{ $metricsEnabled | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
             - name: ERUN_IDLE_TIMEOUT
@@ -739,6 +752,10 @@ spec:
             {{- if eq $mcpEnabled "true" }}
             - containerPort: {{ $mcpPort }}
               name: mcp
+            {{- end }}
+            {{- if eq $metricsEnabled "true" }}
+            - containerPort: {{ $metricsPort }}
+              name: metrics
             {{- end }}
           resources:
             limits:
@@ -908,4 +925,50 @@ spec:
     - name: mcp
       port: 80
       targetPort: mcp
+{{- end }}
+{{- if eq $metricsEnabled "true" }}
+---
+# Restricts the Prometheus exposition listener (metrics-spec.md) added for
+# erun_idle_eligibility/erun_terminal_input_seconds_since_last/
+# erun_traffic_window_bytes/erun_mcp_calls_total/erun_audit_events_total: the
+# listener carries no authentication of its own (matching Prometheus scrape
+# convention), and every series it exposes is labelled by tenant+environment,
+# so leaving it reachable from every namespace would let any other tenant's
+# pod on the cluster read this one's idle/audit/MCP-call activity. Selecting
+# this pod with a NetworkPolicy makes every other port on it default-deny
+# unless a rule says otherwise, so the ssh/mcp rules below exist purely to
+# preserve their current unrestricted reachability (no NetworkPolicy governed
+# them before this one existed) -- only the new metrics port is actually
+# restricted. A cluster Prometheus living outside this namespace needs its own
+# namespace labelled network-policy/erun-metrics-scraper=true to reach it;
+# same-namespace traffic (e.g. `erun open` + a manual curl) is always allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-metrics
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: {{ $sshPort }}
+          protocol: TCP
+    {{- if eq $mcpEnabled "true" }}
+    - ports:
+        - port: {{ $mcpPort }}
+          protocol: TCP
+    {{- end }}
+    - ports:
+        - port: {{ $metricsPort }}
+          protocol: TCP
+      from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              network-policy/erun-metrics-scraper: "true"
 {{- end }}

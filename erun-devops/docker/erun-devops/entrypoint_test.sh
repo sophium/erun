@@ -91,14 +91,14 @@ prepare_run enabled
 start_run true devops
 wait_for '[ -s "${run_dir}/emcp-argv" ]' || fail "the devops path should start emcp when the edge is enabled"
 argv=$(head -n 1 "${run_dir}/emcp-argv")
-for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
+for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--metrics-host 0.0.0.0" "--metrics-port 9100" "--metrics-enabled true" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
     case "${argv}" in
         *"${flag}"*) ;;
         *) fail "emcp argv is missing '${flag}': ${argv}" ;;
     esac
 done
-grep -q 'starting erun MCP on 0.0.0.0:17000/mcp' "${log}" ||
-    fail "the edge start should be logged"
+grep -q 'starting erun MCP on 0.0.0.0:17000/mcp, metrics on 0.0.0.0:9100 (enabled=true)' "${log}" ||
+    fail "the edge start and metrics listener should be logged"
 
 # --- 2. Supervised: killing the server restarts it and logs the restart ---
 first_pid=$(head -n 1 "${run_dir}/emcp-pids")

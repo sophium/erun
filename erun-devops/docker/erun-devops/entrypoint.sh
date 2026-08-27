@@ -1059,6 +1059,9 @@ exec_runtime_mcp() {
         --host "${ERUN_MCP_HOST:-0.0.0.0}" \
         --port "${ERUN_MCP_PORT:-17000}" \
         --path "${ERUN_MCP_PATH:-/mcp}" \
+        --metrics-host "${ERUN_METRICS_HOST:-0.0.0.0}" \
+        --metrics-port "${ERUN_METRICS_PORT:-9100}" \
+        --metrics-enabled "${ERUN_METRICS_ENABLED:-true}" \
         --tenant "${ERUN_TENANT:-}" \
         --environment "${ERUN_ENVIRONMENT:-}" \
         --repo-path "$(runtime_repo_dir)" \
@@ -1069,7 +1072,7 @@ exec_runtime_mcp() {
         set -- "$@" --namespace "${namespace}"
     fi
 
-    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}, metrics on ${ERUN_METRICS_HOST:-0.0.0.0}:${ERUN_METRICS_PORT:-9100} (enabled=${ERUN_METRICS_ENABLED:-true})"
     exec "$@"
 }
 

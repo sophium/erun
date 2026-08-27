@@ -304,7 +304,7 @@ WORKDIR /home/erun
 
 USER erun
 
-EXPOSE 17000 17033 17022
+EXPOSE 17000 17033 17022 9100
 
 # Run PID 1 under tini so orphaned children are reaped. The entrypoint daemonises
 # sshd, whose per-connection session children reparent to PID 1 when they finish;

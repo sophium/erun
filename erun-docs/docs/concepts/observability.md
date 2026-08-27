@@ -65,6 +65,8 @@ For the full schema and the expiry / liveness rules, see [Agent reference · Idl
 
 ERun's runtime pod exposes a single Prometheus-format metrics endpoint on port `9100`. The series cover idle-eligibility, terminal-input freshness, the network-traffic window, MCP tool-call counts, and audit-event counts — labelled by tenant + environment.
 
+The endpoint carries no authentication, so reachability is scoped by a `NetworkPolicy` instead: always open within the env's own namespace, and open to another namespace only once that namespace is labelled `network-policy/erun-metrics-scraper=true` — label your cluster's Prometheus namespace once (`kubectl label namespace <prometheus-namespace> network-policy/erun-metrics-scraper=true`) to let it scrape every env.
+
 For the full schema (every metric name, every label, type, source, cardinality envelope), see [Agent reference · Metrics spec](/agent-reference/metrics-spec).
 
 Application services use the metrics conventions of their own framework. ERun has no opinion — scrape with the cluster's normal Prometheus setup.
