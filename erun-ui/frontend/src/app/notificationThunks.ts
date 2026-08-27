@@ -38,6 +38,15 @@ export const showTerminalMessage =
     dispatch(setRetrySelection(null));
   };
 
+// showTerminalFailure's copyOutput is taken exactly as given: empty means the
+// caller has no captured command output to offer, and the titlebar renders
+// no Copy action for it. A bare validation/precondition message — "tenant is
+// required" and its kin — already says everything there is to say once it
+// names the operation and the recovery, so re-copying that same sentence as
+// fake "output" earns the operator nothing (root AGENTS.md "Smooth,
+// Seamless, No Dead Ends" — an affordance that does nothing is worse than no
+// affordance). A caller that genuinely captured command output (a failed IDE
+// launch, a delete's namespace-cleanup warning) passes it explicitly.
 export const showTerminalFailure =
   (
     message: string,
@@ -56,11 +65,7 @@ export const showTerminalFailure =
         actionKind: action,
       }),
     );
-    // Some errors (e.g. AWS API strings) arrive with no terminal output; copy
-    // the message itself so the operator can paste the full error — which the
-    // titlebar pill truncates — into a bug report. Nielsen #9 (recovery from errors).
-    const effectiveCopy = copyOutput || joinMessageForCopy(message, detail);
-    dispatch(setTerminalCopyOutput(effectiveCopy));
+    dispatch(setTerminalCopyOutput(copyOutput));
     dispatch(setTerminalCopyStatus(''));
     dispatch(setRetrySelection(action === 'wait-longer' ? retrySelection : null));
   };
@@ -72,28 +77,13 @@ export const showTerminalFailure =
 // neutral grey pill — polite aria-live, no role="alert", and no Copy action
 // (the terminal copy buffer only gets set by showTerminalFailure). This
 // wraps showTerminalFailure with the defaults that shape needs: no detail
-// beyond the message, the message itself as the copyable text, and no retry
-// action.
+// beyond the message, no captured output to copy (the message is already
+// fully visible in the pill/popover), and no retry action.
 export const showTerminalError =
   (message: string): AppThunk =>
   (dispatch) => {
-    dispatch(showTerminalFailure(message, '', message, '', null));
+    dispatch(showTerminalFailure(message, '', '', '', null));
   };
-
-function joinMessageForCopy(message: string, detail: string): string {
-  const trimmedMessage = message.trim();
-  const trimmedDetail = detail.trim();
-  if (!trimmedMessage && !trimmedDetail) {
-    return '';
-  }
-  if (!trimmedDetail) {
-    return trimmedMessage;
-  }
-  if (!trimmedMessage) {
-    return trimmedDetail;
-  }
-  return `${trimmedMessage}. ${trimmedDetail}`;
-}
 
 export const hideTerminalMessage = (): AppThunk => (dispatch) => {
   dispatch(clearTerminalStatus());

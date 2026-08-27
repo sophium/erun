@@ -7,7 +7,7 @@ Current Directory:
   path: none
   repo: none
   configured tenant: none
-  effective target: unavailable (default tenant is not configured)
+  effective target: unavailable (default tenant is not configured, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default)
 Cloud Providers:
   none
 Tenants:

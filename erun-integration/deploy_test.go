@@ -304,13 +304,40 @@ func TestDeploy(t *testing.T) {
 	t.Run("dry_run_unresolvable_scope_failure_omits_env_pair", func(t *testing.T) {
 		// The other arm of the same header: with no tenant configured at all
 		// there is no env to name, so the header drops the tenant/environment
-		// pair entirely instead of falling back to a bare separator.
+		// pair entirely instead of falling back to a bare separator. Also locks
+		// resolveOpenTenant's inference-permitted-but-unresolved error: it must
+		// name open, not just repeat "default tenant is not configured", and
+		// state the recovery.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit with no tenant configured, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_unresolvable_scope_failure_omits_env_pair", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_default_environment_not_configured_names_open_and_recovery", func(t *testing.T) {
+		// Sibling of the scenario above for resolveOpenEnvironment: a tenant
+		// resolves (from the configured default), but that tenant has no
+		// default environment, so the error must name the tenant and open's
+		// recovery instead of repeating the bare "default environment is not
+		// configured".
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		if err := os.MkdirAll(filepath.Join(root, "team"), 0o755); err != nil {
+			t.Fatalf("mkdir tenant config dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("write root config: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "team", "config.yaml"), []byte("name: team\n"), 0o644); err != nil {
+			t.Fatalf("write tenant config: %v", err)
+		}
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no default environment configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_default_environment_not_configured_names_open_and_recovery", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {

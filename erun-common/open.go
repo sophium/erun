@@ -27,6 +27,15 @@ var (
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
 	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
 	ErrShellSessionTakenOver           = errors.New("remote session was re-attached in another ERun window")
+	// ErrOpenTenantNotProvided is open's tenant-resolution failure for a call
+	// path that is not allowed to infer one (UseDefaultTenant is false) —
+	// distinct from ErrDefaultTenantNotConfigured, where inference was
+	// permitted but resolved to nothing, because the two have different
+	// recoveries (root AGENTS.md "Distinguish causes before writing copy").
+	ErrOpenTenantNotProvided = errors.New("no tenant given for open")
+	// ErrOpenEnvironmentNotProvided mirrors ErrOpenTenantNotProvided for the
+	// environment half of open's target resolution.
+	ErrOpenEnvironmentNotProvided = errors.New("no environment given for open")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -349,10 +358,17 @@ func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, param
 		}
 	}
 	if tenant == "" && params.UseDefaultTenant {
-		return loadOpenDefaultTenant(store)
+		resolved, err := loadOpenDefaultTenant(store)
+		if err != nil {
+			if errors.Is(err, ErrDefaultTenantNotConfigured) {
+				return "", fmt.Errorf("%w, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default", err)
+			}
+			return "", err
+		}
+		return resolved, nil
 	}
 	if tenant == "" {
-		return "", fmt.Errorf("tenant is required")
+		return "", fmt.Errorf("%w: this call path does not fall back to the working directory or a configured default tenant — pass a tenant explicitly", ErrOpenTenantNotProvided)
 	}
 	return tenant, nil
 }
@@ -376,11 +392,11 @@ func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (strin
 	if environment == "" && params.UseDefaultEnvironment {
 		environment = tenantConfig.DefaultEnvironment
 		if environment == "" {
-			return "", ErrDefaultEnvironmentNotConfigured
+			return "", fmt.Errorf("%w for %s, and open has no environment to fall back to — pass an environment explicitly, or run `erun init --tenant %s --environment <name>` to set one", ErrDefaultEnvironmentNotConfigured, tenantConfig.Name, tenantConfig.Name)
 		}
 	}
 	if environment == "" {
-		return "", fmt.Errorf("environment is required")
+		return "", fmt.Errorf("%w: this call path does not fall back to %s's default environment — pass an environment explicitly", ErrOpenEnvironmentNotProvided, tenantConfig.Name)
 	}
 	return environment, nil
 }
