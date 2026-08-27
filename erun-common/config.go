@@ -84,15 +84,35 @@ const (
 	EnvironmentTypeLocalAgent  EnvironmentType = "local-agent"
 	EnvironmentTypeRemoteAgent EnvironmentType = "remote-agent"
 	EnvironmentTypeRuntime     EnvironmentType = "runtime"
+	// EnvironmentTypeHost is a worktree on the operator's own machine with no
+	// pod and no cluster at all — for work a pod cannot do (desktop app builds
+	// needing a GUI toolchain, tasks needing host-wide credentials such as a
+	// keychain or a code-signing identity). Unlike EnvironmentTypeLocalAgent,
+	// which is the same kind of host directory but hostPath-mounted into a pod
+	// that runs its agent, a host env has no pod to mount it into.
+	EnvironmentTypeHost EnvironmentType = "host"
 )
 
-// IsValid reports whether the value is one of the three canonical types.
-// Empty is not valid; callers wanting "unset" should test against the zero
-// value separately and then resolve via EnvConfig.ResolvedType.
+// validEnvironmentTypes is the canonical, exhaustive list of environment
+// types. IsValid and the completeness test in config_test.go both walk this
+// slice, so a fifth type added here without an explicit case in every
+// exclusion-shaped predicate fails that test rather than silently falling
+// into whichever branch nobody updated.
+var validEnvironmentTypes = []EnvironmentType{
+	EnvironmentTypeLocalAgent,
+	EnvironmentTypeRemoteAgent,
+	EnvironmentTypeRuntime,
+	EnvironmentTypeHost,
+}
+
+// IsValid reports whether the value is one of the canonical types. Empty is
+// not valid; callers wanting "unset" should test against the zero value
+// separately and then resolve via EnvConfig.ResolvedType.
 func (t EnvironmentType) IsValid() bool {
-	switch t {
-	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
-		return true
+	for _, valid := range validEnvironmentTypes {
+		if t == valid {
+			return true
+		}
 	}
 	return false
 }
@@ -248,19 +268,54 @@ func (c EnvConfig) ResolvedType() EnvironmentType {
 	return ""
 }
 
-// BuildsHere reports whether builds happen inside this env (local-agent and
-// remote-agent build here; runtime envs only receive deploys). An env whose
-// type is unresolved is treated as not building here.
+// BuildsHere reports whether builds happen inside this env (local-agent,
+// remote-agent, and host build here; runtime envs only receive deploys). An
+// env whose type is unresolved is treated as not building here. Every valid
+// type has an explicit case — see validEnvironmentTypes — so a type added
+// without updating this switch panics instead of silently taking a default.
 func (c EnvConfig) BuildsHere() bool {
-	return c.Type.IsValid() && c.Type != EnvironmentTypeRuntime
+	if !c.Type.IsValid() {
+		return false
+	}
+	switch c.Type {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
+		return true
+	case EnvironmentTypeRuntime:
+		return false
+	default:
+		panic(fmt.Sprintf("BuildsHere: unhandled EnvironmentType %q", c.Type))
+	}
 }
 
 // RemoteWorktree reports whether the worktree lives outside the local
-// machine (PVC for remote-agent, none for runtime). Local-agent mounts the
-// worktree from the local filesystem via hostPath. An env whose type is
-// unresolved is treated as not having a remote worktree.
+// machine (PVC for remote-agent, none for runtime). Local-agent and host both
+// mount/use the local filesystem directly — the only difference between them
+// is whether a pod exists at all. An env whose type is unresolved is treated
+// as not having a remote worktree. Every valid type has an explicit case —
+// see validEnvironmentTypes — so a type added without updating this switch
+// panics instead of silently taking a default.
 func (c EnvConfig) RemoteWorktree() bool {
-	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+	if !c.Type.IsValid() {
+		return false
+	}
+	switch c.Type {
+	case EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	case EnvironmentTypeLocalAgent, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("RemoteWorktree: unhandled EnvironmentType %q", c.Type))
+	}
+}
+
+// HasPod reports whether this env has a runtime pod at all. Every type but
+// host does; host is the one type with no pod and no cluster contact of any
+// kind. Operations that are meaningless without a pod (deploy, push, pin,
+// terraform, port-forwards, runtime-pod diagnostics) must check this — or the
+// narrower predicate that already applies to their own decision — and refuse
+// explicitly rather than resolving a plan that cannot run.
+func (c EnvConfig) HasPod() bool {
+	return c.Type.IsValid() && c.Type != EnvironmentTypeHost
 }
 
 // MountsRuntimeSource reports whether this runtime env opts into a mutable
@@ -338,15 +393,20 @@ func IsValidUpgradeChannel(channel string) bool {
 // ResolvedUpgradeChannel returns the release channel an upgrade targets for
 // this env. The explicit UpgradeChannel field is the source of truth when
 // valid; otherwise it defaults from the resolved type — runtime envs track
-// "stable", agent envs track "snapshot" (they iterate on snapshot builds) —
-// and anything unresolved falls back to "stable".
+// "stable", agent envs and host envs track "snapshot" (they iterate on
+// snapshot builds) — and anything unresolved falls back to "stable". A host
+// env never actually upgrades (it has no runtime to redeploy — see
+// EnvConfig.HasPod), so this only matters if AutoUpgrade is set on one, which
+// the upgrade planner skips outright.
 func (c EnvConfig) ResolvedUpgradeChannel() string {
 	if IsValidUpgradeChannel(c.UpgradeChannel) {
 		return strings.TrimSpace(c.UpgradeChannel)
 	}
 	switch c.ResolvedType() {
-	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
 		return UpgradeChannelSnapshot
+	case EnvironmentTypeRuntime:
+		return UpgradeChannelStable
 	default:
 		return UpgradeChannelStable
 	}

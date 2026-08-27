@@ -173,9 +173,18 @@ func (p BootstrapInitParams) resolvedRuntimeVersion() string {
 }
 
 // RemoteWorktree reports whether the new env's worktree will live outside the
-// local machine.
+// local machine. Mirrors EnvConfig.RemoteWorktree's explicit-by-type
+// enumeration: local-agent and host both use the local machine's own
+// filesystem, so both answer false.
 func (p BootstrapInitParams) RemoteWorktree() bool {
-	return p.ResolvedType() != EnvironmentTypeLocalAgent
+	switch p.ResolvedType() {
+	case EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	case EnvironmentTypeLocalAgent, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("RemoteWorktree: unhandled EnvironmentType %q", p.ResolvedType()))
+	}
 }
 
 type BootstrapInitInteractionType string
@@ -806,6 +815,9 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	if err != nil {
 		return err
 	}
+	if s.params.ResolvedType() == EnvironmentTypeHost {
+		return s.createHostEnvConfig(envProjectRoot)
+	}
 	kubernetesContext, cloudProviderAlias, managedCloud, err := s.resolveNewEnvCloudConfig()
 	if err != nil {
 		return err
@@ -850,6 +862,31 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		// --container-registry or --cluster-registry. Persisting them up front fixes
 		// that so the new env deploys to the configured registry from the start.
 		ContainerRegistries: seedInitContainerRegistries(s.params, containerRegistry),
+	}
+	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
+		return err
+	}
+	s.result.CreatedEnvConfig = true
+	return nil
+}
+
+// createHostEnvConfig creates a host env: a worktree directory on this
+// machine with no pod and no cluster at all. None of the runtime/cloud/
+// registry fields below apply to it, so it records only what a host env
+// actually has — a name, its type, and the directory it names — and never
+// resolves a kubernetes context, a cloud provider alias, or a container
+// registry. A host environment must not contact a cluster during init any
+// more than it does at any other time.
+func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
+	envProjectRoot = strings.TrimSpace(envProjectRoot)
+	if envProjectRoot == "" {
+		return fmt.Errorf("cannot create %s/%s as type %s: %s", s.tenant, s.envName, EnvironmentTypeHost, hostRepoPathRequirement(EnvironmentTypeHost))
+	}
+	s.runner.Context.Trace("Adding new environment")
+	s.envConfig = EnvConfig{
+		Name:          s.envName,
+		Type:          EnvironmentTypeHost,
+		LocalRepoPath: envProjectRoot,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err
@@ -944,6 +981,13 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 func (s *bootstrapRunState) updateEnvConfig() error {
 	if err := s.updateExistingEnvSettings(); err != nil {
 		return err
+	}
+	// A host env (whether it already was one, or this run just retyped it via
+	// --type host) has no pod and no cluster to reconcile against — skip the
+	// kubernetes-context/cloud-provider/registry steps below entirely rather
+	// than let them resolve a context or ensure a namespace no host env has.
+	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+		return nil
 	}
 	kubernetesContext, err := s.updateEnvKubernetesContext()
 	if err != nil {
@@ -1106,14 +1150,15 @@ func (s *bootstrapRunState) applyEnvType() error {
 	return nil
 }
 
-// adoptLocalRepoPathForType re-resolves the host repo path when an env becomes a
-// local-agent, whose worktree is hostPath-mounted from it. The path a remote env
+// adoptLocalRepoPathForType re-resolves the host repo path when an env becomes
+// a local-agent (whose worktree is hostPath-mounted from it) or a host env
+// (whose worktree IS it, with no pod to mount it into). The path a remote env
 // carries names an in-pod directory that does not exist on this machine, so
-// without one to adopt the retype is refused rather than written: an env recorded
-// as local-agent with nothing to mount would fail later, at deploy, with a
-// message about the mount rather than about the flag that caused it.
+// without one to adopt the retype is refused rather than written: an env
+// recorded as local-agent or host with nothing to use would fail later with a
+// message about the missing path rather than about the flag that caused it.
 func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType) error {
-	if requested != EnvironmentTypeLocalAgent {
+	if requested != EnvironmentTypeLocalAgent && requested != EnvironmentTypeHost {
 		return nil
 	}
 	projectRoot, err := s.envProjectRoot()
@@ -1121,7 +1166,7 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 		return err
 	}
 	if projectRoot = strings.TrimSpace(projectRoot); projectRoot == "" {
-		return fmt.Errorf("cannot change %s/%s to type %s: it needs a host repo path to mount — run init from the project directory or pass --project-root", s.tenant, s.envName, EnvironmentTypeLocalAgent)
+		return fmt.Errorf("cannot change %s/%s to type %s: %s", s.tenant, s.envName, requested, hostRepoPathRequirement(requested))
 	}
 	if s.envConfig.LocalRepoPath == projectRoot {
 		return nil
@@ -1130,6 +1175,17 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: local repo path set to " + projectRoot)
 	return nil
+}
+
+// hostRepoPathRequirement names why a type needs a host-machine directory,
+// worded for what that type actually does with it: local-agent hostPath-mounts
+// it into a pod, while a host env has no pod at all and simply is that
+// directory.
+func hostRepoPathRequirement(requested EnvironmentType) string {
+	if requested == EnvironmentTypeHost {
+		return "it needs a host directory to use — run init from the project directory or pass --project-root"
+	}
+	return "it needs a host repo path to mount — run init from the project directory or pass --project-root"
 }
 
 func describeEnvType(envType EnvironmentType) string {
@@ -1221,6 +1277,10 @@ func (s *bootstrapRunState) projectRoot() string {
 // Tenants with an existing scaffolded module keep working — deploy prefers a
 // local chart when one exists.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
+	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+		s.runner.Context.Trace("init: host environment has no pod; no devops scaffold is written")
+		return nil
+	}
 	projectRoot := s.projectRoot()
 	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)

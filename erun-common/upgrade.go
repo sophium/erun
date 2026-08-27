@@ -188,6 +188,10 @@ func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []Env
 			traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant, env.Name))
 			continue
 		}
+		if !env.HasPod() {
+			traceln(fmt.Sprintf("upgrade: %s/%s is a host environment (no runtime pod to upgrade), skipping", tenant, env.Name))
+			continue
+		}
 		traceln(fmt.Sprintf("upgrade: %s/%s opted in, channel=%s current=%s", tenant, env.Name, env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)))
 		items = append(items, resolveEnvUpgradeItem(tenant, env, override, resolveVersions, traceln))
 	}
