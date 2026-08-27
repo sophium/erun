@@ -118,6 +118,7 @@ function SettingsForm({
   onSave: (input: UpdateOrgSettingsInput) => void;
 }): React.ReactElement {
   const [forceMfa, setForceMfa] = React.useState(settings.forceMfa);
+  const [allowRegister, setAllowRegister] = React.useState(settings.allowRegister);
   const [minLength, setMinLength] = React.useState(settings.minPasswordLength);
   const complexity = usePasswordComplexityFields(settings);
 
@@ -125,6 +126,7 @@ function SettingsForm({
     event.preventDefault();
     onSave({
       forceMfa,
+      allowRegister,
       minPasswordLength: minLength,
       passwordRequiresUppercase: complexity.uppercase,
       passwordRequiresLowercase: complexity.lowercase,
@@ -148,6 +150,18 @@ function SettingsForm({
         checked={forceMfa}
         onChange={setForceMfa}
       />
+      <PolicyCheckbox
+        id="org-allow-register"
+        label="Allow anyone to self-register an account"
+        checked={allowRegister}
+        onChange={setAllowRegister}
+      />
+      {!allowRegister && (
+        <p className="text-sm text-muted-foreground">
+          Self-registration is closed. New accounts are created by inviting them or by enrolling
+          them below.
+        </p>
+      )}
       <div className="grid gap-2">
         <FieldLabel htmlFor="org-min-length">Minimum password length</FieldLabel>
         <Input

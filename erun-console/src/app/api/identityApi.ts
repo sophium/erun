@@ -11,6 +11,11 @@ import { type NoValue, platformApi } from './platformApi';
 // USER_STATE_* values (e.g. USER_STATE_ACTIVE, USER_STATE_INACTIVE,
 // USER_STATE_INITIAL — the last one for an invite that hasn't been completed
 // yet), kept as a string for forward compatibility.
+//
+// This list is the IdP org's own membership, not erun's: enrolled is false
+// for a self-registered or otherwise unmapped account that exists in the
+// IdP but cannot use erun, and isMachine marks the platform's own service
+// identities (login-client, admin-sa) rather than a person.
 export interface IdentityUser {
   id: string;
   username: string;
@@ -18,6 +23,9 @@ export interface IdentityUser {
   email?: string;
   firstName?: string;
   lastName?: string;
+  isMachine: boolean;
+  enrolled: boolean;
+  erunUserId?: string;
 }
 
 function asNumber(value: unknown): number {
@@ -36,6 +44,9 @@ function parseIdentityUser(raw: Record<string, unknown>): IdentityUser {
     email: asOptionalString(raw.email),
     firstName: asOptionalString(raw.firstName),
     lastName: asOptionalString(raw.lastName),
+    isMachine: asBoolean(raw.isMachine),
+    enrolled: asBoolean(raw.enrolled),
+    erunUserId: asOptionalString(raw.erunUserId),
   };
 }
 
@@ -103,6 +114,7 @@ function parseEnrollResult(raw: unknown): EnrollIdentityUserResult {
 // surface does not drive.
 export interface OrgSettings {
   forceMfa: boolean;
+  allowRegister: boolean;
   minPasswordLength: number;
   passwordRequiresUppercase: boolean;
   passwordRequiresLowercase: boolean;
@@ -117,6 +129,7 @@ function parseOrgSettings(raw: unknown): OrgSettings {
   }
   return {
     forceMfa: asBoolean(raw.forceMfa),
+    allowRegister: asBoolean(raw.allowRegister),
     minPasswordLength: asNumber(raw.minPasswordLength),
     passwordRequiresUppercase: asBoolean(raw.passwordRequiresUppercase),
     passwordRequiresLowercase: asBoolean(raw.passwordRequiresLowercase),
@@ -132,6 +145,7 @@ function parseOrgSettings(raw: unknown): OrgSettings {
 // change; every other field is left at its current value server-side.
 export interface UpdateOrgSettingsInput {
   forceMfa?: boolean;
+  allowRegister?: boolean;
   minPasswordLength?: number;
   passwordRequiresUppercase?: boolean;
   passwordRequiresLowercase?: boolean;
@@ -192,6 +206,79 @@ export interface UpdateSmtpSettingsInput {
   senderName?: string;
   replyToAddress?: string;
   tls: boolean;
+}
+
+// An invite is a server-side record (#1483), not a self-contained signed
+// token — revocable and listable up until it is accepted. token is the
+// invite link's credential: the console builds the actual accept URL from
+// it locally, since the backend has no reliable notion of its own public
+// console origin.
+export interface Invite {
+  inviteId: string;
+  tenantId: string;
+  token: string;
+  email?: string;
+  expiresAt: string;
+  consumedAt?: string;
+}
+
+function parseInvite(raw: Record<string, unknown>): Invite {
+  return {
+    inviteId: asString(raw.inviteId),
+    tenantId: asString(raw.tenantId),
+    token: asString(raw.token),
+    email: asOptionalString(raw.email),
+    expiresAt: asString(raw.expiresAt),
+    consumedAt: asOptionalString(raw.consumedAt),
+  };
+}
+
+function parseInviteList(value: unknown): Invite[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map(parseInvite);
+}
+
+// CreateInviteInput's tenantId targets a tenant other than the caller's own
+// — honored only for an operations-scoped caller, mirroring the backend's
+// own cross-tenant enrollment convention.
+export interface CreateInviteInput {
+  email?: string;
+  tenantId?: string;
+}
+
+// AcceptInviteInput is what an invitee themselves supplies. There is no
+// bearer token for this call — the invite token in the body is the
+// credential — so acceptInvite below passes no token to httpBaseQuery.
+export interface AcceptInviteInput {
+  token: string;
+  username: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  password: string;
+}
+
+export interface AcceptInviteResult {
+  idpUser: IdentityUser;
+  erunUser?: ErunUserRef;
+  error?: string;
+}
+
+function parseAcceptInviteResult(raw: unknown): AcceptInviteResult {
+  if (!isRecord(raw) || !isRecord(raw.idpUser)) {
+    throw new Error('accept invite response was not in the expected shape');
+  }
+  const erunUserRaw = raw.erunUser;
+  return {
+    idpUser: parseIdentityUser(raw.idpUser),
+    erunUser:
+      isRecord(erunUserRaw) && asString(erunUserRaw.userId) !== ''
+        ? { userId: asString(erunUserRaw.userId), username: asString(erunUserRaw.username) }
+        : undefined,
+    error: asOptionalString(raw.error),
+  };
 }
 
 export const identityApi = platformApi.injectEndpoints({
@@ -286,6 +373,57 @@ export const identityApi = platformApi.injectEndpoints({
   }),
 });
 
+// A separate injectEndpoints call (rather than one giant endpoints object)
+// keeps each builder function under the module's max-lines-per-function
+// budget; both sets still share platformApi's one cache, tag namespace, and
+// reducer slot.
+export const inviteApi = platformApi.injectEndpoints({
+  endpoints: (builder) => ({
+    // listInvites returns the resolved tenant's outstanding (unconsumed)
+    // invites — the ones an operator can still hand out or revoke.
+    listInvites: builder.query<Invite[], string>({
+      query: (token) => ({ url: '/v1/invites', token, label: 'list invites' }),
+      transformResponse: parseInviteList,
+      providesTags: ['Invites'],
+    }),
+
+    createInvite: builder.mutation<Invite, { token: string; input: CreateInviteInput }>({
+      query: ({ token, input }) => ({
+        url: '/v1/invites',
+        method: 'POST',
+        body: input,
+        token,
+        label: 'create invite',
+      }),
+      transformResponse: parseInvite,
+      invalidatesTags: ['Invites'],
+    }),
+
+    revokeInvite: builder.mutation<NoValue, { token: string; inviteId: string }>({
+      query: ({ token, inviteId }) => ({
+        url: `/v1/invites/${encodeURIComponent(inviteId)}`,
+        method: 'DELETE',
+        token,
+        label: 'revoke invite',
+      }),
+      invalidatesTags: ['Invites'],
+    }),
+
+    // acceptInvite is the one endpoint in this module with no bearer token
+    // at all: the invitee has none yet, and the invite token in the body is
+    // the credential that authorizes this call.
+    acceptInvite: builder.mutation<AcceptInviteResult, AcceptInviteInput>({
+      query: (input) => ({
+        url: '/v1/invites/accept',
+        method: 'POST',
+        body: input,
+        label: 'accept invite',
+      }),
+      transformResponse: parseAcceptInviteResult,
+    }),
+  }),
+});
+
 export const {
   useListIdentityUsersQuery,
   useCreateIdentityUserMutation,
@@ -295,3 +433,10 @@ export const {
   useGetSmtpSettingsQuery,
   useUpdateSmtpSettingsMutation,
 } = identityApi;
+
+export const {
+  useListInvitesQuery,
+  useCreateInviteMutation,
+  useRevokeInviteMutation,
+  useAcceptInviteMutation,
+} = inviteApi;

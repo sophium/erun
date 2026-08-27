@@ -15,6 +15,14 @@ export type NoValue = ReturnType<_VoidReturning>;
 export const platformApi = createApi({
   reducerPath: 'platformApi',
   baseQuery: httpBaseQuery,
-  tagTypes: ['Config', 'Environment', 'Context', 'IdentityUsers', 'OrgSettings', 'SmtpSettings'],
+  tagTypes: [
+    'Config',
+    'Environment',
+    'Context',
+    'IdentityUsers',
+    'OrgSettings',
+    'SmtpSettings',
+    'Invites',
+  ],
   endpoints: () => ({}),
 });

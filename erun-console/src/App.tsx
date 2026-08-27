@@ -9,6 +9,7 @@ import { clearAuth } from './app/slices/authSlice';
 import type { OidcConfig } from './auth/auth';
 import { signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
+import { AcceptInvitePage } from './identity/AcceptInvitePage';
 import { AppShell } from './shell/AppShell';
 import { LandingScreen } from './shell/LandingScreen';
 import { ErrorScreen, LoadingScreen, NotEnrolledScreen } from './shell/PreShellScreens';
@@ -162,10 +163,24 @@ function AppContent({
   }
 }
 
+// isAcceptInvitePath and acceptInviteToken read the URL directly rather than
+// through a router: the console has no client-side routing today, and an
+// invite link is the one page that must render before OIDC sign-in ever
+// starts — an invitee has no bearer token and no tenant membership yet, so
+// forcing them through the normal sign-in flow first would be a dead end.
+function isAcceptInvitePath(): boolean {
+  return window.location.pathname === '/accept-invite';
+}
+
+function acceptInviteToken(): string {
+  return new URLSearchParams(window.location.search).get('token') ?? '';
+}
+
 export function App(): React.ReactElement {
   const platform = usePlatformInfo();
   const dispatch = useAppDispatch();
   const auth = useAppSelector((s) => s.auth);
+  const acceptInvite = isAcceptInvitePath();
 
   // The `.dark` class only gets applied here, once, so every pre-shell screen
   // (including the signed-out landing page) honors a stored or OS-level dark
@@ -177,16 +192,26 @@ export function App(): React.ReactElement {
 
   // Resolves the OIDC config from platform discovery (GET /v1/platform), then
   // the bearer token (an OIDC callback exchange, a token held this session,
-  // or the dev-token fallback) — see app/authThunks.ts.
+  // or the dev-token fallback) — see app/authThunks.ts. Skipped on the
+  // accept-invite page: an invitee has no identity to resolve yet.
   React.useEffect(() => {
+    if (acceptInvite) {
+      return;
+    }
     void dispatch(resolveAuth());
-  }, [dispatch]);
+  }, [dispatch, acceptInvite]);
 
   // Loads the tenant config once a token is known. `refetch` is also the
   // refresh a write surface (register/deploy) triggers on completion, so a
   // newly registered env or a settled deploy's status shows up here too —
   // via `invalidatesTags: ['Config']` on those mutations.
-  const configQuery = useGetConfigQuery(auth.token ?? '', { skip: auth.token === undefined });
+  const configQuery = useGetConfigQuery(auth.token ?? '', {
+    skip: acceptInvite || auth.token === undefined,
+  });
+
+  if (acceptInvite) {
+    return <AcceptInvitePage token={acceptInviteToken()} />;
+  }
 
   const state = computeLoadState(auth, configQuery);
 

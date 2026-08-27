@@ -109,3 +109,8 @@ CREATE TRIGGER context_credentials_set_timestamps
   BEFORE INSERT OR UPDATE ON context_credentials
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER invites_set_timestamps
+  BEFORE INSERT OR UPDATE ON invites
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

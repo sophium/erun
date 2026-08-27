@@ -120,12 +120,16 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/users/{user_id}/roles` | List a user's assigned roles. | Tenant member (read) |
 | `POST` | `/v1/users/{user_id}/roles` | Grant a role to a user. Body below. | Tenant member (write) |
 | `DELETE` | `/v1/users/{user_id}/roles/{role_id}` | Revoke a role from a user; refused if it would leave the tenant with no user able to grant roles. | Tenant member (write) |
+| `POST` | `/v1/invites` | Create a revocable, single-use invite for the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
+| `GET` | `/v1/invites` | List the caller's tenant's outstanding (unconsumed) invites, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
+| `DELETE` | `/v1/invites/{invite_id}` | Revoke an outstanding invite. `204` on success. | Tenant member (write) |
+| `POST` | `/v1/invites/accept` | Consume an invite token and enroll the invitee. **Unauthenticated** — the invite token in the body is the credential. Body below. | None (public) |
 
 `GET /v1/config` is the console's read model over the per-tenant erun config — the backend DB is the system of record for the tenant's environments and cloud contexts, and this endpoint returns them denormalized as the on-disk erun config shape. All of these reads are tenant-scoped by row-level security, so a token only ever sees its own tenant's rows.
 
 ### `GET /v1/platform` {#platform-endpoint}
 
-The **only unauthenticated endpoint** besides `/healthz` — registered outside the auth middleware, directly on the mux next to it. A caller (chiefly the console SPA, but also the `erun cloud` provider below) has to resolve this instance's own issuer, API/console URLs, OIDC client ids, and display brand *before* it can sign in, so the endpoint carries no bearer token and no tenant scoping. No instance's name is ever hardcoded in a client; this is how one discovers it. It exists so **one built console image can serve any erunpaas instance** (issue #603): issuer, brand, and OIDC client ids are runtime config the API answers with, never baked into the frontend build.
+The only endpoint besides `/healthz` that requires **no credential of any kind** — registered outside the auth middleware, directly on the mux next to it. A caller (chiefly the console SPA, but also the `erun cloud` provider below) has to resolve this instance's own issuer, API/console URLs, OIDC client ids, and display brand *before* it can sign in, so the endpoint carries no bearer token and no tenant scoping. (`POST /v1/invites/accept` below, the [DNS-01 broker](#dns01-broker), and the [registry token service](#registry-token-endpoint) are also registered outside the OIDC auth middleware, but each authenticates its own distinct credential — an invite token, a per-env M2M token, and HTTP Basic respectively — rather than requiring none at all.) No instance's name is ever hardcoded in a client; this is how one discovers it. It exists so **one built console image can serve any erunpaas instance** (issue #603): issuer, brand, and OIDC client ids are runtime config the API answers with, never baked into the frontend build.
 
 ```jsonc
 // 200 response — every field optional; unset ones are empty strings, never omitted
@@ -713,7 +717,7 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
 
-### `POST /v1/users` and `GET /v1/users`
+### `POST /v1/users` and `GET /v1/users` {#post-v1users-and-get-v1users}
 
 Enrolls or lists users. Today the **only** other way a user comes to exist is the per-tenant first-user bootstrap (see [above](#tenant-issuers)) — this endpoint is how an authorized caller enrolls additional users beyond that first one.
 
@@ -782,6 +786,17 @@ A **role** is a named, tenant-owned bundle of permissions; a **permission** is o
     { "apiMethod": "GET", "apiPath": "/v1/reviews" },
     { "apiMethodPattern": "^GET$", "apiPathPattern": "^/v1/reviews/.*$" }
   ]
+### `POST /v1/invites`, `GET /v1/invites`, `DELETE /v1/invites/{invite_id}` {#invites}
+
+Registration is invite-only (issue #1483): self-registration on the platform's IdP is closed via [`allowRegister`](/agent-reference/identity-administration#org-settings), and this is the replacement path for adding a member. An invite is a **server-side record** — revocable and listable up until it is accepted — not a self-contained signed token; the token field below is the only part of it that ever leaves the backend.
+
+Create and list act on the caller's own resolved tenant by default. An explicit `tenantId` (body field for the `POST`, `?tenantId=` query param for the `GET`) targets a **different** tenant, honored only when the caller's resolved tenant is `OPERATIONS` — the same cross-tenant precedent [`POST`/`GET /v1/users`](#post-v1users-and-get-v1users) uses. This is deliberate for an invite whose target is an `OPERATIONS` tenant: accepting it lands the invitee with `erun_operations` database access across every tenant, so minting one needs the same operations-only gate as any other cross-tenant action today. A distinct permission scoped specifically to "invite into an OPERATIONS tenant" (rather than reusing the coarser operations-tenant-membership check) is now expressible: the role-assignment layer has since shipped, so this coarser tenant-type gate is a deliberate carry-over to be narrowed, not a missing capability.
+
+```jsonc
+// POST /v1/invites body — every field optional
+{
+  "email": "bob@example.com",   // optional — pins the invite to one email; accept refuses a different one
+  "tenantId": "019a…"           // optional — operations-only cross-tenant target
 }
 
 // 201 response
@@ -825,6 +840,84 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 | `400` | `POST /v1/roles`: `name` is empty, no permissions given, or a permission fails the exact/pattern-exclusivity, method-enum, or regex-compile checks above. `POST /v1/users/{user_id}/roles`: `roleId` is empty. | Fix the request body per the rules above. |
 | `404` | The `role_id` or `user_id` does not exist in the caller's tenant (a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to your own tenant. |
 | `409` | `POST /v1/roles`: a role with this name, or one of its permissions, already exists in the tenant. `POST /v1/users/{user_id}/roles`: the user already holds this role. `DELETE .../roles/{role_id}`: the lockout guard above refused the revoke. | Use a different name, or accept the existing grant; for the lockout case, grant a recovery role to another user (or the same user) before revoking this one. |
+  "inviteId": "019a…",
+  "tenantId": "019a…",
+  "token": "kX92n…",             // the invite's credential — build the accept link from this
+  "email": "bob@example.com",
+  "expiresAt": "2026-09-03T16:00:00Z",   // fixed 7-day TTL, not caller-configurable today
+  "createdAt": "2026-08-27T16:00:00Z",
+  "updatedAt": "2026-08-27T16:00:00Z"
+}
+```
+
+```jsonc
+// GET /v1/invites?tenantId=019a… (operations-only cross-tenant; omit tenantId for the caller's own tenant)
+// 200 response — only outstanding (unconsumed) invites, newest first
+[
+  {
+    "inviteId": "019a…",
+    "tenantId": "019a…",
+    "token": "kX92n…",
+    "email": "bob@example.com",
+    "expiresAt": "2026-09-03T16:00:00Z",
+    "createdAt": "2026-08-27T16:00:00Z",
+    "updatedAt": "2026-08-27T16:00:00Z"
+  }
+]
+```
+
+`DELETE /v1/invites/{invite_id}` revokes it; `204` on success. There is no soft-revoke state — a revoked invite's row is gone, so a stale accept attempt against it resolves the same as an unknown token.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | Body is not valid JSON. | Send a valid JSON object; every field is optional. |
+| `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
+| `404` | `DELETE`: `invite_id` does not name an outstanding invite in a tenant the caller can reach. | Re-check the id from `GET /v1/invites`; an already-consumed or already-revoked invite is not found here. |
+
+### `POST /v1/invites/accept` {#invites-accept}
+
+Consumes an invite token and enrolls the invitee as an erun user of the invite's target tenant. **Unauthenticated** — registered directly on the mux like [`GET /v1/platform`](#platform-endpoint) — because the invitee has no bearer token yet; the invite token in the body is what authorizes this call, and it is single-use and validated atomically (a `SELECT ... FOR UPDATE` against the invite row) so two concurrent accepts of the same token cannot both succeed.
+
+Unlike [`POST /v1/identity/users`](/agent-reference/identity-administration) (an operator composing an account for someone absent, which never sets a caller-supplied password so no operator ever handles a credential belonging to someone else's account), the invitee is present and choosing their own password right now — there is no "someone else's account" to protect them from, and Zitadel's own email-invite flow would be the wrong choice regardless, since its link has nothing to do with the credential just supplied. So this always creates the IdP identity with the supplied password as its initial password, marking the email verified and landing the account `USER_STATE_ACTIVE` immediately — no email round-trip, and it works with no SMTP configured at all (issue #1168). A future increment may prefer WebAuthn/passkey registration here instead of a password, to keep the "never handle someone else's credential" property even tighter; that is not implemented today, and `password` is required.
+
+```jsonc
+// request body
+{
+  "token": "kX92n…",              // required
+  "username": "bob",              // required
+  "email": "bob@example.com",     // optional; required to match the invite's pinned email, if it set one
+  "firstName": "Bob",             // optional
+  "lastName": "Operator",         // optional
+  "password": "the-invitee-chose-this"   // required
+}
+
+// 201 response — both halves landed
+{
+  "idpUser": { "id": "387728445393600515", "username": "bob", "state": "USER_STATE_ACTIVE" },
+  "erunUser": { "userId": "019a…", "username": "bob" }
+}
+
+// 201 response — the IdP identity was created, but the erun mapping failed
+{
+  "idpUser": { "id": "387728445393600515", "username": "bob", "state": "USER_STATE_ACTIVE" },
+  "error": "identity created in the identity provider but the erun user mapping failed: idp user id 387728445393600515: a user with this username already exists in the target tenant"
+}
+```
+
+The half-landed-failure shape mirrors `POST /v1/identity/users` exactly: a failure after the IdP identity exists is a `201` with `error` set and no `erunUser`, not an opaque failure — the console tells the invitee to ask an operator to finish the enrollment rather than retry blindly.
+
+**Error behaviour.** Each of the three invalid-token states is reported distinctly rather than as one generic failure — a stale link should say why it's stale:
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `400` | `token`/`username`/`password` empty, the body is not valid JSON, or `email` was supplied and does not match the invite's pinned email (case-insensitive). | Send all three required fields; match the pinned email exactly or omit it. |
+| `404` | `token` does not name any invite that ever existed (or it was revoked — revocation deletes the row). | Ask whoever invited you for a new link. |
+| `410` | The invite exists but has expired, or has already been consumed (single-use). | Ask whoever invited you for a new link. |
+| Forwarded from Zitadel | The IdP identity creation itself failed (e.g. the password does not meet the org's complexity policy). | The response body carries Zitadel's own message; act on it directly. |
+
+**Not audited.** Unlike `POST`/`GET`/`DELETE /v1/invites` above (which run through the authenticated middleware that writes `audit_events` for every protected request), this endpoint is registered outside that middleware — the same as [`GET /v1/platform`](#platform-endpoint) — because there is no authenticated caller identity to attribute the row to. The invite's own `created_by_user_id` plus its `consumed_at` timestamp is today's record of who accepted it and when; a dedicated audit event for acceptance is a reasonable follow-up, not yet implemented.
 
 ### `PUT /v1/tenants/{tenant_id}/quota` {#put-v1tenantstenant_idquota}
 

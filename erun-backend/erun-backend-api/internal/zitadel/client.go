@@ -161,7 +161,11 @@ func truncate(body []byte, limit int) string {
 }
 
 // User is a Zitadel IdP identity, as much of it as identity administration
-// needs to display and act on.
+// needs to display and act on. IsMachine distinguishes the org's own
+// service identities (e.g. login-client, admin-sa) from human accounts —
+// Zitadel's _search response carries a "machine" object in exactly the
+// cases "human" is absent, so the two are read as a pair rather than
+// inferring one from the other's absence.
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
@@ -169,6 +173,7 @@ type User struct {
 	Email     string `json:"email"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
+	IsMachine bool   `json:"isMachine"`
 }
 
 type usersSearchResponse struct {
@@ -188,10 +193,13 @@ type userSearchResult struct {
 			Email string `json:"email"`
 		} `json:"email"`
 	} `json:"human"`
+	Machine *struct {
+		Name string `json:"name"`
+	} `json:"machine"`
 }
 
 func (r userSearchResult) toUser() User {
-	u := User{ID: r.ID, Username: r.UserName, State: r.State}
+	u := User{ID: r.ID, Username: r.UserName, State: r.State, IsMachine: r.Machine != nil}
 	if r.Human == nil {
 		return u
 	}

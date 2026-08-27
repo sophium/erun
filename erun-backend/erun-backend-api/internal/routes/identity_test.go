@@ -3,15 +3,26 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
+
+type stubEnrolledUserLister struct {
+	users []model.User
+	err   error
+}
+
+func (s *stubEnrolledUserLister) List(context.Context, repository.UserFilter) ([]model.User, error) {
+	return s.users, s.err
+}
 
 type stubIdentityAdminClient struct {
 	users             []zitadel.User
@@ -102,11 +113,48 @@ func TestListUsersForbidsNonOperationsTenant(t *testing.T) {
 
 func TestListUsersReturnsAdminResult(t *testing.T) {
 	admin := &stubIdentityAdminClient{users: []zitadel.User{{ID: "u1", Username: "alice"}}}
-	routes := IdentityRoutes{admin: admin}
+	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
 	rec := httptest.NewRecorder()
 	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListUsersDistinguishesEnrolledFromIdPOnly locks the core of #1482's
+// Users-page fix: a self-registered IdP account with no erun mapping must
+// not render identically to an actual tenant member. It also proves the
+// machine-account signal survives the merge unchanged.
+func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
+	admin := &stubIdentityAdminClient{users: []zitadel.User{
+		{ID: "sub-alice", Username: "alice", Email: "alice@example.com"},
+		{ID: "sub-stranger", Username: "stranger", Email: "stranger@example.com"},
+		{ID: "sub-svc", Username: "admin-sa", IsMachine: true},
+	}}
+	erunUsers := &stubEnrolledUserLister{users: []model.User{
+		{UserID: "erun-alice", Username: "alice", ExternalUserID: "sub-alice"},
+	}}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var views []identityUserView
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(views) != 3 {
+		t.Fatalf("got %d views, want 3", len(views))
+	}
+	if !views[0].Enrolled || views[0].ErunUserID != "erun-alice" {
+		t.Fatalf("views[0] (alice) = %+v, want Enrolled with erun-alice", views[0])
+	}
+	if views[1].Enrolled || views[1].ErunUserID != "" {
+		t.Fatalf("views[1] (stranger) = %+v, want not enrolled", views[1])
+	}
+	if !views[2].IsMachine || views[2].Enrolled {
+		t.Fatalf("views[2] (admin-sa) = %+v, want a machine account, not enrolled", views[2])
 	}
 }
 
@@ -209,6 +257,28 @@ func TestUpdateOrgSettingsPassesOnlyProvidedFields(t *testing.T) {
 	}
 	if admin.gotUpdateParams.MinPasswordLength != nil {
 		t.Fatalf("gotUpdateParams.MinPasswordLength = %v, want nil when not provided", admin.gotUpdateParams.MinPasswordLength)
+	}
+	if admin.gotUpdateParams.AllowRegister != nil {
+		t.Fatalf("gotUpdateParams.AllowRegister = %v, want nil when not provided", admin.gotUpdateParams.AllowRegister)
+	}
+}
+
+// TestUpdateOrgSettingsThreadsAllowRegister locks the actual lever #1482
+// asks for: closing (or reopening) self-registration must reach the
+// Zitadel client's params, the same way forceMfa already does.
+func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	routes := IdentityRoutes{admin: admin}
+	rec := httptest.NewRecorder()
+	routes.updateOrgSettings(rec, identityRequest(http.MethodPatch, "/v1/identity/org-settings", `{"allowRegister":false}`, string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if admin.gotUpdateParams.AllowRegister == nil || *admin.gotUpdateParams.AllowRegister {
+		t.Fatalf("gotUpdateParams.AllowRegister = %v, want false", admin.gotUpdateParams.AllowRegister)
+	}
+	if admin.gotUpdateParams.ForceMFA != nil {
+		t.Fatalf("gotUpdateParams.ForceMFA = %v, want nil when not provided", admin.gotUpdateParams.ForceMFA)
 	}
 }
 
