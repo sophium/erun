@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
+import { openPlatformBlockDocs } from '@/app/documentationThunks';
 import { useAppDispatch } from '@/app/hooks';
 import {
   cancelUnexposeConfirm,
@@ -31,14 +32,15 @@ import { BrowserOpenURL, ClipboardSetText } from '../../../wailsjs/runtime/runti
 
 type ManageDialog = AppState['manageDialog'];
 
-// ExposuresSection is the Ports tab's public-exposure surface (issue #1351):
-// it lists an environment's active exposures and their public hostnames,
-// exposes a new service, and removes the environment's public DNS record
-// behind a two-step confirm. Every reachable state is designed explicitly —
-// loading, three distinct empty states (not applicable / restricted /
-// nothing yet), populated, failed, and the in-flight create/remove states —
-// per erun-ui/AGENTS.md "Degrade by permission" and "Keep the three empty
-// states distinct".
+// ExposuresSection is the Ports tab's public-exposure surface: it lists an
+// environment's active exposures and their public hostnames, exposes a new
+// service, and removes the environment's public DNS record behind a
+// two-step confirm. Every reachable state is designed explicitly — loading,
+// four distinct empty states (host environment type / project not
+// configured for exposure, each named and the fixable one carrying its
+// recovery / restricted / nothing yet), populated, failed, and the in-flight
+// create/remove states — per erun-ui/AGENTS.md "Degrade by permission" and
+// "Keep the three empty states distinct".
 export function ExposuresSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const exposures = dialog.exposures;
   const loading = dialog.exposuresLoading;
@@ -76,11 +78,33 @@ function ExposuresBody({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   if (!exposures.configured) {
+    if (exposures.notConfiguredReason === 'host-environment') {
+      return (
+        <EmptyState
+          icon={<Globe aria-hidden="true" />}
+          heading="Not available for this environment type"
+          body="Host environments have no pod and no cluster, so there is no public address to show or create here."
+        />
+      );
+    }
     return (
       <EmptyState
         icon={<Globe aria-hidden="true" />}
         heading="Not available for this environment"
-        body="This environment's project isn't set up for hosted deployment, so it has no public address to show."
+        body="This environment's project isn't set up for hosted deployment yet -- it needs a platform: block with a base domain in .erun/config.yaml before it can have a public address."
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              dispatch(openPlatformBlockDocs());
+            }}
+          >
+            <ExternalLink aria-hidden="true" />
+            View the platform: block reference
+          </Button>
+        }
       />
     );
   }

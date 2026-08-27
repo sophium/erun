@@ -15,7 +15,8 @@ func exposureTestApp(t *testing.T, projectRoot string) *App {
 		deps: erunUIDeps{
 			store: stubUIStore{
 				envs: map[string]eruncommon.EnvConfig{
-					"team/dev": {KubernetesContext: "team-context"},
+					"team/dev":  {KubernetesContext: "team-context"},
+					"team/host": {Type: eruncommon.EnvironmentTypeHost},
 				},
 			},
 			findProjectRoot: func() (string, string, error) {
@@ -70,6 +71,27 @@ func TestListEnvironmentExposuresNotConfiguredWithoutPlatformBlock(t *testing.T)
 	}
 	if len(result.Services) != 0 {
 		t.Fatalf("expected no services, got %+v", result.Services)
+	}
+	if result.NotConfiguredReason != uiExposureNotConfiguredNoPlatformBlock {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", uiExposureNotConfiguredNoPlatformBlock, result.NotConfiguredReason)
+	}
+}
+
+// TestListEnvironmentExposuresNotConfiguredForHostEnvironment locks down that
+// a host environment (no pod, no cluster at all) reports the host-specific
+// reason even when the open project does have a platform block -- exposure
+// can never apply to a host env regardless of the project's configuration.
+func TestListEnvironmentExposuresNotConfiguredForHostEnvironment(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "host"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Configured {
+		t.Fatal("expected Configured=false for a host environment")
+	}
+	if result.NotConfiguredReason != uiExposureNotConfiguredHostEnvironment {
+		t.Fatalf("expected NotConfiguredReason %q, got %q", uiExposureNotConfiguredHostEnvironment, result.NotConfiguredReason)
 	}
 }
 

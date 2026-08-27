@@ -47,7 +47,7 @@ const POPULATED = {
 };
 
 test.describe('manage dialog ports tab — public exposures (#1351)', () => {
-  test('a non-hosted environment reports its public address as not applicable, not an empty list', async ({
+  test('a cluster-backed environment with no platform block names the fix and links to it', async ({
     app,
   }) => {
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
@@ -56,12 +56,49 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Not available for this environment')).toBeVisible();
+    await expect(dialog.getByText(/isn't set up for hosted deployment yet/)).toBeVisible();
     await expect(dialog.getByText('Nothing exposed yet')).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: /Expose a service/ })).toHaveCount(0);
+
+    // The empty state must carry the action that resolves it, not just name
+    // the condition (root AGENTS.md "Smooth, Seamless, No Dead Ends").
+    const docsLink = dialog.getByRole('button', { name: /View the platform: block reference/ });
+    await expect(docsLink).toBeVisible();
 
     await dialog.screenshot({
       path: '/home/erun/.erun/outputs/1351-visual/ports-not-applicable.png',
     });
+
+    const [popup] = await Promise.all([app.page.waitForEvent('popup'), docsLink.click()]);
+    // The browser normalizes a bare path to add a trailing slash before the
+    // fragment (mirrors sidebar-documentation-link.spec.ts's own '/' suffix).
+    await expect
+      .poll(() => popup.url())
+      .toBe('https://docs.erunpaas.com/reference/configuration/#platform-block');
+    await popup.close();
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  test('a host environment reports its type as never exposable, with no dangling action', async ({
+    app,
+    seededHostEnv,
+  }) => {
+    const { tenant, environment } = seededHostEnv;
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Ports');
+    const dialog = app.manageDialog.locator();
+
+    await expect(dialog.getByText('Not available for this environment type')).toBeVisible();
+    await expect(dialog.getByText(/no pod and no cluster/)).toBeVisible();
+    // Unlike the fixable "no platform block" case, there is nothing to fix
+    // here -- a host env can never be exposed, so no action is offered.
+    await expect(
+      dialog.getByRole('button', { name: /View the platform: block reference/ }),
+    ).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: /Expose a service/ })).toHaveCount(0);
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

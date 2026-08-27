@@ -72,8 +72,14 @@ test.describe('environment init refresh', () => {
     const environment = 'local';
     await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
+    // The env never exists, so the handler exhausts its full retry budget
+    // (8 attempts, a getInitialState round trip plus a 400ms delay each)
+    // before raising the error -- on a loaded machine each round trip alone
+    // can take longer than the 400ms delay between them, so the wait here
+    // must clear the retry loop's own worst case with real margin, not just
+    // the fast-path duration a lightly-loaded machine sees.
     await expect(app.titlebar.statusMessage()).toContainText('did not appear in the sidebar', {
-      timeout: 15_000,
+      timeout: 45_000,
     });
     await expect(app.sidebar.envRowButton(tenant, environment)).toHaveCount(0);
     await app.titlebar.dismissStatus();

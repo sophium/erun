@@ -14,23 +14,24 @@ import (
 // composes the shared expose/unexpose primitives in erun-common; it holds no
 // expose/unexpose planning of its own.
 
-// ListEnvironmentExposures powers the Ports tab's exposure list. An
-// environment whose project carries no platform block reports Configured
-// false -- there is nothing to check against a cluster, so the tab renders
-// "not applicable" rather than an empty list. A listing the caller's
-// Kubernetes credentials cannot make reports Restricted instead of a bare
-// empty list.
+// ListEnvironmentExposures powers the Ports tab's exposure list. Configured
+// is false for either of two distinct reasons, named in NotConfiguredReason
+// so the tab's empty state can tell them apart: a host environment has no
+// pod and no cluster at all, so exposure can never apply; a cluster-backed
+// environment whose project carries no platform block simply hasn't been set
+// up for it yet. A listing the caller's Kubernetes credentials cannot make
+// reports Restricted instead of a bare empty list.
 func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return uiExposureList{}, fmt.Errorf("tenant and environment are required")
 	}
-	req, configured, err := a.resolveExposureRequest(selection)
+	req, configured, notConfiguredReason, err := a.resolveExposureRequest(selection)
 	if err != nil {
 		return uiExposureList{}, err
 	}
 	if !configured {
-		return uiExposureList{Services: []uiExposedService{}}, nil
+		return uiExposureList{Services: []uiExposedService{}, NotConfiguredReason: notConfiguredReason}, nil
 	}
 	services, err := eruncommon.ListExposedServices(req)
 	if err != nil {
@@ -101,20 +102,28 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 }
 
 // resolveExposureRequest resolves the env's namespace/context (for listing
-// its Ingresses) and whether its project is configured for exposure at all.
-func (a *App) resolveExposureRequest(selection uiSelection) (eruncommon.ShellLaunchParams, bool, error) {
+// its Ingresses), whether it is configured for exposure at all, and -- when
+// it isn't -- which of the two distinct reasons applies. A host environment
+// is checked first and always wins: it has no cluster to check a platform
+// block against, so that reason takes priority over the project's config.
+func (a *App) resolveExposureRequest(selection uiSelection) (req eruncommon.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return eruncommon.ShellLaunchParams{}, false, err
+		return eruncommon.ShellLaunchParams{}, false, "", err
 	}
-	req := eruncommon.ShellLaunchParams{
+	if config.Type == eruncommon.EnvironmentTypeHost {
+		return eruncommon.ShellLaunchParams{}, false, uiExposureNotConfiguredHostEnvironment, nil
+	}
+	req = eruncommon.ShellLaunchParams{
 		Tenant:            selection.Tenant,
 		Environment:       selection.Environment,
 		Namespace:         eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
 		KubernetesContext: strings.TrimSpace(config.KubernetesContext),
 	}
-	configured := eruncommon.ProjectHasExposablePlatform(a.exposeProjectRoot())
-	return req, configured, nil
+	if !eruncommon.ProjectHasExposablePlatform(a.exposeProjectRoot()) {
+		return req, false, uiExposureNotConfiguredNoPlatformBlock, nil
+	}
+	return req, true, "", nil
 }
 
 // exposeProjectRoot resolves the currently open project, the same way every

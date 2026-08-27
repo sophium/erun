@@ -22,3 +22,10 @@ export const openDocumentation = (): AppThunk => () => {
 export const openInstallDocs = (): AppThunk => () => {
   BrowserOpenURL(`${ERUN_DOCS_URL}/getting-started/install`);
 };
+
+// openPlatformBlockDocs deep-links the `platform:` block reference — the
+// recovery the Ports tab's "not available" empty state names for a
+// cluster-backed environment whose project hasn't declared one yet.
+export const openPlatformBlockDocs = (): AppThunk => () => {
+  BrowserOpenURL(`${ERUN_DOCS_URL}/reference/configuration#platform-block`);
+};
