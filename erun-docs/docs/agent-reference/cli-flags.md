@@ -47,7 +47,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
 | `--project-root <path>` | string (absolute path) | `<cwd>`'s git repo root (`git rev-parse --show-toplevel`) | Must be an existing directory; must contain a `.git/` directory or `.git` file. | The new env's `EnvConfig.localRepoPath` (every env type records it; #549). |
-| `--type <type>` | enum (`local-agent`, `remote-agent`, `runtime`) | unset. A **new** env then resolves to `local-agent` (or `remote-agent` when `--remote` is given); an **existing** env keeps `EnvConfig.type`. | Must be one of the three values. Conflicts with a `--remote` whose value disagrees. | `EnvConfig.type`. On an existing env this is a [retype](#init-existing-env), permitted between any two types in either direction. |
+| `--type <type>` | enum (`local-agent`, `remote-agent`, `runtime`, `host`) | unset. A **new** env then resolves to `local-agent` (or `remote-agent` when `--remote` is given); an **existing** env keeps `EnvConfig.type`. | Must be one of the four values. Conflicts with a `--remote` whose value disagrees (`host` also conflicts, since it resolves `RemoteWorktree() == false` the same as `local-agent`). | `EnvConfig.type`. On an existing env this is a [retype](#init-existing-env), permitted between any two types in either direction. `host` creates or retypes to an env with **no cluster contact at all** — see the host branch noted in the lifecycle algorithm below, which skips steps 2, 5, 6, 7, 8 entirely. |
 | `--remote` | bool | `false` | Conflicts with a `--type` whose value disagrees (e.g. `--type=local-agent --remote`). | Deprecated alias for `--type=remote-agent`: sets `EnvConfig.type = remote-agent`. Init then writes the in-pod bootstrap marker. |
 | `--no-git` | bool | `false` | Only meaningful with `--remote` / `--type=remote-agent`. | Skips the in-pod `git clone` step. |
 | `--version <version>` | string (semver) | A **new** env takes the CLI's built-in `ERUN_VERSION`; an **existing** env keeps `EnvConfig.runtimeversion` (the built-in fills in only when the env records none). | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. The transport's own version is a fallback, not a request — an `init` about something else never repins a running env; move a version with [`erun deploy --version`](#erun-deploy). |
@@ -80,9 +80,9 @@ A setting is applied because it was supplied, not because of the type the invoca
 
 The `--type` default is the asymmetry that matters: a new env with no `--type` resolves to `local-agent`, but that fallback is a default, not a request, so an existing env is not moved by it.
 
-**Retyping.** A named `--type` that differs from `EnvConfig.type` changes it, in either direction and between any two of the three types — including `runtime` → `remote-agent`, which is what makes a runtime env orchestratable by the desktop. Trace: `init: env type "<from>" -> "<to>"` (or `init: env type already "<t>"` when they match). The rest of the run then does the work the named type implies: retyping to `remote-agent` or `runtime` runs the same runtime deploy and in-pod checkout a fresh `--type=<t>` init would.
+**Retyping.** A named `--type` that differs from `EnvConfig.type` changes it, in either direction and between any two of the four types — including `runtime` → `remote-agent`, which is what makes a runtime env orchestratable by the desktop. Trace: `init: env type "<from>" -> "<to>"` (or `init: env type already "<t>"` when they match). The rest of the run then does the work the named type implies: retyping to `remote-agent` or `runtime` runs the same runtime deploy and in-pod checkout a fresh `--type=<t>` init would; retyping to `host` runs no deploy at all and skips the cluster/cloud reconcile in [Side effects](#side-effects) below entirely.
 
-Retyping **to** `local-agent` is the one case that needs more than the field: a `local-agent` worktree is hostPath-mounted, and the path a remote env carries in `EnvConfig.localRepoPath` names an in-pod directory. The retype re-resolves the host project root (`--project-root`, else the cwd's git root) and records it (`init: local repo path set to <path>`); when neither answers, it fails with `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` and writes nothing.
+Retyping **to** `local-agent` or `host` is the one case that needs more than the field: a `local-agent` worktree is hostPath-mounted, and a `host` env *is* the directory with no pod to mount it into — either way, the path a remote/runtime env carries in `EnvConfig.localRepoPath` names an in-pod directory or is empty, not a usable host path. The retype re-resolves the host project root (`--project-root`, else the cwd's git root) and records it (`init: local repo path set to <path>`); when neither answers, it fails and writes nothing — `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` for `--type=local-agent`, `HOST_RETYPE_NEEDS_REPO_PATH` for `--type=host` (same cause, worded for what the type actually does with the path — "mount" vs "use").
 
 Settings are reconciled before `init`'s own runtime deploy, so that deploy carries them: a re-init that adds `--image-pull-secret` deploys with the secret, and one that omits `--runtime-cpu` deploys at the env's recorded limits rather than the defaults.
 
@@ -101,13 +101,13 @@ An env created by this same run skips the reconcile entirely — it was written 
 ### `erun init` lifecycle algorithm
 
 1. Parse flags; resolve effective tenant + env (see [Configuration · Resolution order](/reference/configuration#effective-tenant--environment-for-a-cli-command)).
-2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list.
-3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository`.
-4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default.
-5. With `--remote`/`--type=remote-agent` (and `--type=runtime`): resolve a ghcr.io credential from the machine running `init` itself (a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`) for every registry the env is configured to build to or deploy from. When one resolves, mint (or refresh) a `kubernetes.io/dockerconfigjson` Secret named `<tenant>-devops-registry-credential` via `kubectl apply -f -` and persist its name to `EnvConfig.registrycredentialsecretname`, so step 6's chart install mounts it. Resolves to nothing (no error) when the host itself has no credential to give.
-6. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`, threading `registryCredentialSecretName` when step 5 minted one.
-7. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. The Secret step 5 minted is what usually makes this resolve on a freshly created environment; abort if none resolves regardless — the pod is left deployed (init is safe to re-run once authenticated).
-8. With `--remote`: open SSH and write the in-pod bootstrap marker.
+2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list. **Skipped for `--type=host`** — a host env never resolves a kubernetes context at all, at this or any other step; that is the whole point of the type.
+3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository` (`local-agent`, `host`) or proceed sourceless (`remote-agent`, `runtime`, whose worktree is not a host path).
+4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default. Runs for `--type=host` too — the confirmation is local and interactive, not cluster-touching.
+5. With `--remote`/`--type=remote-agent` (and `--type=runtime`): resolve a ghcr.io credential from the machine running `init` itself (a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`) for every registry the env is configured to build to or deploy from. When one resolves, mint (or refresh) a `kubernetes.io/dockerconfigjson` Secret named `<tenant>-devops-registry-credential` via `kubectl apply -f -` and persist its name to `EnvConfig.registrycredentialsecretname`, so step 6's chart install mounts it. Resolves to nothing (no error) when the host itself has no credential to give. **Never runs for `--type=host`.**
+6. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`, threading `registryCredentialSecretName` when step 5 minted one. **Never runs for `--type=host`** — it has no pod for any chart to render into, so it records `name`, `type`, and `localRepoPath` and stops.
+7. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. The Secret step 5 minted is what usually makes this resolve on a freshly created environment; abort if none resolves regardless — the pod is left deployed (init is safe to re-run once authenticated). **Never runs for `--type=host`.**
+8. With `--remote`: open SSH and write the in-pod bootstrap marker. **Never runs for `--type=host`.**
 9. Update default-tenant pointer if `--set-default-tenant`.
 10. Exit `0`.
 
@@ -117,6 +117,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 |---|---|---|
 | `NOT_IN_GIT_REPO` | `--project-root` unset and cwd is not in a git repo. | `1` |
 | `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` | `--type=local-agent` on an existing env, with no `--project-root` and no git repo at the cwd, so there is no host path to mount as the worktree. Nothing is written. Message: ``cannot change <tenant>/<env> to type local-agent: it needs a host repo path to mount — run init from the project directory or pass --project-root``. | `1` |
+| `HOST_RETYPE_NEEDS_REPO_PATH` | `--type=host` on a new or existing env, with no `--project-root` and no git repo at the cwd, so there is no directory to record. Nothing is written. Message (existing env): ``cannot change <tenant>/<env> to type host: it needs a host directory to use — run init from the project directory or pass --project-root``; a new env's message says "cannot create" in place of "cannot change". | `1` |
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |
@@ -162,6 +163,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 | Code | Cause | Exit code |
 |---|---|---|
 | `TENANT_NOT_CONFIGURED` | Resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. | `1` |
+| `HOST_ENV_NO_SHELL` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to open a kubectl-exec shell into. Checked before every other step (before `KUBE_CONTEXT_MISSING`, before any port-forward). Message names the worktree directory to open directly instead. | `1` |
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
 | `CLOUD_START_FAILED` | Cloud-provider start command returned an error or the context entered a terminal failure state. | `2` |
@@ -508,6 +510,7 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 
 | Code | Cause | Exit code |
 |---|---|---|
+| `HOST_ENV_NO_DEPLOY` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to deploy to. Checked before spec resolution, so nothing is built or resolved first. | `1` |
 | `NO_VERSION` | Neither `--version` nor `--current` given. `deploy` does not mint a version, so there is nothing to install. | `1` |
 | `NO_CURRENT_VERSION` | `--current` given but the env has no recorded runtime version yet. Deploy a specific `--version` once to seed it. | `1` |
 | `CLUSTER_UNREACHABLE` | Same as `erun open`. | `2` |

@@ -265,6 +265,7 @@ erun deploy team prod --version 1.2.3
 
 | Failure | Behaviour |
 |---|---|
+| The environment is a [host env](/concepts/environment-types#host). | Errors before any change: a host env has no pod and no cluster to deploy against. Exit code 1. |
 | Neither `--version` nor `--current` given. | Errors before any change: `deploy requires a version — pass --version <v> or --current`. `deploy` never builds, so there is nothing to install without one. Exit code 1. |
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
 | The live release has MCP authentication enabled but the deploy resolved none. | Errors during resolution, before `helm upgrade`: `MCP auth is enabled on the live <release> release, but this deploy resolved none …`, followed by what that release trusts — the desktop identity key's path on this host, the `<release>-mcp-auth` Secret and its key fingerprint, or (a legacy or hand-configured release) an OIDC issuer, which erun has no supported way to reconfigure. Re-supply the named key with `--mcp-auth-public-key <path>`, or pass `--no-mcp-auth` to turn it off on purpose. See [MCP edge authentication is sticky](#mcp-auth-sticky). Exit code 1. |

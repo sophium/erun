@@ -20,7 +20,7 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the curren
 |---|---|
 | `--tenant <name>` | Tenant name to initialize. |
 | `--environment <name>` | Environment name. |
-| `--type <type>` | Environment type: `local-agent` (default for a new env), `remote-agent`, or `runtime`. On an environment that already exists this **changes** the type, in either direction and between any two types; omit it and the environment keeps the type it has. |
+| `--type <type>` | Environment type: `local-agent` (default for a new env), `remote-agent`, `runtime`, or `host`. `host` names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials; see [Environment types → host](/concepts/environment-types#host). On an environment that already exists this **changes** the type, in either direction and between any two types; omit it and the environment keeps the type it has. |
 | `--kubernetes-context <name>` | Kubernetes context to associate with the environment. |
 | `--container-registry <host>` | Container registry to associate with the environment (e.g. `ghcr.io/sophium`, `<acct>.dkr.ecr.<region>.amazonaws.com`). |
 | `--runtime-image <ref>` | Custom runtime image for the environment, persisted to the env config's `runtimeimage` field. Use this to run a project-built image that extends the published `erun-devops` image. |
@@ -58,7 +58,13 @@ Two rules make this safe to reach for:
 - **A flag you passed is applied, or the command refuses and says why.** It is never accepted and quietly dropped.
 - **A flag you omitted changes nothing.** `--type` in particular: without it the environment keeps its type, so an `init` about a pull secret never retypes anything.
 
-Changing the type does the work the new type implies — retyping to `remote-agent` deploys the runtime and sets up the in-pod checkout, exactly as creating one would. Retyping **to** `local-agent` needs a host directory to mount as the worktree: run `init` from the project directory, or pass `--project-root`, or the command refuses rather than writing a type the environment could not run. Run with `--dry-run` first to see, line by line, what a re-run would change and what it would keep.
+Changing the type does the work the new type implies — retyping to `remote-agent` deploys the runtime and sets up the in-pod checkout, exactly as creating one would. Retyping **to** `local-agent` or `host` needs a host directory: run `init` from the project directory, or pass `--project-root`, or the command refuses rather than writing a type the environment could not run — `local-agent` mounts that directory into a pod, `host` simply *is* that directory, with no pod at all. Run with `--dry-run` first to see, line by line, what a re-run would change and what it would keep.
+
+```bash
+# Create a host env for building the desktop app: no pod, no cluster,
+# just the directory named below.
+erun init my-tenant desktop-build --type host --project-root ~/code/erun-ui
+```
 
 ## Examples
 
