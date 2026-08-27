@@ -12,9 +12,9 @@ import (
 )
 
 func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboard, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiTenantDashboard{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("loading the tenant dashboard", input.Tenant)
+	if err != nil {
+		return uiTenantDashboard{}, err
 	}
 	dashboard := uiTenantDashboard{
 		Tenant:      tenant,

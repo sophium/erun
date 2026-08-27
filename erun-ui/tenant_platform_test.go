@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,12 +9,17 @@ import (
 )
 
 // TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
-// tenant must fail loudly rather than silently returning null the way the
-// old apiUrl/cloudProviderAlias precondition used to.
+// tenant must fail loudly, naming the operation and its recovery, rather
+// than silently returning null the way the old apiUrl/cloudProviderAlias
+// precondition used to.
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
-	if _, err := app.LoadTenantDashboard(uiTenantDashboardInput{}); err == nil {
-		t.Fatal("expected an error for a missing tenant")
+	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "loading the tenant dashboard") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }
 

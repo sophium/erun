@@ -18,9 +18,9 @@ import (
 // degrades independently, mirroring LoadTenantDashboard's own panels: a
 // caller who cannot read comments still sees the review and its builds.
 func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiReviewDetail{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("loading review detail", input.Tenant)
+	if err != nil {
+		return uiReviewDetail{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {
@@ -116,9 +116,9 @@ func loadReviewDetailQueuePosition(ctx context.Context, client *eruncommon.Platf
 // the text preserved" contract: the caller keeps the draft body on error and
 // only clears it once this call actually succeeds.
 func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	if tenant == "" {
-		return uiReviewComment{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("replying to a review comment", input.Tenant)
+	if err != nil {
+		return uiReviewComment{}, err
 	}
 	reviewID := strings.TrimSpace(input.ReviewID)
 	if reviewID == "" {

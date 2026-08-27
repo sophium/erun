@@ -1,0 +1,2 @@
+audit: erun cloud set --alias team-cloud  dev
+set cloud provider alias: no tenant given — pass one explicitly (`erun cloud set <tenant> <environment> --alias <alias>`, or the cloud_set tool's tenant field)

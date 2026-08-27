@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -45,7 +46,10 @@ func TestTenantReviewCreateCapabilityRequiresATenant(t *testing.T) {
 	defer server.Close()
 
 	_, err := tenantDashboardApp(t, server.URL).TenantReviewCreateCapability("")
-	if err == nil || !strings.Contains(err.Error(), "tenant is required") {
-		t.Fatalf("expected a tenant-required error, got %v", err)
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "checking whether you can create a review") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }

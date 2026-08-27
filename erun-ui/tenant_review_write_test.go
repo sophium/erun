@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,18 @@ func TestCreateReviewOpensAReviewFromThePushedBranch(t *testing.T) {
 	}
 }
 
+func TestCreateReviewRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReview(uiCreateReviewInput{
+		Name: "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "opening a review") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
+	}
+}
+
 func TestCreateReviewRequiresNameAndBothBranches(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
@@ -135,6 +148,16 @@ func TestCreateReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected the refused write to surface as an error")
+	}
+}
+
+func TestCloseReviewRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CloseReview(uiCloseReviewInput{ReviewID: "review-1"})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "closing a review") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }
 
@@ -162,6 +185,16 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected the refused write to surface as an error")
+	}
+}
+
+func TestAdvanceMergeQueueRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).AdvanceMergeQueue(uiAdvanceMergeQueueInput{TargetBranch: "main"})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "advancing the merge queue") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }
 
@@ -215,6 +248,18 @@ func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.
 	}
 }
 
+func TestOverrideAdvanceMergeQueueRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
+		TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "overriding the merge queue's unresolved-thread gate") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
+	}
+}
+
 func TestOverrideAdvanceMergeQueueBypassesTheGate(t *testing.T) {
 	server := reviewWriteAPI(t, nil)
 	defer server.Close()
@@ -239,6 +284,18 @@ func TestOverrideAdvanceMergeQueueRequiresAReason(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "a reason is required") {
 		t.Fatalf("expected a reason-required error, got %v", err)
+	}
+}
+
+func TestCreateReviewCommentRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewComment(uiCreateReviewCommentInput{
+		ReviewID: "review-1", CommitID: "abc123", FilePath: "main.go", Line: 10, Body: "why this line?",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "commenting on a review") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }
 
@@ -325,5 +382,34 @@ func TestReviewDetailReportsCanCloseAlongsideCanComment(t *testing.T) {
 
 	if !detail.CanClose {
 		t.Fatalf("expected an unknown capability set to leave closing attemptable, got %+v", detail)
+	}
+}
+
+// TestResolveReviewCommentRequiresATenant and
+// TestUnresolveReviewCommentRequiresATenant both route through
+// updateReviewCommentStatus, which names a different operation for each
+// direction (resolving vs reopening) — both are locked here so neither
+// branch regresses to the shared bare message.
+func TestResolveReviewCommentRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).ResolveReviewComment(uiUpdateReviewCommentStatusInput{
+		ReviewID: "review-1", CommentID: "comment-1",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "resolving a review comment") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
+	}
+}
+
+func TestUnresolveReviewCommentRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).UnresolveReviewComment(uiUpdateReviewCommentStatusInput{
+		ReviewID: "review-1", CommentID: "comment-1",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "reopening a review comment") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }

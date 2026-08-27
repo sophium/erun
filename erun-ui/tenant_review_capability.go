@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"strings"
 )
 
 // uiTenantReviewCreateCapability reports whether the signed-in user may open
@@ -25,9 +23,9 @@ type uiTenantReviewCreateCapability struct {
 // loading reviews, the merge queue, builds, or audit events the dashboard
 // also reads — this call exists only to gate one button.
 func (a *App) TenantReviewCreateCapability(tenant string) (uiTenantReviewCreateCapability, error) {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return uiTenantReviewCreateCapability{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("checking whether you can create a review", tenant)
+	if err != nil {
+		return uiTenantReviewCreateCapability{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {

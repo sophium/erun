@@ -1259,6 +1259,28 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/set_empty_alias_fails", normalize.Apply(result.Combined))
 	})
 
+	t.Run("set_empty_tenant_fails", func(t *testing.T) {
+		// TENANT/ENVIRONMENT are cobra-positional (ExactArgs(2)), so an
+		// explicitly empty value still satisfies the arg-count check and must
+		// be rejected by normalizeEnvironmentCloudProviderAliasParams before
+		// any env lookup runs.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "set", "", "dev", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty tenant, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/set_empty_tenant_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("set_empty_environment_fails", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "set", "team", "", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/set_empty_environment_fails", normalize.Apply(result.Combined))
+	})
+
 	t.Run("refresh_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"cloud", "refresh", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

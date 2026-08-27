@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -223,9 +222,9 @@ func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerTo
 }
 
 func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("loading tenant settings", tenant)
+	if err != nil {
+		return uiTenantConfig{}, err
 	}
 
 	config, _, err := a.deps.store.LoadTenantConfig(tenant)
@@ -236,9 +235,9 @@ func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
 }
 
 func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
-	tenant := strings.TrimSpace(config.Name)
-	if tenant == "" {
-		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("saving tenant settings", config.Name)
+	if err != nil {
+		return uiTenantConfig{}, err
 	}
 
 	existing, _, err := a.deps.store.LoadTenantConfig(tenant)

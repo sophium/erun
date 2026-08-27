@@ -1,0 +1,2 @@
+audit: erun cloud set --alias team-cloud team
+set cloud provider alias for team: no environment given — pass one explicitly (`erun cloud set team <environment> --alias <alias>`, or the cloud_set tool's environment field)

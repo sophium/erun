@@ -585,11 +585,11 @@ func normalizeEnvironmentCloudProviderAliasParams(params SetEnvironmentCloudAlia
 	alias := strings.TrimSpace(params.Alias)
 	switch {
 	case tenant == "":
-		return "", "", "", fmt.Errorf("tenant is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias: no tenant given — pass one explicitly (`erun cloud set <tenant> <environment> --alias <alias>`, or the cloud_set tool's tenant field)")
 	case environment == "":
-		return "", "", "", fmt.Errorf("environment is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias for %s: no environment given — pass one explicitly (`erun cloud set %s <environment> --alias <alias>`, or the cloud_set tool's environment field)", tenant, tenant)
 	case alias == "":
-		return "", "", "", fmt.Errorf("cloud provider alias is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias for %s/%s: no alias given — pass one explicitly (`erun cloud set %s %s --alias <alias>`, or the cloud_set tool's alias field)", tenant, environment, tenant, environment)
 	default:
 		return tenant, environment, alias, nil
 	}

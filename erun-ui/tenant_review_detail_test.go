@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,16 @@ func loadReviewDetailFrom(t *testing.T, app *App) uiReviewDetail {
 		t.Fatalf("LoadReviewDetail failed: %v", err)
 	}
 	return detail
+}
+
+func TestLoadReviewDetailRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).LoadReviewDetail(uiReviewDetailInput{ReviewID: "review-1"})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "loading review detail") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
+	}
 }
 
 func TestLoadReviewDetailPopulatesTheReviewItself(t *testing.T) {
@@ -130,6 +141,18 @@ func TestCreateReviewReplyCopiesTheParentThreadsAnchor(t *testing.T) {
 	}
 	if comment.CommentID != "comment-3" || comment.ParentCommentID != "comment-1" || comment.Body != "fixed, thanks" {
 		t.Fatalf("unexpected reply: %+v", comment)
+	}
+}
+
+func TestCreateReviewReplyRequiresATenant(t *testing.T) {
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewReply(uiCreateReviewReplyInput{
+		ReviewID: "review-1", ParentCommentID: "comment-1", Body: "fixed, thanks",
+	})
+	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "replying to a review comment") {
+		t.Fatalf("expected the error to name its operation, got %v", err)
 	}
 }
 
