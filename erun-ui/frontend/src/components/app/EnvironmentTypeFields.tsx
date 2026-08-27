@@ -26,6 +26,7 @@ export function EnvironmentTypeSelect({
         { value: 'remote-agent', label: 'Remote agent' },
         { value: 'local-agent', label: 'Local agent' },
         { value: 'runtime', label: 'Runtime' },
+        { value: 'host', label: 'Host' },
       ]}
       placeholder="Select environment type"
       emptyLabel=""
@@ -47,20 +48,27 @@ function environmentTypeHelper(envType: EnvironmentDialog['envType']): string {
       return 'Worktree on a PVC inside the cluster. Builds happen in the cluster.';
     case 'runtime':
       return 'No agent worktree. Deploy-only — the pod just receives built images.';
+    case 'host':
+      return 'A directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials.';
     default:
       return '';
   }
 }
 
-// LocalRepoPathField's path only applies to local-agent envs; remote-agent uses
-// a cluster PVC and runtime has no worktree.
+// LocalRepoPathField's path applies to local-agent and host envs — both use
+// a directory on this machine, differing only in whether a pod mounts it;
+// remote-agent uses a cluster PVC and runtime has no worktree.
 export function LocalRepoPathField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <LocalRepoPathInput
       id="environment-local-repo-path"
       label="Local repo path"
-      helper="Absolute path on this machine. Mounted into the agent pod as the worktree."
+      helper={
+        dialog.envType === 'host'
+          ? 'Absolute path on this machine. This env has no pod — it IS this directory.'
+          : 'Absolute path on this machine. Mounted into the agent pod as the worktree.'
+      }
       value={dialog.localRepoPath}
       disabled={dialog.busy}
       required

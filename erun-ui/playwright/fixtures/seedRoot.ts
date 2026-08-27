@@ -496,6 +496,23 @@ export function seedRuntimeEnvironment(tenant: string, environment: string, extr
   );
 }
 
+// seedHostEnvironment writes an inert host-type env config: a worktree with no
+// pod and no cluster at all, so unlike seedEnvironment it carries no
+// kubernetescontext, containerregistry, or runtimeversion — none of those
+// apply to a type with no pod.
+export function seedHostEnvironment(tenant: string, environment: string, extraYaml = ''): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: ${repoDir()}\n` +
+      'type: host\n' +
+      'aitool: sh\n' +
+      extraYaml,
+  );
+}
+
 // removeEnvironment deletes a previously seeded env config dir. The
 // backend's fsnotify config watcher picks the deletion up and drops the
 // sidebar row.

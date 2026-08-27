@@ -38,6 +38,25 @@ function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement 
   );
 }
 
+// HostEnvBadge marks a host environment distinctly from a local-agent one: it
+// has no pod and no cluster at all, so it must never be presented as a pod
+// that failed to start.
+function HostEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
+        selected
+          ? 'border-primary-foreground/40 text-primary-foreground/85'
+          : 'border-border text-muted-foreground',
+      )}
+      aria-label="Host environment — no pod, this machine only"
+    >
+      Host
+    </span>
+  );
+}
+
 function EnvironmentRowEditButton({
   tenantName,
   environmentName,
@@ -183,6 +202,7 @@ function EnvironmentRowOpenButton({
   selected,
   selection,
   isLocal,
+  isHost,
   busy,
   busyLabel,
 }: {
@@ -191,6 +211,7 @@ function EnvironmentRowOpenButton({
   selected: boolean;
   selection: UISelection;
   isLocal: boolean;
+  isHost: boolean;
   busy: boolean;
   busyLabel: string;
 }): React.ReactElement {
@@ -211,7 +232,11 @@ function EnvironmentRowOpenButton({
       }}
     >
       <span className="min-w-0 truncate">{environmentName}</span>
-      {isLocal && <LocalEnvBadge selected={selected} />}
+      {isHost ? (
+        <HostEnvBadge selected={selected} />
+      ) : (
+        isLocal && <LocalEnvBadge selected={selected} />
+      )}
       {busy && <BusyRowSpinner label={busyLabel} />}
     </button>
   );
@@ -383,12 +408,13 @@ export function EnvironmentRow({
     busyLabel,
     busyFromEnvironment,
     isLocal,
+    isHost,
     runtimeVersion,
     selection,
     envState,
     indicator,
   } = useEnvironmentRowState(tenantName, environmentName);
-  const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
+  const rowLabel = `${tenantName} / ${environmentName}${isHost ? ' (host)' : isLocal ? ' (local)' : ''}`;
   return (
     <EnvHoverCard
       className={cn(
@@ -400,6 +426,7 @@ export function EnvironmentRow({
       environmentName={environmentName}
       selection={selection}
       isLocal={isLocal}
+      isHost={isHost}
       runtimeVersion={runtimeVersion}
       activityLabel={busy && !busyFromEnvironment ? busyLabel : ''}
       indicator={indicator}
@@ -410,10 +437,14 @@ export function EnvironmentRow({
         selected={selected}
         selection={selection}
         isLocal={isLocal}
+        isHost={isHost}
         busy={busy}
         busyLabel={busyLabel}
       />
-      {indicator.visible && (
+      {/* A host env has no pod, so it is never "running" or "stopped" — it
+          simply is. Showing the pod-shaped open/close status dot for it would
+          present a directory as a pod that failed to start. */}
+      {!isHost && indicator.visible && (
         <EnvStatusIndicator indicator={indicator} selection={selection} envState={envState} />
       )}
       <EnvironmentRowOutputsButton

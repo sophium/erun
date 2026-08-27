@@ -8,6 +8,13 @@ export function environmentTypeIsRemoteWorktree(type: string | undefined): boole
   return type === 'remote-agent' || type === 'runtime';
 }
 
+// environmentTypeIsHost reports whether the env is a host environment — a
+// directory on the operator's own machine with no pod and no cluster at all.
+// Mirrors EnvironmentTypeHost in erun-common/config.go.
+export function environmentTypeIsHost(type: string | undefined): boolean {
+  return type === 'host';
+}
+
 // environmentTypeIsRuntime reports whether the env is a runtime (serving) env —
 // the only type that can opt into a mounted source worktree. Mirrors
 // EnvironmentTypeRuntime in erun-common/config.go.
@@ -33,5 +40,11 @@ export function environmentTypeBuildsHereLocally(type: string | undefined): bool
 // land on the right answer for host by coincidence. Mirrors
 // EnvConfig.BuildsHere() in erun-common/config.go.
 export function environmentTypeBuildsHere(type: string | undefined): boolean {
-  return type === 'local-agent' || type === 'remote-agent' || type === 'host' || type === undefined || type === '';
+  return (
+    type === 'local-agent' ||
+    type === 'remote-agent' ||
+    type === 'host' ||
+    type === undefined ||
+    type === ''
+  );
 }

@@ -4,7 +4,7 @@
 import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 
-export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
+export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | 'host' | '';
 
 // EnvironmentTypeValues are the narrowed dropdown options; the `type` field
 // below must stay bare `string` because the Wails binding widens the Go
@@ -13,6 +13,7 @@ export const EnvironmentTypeValues: readonly EnvironmentType[] = [
   'local-agent',
   'remote-agent',
   'runtime',
+  'host',
 ] as const;
 
 export interface UIEnvironment {

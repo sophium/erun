@@ -224,13 +224,22 @@ function EnvironmentNameFields({
 }
 
 function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  // A host env has no pod and no cluster at all: no kubernetes context, no
+  // runtime pod sizing, no container registry — none of those apply to it.
+  // Showing them as required fields would block creating a host env entirely
+  // (a dead end per root AGENTS.md "Smooth, Seamless, No Dead Ends").
+  const isHost = dialog.envType === 'host';
   return (
     <>
       <EnvironmentTypeSelect dialog={dialog} />
-      {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
-      <KubernetesContextSelect dialog={dialog} />
-      <RuntimePodFields dialog={dialog} />
-      <ContainerRegistryField dialog={dialog} />
+      {(dialog.envType === 'local-agent' || isHost) && <LocalRepoPathField dialog={dialog} />}
+      {!isHost && (
+        <>
+          <KubernetesContextSelect dialog={dialog} />
+          <RuntimePodFields dialog={dialog} />
+          <ContainerRegistryField dialog={dialog} />
+        </>
+      )}
       <EnvironmentCreateChecks dialog={dialog} />
     </>
   );
@@ -254,8 +263,10 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // "Initialize without Git checkout" is a no-op for local-agent envs, so hide it there.
-  const isLocalAgent = dialog.envType === 'local-agent';
+  // "Initialize without Git checkout" is a no-op for local-agent and host
+  // envs — both resolve their worktree from this machine's own directory,
+  // never a remote checkout — so hide it there.
+  const skipsRemoteCheckoutAlready = dialog.envType === 'local-agent' || dialog.envType === 'host';
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -268,7 +279,7 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ setDefaultTenant }));
         }}
       />
-      {!isLocalAgent && (
+      {!skipsRemoteCheckoutAlready && (
         <CheckboxField
           id="environment-no-git"
           label="Skip Git checkout"
