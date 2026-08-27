@@ -22,6 +22,23 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
+// refuseOpenForHostEnvironment refuses `open` against a host env: it has no
+// pod and no cluster to open a kubectl-exec shell into. Its worktree is
+// already the operator's own directory, so the resolution here is to open
+// that directory directly rather than through erun. Checked against
+// ResolvedType rather than the broader !HasPod() so a legacy env with an
+// unresolved type (ResolvedType == "", see EnvConfig docs) keeps opening
+// exactly as it did before host existed, instead of being misreported as a
+// host environment it never was. Checked before any other open side effect
+// (persisting the local port range, ensuring the kubernetes context) so a
+// refusal never partially applies one.
+func refuseOpenForHostEnvironment(result common.OpenResult) error {
+	if result.EnvConfig.ResolvedType() != common.EnvironmentTypeHost {
+		return nil
+	}
+	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
+}
+
 func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
@@ -71,6 +88,9 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			}
 			if initRan {
 				return nil
+			}
+			if err := refuseOpenForHostEnvironment(result); err != nil {
+				return err
 			}
 			result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 			if err != nil {
@@ -308,9 +328,6 @@ func (r *resolvedOpenRunner) run() error {
 		r.result.Tenant, r.result.Environment,
 		r.result.EnvConfig.KubernetesContext, r.result.RemoteRepo(),
 		r.options.NoShell, openIDEKindLabel(r.options)))
-	if err := r.refuseHostEnvironment(); err != nil {
-		return err
-	}
 	if err := r.ensureKubernetesContext(); err != nil {
 		return err
 	}
@@ -374,20 +391,6 @@ func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 		return nil
 	}
 	return r.ctx.EnsureKubernetesContext(r.result.EnvConfig.KubernetesContext)
-}
-
-// refuseHostEnvironment refuses `open` against a host env: it has no pod and
-// no cluster to open a kubectl-exec shell into. Its worktree is already the
-// operator's own directory, so the resolution here is to open that directory
-// directly rather than through erun. Checked against ResolvedType rather than
-// the broader !HasPod() so a legacy env with an unresolved type (ResolvedType
-// == "", see EnvConfig docs) keeps opening exactly as it did before host
-// existed, instead of being misreported as a host environment it never was.
-func (r *resolvedOpenRunner) refuseHostEnvironment() error {
-	if r.result.EnvConfig.ResolvedType() != common.EnvironmentTypeHost {
-		return nil
-	}
-	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", r.result.Tenant, r.result.Environment, r.result.Environment, r.result.RepoPath)
 }
 
 func (r *resolvedOpenRunner) recordActivity() {

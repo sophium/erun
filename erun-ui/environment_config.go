@@ -75,16 +75,20 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 }
 
 // applyContainerRegistries routes the registry list by env type: local-agent
-// envs store it in project config, where the build/deploy resolvers read it;
-// remote/runtime envs keep it on the env config because their project config
-// is not on the local machine.
+// and host envs store it in project config, where the build/deploy resolvers
+// read it (both have their project root on this machine); remote/runtime envs
+// keep it on the env config because their project config is not on the local
+// machine. A host env never actually deploys against a registry, so this only
+// matters if a project build pushes images independent of any pod.
 func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
-	if updated.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+	switch updated.ResolvedType() {
+	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
 		updated.ContainerRegistries = nil
 		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
+	default:
+		updated.ContainerRegistries = registries.Clone()
+		return nil
 	}
-	updated.ContainerRegistries = registries.Clone()
-	return nil
 }
 
 // saveEnvironmentProjectRegistries writes a local-agent env's registry list to

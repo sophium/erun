@@ -216,12 +216,16 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 	return filepath.Join(orchestratorsRoot(), strings.TrimSpace(tenant)+"-"+strings.TrimSpace(environment))
 }
 
-// orchestratableEnv reports whether an env can be linked to an orchestrator. It
-// needs a worktree to review and an in-pod agent to delegate to, which both agent
-// types have and a runtime env does not.
+// orchestratableEnv reports whether an env can be linked to an orchestrator. A
+// local-agent or remote-agent env has a worktree to review and an in-pod agent
+// to delegate to; a runtime env has neither and is excluded. A host env has no
+// pod, but its worktree is already the operator's own checkout — the
+// orchestrator still does not edit it, and the env's own agent does, exactly
+// as for a local-agent env (see orchestratorReviewDirectory), so it links the
+// same way.
 func orchestratableEnv(env eruncommon.EnvConfig) bool {
 	switch env.ResolvedType() {
-	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeRemoteAgent:
+	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeRemoteAgent, eruncommon.EnvironmentTypeHost:
 		return true
 	default:
 		return false
@@ -230,14 +234,18 @@ func orchestratableEnv(env eruncommon.EnvConfig) bool {
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
 // this machine, and whether that directory is a synced mirror. It applies the
-// same policy as hostWorkspacePath — a local-agent worktree is already here, so
-// it is reviewed in place — but yields the mirror path a remote-agent env would
-// be wired to rather than "" when its sync is not on yet.
+// same policy as hostWorkspacePath — a local-agent or host worktree is already
+// here, so it is reviewed in place (for host, the review directory and the
+// worktree are the very same path, since there is no pod to mount it into) —
+// but yields the mirror path a remote-agent env would be wired to rather than
+// "" when its sync is not on yet.
 func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
-	if env.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+	switch env.ResolvedType() {
+	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
 		return strings.TrimSpace(env.LocalRepoPath), false
+	default:
+		return defaultOrchestratorDirectory(tenant, env.Name), true
 	}
-	return defaultOrchestratorDirectory(tenant, env.Name), true
 }
 
 // orchestratorClaudeMd is the single CLAUDE.md every orchestrator shares in the
