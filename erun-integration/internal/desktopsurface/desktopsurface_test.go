@@ -157,6 +157,92 @@ func TestMissingMessageNamesTheCapabilitysOwnDeclarationHint(t *testing.T) {
 	}
 }
 
+// TestFindMissingDesktopSurfaceSkipsAKnownGapCapability locks rule 1 of the
+// baseline: a route recorded as a known gap does not fail the gate, the same
+// as an AgentFacing one, even with zero frontend references.
+func TestFindMissingDesktopSurfaceSkipsAKnownGapCapability(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
+	}
+	frontend := FrontendSource("")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want a KnownGap capability skipped even with zero frontend references, got %+v", missing)
+	}
+}
+
+// TestFindMissingDesktopSurfaceFlagsAnUndeclaredCapabilityNotInTheBaseline
+// locks rule 2: a capability that is neither declared internal nor recorded
+// in the baseline still fails, so a 34th unsurfaced route cannot land
+// silently just because the baseline mechanism exists.
+func TestFindMissingDesktopSurfaceFlagsAnUndeclaredCapabilityNotInTheBaseline(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "GET /v1/widgets", Source: "API route", Pattern: APIRoutePattern("/v1/widgets")},
+	}
+	frontend := FrontendSource("")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 1 || missing[0].Capability.Name != "GET /v1/widgets" {
+		t.Fatalf("want the undeclared, unbaselined route flagged, got %+v", missing)
+	}
+}
+
+// TestFindStaleBaselineEntriesFlagsAKnownGapThatGainedASurface locks rule 3:
+// the baseline can only shrink. A capability recorded as a known gap that has
+// since gained a real frontend reference must fail, not silently pass --
+// otherwise nobody notices the baseline could be shorter.
+func TestFindStaleBaselineEntriesFlagsAKnownGapThatGainedASurface(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
+	}
+	frontend := FrontendSource(`fetch("/v1/roles")`)
+
+	stale := FindStaleBaselineEntries(capabilities, frontend)
+
+	if len(stale) != 1 || stale[0].Capability.Name != "GET /v1/roles" {
+		t.Fatalf("want the now-surfaced baseline entry flagged as stale, got %+v", stale)
+	}
+	if msg := stale[0].Message(); msg == "" {
+		t.Fatal("Message() must not be empty; the gate must name the removal fix")
+	}
+}
+
+// TestFindStaleBaselineEntriesClearsAKnownGapStillMissingItsSurface is the
+// negative case for rule 3: a baselined route that still has no frontend
+// reference is not stale -- it is exactly the gap the baseline was meant to
+// record, and rule 1 (not rule 3) governs it.
+func TestFindStaleBaselineEntriesClearsAKnownGapStillMissingItsSurface(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
+	}
+	frontend := FrontendSource("")
+
+	stale := FindStaleBaselineEntries(capabilities, frontend)
+
+	if len(stale) != 0 {
+		t.Fatalf("want a baselined route still missing its surface left alone, got %+v", stale)
+	}
+}
+
+// TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint mirrors
+// TestMissingMessageNamesTheCapabilitysOwnDeclarationHint for the stale-entry
+// message, so a failure names the removal fix rather than a generic pointer.
+func TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint(t *testing.T) {
+	entry := StaleBaselineEntry{Capability: Capability{
+		Name:         "GET /v1/roles",
+		Source:       "API route",
+		BaselineHint: `erun-backend-api/internal/routes/route_audit.go's KnownUnsurfacedRoutes map (remove "GET /v1/roles")`,
+	}}
+
+	msg := entry.Message()
+	if !strings.Contains(msg, "KnownUnsurfacedRoutes") {
+		t.Fatalf("want Message() to name the capability's own BaselineHint, got %q", msg)
+	}
+}
+
 func TestFindUnboundAppMethodsFlagsAnUnexportedMethodWithNoOtherCaller(t *testing.T) {
 	decls := []AppMethodDecl{
 		{Name: "whipOrchestratorNow", Exported: false, File: "orchestrator_pacing.go", Line: 289, IdentUses: 0},

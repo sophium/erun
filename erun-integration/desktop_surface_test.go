@@ -210,6 +210,36 @@ type apiRouteSite struct {
 	path   string
 }
 
+// apiRouteMapLiteral extracts the string keys of a package-level
+// map[string]bool literal named mapName (e.g. InternalAPIRoutes,
+// KnownUnsurfacedRoutes) from a parsed file, into dest.
+func apiRouteMapLiteral(file *ast.File, mapName string, dest map[string]bool) {
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != mapName || len(spec.Values) != 1 {
+			return true
+		}
+		composite, ok := spec.Values[0].(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		for _, elt := range composite.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := kv.Key.(*ast.BasicLit)
+			if !ok || key.Kind != token.STRING {
+				continue
+			}
+			if v, err := strconv.Unquote(key.Value); err == nil {
+				dest[v] = true
+			}
+		}
+		return true
+	})
+}
+
 // apiRouteCapabilities parses every non-test .go file in
 // erun-backend-api/internal/routes (not imported: it is a separate Go
 // module, the same reason erun-ui's own .go files are parsed rather than
@@ -220,7 +250,9 @@ type apiRouteSite struct {
 // "mux.HandleFunc("METHOD /path", ...)" for the handful of intentionally
 // unauthenticated routes (see erun-backend-api/internal/routes/platform.go,
 // invites.go). A route is AgentFacing when its "METHOD /path" key appears in
-// routes.InternalAPIRoutes, parsed the same way rather than imported.
+// routes.InternalAPIRoutes, and KnownGap when it appears in
+// routes.KnownUnsurfacedRoutes instead -- both parsed the same way rather
+// than imported.
 func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability {
 	t.Helper()
 	dir := filepath.Join(root, "erun-backend", "erun-backend-api", "internal", "routes")
@@ -231,6 +263,7 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 
 	fset := token.NewFileSet()
 	internal := make(map[string]bool)
+	knownGap := make(map[string]bool)
 	var sites []apiRouteSite
 
 	for _, entry := range entries {
@@ -243,30 +276,8 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 			t.Fatalf("parse %s: %v", name, err)
 		}
 
-		ast.Inspect(file, func(n ast.Node) bool {
-			spec, ok := n.(*ast.ValueSpec)
-			if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "InternalAPIRoutes" || len(spec.Values) != 1 {
-				return true
-			}
-			composite, ok := spec.Values[0].(*ast.CompositeLit)
-			if !ok {
-				return true
-			}
-			for _, elt := range composite.Elts {
-				kv, ok := elt.(*ast.KeyValueExpr)
-				if !ok {
-					continue
-				}
-				key, ok := kv.Key.(*ast.BasicLit)
-				if !ok || key.Kind != token.STRING {
-					continue
-				}
-				if v, err := strconv.Unquote(key.Value); err == nil {
-					internal[v] = true
-				}
-			}
-			return true
-		})
+		apiRouteMapLiteral(file, "InternalAPIRoutes", internal)
+		apiRouteMapLiteral(file, "KnownUnsurfacedRoutes", knownGap)
 
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -321,7 +332,9 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 			Source:          "API route",
 			Pattern:         desktopsurface.APIRoutePattern(s.path),
 			AgentFacing:     internal[full],
+			KnownGap:        knownGap[full],
 			DeclarationHint: fmt.Sprintf("erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes map (add %q with a comment explaining why)", full),
+			BaselineHint:    fmt.Sprintf("erun-backend-api/internal/routes/route_audit.go's KnownUnsurfacedRoutes map (remove %q)", full),
 		})
 	}
 	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i].Name < capabilities[j].Name })
@@ -352,6 +365,11 @@ func TestDesktopSurfaceGate(t *testing.T) {
 	missing := desktopsurface.FindMissingDesktopSurface(capabilities, operatorSurface)
 	for _, m := range missing {
 		t.Errorf("%s", m.Message())
+	}
+
+	stale := desktopsurface.FindStaleBaselineEntries(capabilities, operatorSurface)
+	for _, s := range stale {
+		t.Errorf("%s", s.Message())
 	}
 }
 

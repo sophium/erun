@@ -43,10 +43,22 @@ type Capability struct {
 	// erun-backend-api/internal/routes.InternalAPIRoutes for the three
 	// declaration sites.
 	AgentFacing bool
+	// KnownGap marks a capability recorded in a baseline of pre-existing gaps
+	// (erun-backend-api/internal/routes.KnownUnsurfacedRoutes today) rather
+	// than one that legitimately needs no surface. It is skipped by
+	// FindMissingDesktopSurface exactly like AgentFacing, but
+	// FindStaleBaselineEntries flags it the moment it gains a real reference,
+	// so the baseline can only shrink and never quietly grows stale.
+	KnownGap bool
 	// DeclarationHint names, in prose, where a capability from this Source
 	// declares itself exempt -- used verbatim in Missing.Message() so the
 	// failure points at the fix instead of a generic pointer.
 	DeclarationHint string
+	// BaselineHint names, in prose, where a capability from this Source is
+	// recorded as a known gap -- used verbatim in StaleBaselineEntry.Message()
+	// so a capability that gained a surface points at removing its own
+	// baseline entry instead of the unrelated DeclarationHint fix.
+	BaselineHint string
 }
 
 // Missing is a capability the gate could not find any operator entry point
@@ -123,14 +135,10 @@ func APIRoutePattern(path string) string {
 func FindMissingDesktopSurface(capabilities []Capability, frontendSource FrontendSource) []Missing {
 	var missing []Missing
 	for _, c := range capabilities {
-		if c.AgentFacing {
+		if c.AgentFacing || c.KnownGap {
 			continue
 		}
-		if c.Pattern != "" {
-			if frontendSource.ContainsPattern(c.Pattern) {
-				continue
-			}
-		} else if frontendSource.Contains(c.Token) {
+		if referencedInFrontend(c, frontendSource) {
 			continue
 		}
 		missing = append(missing, Missing{Capability: c})
@@ -139,6 +147,59 @@ func FindMissingDesktopSurface(capabilities []Capability, frontendSource Fronten
 		return missing[i].Capability.Name < missing[j].Capability.Name
 	})
 	return missing
+}
+
+// referencedInFrontend reports whether c's Pattern (or, absent one, its
+// Token) appears in frontendSource.
+func referencedInFrontend(c Capability, frontendSource FrontendSource) bool {
+	if c.Pattern != "" {
+		return frontendSource.ContainsPattern(c.Pattern)
+	}
+	return frontendSource.Contains(c.Token)
+}
+
+// StaleBaselineEntry is a KnownGap capability that has gained a real
+// operator-surface reference since it was baselined, so it must be removed
+// from the baseline rather than left to amnesty a gap that no longer exists.
+type StaleBaselineEntry struct {
+	Capability Capability
+}
+
+// Message names the capability and where to remove its now-stale baseline
+// entry, distinct from Missing.Message()'s "add a surface or declare
+// internal" -- this capability already has a surface, so the fix is the
+// opposite: delete the entry that once excused it.
+func (s StaleBaselineEntry) Message() string {
+	hint := s.Capability.BaselineHint
+	if hint == "" {
+		hint = "its baseline entry in erun-backend-api/internal/routes/route_audit.go's KnownUnsurfacedRoutes map"
+	}
+	return fmt.Sprintf(
+		"%s %q now has an operator entry point but is still listed as a known gap.\n"+
+			"    Remove it from %s -- the baseline records gaps that still exist, and this one no longer does.",
+		s.Capability.Source, s.Capability.Name, hint,
+	)
+}
+
+// FindStaleBaselineEntries returns every KnownGap capability that now has a
+// real reference in frontendSource, ordered by name for a stable report. A
+// baseline that never sheds entries it has outgrown rots into a permanent
+// amnesty, so this is what lets the gate enforce "the baseline only shrinks"
+// rather than merely documenting it.
+func FindStaleBaselineEntries(capabilities []Capability, frontendSource FrontendSource) []StaleBaselineEntry {
+	var stale []StaleBaselineEntry
+	for _, c := range capabilities {
+		if !c.KnownGap {
+			continue
+		}
+		if referencedInFrontend(c, frontendSource) {
+			stale = append(stale, StaleBaselineEntry{Capability: c})
+		}
+	}
+	sort.Slice(stale, func(i, j int) bool {
+		return stale[i].Capability.Name < stale[j].Capability.Name
+	})
+	return stale
 }
 
 // UnboundAppMethod is a method on *App that Wails would silently skip when
