@@ -158,19 +158,32 @@ The `SessionStart` hook above closes the gap at session *boundaries* (`startup`,
 
 **Staleness read.** Each orchestrator's turn-boundary activity report (the same file the busy-spinner reconciler reads, `{"busy":…,"atUnix":…}`) is read again here, independent of that reconciler's own busy/idle staleness bounds: a report not refreshed for **10 minutes** (`orchestratorPacingStaleAfter`) reads as quiet regardless of whether its last write said busy or idle. The reference point is the later of the report's own write time and the session's launch time, so a session with no report yet (its first turn hasn't reached a boundary) is not nudged before it has had ten minutes to.
 
-**Nudge.** For each live, non-transient orchestrator whose report is stale, and which is not currently reporting a background shell running (`orchestrator-shell-activity`; a backgrounded shell is expected to legitimately outlive the turn that started it), the desktop writes this text into the session's pty, then — after a short settle, as a **separate** write — a bare carriage return to submit it:
+**Nudge.** For each live, non-transient orchestrator whose report is stale, the desktop writes this text into the session's pty, then — after a short settle, as a **separate** write — a bare carriage return to submit it:
 
 > Keep pacing yourself, on connection errors wait and resume, do not exit this loop. If the assigned task is already complete and verified, say so in one line and stop.
 
-Each nudge appears in the pane as a dim marker line naming the attempt count (`── pacing nudge N/6 sent … ──`), so it is never silent.
+A background shell reported running for that orchestrator (`orchestrator-shell-activity`) no longer holds the nudge back. It used to: the reasoning was that a shell left running was evidence the orchestrator meant to be quiet, but a background shell is a fact about the *shell*, not about the turn behind it — a long-running build is the single most likely thing still running when a turn dies mid-response, so the old rule suppressed the nudge exactly when it was needed most. The shell-activity report is unchanged and still drives the shell indicator; pacing simply stopped reading it.
+
+Each nudge appears in the pane as a dim marker line naming the attempt count and the **measured** quiet period — never the ten-minute constant — so a session quiet for twenty minutes reads as twenty minutes, not as the contract having been honoured on time:
+
+```
+── pacing nudge N/6 sent — no activity report for 19m42s ──
+```
+
+If the orchestrator's last report said `busy: true` and was never followed by an idle one, the marker names that too, since a report stuck on "busy" for a full staleness period usually means the harness never reached its own turn boundary (a dropped connection, a crash) rather than a turn that finished and simply stopped reporting:
+
+```
+── pacing nudge N/6 sent — no activity report for 19m42s — last report said mid-turn, so the turn may have died without one ──
+```
 
 **Bounds.**
 
 - One nudge per orchestrator per tick, and never for a transient (Investigate) session — it has no `id` and its own bounded lifecycle belongs to the investigation registry, not this one.
-- No nudge while a background shell is reported running for that orchestrator.
 - A cap of **6** consecutive un-answered nudges (`orchestratorPacingMaxNudges`) — about an hour at the 10-minute interval. Crossing the cap posts a warning notification and a distinct pane marker instead of a 7th nudge, and the cap latches (no repeat notification on later ticks) until it is rearmed by either:
   - a fresh turn-boundary report whose own timestamp is later than the last nudge **and** says `busy: true` — evidence the session resumed on its own, or
   - real operator input sent into that same pane (`SendSessionInput`) — evidence the operator is now at the keyboard.
+
+**Every decision is logged, not just the ones that nudge.** The reconciler names the reason it did or didn't nudge — alive-but-fresh, not alive, already capped, crossing the cap, or nudging — in the desktop's durable app log, once per transition rather than once per 15-second tick. A stalled pane that never nudges (because the session itself is no longer alive) is therefore distinguishable from a healthy, ordinarily quiet one by reading that log, instead of both looking identical from outside.
 
 **Auto-resume after a crash.** An orchestrator's managed session carries a respawn closure (the same `tryReconnect` mechanism environment tabs use to recover a dropped pod session), gated so it only ever fires for a genuine failure:
 
