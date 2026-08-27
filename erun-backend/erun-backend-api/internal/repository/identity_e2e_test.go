@@ -53,6 +53,75 @@ func TestBootstrapFirstIdentityEnrolsPlatformTenantWhenERUNTenantSet(t *testing.
 	if user.UserID == "" {
 		t.Fatal("expected a bootstrapped user")
 	}
+	assertHasReadAllAndWriteAll(t, db, user.UserID)
+}
+
+// TestFirstTenantUserBootstrapGrantsBothPredefinedRoles proves the
+// per-tenant-first-user path (a token resolving to an already-registered
+// tenant with zero users) grants the same ReadAll+WriteAll shape as
+// empty-database bootstrap, so the role-assignment API added alongside it
+// changes nothing about how a new tenant gets its first admin.
+func TestFirstTenantUserBootstrapGrantsBothPredefinedRoles(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	// Bootstrap the platform's own OPERATIONS tenant first, then register a
+	// second, ordinary tenant with zero users of its own.
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  "https://issuer.example/frs",
+		Subject: "operator-subject",
+	})
+	mustNoErr(t, err, "bootstrap platform tenant")
+
+	var secondTenantID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
+		"second-tenant",
+	).Scan(&secondTenantID), "seed second tenant")
+	_, err = db.Exec(`INSERT INTO issuers (issuer) VALUES ($1)`, "https://issuer.example/second-tenant")
+	mustNoErr(t, err, "register second tenant issuer")
+	_, err = db.Exec(
+		`INSERT INTO tenant_issuers (tenant_id, issuer, name) VALUES ($1, $2, $3)`,
+		secondTenantID, "https://issuer.example/second-tenant", "second tenant issuer",
+	)
+	mustNoErr(t, err, "map second tenant issuer")
+
+	tenant, user, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  "https://issuer.example/second-tenant",
+		Subject: "second-tenant-first-user",
+	})
+	mustNoErr(t, err, "bootstrap second tenant's first user")
+	if tenant.TenantID != secondTenantID {
+		t.Fatalf("expected the second tenant, got %q", tenant.TenantID)
+	}
+	assertHasReadAllAndWriteAll(t, db, user.UserID)
+}
+
+// assertHasReadAllAndWriteAll locks in that bootstrap keeps granting exactly
+// the predefined ReadAll+WriteAll shape, so the fine-grained role-assignment
+// API added alongside it stays additive rather than changing the default.
+func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
+	t.Helper()
+	var names []string
+	rows, err := db.Query(`
+		SELECT ro.name
+		  FROM user_roles ur
+		  JOIN roles ro ON ro.tenant_id = ur.tenant_id AND ro.role_id = ur.role_id
+		 WHERE ur.user_id = $1
+		 ORDER BY ro.name
+	`, userID)
+	mustNoErr(t, err, "query bootstrapped user's roles")
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var name string
+		mustNoErr(t, rows.Scan(&name), "scan role name")
+		names = append(names, name)
+	}
+	mustNoErr(t, rows.Err(), "iterate role names")
+	if len(names) != 2 || names[0] != "ReadAll" || names[1] != "WriteAll" {
+		t.Fatalf("expected exactly [ReadAll WriteAll], got %v", names)
+	}
 }
 
 func TestBootstrapFirstIdentityFallsBackWhenERUNTenantAbsent(t *testing.T) {

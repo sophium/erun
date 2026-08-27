@@ -14,6 +14,10 @@ var (
 	ErrNotFound               = errors.New("not found")
 	ErrMissingSecurityContext = errors.New("missing security context")
 	ErrConflict               = errors.New("conflict")
+	// ErrLastGrantCapableRole guards against a tenant locking itself out of its
+	// own role management: revoking it would leave no user able to grant roles,
+	// and there would be no recovery lever left inside the product.
+	ErrLastGrantCapableRole = errors.New("revoking this role would leave the tenant with no user able to grant roles")
 )
 
 func normalizeNoRows(err error) error {
@@ -30,6 +34,15 @@ func normalizeNoRows(err error) error {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
+}
+
+// isForeignKeyViolation reports whether PostgreSQL rejected a write because a
+// referenced row does not exist for the caller's own tenant — e.g. a role_id
+// or user_id that belongs to a different tenant, which RLS makes invisible
+// rather than merely forbidden.
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation
 }
 
 // pgErrorCode returns the PostgreSQL SQLSTATE of err, if err wraps one.

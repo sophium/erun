@@ -338,6 +338,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterConfigRoute(register, repos.tenants, repos.environments, repos.contexts)
 	routes.RegisterProvisionRoute(register, repos.tenants, repos.environments, repos.tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
+	routes.RegisterRoleRoutes(register, repository.NewRoleRepository(txManager))
 	registerIdentityAdminRoutes(register, options, txManager)
 }
 
