@@ -21,6 +21,7 @@ func whipTestStore(t *testing.T) stubUIStore {
 		envs: map[string]eruncommon.EnvConfig{
 			"erun/ux": {
 				Name:              "ux",
+				Type:              eruncommon.EnvironmentTypeLocalAgent,
 				LocalRepoPath:     t.TempDir(),
 				KubernetesContext: "orbstack",
 			},
@@ -119,6 +120,37 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 	}
 }
 
+// TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot is the
+// regression test for the "identity was never the pod's to supply" half of
+// #1528: every other return path in whipOneEnvironmentNow already stamps
+// Candidate.ID/Name from the host's own id, but the success path used to
+// trust whatever the pod echoed back verbatim. A pod that decodes to an empty
+// (or wrong) identity must still be reported under the id the desktop itself
+// resolved, never a blank row.
+func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store: whipTestStore(t),
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
+		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+			return eruncommon.WhipResult{
+				Decision: eruncommon.WhipDecisionNudge,
+				Reason:   eruncommon.WhipReasonNudge,
+				Pushed:   true,
+			}, nil
+		},
+	})
+
+	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
+	if result.Candidate.ID != "erun/ux" || result.Candidate.Name != "erun/ux" {
+		t.Fatalf("expected the host-resolved id to be stamped regardless of the pod's payload, got %+v", result.Candidate)
+	}
+	if result.Decision != eruncommon.WhipDecisionNudge || !result.Pushed {
+		t.Fatalf("expected the pod's own decision to still pass through, got %+v", result)
+	}
+}
+
 // TestWhipOneEnvironmentNowSurfacesACallFailureAsNotAlive covers the MCP call
 // itself failing (e.g. an old runtime image without the "whip" tool): the
 // environment is reported not-alive with the failure attached, rather than
@@ -186,6 +218,45 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	orchestrator := byKind["orchestrator"]
 	if orchestrator.Outcome != "pushed" || orchestrator.ID != "alive" {
 		t.Fatalf("orchestrator result: got %+v, want pushed/alive", orchestrator)
+	}
+}
+
+// TestWhipAllEnvironmentsNowSkipsHostEnvs covers #1528's "enumerates targets
+// that could never have been whipped" finding: a host-type env has no pod and
+// no cluster contact at all (EnvConfig.HasPod), so it can never carry an AI
+// session to push. Reporting it every pass is noise the report should not
+// carry, unlike a real env this transport merely cannot reach right now.
+func TestWhipAllEnvironmentsNowSkipsHostEnvs(t *testing.T) {
+	store := whipTestStore(t)
+	store.envs["erun/desktop-build"] = eruncommon.EnvConfig{
+		Name:          "desktop-build",
+		Type:          eruncommon.EnvironmentTypeHost,
+		LocalRepoPath: t.TempDir(),
+	}
+
+	app := NewApp(erunUIDeps{
+		store: store,
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
+		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+			return eruncommon.WhipResult{
+				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  eruncommon.WhipDecisionNudge,
+				Pushed:    true,
+			}, nil
+		},
+	})
+
+	results, err := app.whipAllEnvironmentsNow(context.Background())
+	if err != nil {
+		t.Fatalf("whipAllEnvironmentsNow failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected the host env to be skipped, got %d results: %+v", len(results), results)
+	}
+	if results[0].Candidate.ID != "erun/ux" {
+		t.Fatalf("expected only erun/ux, got %+v", results[0])
 	}
 }
 
@@ -259,7 +330,7 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 		Pushed:    false,
 		Error:     "writing nudge text: boom",
 	})
-	if failedPush.Outcome != "skipped" || failedPush.Error == "" {
-		t.Fatalf("got %+v, want a decided-but-failed push reported skipped with its error", failedPush)
+	if failedPush.Outcome != "failed" || failedPush.Error == "" {
+		t.Fatalf("got %+v, want a decided-but-failed push reported failed with its error", failedPush)
 	}
 }

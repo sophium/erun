@@ -32,6 +32,28 @@ func whipEnvironmentViaMCP(ctx context.Context, endpoint, bearer string) (erunco
 	if err != nil {
 		return eruncommon.WhipResult{}, formatWhipMCPError(err)
 	}
+	return decodeWhipMCPResult(result)
+}
+
+// decodeWhipMCPResult turns one "whip" tool CallToolResult into a
+// eruncommon.WhipResult, pulled out of whipEnvironmentViaMCP so the decode
+// path can be driven directly in tests without a live MCP round trip.
+func decodeWhipMCPResult(result *mcp.CallToolResult) (eruncommon.WhipResult, error) {
+	// A tool-reported failure comes back as a populated CallToolResult with
+	// IsError set and no StructuredContent, not as a JSON-RPC error -- the SDK
+	// server wraps a returned error this way (server.go's "for regular errors,
+	// embed them in the tool result"). Missing this check is what let the
+	// nil-StructuredContent case below decode straight into a zero-valued
+	// success: CallTool's own err was nil, so nothing signalled failure at all.
+	if result.IsError {
+		return eruncommon.WhipResult{}, formatWhipMCPError(fmt.Errorf("%s", mcpResultText(result)))
+	}
+	// json.Unmarshal into a struct is a documented no-op for a nil/"null"
+	// input, so a nil StructuredContent must be rejected before it decodes
+	// into an indistinguishable-from-real zero WhipResult.
+	if result.StructuredContent == nil {
+		return eruncommon.WhipResult{}, fmt.Errorf("whip: environment returned no result")
+	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
 		return eruncommon.WhipResult{}, err
@@ -40,7 +62,25 @@ func whipEnvironmentViaMCP(ctx context.Context, endpoint, bearer string) (erunco
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return eruncommon.WhipResult{}, err
 	}
+	// The pod always stamps Candidate.ID/Name (RunLocalEnvironmentWhip); an
+	// empty ID means the payload was not a real decision, whatever decoded.
+	if decoded.Candidate.ID == "" {
+		return eruncommon.WhipResult{}, fmt.Errorf("whip: environment returned an empty result")
+	}
 	return decoded, nil
+}
+
+// mcpResultText extracts the text an IsError result carries -- the SDK puts
+// the tool's own error message in Content as a TextContent block (see
+// CallToolResult.SetError) -- falling back to a generic phrase when a result
+// somehow has none.
+func mcpResultText(result *mcp.CallToolResult) string {
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok && strings.TrimSpace(text.Text) != "" {
+			return text.Text
+		}
+	}
+	return "whip tool reported an error with no detail"
 }
 
 // formatWhipMCPError mirrors formatJobMCPError/formatIdleStopMCPError: a

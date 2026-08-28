@@ -7,6 +7,7 @@ import type { StatusBadgeTone } from 'erun-kit';
 const whipOutcomeTones: Record<string, StatusBadgeTone> = {
   pushed: 'success',
   capped: 'warning',
+  failed: 'destructive',
   skipped: 'muted',
 };
 
@@ -20,6 +21,8 @@ export function whipOutcomeLabel(outcome: string): string {
       return 'Pushed';
     case 'capped':
       return 'Capped';
+    case 'failed':
+      return 'Failed';
     default:
       return 'Skipped';
   }

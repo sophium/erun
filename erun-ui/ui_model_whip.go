@@ -15,7 +15,7 @@ type uiWhipResult struct {
 	Kind    string `json:"kind"` // "orchestrator" | "environment"
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Outcome string `json:"outcome"` // "pushed" | "capped" | "skipped"
+	Outcome string `json:"outcome"` // "pushed" | "capped" | "skipped" | "failed"
 	Reason  string `json:"reason,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
@@ -48,7 +48,11 @@ func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
 			ui.Outcome = "pushed"
 			return ui
 		}
-		ui.Outcome = "skipped"
+		// A decided nudge that did not push is a write that was attempted and
+		// refused -- InlineAlert territory (erun-ui/AGENTS.md's Design-Language
+		// Decision Record), not a benign skip. Give it its own outcome so the
+		// badge and tone can't collapse it into the same bucket as "not alive".
+		ui.Outcome = "failed"
 		ui.Reason = "push failed"
 		ui.Error = result.Error
 		return ui

@@ -63,6 +63,14 @@ test('the whip control renders a pending state and then every target with its ow
       outcome: 'skipped',
       reason: 'not alive — no live session to push',
     },
+    {
+      kind: 'environment',
+      id: 'pw/gamma',
+      name: 'pw/gamma',
+      outcome: 'failed',
+      reason: 'push failed',
+      error: 'writing nudge text: exit status 1',
+    },
   ]);
 
   const whip = app.titlebar.whipButton();
@@ -78,12 +86,17 @@ test('the whip control renders a pending state and then every target with its ow
 
   await expect(body.getByText('pw/alpha')).toBeVisible();
   await expect(body.getByText('pw/beta')).toBeVisible();
+  await expect(body.getByText('pw/gamma')).toBeVisible();
   await expect(body.getByText('pw-orch')).toBeVisible();
   await expect(body.getByText('Pushed')).toBeVisible();
   await expect(body.getByText('Capped')).toBeVisible();
   await expect(body.getByText('Skipped')).toBeVisible();
   await expect(body.getByText(/stopped nudging after repeated silence/)).toBeVisible();
   await expect(body.getByText(/not alive — no live session to push/)).toBeVisible();
+  // A failed push is its own outcome, distinct from a benign skip (#1528):
+  // same decision (nudge) as a pushed row, but refused rather than quiet.
+  await expect(body.getByText('Failed')).toBeVisible();
+  await expect(body.getByText(/push failed.*writing nudge text/)).toBeVisible();
 
   await app.titlebar.closeWhipReport();
   await expect(app.titlebar.whipReportHeading()).toBeHidden();
