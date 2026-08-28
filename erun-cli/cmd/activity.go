@@ -207,8 +207,8 @@ func newActivityCancelStopPendingCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tenant = strings.TrimSpace(tenant)
 			environment = strings.TrimSpace(environment)
-			if tenant == "" || environment == "" {
-				return fmt.Errorf("tenant and environment are required")
+			if err := validateActivityTarget(tenant, environment); err != nil {
+				return err
 			}
 			return common.ClearEnvironmentStopPending(tenant, environment)
 		},
@@ -247,8 +247,8 @@ func newActivityRecordStopCmd() *cobra.Command {
 func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, cloudContextName, source string, stateStdin bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := validateActivityTarget(tenant, environment); err != nil {
+		return err
 	}
 	source = normalizeStopHistorySource(source)
 	pending, havePending, err := loadPendingForRecord(commandContext(cmd).Stdin, stateStdin, tenant, environment)
@@ -357,8 +357,8 @@ func addActivityTargetFlags(cmd *cobra.Command, tenant, environment *string) {
 func resolveActivityStatus(store common.OpenStore, tenant, environment string) (common.EnvironmentIdleStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return common.EnvironmentIdleStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := validateActivityTarget(tenant, environment); err != nil {
+		return common.EnvironmentIdleStatus{}, err
 	}
 	return common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 }

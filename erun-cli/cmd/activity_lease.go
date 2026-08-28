@@ -391,9 +391,28 @@ func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	return common.SaveRuntimeUsageHistory(tenant, environment, common.AppendRuntimeUsageSample(history, sample, time.Now()))
 }
 
-func validateActivityTarget(tenant, environment string) error {
-	if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-		return fmt.Errorf("tenant and environment are required")
+// missingTenantOrEnvironmentFlags names which of the shared --tenant/--environment
+// flags a caller left empty, for validateActivityTarget/validateJobTarget to build
+// an operation-specific refusal instead of a bare "tenant and environment are
+// required" dead end.
+func missingTenantOrEnvironmentFlags(tenant, environment string) []string {
+	var missing []string
+	if strings.TrimSpace(tenant) == "" {
+		missing = append(missing, "tenant")
 	}
-	return nil
+	if strings.TrimSpace(environment) == "" {
+		missing = append(missing, "environment")
+	}
+	return missing
+}
+
+func validateActivityTarget(tenant, environment string) error {
+	missing := missingTenantOrEnvironmentFlags(tenant, environment)
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s not set: erun activity commands run outside any resolved environment and never read the ambient config -- pass --tenant and --environment explicitly",
+		strings.Join(missing, " and "),
+	)
 }

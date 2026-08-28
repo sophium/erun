@@ -78,8 +78,8 @@ type uiRuntimeSizingRecommendation struct {
 // and never writes anything.
 func (a *App) LoadRuntimeSizing(selection uiSelection) (uiRuntimeSizingRecommendation, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiRuntimeSizingRecommendation{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load runtime sizing", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeSizingRecommendation{}, err
 	}
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeSizingTimeout)
 	defer cancel()
@@ -102,8 +102,8 @@ func (a *App) LoadRuntimeSizing(selection uiSelection) (uiRuntimeSizingRecommend
 // that does.
 func (a *App) ResizeRuntimeToRecommendation(selection uiSelection, overrideLease bool) (uiRuntimeSizingRecommendation, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiRuntimeSizingRecommendation{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resize runtime to recommendation", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeSizingRecommendation{}, err
 	}
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeReclaimTimeout)
 	defer cancel()

@@ -358,6 +358,29 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
+// errMissingTenantOrEnvironment names which of tenant/environment a Wails
+// binding needed but was called with empty, the operation, and the fix.
+// Every binding here acts on the environment the frontend currently has
+// selected, so a blank value means it was invoked with no selection --
+// select an environment in the sidebar before retrying. Returns nil when
+// both are set, so callers can use it as their whole guard clause.
+func errMissingTenantOrEnvironment(operation, tenant, environment string) error {
+	var missing []string
+	if strings.TrimSpace(tenant) == "" {
+		missing = append(missing, "tenant")
+	}
+	if strings.TrimSpace(environment) == "" {
+		missing = append(missing, "environment")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s: %s not set -- select an environment in the sidebar before retrying this action",
+		operation, strings.Join(missing, " and "),
+	)
+}
+
 func normalizeSelection(selection uiSelection) uiSelection {
 	return uiSelection{
 		Tenant:            strings.TrimSpace(selection.Tenant),

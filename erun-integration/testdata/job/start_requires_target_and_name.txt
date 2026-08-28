@@ -1,4 +1,4 @@
 audit: erun job start --name suite work
-tenant and environment are required
+tenant and environment not set: erun job commands run outside any resolved environment and never read the ambient config -- pass --tenant and --environment explicitly
 audit: erun job start --environment dev --tenant team work
 job name is required

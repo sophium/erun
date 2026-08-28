@@ -18,8 +18,8 @@ import (
 // cannot report the "not deployed" case this covers.
 func (a *App) CheckEnvironmentHealth(selection uiSelection) (uiEnvironmentHealth, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentHealth{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentHealth{}, err
 	}
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {

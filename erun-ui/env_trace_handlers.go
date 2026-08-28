@@ -33,8 +33,8 @@ type uiEnvTrace struct {
 // the env or hold it awake.
 func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvTrace{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvTrace{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,

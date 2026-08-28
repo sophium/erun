@@ -61,8 +61,8 @@ const (
 // error that turns the Runtime tab into a failure surface.
 func (a *App) LoadRuntimeActivity(selection uiSelection) (uiRuntimeActivity, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiRuntimeActivity{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load runtime activity", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeActivity{}, err
 	}
 	report, err := a.probeRuntimeActivity(selection)
 	if err != nil {
@@ -80,8 +80,8 @@ func (a *App) LoadRuntimeActivity(selection uiSelection) (uiRuntimeActivity, err
 // what is there before anything is stopped.
 func (a *App) ReclaimRuntimeResources(input uiRuntimeReclaimInput) (uiRuntimeReclaimResult, error) {
 	selection := normalizeSelection(uiSelection{Tenant: input.Tenant, Environment: input.Environment})
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiRuntimeReclaimResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("reclaim runtime resources", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeReclaimResult{}, err
 	}
 	action := strings.TrimSpace(input.Action)
 	script, err := runtimeReclaimScript(action)

@@ -136,8 +136,8 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 // addressed by, shared by starting and attaching. The id defaults to the name,
 // matching the lease store, so re-running the same named work keeps one handle.
 func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (string, error) {
-	if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
+		return "", err
 	}
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("job name is required")

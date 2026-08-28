@@ -36,7 +36,7 @@ func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner
 	environment = strings.TrimSpace(environment)
 	expected := common.DeleteEnvironmentConfirmation(tenant, environment)
 	if expected == "" {
-		return fmt.Errorf("tenant and environment are required")
+		return fmt.Errorf("tenant and environment must not be empty: run `erun delete TENANT ENVIRONMENT` with both positional arguments set")
 	}
 
 	if !ctx.DryRun && !yes {

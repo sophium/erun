@@ -61,46 +61,18 @@ var bareRequiredInputPattern = regexp.MustCompile(`^(?:tenant|environment)(?: an
 // for the "tenant and environment are required" hits that widening the
 // pattern above newly caught: 65 pre-existing call sites across erun-cli,
 // erun-common, and erun-ui, none of them reachable from the exec_agent bug
-// this gate change was made for. Rewriting all of them to name their own
-// operation and recovery is a distinct, large effort of its own (tracked in
-// a separate GitHub issue), not something to rush inline with a one-tool
-// schema fix. This baseline may only shrink: fixing a site
-// and forgetting to remove its entry here fails TestBareRequiredInputBaselineIsCurrent
-// below, the same way a stale KnownUnsurfacedRoutes entry fails its own gate.
-// The key is the file path relative to the repo root; the value is the exact
-// count of matching literals still in that file.
-var bareRequiredInputBaseline = map[string]int{
-	"erun-cli/cmd/activity.go":         3,
-	"erun-cli/cmd/activity_lease.go":   1,
-	"erun-cli/cmd/activity_proxy.go":   1,
-	"erun-cli/cmd/delete.go":           1,
-	"erun-cli/cmd/job.go":              1,
-	"erun-common/activity.go":          3,
-	"erun-common/delete.go":            1,
-	"erun-common/env_trace.go":         1,
-	"erun-common/idle_stop_pending.go": 4,
-	"erun-common/job_supervisor.go":    1,
-	"erun-common/unexpose.go":          1,
-	"erun-ui/contribute_mode.go":       2,
-	"erun-ui/contribute_sessions.go":   2,
-	"erun-ui/deploy_components.go":     1,
-	"erun-ui/environment_config.go":    4,
-	"erun-ui/environment_health.go":    1,
-	"erun-ui/environment_jobs.go":      1,
-	"erun-ui/environment_stop.go":      1,
-	"erun-ui/env_trace_handlers.go":    1,
-	"erun-ui/exec_write_push.go":       2,
-	"erun-ui/exposure_app.go":          3,
-	"erun-ui/host_open_path.go":        1,
-	"erun-ui/host_workspace.go":        4,
-	"erun-ui/idle_status.go":           3,
-	"erun-ui/outputs.go":               2,
-	"erun-ui/pin_version.go":           3,
-	"erun-ui/runtime_activity.go":      2,
-	"erun-ui/runtime_sizing.go":        2,
-	"erun-ui/runtime_usage.go":         1,
-	"erun-ui/terminal_sessions.go":     11,
-}
+// this gate change was made for. All 65 have since been rewritten to name
+// their own operation and recovery (see erun-common's errMissingTenantOrEnvironment
+// and erun-ui's errMissingTenantOrEnvironment), so the baseline is empty: it
+// stays declared, rather than deleted, so a reintroduced bare literal in one
+// of these files gets zero tolerance like any other file, and so a future
+// widening of this baseline documents the same shrink-only contract. This
+// baseline may only shrink: fixing a site and forgetting to remove its entry
+// here fails TestBareRequiredInputBaselineIsCurrent below, the same way a
+// stale KnownUnsurfacedRoutes entry fails its own gate. The key is the file
+// path relative to the repo root; the value is the exact count of matching
+// literals still in that file.
+var bareRequiredInputBaseline = map[string]int{}
 
 // skipDirForBareRequiredInputScan excludes directories that hold no
 // hand-written production Go source: version control, installed JS

@@ -65,8 +65,8 @@ func (a *App) GetContributeMode(selection uiSelection) bool {
 // after this returns; this method does not touch them.
 func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeState, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiContributeState{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("set contribute mode", selection.Tenant, selection.Environment); err != nil {
+		return uiContributeState{}, err
 	}
 	if on {
 		if !a.IsContributeEligible(selection) {
@@ -124,8 +124,8 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 }
 
 func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
-	if selection.Tenant == "" || selection.Environment == "" {
-		return 0, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve contribute app port", selection.Tenant, selection.Environment); err != nil {
+		return 0, err
 	}
 	if !a.GetContributeMode(selection) {
 		return 0, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)

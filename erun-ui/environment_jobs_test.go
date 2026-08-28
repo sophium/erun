@@ -178,7 +178,7 @@ func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
 func TestJobReadsRequireTheirIdentifiers(t *testing.T) {
 	app := &App{}
 	if _, err := app.LoadEnvironmentJobs(" ", "build"); err == nil ||
-		!strings.Contains(err.Error(), "tenant and environment are required") {
+		!strings.Contains(err.Error(), "tenant not set") {
 		t.Fatalf("blank tenant: %v", err)
 	}
 	if _, err := app.ReadEnvironmentJobOutput(uiJobOutputInput{Tenant: "t", Environment: "e"}); err == nil ||

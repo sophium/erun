@@ -814,8 +814,12 @@ func addJobTargetFlags(cmd *cobra.Command, tenant, environment *string) {
 }
 
 func validateJobTarget(tenant, environment string) error {
-	if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
-		return fmt.Errorf("tenant and environment are required")
+	missing := missingTenantOrEnvironmentFlags(tenant, environment)
+	if len(missing) == 0 {
+		return nil
 	}
-	return nil
+	return fmt.Errorf(
+		"%s not set: erun job commands run outside any resolved environment and never read the ambient config -- pass --tenant and --environment explicitly",
+		strings.Join(missing, " and "),
+	)
 }

@@ -19,8 +19,8 @@ import (
 // deploy reconciles it instead of quietly restarting the pod.
 func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentStopResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("stop environment", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentStopResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,

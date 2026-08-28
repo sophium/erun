@@ -250,8 +250,8 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	if store == nil {
 		return EnvironmentIdleStatus{}, fmt.Errorf("store is required")
 	}
-	if tenant == "" || environment == "" {
-		return EnvironmentIdleStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
+		return EnvironmentIdleStatus{}, err
 	}
 	config, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -367,8 +367,8 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	kind := strings.TrimSpace(params.Kind)
-	if tenant == "" || environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
+		return err
 	}
 	if !validEnvironmentActivityKind(kind) {
 		return fmt.Errorf("unsupported activity kind %q", kind)
@@ -472,8 +472,8 @@ func LoadEnvironmentActivity(tenant, environment string) (map[string]Environment
 func EnvironmentActivityDir(tenant, environment string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
+		return "", err
 	}
 	dir, err := xdg.CacheFile(filepath.Join("erun", "activity", tenant, environment))
 	if err != nil {

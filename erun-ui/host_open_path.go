@@ -122,8 +122,8 @@ type podPathResolution struct {
 func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) (podPathResolution, error) {
 	selection = normalizeSelection(selection)
 	podPath = strings.TrimSpace(podPath)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return podPathResolution{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve environment host path", selection.Tenant, selection.Environment); err != nil {
+		return podPathResolution{}, err
 	}
 	if podPath == "" {
 		return podPathResolution{}, fmt.Errorf("path is required")

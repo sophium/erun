@@ -11,8 +11,8 @@ import (
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiIdleStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
+		return uiIdleStatus{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -254,8 +254,8 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ erun
 // client observe it too.
 func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -312,8 +312,8 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 // canonical history the in-pod monitor records rather than any local copy.
 func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
