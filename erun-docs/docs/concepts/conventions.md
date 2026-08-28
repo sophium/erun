@@ -150,6 +150,8 @@ Helm charts live at:
 
 One chart per deployable component. Components map 1:1 with images by name when a service has both (e.g. `erun-backend-api` has a Dockerfile at `<tenant>-devops/docker/erun-backend-api/` and a chart at `<tenant>-devops/k8s/erun-backend-api/`).
 
+Writing this layout by hand for a new service is exactly what the [`erun-blueprint-service`](/concepts/skills) skill does — it adds the Dockerfile, chart, and per-env `values.<env>.yaml` overlays for a component in this shape, so a hand-written or generated service becomes something `erun build`/`erun deploy` can find without anyone reverse-engineering the convention above.
+
 The deploy plan — which charts deploy in what order — is declared per env in `.erun/config.yaml`. Each step is either a single component name (deployed alone) or a list (deployed in parallel within the step); steps run in declared order. Different envs can declare different plans (a slim plan for `dev`, the full backend for `prod`). For the YAML schema and the per-field semantics, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config).
 
 Per-env helm value overlays live next to the chart as `values.<env>.yaml` — runtime envs need them; agent envs use defaults.
