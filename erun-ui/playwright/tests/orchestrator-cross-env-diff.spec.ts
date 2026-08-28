@@ -363,6 +363,15 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     const betaAll = review.reviewBoundaryButton('All branch changes', 1);
     const betaCurrent = review.reviewBoundaryButton('Current local changes', 1);
 
+    // diffSectionPaths() above only proves the diff panel's file list
+    // (DiffList) has rendered both environments' files. The review-layers
+    // controls read the same per-env slot but live in a separate subtree
+    // (ReviewRangeControls, inside the changed-files aside), so nth(1) has
+    // nothing to resolve to until beta's own controls have mounted -- wait
+    // for that directly instead of assuming it happens in the same commit.
+    await expect(betaCurrent).toBeVisible();
+    await expect(betaAll).toBeVisible();
+
     await expect(alphaCurrent).toHaveAttribute('aria-pressed', 'true');
     await expect(betaCurrent).toHaveAttribute('aria-pressed', 'true');
 
