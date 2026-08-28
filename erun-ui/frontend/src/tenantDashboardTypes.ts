@@ -70,6 +70,144 @@ export interface UITenantDashboard {
   // cannot read reviews, or has no signed-in user id to filter by.
   mineReviewCount?: number;
   waitingOnMeReviewCount?: number;
+  // contexts/environments are the Registration tab's two lists: the
+  // platform's own cloud contexts (managed clusters) and hosted
+  // environments — objects distinct from (and with no automatic link to)
+  // this machine's local tenant/env config. Each degrades independently:
+  // a caller denied one list, or whose read of one failed, still sees the
+  // other (contextsRestricted/contextsError, environmentsRestricted/
+  // environmentsError).
+  contexts?: UIPlatformContext[];
+  contextsRestricted?: string;
+  contextsError?: string;
+  environments?: UIPlatformEnvironment[];
+  environmentsRestricted?: string;
+  environmentsError?: string;
+  // canCreateContext/canRegisterEnvironment/canPreviewProvision/
+  // canDeployEnvironment/canStopEnvironment/canDeleteEnvironment mirror
+  // canCreateReview/canAdvanceMergeQueue above for the Registration tab's
+  // own writes.
+  canCreateContext: boolean;
+  canRegisterEnvironment: boolean;
+  canPreviewProvision: boolean;
+  canDeployEnvironment: boolean;
+  canStopEnvironment: boolean;
+  canDeleteEnvironment: boolean;
+}
+
+// UIPlatformContext mirrors a hosted cloud context (managed cluster) the
+// Registration tab lists and can create.
+export interface UIPlatformContext {
+  contextId: string;
+  name: string;
+  provider: string;
+  cloudProviderAlias?: string;
+  region?: string;
+  instanceType?: string;
+  kubernetesContext?: string;
+  status: string;
+  provisionError?: string;
+}
+
+// UIPlatformEnvironment mirrors a hosted environment the Registration tab
+// lists, registers, and deploys/stops/deletes.
+export interface UIPlatformEnvironment {
+  environmentId: string;
+  name: string;
+  type: string;
+  contextId?: string;
+  kubernetesContext?: string;
+  runtimeVersion?: string;
+  status: string;
+  provisionError?: string;
+  deployedVersion?: string;
+  // deleteError names why a delete attempt did not tear the namespace down,
+  // set only when status is "deletion-blocked".
+  deleteError?: string;
+}
+
+// UICreatePlatformContextInput registers (or, with preview set, only
+// previews) a cloud context, mirroring `erun platform context create
+// [--preview]`.
+export interface UICreatePlatformContextInput {
+  tenant: string;
+  name: string;
+  cloudProviderAlias: string;
+  region: string;
+  instanceType?: string;
+  diskType?: string;
+  diskSizeGb?: number;
+  preview?: boolean;
+}
+
+// UIPlatformContextOutcome is CreatePlatformContext's result. kind
+// "conflict"/"unavailable" is an expected, actionable refusal carried in
+// `message` verbatim from the platform — render it as a recoverable state,
+// never a raw error. Only "accepted" carries `context` (a real create) or
+// `plan` (a preview).
+// kind is plain string (not a literal union), matching every other
+// status-like field crossing the Wails boundary in this file — the Go side
+// carries "accepted" | "conflict" | "unavailable" as an untyped string.
+export interface UIPlatformContextOutcome {
+  kind: string;
+  context?: UIPlatformContext;
+  plan?: string[];
+  message?: string;
+}
+
+// UIPlatformProvisionInput previews the ordered plan for provisioning a
+// hosted environment without creating anything, mirroring `erun platform
+// provision`. Pass either kubernetesContext to reuse an existing cluster, or
+// the context* trio to preview bootstrapping a new one.
+export interface UIPlatformProvisionInput {
+  tenant: string;
+  envName: string;
+  envType: string;
+  kubernetesContext?: string;
+  contextName?: string;
+  contextCloudProviderAlias?: string;
+  contextRegion?: string;
+  contextInstanceType?: string;
+  contextDiskType?: string;
+  contextDiskSizeGb?: number;
+}
+
+// UIPlatformProvisionResult is always a successful preview; quotaOk names
+// whether the plan can actually register without hitting the tenant's cap.
+export interface UIPlatformProvisionResult {
+  plan: string[];
+  quotaOk: boolean;
+}
+
+// UIRegisterPlatformEnvironmentInput registers a hosted environment,
+// mirroring `erun platform env register`.
+export interface UIRegisterPlatformEnvironmentInput {
+  tenant: string;
+  name: string;
+  type: string;
+  contextId?: string;
+  kubernetesContext?: string;
+  runtimeVersion?: string;
+}
+
+// UIPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input.
+export interface UIPlatformEnvironmentActionInput {
+  tenant: string;
+  environmentId: string;
+  version?: string;
+}
+
+// UIPlatformEnvironmentOutcome is the shared result for
+// RegisterPlatformEnvironment/DeployPlatformEnvironment/
+// StopPlatformEnvironment/DeletePlatformEnvironment. kind "conflict" (a
+// quota cap, or another deploy/delete already in flight) and "unavailable"
+// (no deploy executor configured) are expected, actionable outcomes carried
+// in `message` verbatim from the platform — never raw errors; only
+// "accepted" carries `environment`.
+export interface UIPlatformEnvironmentOutcome {
+  kind: string;
+  environment?: UIPlatformEnvironment;
+  message?: string;
 }
 
 // UITenantDashboardPanel is one panel's own outcome: `restricted` names the API

@@ -17,6 +17,7 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'queue', label: 'Merge queue' },
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
+  { tab: 'registration', label: 'Registration' },
   { tab: 'api-log', label: 'API log' },
 ];
 
@@ -81,6 +82,24 @@ const reviewStatusTones: Record<string, StatusBadgeTone> = {
 
 export function reviewStatusTone(status: string): StatusBadgeTone {
   return reviewStatusTones[status.trim().toUpperCase()] ?? 'warning';
+}
+
+// registrationStatusTones maps the Registration tab's two status vocabularies
+// (hosted environments and cloud contexts share the same
+// registered/provisioning/running/failed/deleting/deletion-blocked shape) to
+// a StatusBadge tone. WCAG 1.4.1 again: every tone still shows the status
+// word, never colour alone.
+const registrationStatusTones: Record<string, StatusBadgeTone> = {
+  registered: 'muted',
+  provisioning: 'in-progress',
+  running: 'success',
+  failed: 'destructive',
+  deleting: 'in-progress',
+  'deletion-blocked': 'destructive',
+};
+
+export function registrationStatusTone(status: string): StatusBadgeTone {
+  return registrationStatusTones[status.trim().toLowerCase()] ?? 'warning';
 }
 
 // unresolvedThreadsTone renders the count as a quantity, not just a colour:

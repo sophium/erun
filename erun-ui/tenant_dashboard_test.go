@@ -33,6 +33,10 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 			_, _ = w.Write([]byte(`{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`))
 		case "/v1/users":
 			_, _ = w.Write([]byte(`[]`))
+		case "/v1/contexts":
+			_, _ = w.Write([]byte(`[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`))
+		case "/v1/environments":
+			_, _ = w.Write([]byte(`[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`))
 		default:
 			http.NotFound(w, req)
 		}
@@ -220,7 +224,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments"
 	if got := strings.Join(requests, ","); got != want {
 		t.Fatalf("expected every read to be attempted, got %q, want %q", got, want)
 	}

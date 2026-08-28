@@ -15,6 +15,7 @@ import {
   RelativeTime,
   type TenantDashboardData,
 } from './TenantDashboardMessage';
+import { RegistrationPanel } from './TenantDashboardPanels.Registration';
 import { MergeQueuePanel, ReviewsPanel } from './TenantDashboardPanels.Reviews';
 
 export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): React.ReactElement {
@@ -25,6 +26,7 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
       <MergeQueuePanel data={data} />
       <BuildsPanel data={data} />
       <AuditPanel data={data} />
+      <RegistrationPanel data={data} />
       <TabsContent value="api-log" className="min-h-0 overflow-auto">
         <APILogPanel log={data?.apiLog ?? ''} error={data?.apiLogError ?? ''} />
       </TabsContent>

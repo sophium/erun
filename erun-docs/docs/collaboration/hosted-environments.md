@@ -8,6 +8,8 @@ A hosted erun platform gives your tenant its own environments over an API — cr
 
 For the full concept and spec, see [Agent reference · Hosted platform](/concepts/hosted-platform).
 
+The examples below use the CLI, but every action — previewing, registering, deploying, stopping, deleting — has an equivalent in the desktop app's tenant dashboard, on its **Registration** tab. Open the tenant dashboard and switch to Registration to see what's already registered on the platform, alongside the local tenant and environments the sidebar already shows: those are two separate objects, and creating one does not create the other. Registering a new tenant, or enrolling its first user, still needs `erun platform tenant create`/`erun platform user enroll` from the CLI or console — the Registration tab points there rather than half-configuring it through a form.
+
 ## Sign in once
 
 ```bash
@@ -41,6 +43,8 @@ Re-deploy at a different version later with:
 erun platform env deploy <environment-id> --version 1.5.0
 ```
 
+In the desktop, the Registration tab's "Register an environment" form registers, and each row in its environments list carries its own Deploy control (with an optional version field) for a later re-deploy.
+
 ## Preview before you commit
 
 `erun platform provision` resolves the full plan — quota, placement, namespace, and deploy — without creating anything, so you can check it before registering for real:
@@ -48,6 +52,8 @@ erun platform env deploy <environment-id> --version 1.5.0
 ```bash
 erun platform provision --env-name staging --env-type runtime
 ```
+
+The Registration tab's "Register an environment" form previews the same way: a "Preview provisioning plan" button resolves and shows the plan before "Register environment" is even enabled to click, so a register action is never one click past a preview you have not seen.
 
 ## Stop and delete
 
@@ -64,13 +70,24 @@ erun platform env get <environment-id>
 
 It converges one of two ways: the environment is gone (`env get` reports it as not found), or it lands on `deletion-blocked` with the reason — the stuck namespace's own conditions — printed on the same line. The platform re-attempts a blocked delete on its own every few minutes, so a namespace that finishes terminating converges without you doing anything; re-running `erun platform env delete` retries it immediately.
 
+The Registration tab's environments list carries Stop and Delete alongside Deploy on each row. Delete additionally asks you to type the environment's name to confirm before it will send the request — the same confirmation every other unrecoverable action in the desktop app requires.
+
 ## Where an environment lands
 
 Name a cloud context you've already registered with `contextId` and a hosted runtime environment deploys there instead of the platform's own cluster; leave it unset and the platform auto-selects one of your own registered contexts with room, or falls back to its own cluster if you haven't registered any. See [Placement](/concepts/hosted-platform#single-cluster-placement) for the full decision and what an unresolvable request looks like (a clear, immediate error rather than a silently-wrong deploy).
 
+Register a cloud context first with:
+
+```bash
+erun platform context create --name prod --alias aws-main --region eu-west-2 --preview
+erun platform context create --name prod --alias aws-main --region eu-west-2
+```
+
+`--preview` resolves and returns the bootstrap plan without creating anything, the same way the desktop's Registration tab's "Preview context plan" button does before its "Register context" button is used for real.
+
 ## Quotas
 
-Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit. An environment you have asked to delete stops counting against that cap as soon as the delete is accepted — a teardown that gets stuck can't lock you out of your own allowance.
+Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit. An environment you have asked to delete stops counting against that cap as soon as the delete is accepted — a teardown that gets stuck can't lock you out of your own allowance. In the desktop, hitting the cap shows the same message inline on the register form rather than a raw error — it names the cap and the fix (delete or stop another environment first), the same recoverable state the CLI reports.
 
 Each of your environments also runs inside a namespace capped on CPU, memory, and storage — enforced by Kubernetes itself, not just recorded. On top of that, your tenant has an aggregate CPU/memory/storage budget across all of your runtime environments combined: registering (or redeploying) one that would push your total past that budget is refused the same way, naming which resource and by how much. If your platform operator has set either cap unusually low, registering a new runtime environment is refused with a clear conflict naming the cap, rather than succeeding and failing to actually come up.
 

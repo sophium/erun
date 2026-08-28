@@ -36,6 +36,12 @@ const dashboard: UITenantDashboard = {
   canCreateReview: false,
   canAdvanceMergeQueue: false,
   canOverrideMergeQueue: false,
+  canCreateContext: false,
+  canRegisterEnvironment: false,
+  canPreviewProvision: false,
+  canDeployEnvironment: false,
+  canStopEnvironment: false,
+  canDeleteEnvironment: false,
   platformAlias: 'erun+api.frs-prod.services.erunpaas.com@erun',
 };
 

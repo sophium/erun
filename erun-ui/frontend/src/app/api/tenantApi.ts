@@ -2,10 +2,17 @@ import type {
   UIAdvanceMergeQueueInput,
   UICloudProviderStatus,
   UIConnectERunPlatformInput,
+  UICreatePlatformContextInput,
   UICreateReviewInput,
   UIOverrideAdvanceMergeQueueInput,
+  UIPlatformContextOutcome,
+  UIPlatformEnvironmentActionInput,
+  UIPlatformEnvironmentOutcome,
+  UIPlatformProvisionInput,
+  UIPlatformProvisionResult,
   UIPlatformUser,
   UIPlatformUserEnrollInput,
+  UIRegisterPlatformEnvironmentInput,
   UITenantConfig,
   UITenantDashboard,
   UITenantDashboardInput,
@@ -15,12 +22,18 @@ import type {
 import {
   AdvanceMergeQueue,
   ConnectERunPlatform,
+  CreatePlatformContext,
   CreateReview,
+  DeletePlatformEnvironment,
+  DeployPlatformEnvironment,
   EnrollERunPlatformUser,
   LoadTenantConfig,
   LoadTenantDashboard,
   OverrideAdvanceMergeQueue,
+  PreviewPlatformProvision,
+  RegisterPlatformEnvironment,
   SaveTenantConfig,
+  StopPlatformEnvironment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
@@ -81,6 +94,52 @@ export const tenantApi = wailsApi.injectEndpoints({
         EnrollERunPlatformUser(input),
       ),
     }),
+    createPlatformContext: builder.mutation<UIPlatformContextOutcome, UICreatePlatformContextInput>(
+      {
+        queryFn: wailsQueryFn<UICreatePlatformContextInput, UIPlatformContextOutcome>((input) =>
+          CreatePlatformContext(input),
+        ),
+      },
+    ),
+    previewPlatformProvision: builder.mutation<UIPlatformProvisionResult, UIPlatformProvisionInput>(
+      {
+        queryFn: wailsQueryFn<UIPlatformProvisionInput, UIPlatformProvisionResult>((input) =>
+          PreviewPlatformProvision(input),
+        ),
+      },
+    ),
+    registerPlatformEnvironment: builder.mutation<
+      UIPlatformEnvironmentOutcome,
+      UIRegisterPlatformEnvironmentInput
+    >({
+      queryFn: wailsQueryFn<UIRegisterPlatformEnvironmentInput, UIPlatformEnvironmentOutcome>(
+        (input) => RegisterPlatformEnvironment(input),
+      ),
+    }),
+    deployPlatformEnvironment: builder.mutation<
+      UIPlatformEnvironmentOutcome,
+      UIPlatformEnvironmentActionInput
+    >({
+      queryFn: wailsQueryFn<UIPlatformEnvironmentActionInput, UIPlatformEnvironmentOutcome>(
+        (input) => DeployPlatformEnvironment(input),
+      ),
+    }),
+    stopPlatformEnvironment: builder.mutation<
+      UIPlatformEnvironmentOutcome,
+      UIPlatformEnvironmentActionInput
+    >({
+      queryFn: wailsQueryFn<UIPlatformEnvironmentActionInput, UIPlatformEnvironmentOutcome>(
+        (input) => StopPlatformEnvironment(input),
+      ),
+    }),
+    deletePlatformEnvironment: builder.mutation<
+      UIPlatformEnvironmentOutcome,
+      UIPlatformEnvironmentActionInput
+    >({
+      queryFn: wailsQueryFn<UIPlatformEnvironmentActionInput, UIPlatformEnvironmentOutcome>(
+        (input) => DeletePlatformEnvironment(input),
+      ),
+    }),
   }),
 });
 
@@ -95,4 +154,10 @@ export const {
   useOverrideAdvanceMergeQueueMutation,
   useConnectERunPlatformMutation,
   useEnrollERunPlatformUserMutation,
+  useCreatePlatformContextMutation,
+  usePreviewPlatformProvisionMutation,
+  useRegisterPlatformEnvironmentMutation,
+  useDeployPlatformEnvironmentMutation,
+  useStopPlatformEnvironmentMutation,
+  useDeletePlatformEnvironmentMutation,
 } = tenantApi;
