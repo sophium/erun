@@ -62,9 +62,9 @@ var bareRequiredInputPattern = regexp.MustCompile(`^(?:tenant|environment)(?: an
 // pattern above newly caught: 65 pre-existing call sites across erun-cli,
 // erun-common, and erun-ui, none of them reachable from the exec_agent bug
 // this gate change was made for. Rewriting all of them to name their own
-// operation and recovery is a distinct, large effort of its own (tracked at
-// https://github.com/sophium/erun/issues/1506), not something to rush inline
-// with a one-tool schema fix. This baseline may only shrink: fixing a site
+// operation and recovery is a distinct, large effort of its own (tracked in
+// a separate GitHub issue), not something to rush inline with a one-tool
+// schema fix. This baseline may only shrink: fixing a site
 // and forgetting to remove its entry here fails TestBareRequiredInputBaselineIsCurrent
 // below, the same way a stale KnownUnsurfacedRoutes entry fails its own gate.
 // The key is the file path relative to the repo root; the value is the exact
