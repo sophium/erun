@@ -122,7 +122,7 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 
 // TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot is the
 // regression test for the "identity was never the pod's to supply" half of
-// #1528: every other return path in whipOneEnvironmentNow already stamps
+// Every other return path in whipOneEnvironmentNow already stamps
 // Candidate.ID/Name from the host's own id, but the success path used to
 // trust whatever the pod echoed back verbatim. A pod that decodes to an empty
 // (or wrong) identity must still be reported under the id the desktop itself
@@ -221,7 +221,7 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	}
 }
 
-// TestWhipAllEnvironmentsNowSkipsHostEnvs covers #1528's "enumerates targets
+// TestWhipAllEnvironmentsNowSkipsHostEnvs covers the "enumerates targets
 // that could never have been whipped" finding: a host-type env has no pod and
 // no cluster contact at all (EnvConfig.HasPod), so it can never carry an AI
 // session to push. Reporting it every pass is noise the report should not
