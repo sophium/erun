@@ -255,6 +255,11 @@ export class Sidebar {
     await this.orchestratorRowButton(name).click();
   }
 
+  // The hover card raised by hovering orchestratorRowButton, mirroring envHoverCard().
+  orchestratorHoverCard(name: string): Locator {
+    return this.page.getByRole('dialog', { name: `${name} details` });
+  }
+
   // The tenant name button that opens its dashboard, carrying aria-current
   // when the dashboard is the sidebar's focused row (#1204).
   tenantDashboardButton(tenant: string): Locator {
