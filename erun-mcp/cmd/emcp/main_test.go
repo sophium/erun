@@ -81,6 +81,28 @@ func assertRuntimeContext(t *testing.T, got erunmcp.RuntimeContext) {
 	}
 }
 
+func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
+	stderr := new(bytes.Buffer)
+	called := false
+
+	exitCode := run([]string{
+		"--metrics-enabled", "true",
+		"--tenant", "tenant-a", "--environment", "dev",
+	}, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+		called = true
+		return nil
+	})
+	if exitCode != 2 {
+		t.Fatalf("expected refusal exit code 2, got %d", exitCode)
+	}
+	if called {
+		t.Fatal("expected server not to start when leftover positional arguments remain")
+	}
+	if got := stderr.String(); !strings.Contains(got, `"true"`) || !strings.Contains(got, "--flag=value") {
+		t.Fatalf("unexpected stderr: %q", got)
+	}
+}
+
 func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	stderr := new(bytes.Buffer)
 

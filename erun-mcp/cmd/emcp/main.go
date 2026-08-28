@@ -46,6 +46,11 @@ func run(args []string, stderr io.Writer, info eruncommon.BuildInfo, runServer s
 		return 2
 	}
 
+	if flags.NArg() > 0 {
+		_, _ = fmt.Fprintf(stderr, "emcp: unrecognized argument %q (and %d more); flag parsing stopped here because a preceding bool flag was given a space-separated value — write it as --flag=value (e.g. --metrics-enabled=true) instead of --flag value\n", flags.Arg(0), flags.NArg()-1)
+		return 2
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
