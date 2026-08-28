@@ -3,6 +3,7 @@ import { Copy, KeyRound, Link2, LoaderCircle, ShieldAlert, UserPlus, Users } fro
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import { showNotification } from '@/app/notificationThunks';
 import { chooseTenantPlatformAlias, loadTenantDashboard } from '@/app/tenantDialogThunks';
 import {
@@ -32,15 +33,13 @@ import { SignInAction } from './PlatformSignInAlert';
 // is a defect of the same severity as a crash.
 
 export function TenantPlatformStateCard({
-  tenant,
   data,
 }: {
-  tenant: string;
   data: UITenantDashboard;
 }): React.ReactElement | null {
   switch (data.platformState) {
     case TENANT_PLATFORM_STATE_NOT_CONNECTED:
-      return <NotConnectedState tenant={tenant} />;
+      return <NotConnectedState />;
     case TENANT_PLATFORM_STATE_CHOOSE_ALIAS:
       return <ChooseAliasState choices={data.platformAliasChoices ?? []} />;
     case TENANT_PLATFORM_STATE_NOT_SIGNED_IN:
@@ -77,22 +76,24 @@ function PlatformContactLine({ data }: { data: UITenantDashboard }): React.React
   );
 }
 
-function NotConnectedState({ tenant }: { tenant: string }): React.ReactElement {
+function NotConnectedState(): React.ReactElement {
   const dispatch = useAppDispatch();
   const draft = useAppSelector((state) => state.tenantDashboard.connectApiUrlDraft);
   const connecting = useAppSelector((state) => state.tenantDashboard.connecting);
   const error = useAppSelector((state) => state.tenantDashboard.connectError);
-  const placeholder = `https://api.${tenant}-prod.services.erunpaas.com`;
-  // Prefill from erun's own naming convention rather than leaving a blank
-  // field the operator must hand-type into (Smooth: "no hand-typed URL where
-  // one can be discovered"). Still fully editable — this is a starting guess
-  // the Connect action itself verifies against the real platform, not an
-  // assumption the app is asking the operator to trust blindly.
+  // Prefill with the one hosted platform's own API URL — a property of the
+  // platform, not of the tenant connecting to it. Interpolating the tenant
+  // name here previously produced a host that only ever resolved for
+  // whichever tenant happened to share a name with the platform's own
+  // namespace, and NXDOMAIN for every other tenant; do not reintroduce that
+  // shape. Still fully editable — this is a starting guess the Connect
+  // action itself verifies against the real platform, not an assumption the
+  // app is asking the operator to trust blindly.
   React.useEffect(() => {
     if (!draft.trim()) {
-      dispatch(setConnectApiUrlDraft(placeholder));
+      dispatch(setConnectApiUrlDraft(HOSTED_PLATFORM_API_URL));
     }
-  }, [dispatch, draft, placeholder]);
+  }, [dispatch, draft]);
   return (
     <EmptyState
       icon={<Link2 />}
@@ -105,7 +106,7 @@ function NotConnectedState({ tenant }: { tenant: string }): React.ReactElement {
           </FieldLabel>
           <Input
             id="connect-platform-url"
-            placeholder={placeholder}
+            placeholder={HOSTED_PLATFORM_API_URL}
             value={draft}
             disabled={connecting}
             onChange={(event) => {
@@ -116,7 +117,7 @@ function NotConnectedState({ tenant }: { tenant: string }): React.ReactElement {
             type="button"
             disabled={connecting || !draft.trim()}
             onClick={() => {
-              void dispatch(connectTenantPlatform(draft || placeholder));
+              void dispatch(connectTenantPlatform(draft || HOSTED_PLATFORM_API_URL));
             }}
           >
             {connecting && <LoaderCircle className="animate-spin" aria-hidden="true" />}

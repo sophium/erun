@@ -79,8 +79,8 @@ Bypasses `review queue advance`'s unresolved-thread check and advances anyway. `
 ## Examples
 
 ```bash
-erun cloud init erun --api-url https://api.acme.services.erunpaas.com
-erun cloud login --alias erun+api.acme.services.erunpaas.com@erun
+erun cloud init erun --api-url https://api.erunpaas.com
+erun cloud login --alias erun+api.erunpaas.com@erun
 
 erun exec push feature/add-widget
 erun review create --name "Add widget" --source-branch feature/add-widget --target-branch main

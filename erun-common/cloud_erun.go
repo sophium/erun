@@ -25,6 +25,13 @@ type InitERunCloudProviderParams struct {
 	APIURL string
 }
 
+// HostedPlatformAPIURL is erun's own hosted platform's front door — a single
+// apex host serving every tenant, never a per-tenant or per-environment one.
+// The CLI's `cloud init erun` help text and the desktop's Connect-tenant
+// default both read this constant so the two cannot drift apart the way they
+// did when each hardcoded its own guess.
+const HostedPlatformAPIURL = "https://api.erunpaas.com"
+
 // InitERunCloudProvider discovers a hosted erun platform's own config (GET
 // /v1/platform) and its issuer's OIDC discovery document, then records the
 // alias, API URL, issuer, and CLI client id. It performs no sign-in: use

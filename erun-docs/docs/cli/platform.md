@@ -105,8 +105,8 @@ Previews the full ordered plan for provisioning a hosted environment — tenant,
 ## Examples
 
 ```bash
-erun cloud init erun --api-url https://api.acme.services.erunpaas.com
-erun cloud login --alias erun+api.acme.services.erunpaas.com@erun
+erun cloud init erun --api-url https://api.erunpaas.com
+erun cloud login --alias erun+api.erunpaas.com@erun
 
 erun platform whoami
 erun platform env register --name prod --type runtime --runtime-version 1.4.2

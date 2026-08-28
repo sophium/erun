@@ -6,7 +6,7 @@ Usage:
   erun cloud init erun [flags]
 
 Examples:
-  erun cloud init erun --api-url https://api.frs-prod.services.erunpaas.com
+  erun cloud init erun --api-url https://api.erunpaas.com
 
 Flags:
       --api-url string   Base URL of the hosted erun platform's API

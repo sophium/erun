@@ -78,8 +78,51 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
       await expect(app.tenantDashboard.connectApiUrlInput()).toBeVisible();
+      // The default must be the platform's own apex host regardless of
+      // tenant name — SEED_TENANT ('pw') is exactly the shape that used to
+      // interpolate into a host that was NXDOMAIN for every tenant but frs.
+      await expect(app.tenantDashboard.connectApiUrlInput()).toHaveValue(
+        'https://api.erunpaas.com',
+      );
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
+      await page.screenshot({
+        path: 'test-results/tenant-dashboard-not-connected-default.png',
+      });
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('not-connected names the standard host when a custom URL fails to verify', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('platform-not-connected-bad-url');
+    try {
+      await app.reloadEnvironments();
+      await app.sidebar
+        .envRowButton(SEED_TENANT, environment)
+        .waitFor({ state: 'visible', timeout: 15_000 });
+
+      stubRPC(page, {
+        LoadTenantDashboard: { data: { tenant: SEED_TENANT, platformState: 'not-connected' } },
+        ConnectERunPlatform: { error: 'platform discovery failed: dial tcp: lookup: no such host' },
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.connectApiUrlInput().fill('https://api.wrong-host.example');
+      await app.tenantDashboard.connectButton().click();
+
+      await expect(app.tenantDashboard.connectErrorAlert()).toContainText('no such host');
+      await expect(app.tenantDashboard.connectErrorAlert()).toContainText(
+        'https://api.erunpaas.com',
+      );
+      // The failure stays on the panel with the field still editable — no
+      // dead end, and the recovery (retype the named default) is still one
+      // click away.
+      await expect(app.tenantDashboard.connectApiUrlInput()).toBeEditable();
+      await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

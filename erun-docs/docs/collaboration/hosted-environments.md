@@ -13,9 +13,11 @@ The examples below use the CLI, but every action — previewing, registering, de
 ## Sign in once
 
 ```bash
-erun cloud init erun --api-url https://api.<tenant>.services.<your-domain>
-erun cloud login --alias erun+api.<tenant>.services.<your-domain>@erun
+erun cloud init erun --api-url https://api.erunpaas.com
+erun cloud login --alias erun+api.erunpaas.com@erun
 ```
+
+`https://api.erunpaas.com` is erun's own hosted platform — a single apex host serving every tenant, not a per-tenant or per-environment address. A self-hosted platform has its own single API URL the same way; ask whoever runs it what that is.
 
 `login` opens a device-code sign-in (or a browser tab if your issuer has no device flow) and confirms you're in by printing your tenant.
 
