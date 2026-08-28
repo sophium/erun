@@ -187,10 +187,14 @@ func TestObserve(t *testing.T) {
 	// release's own recorded values disagreeing with the running container
 	// (a hand-patched, out-of-band image) and with the env config's recorded
 	// runtimeversion/runtimepod must be named, not left for the reader to spot
-	// by comparing dumps by eye.
+	// by comparing dumps by eye. The env config records an explicit runtimepod
+	// (rather than leaving it unset) so the runtimepod drift below reflects a
+	// real configured value disagreeing with the release, not silence compared
+	// against a manufactured default.
 	t.Run("real_run_reports_release_drift", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"4\"\n  memory: 8916Mi\n")
 		stubs := setup.Cwd + "/stubs"
 		responses := observeStubResponses()
 		// The running container's image and resource limits diverge from what
@@ -209,6 +213,58 @@ func TestObserve(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "observe/real_run_reports_release_drift", normalize.Apply(result.Combined))
+	})
+
+	// real_run_runtime_pod_silent_config_reports_no_drift is the false-positive
+	// regression this scenario exists for: an env config that never recorded a
+	// runtimepod (the SeedTenantEnv default, and the in-pod reality per
+	// runtime_resources.go's NormalizeRuntimePodResources doc) asserts nothing
+	// about the pod's shape, so a release sized well above the package's
+	// DefaultRuntimePodCPU/Memory (4 / 8916Mi) must report no runtimepod drift —
+	// comparing the release against a manufactured default nobody configured is
+	// exactly the bug, not the fix.
+	t.Run("real_run_runtime_pod_silent_config_reports_no_drift", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		responses := observeStubResponses()
+		responses["pods"] = `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"12","memory":"23552Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`
+		fixture.StubKubectlGetJSON(t, stubs, responses)
+		statusStub := `{"name":"team-devops","namespace":"team-dev","version":3,"info":{"status":"deployed"},` +
+			`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
+			`"runtime":{"resources":{"limits":{"cpu":"12","memory":"23552Mi"}}}}}`
+		fixture.StubHelmObserve(t, stubs, statusStub, observeHelmListStubDefault())
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_runtime_pod_silent_config_reports_no_drift", normalize.Apply(result.Combined))
+	})
+
+	// real_run_runtime_pod_configured_mismatch_reports_drift is the other
+	// direction of the same regression: once the env config actually records a
+	// runtimepod, a release that disagrees with it must still be flagged. CPU
+	// agrees and only memory diverges, so the golden isolates the memory-only
+	// finding instead of always pairing it with a CPU one.
+	t.Run("real_run_runtime_pod_configured_mismatch_reports_drift", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"4\"\n  memory: 2048Mi\n")
+		stubs := setup.Cwd + "/stubs"
+		responses := observeStubResponses()
+		responses["pods"] = `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"4096Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`
+		fixture.StubKubectlGetJSON(t, stubs, responses)
+		statusStub := `{"name":"team-devops","namespace":"team-dev","version":3,"info":{"status":"deployed"},` +
+			`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
+			`"runtime":{"resources":{"limits":{"cpu":"4","memory":"4096Mi"}}}}}`
+		fixture.StubHelmObserve(t, stubs, statusStub, observeHelmListStubDefault())
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_runtime_pod_configured_mismatch_reports_drift", normalize.Apply(result.Combined))
 	})
 
 	// real_run_helm_release_not_found confirms an absent release is reported
