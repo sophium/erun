@@ -25,6 +25,8 @@ erun resize --tenant my-tenant --environment dev --apply-recommendation --dry-ru
 
 `--apply-recommendation` needs usage history retained inside the environment's own runtime pod, so run it there (over SSH, or through the environment's own MCP `resize` tool) — a host-side laptop invocation has nothing to read and refuses rather than guessing.
 
+Before resolving a target, the trace prints the standing recommendation's own reasoning — the same `sizing:`/`sizing-evidence:` lines [`erun list`](/cli/list#the-sizing-recommendation) shows under `runtime-pod:` — even when the resolved plan is a no-op. A no-op that reports "already sized" is otherwise a dead end: this is what lets you see *why* nothing is proposed, not just that nothing is.
+
 This moves the runtime container's own limits: the throttle/OOM ceiling, and the amount it draws from the namespace's resource quota. It does **not** change what the Kubernetes scheduler reserves for the pod (a small fixed request, independent of this setting), it does not resize the `erun-dind` sidecar, and it does not touch any PVC — disk sizing is not part of this command.
 
 ## Not while someone else is using it
@@ -54,7 +56,7 @@ The full JSON shape and every refusal are specified in [Agent reference · `erun
 
 ## From the desktop
 
-The Manage dialog → **Runtime** tab's sizing recommendation carries a **Resize to this** action that runs the same operation as `--apply-recommendation`, so applying it is one click rather than retyping the suggested numbers into the resource sliders. See [Runtime pods · What the environment thinks it should be sized as](/concepts/runtime-pods#what-the-environment-thinks-it-should-be-sized-as).
+The Manage dialog → **Runtime** tab's sizing recommendation carries a **Resize to this** action that runs the same operation as `--apply-recommendation`, so applying it is one click rather than retyping the suggested numbers into the resource sliders. Underneath it, the panel shows the same verdict/evidence reasoning the trace prints — including on a no-op, so "Already sized as recommended" always comes with the window and counters it was decided from. See [Runtime pods · What the environment thinks it should be sized as](/concepts/runtime-pods#what-the-environment-thinks-it-should-be-sized-as).
 
 ## From an MCP-connected orchestrator
 

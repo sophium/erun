@@ -577,6 +577,8 @@ Every field reports its own unavailability rather than failing the call: a clust
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
+When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `erun list` reports under `runtime-pod:` — so a caller checking on an environment does not need a separate `resize` call just to see it. Omitted when nothing has been observed yet.
+
 ### `resize`
 
 Changes the runtime pod's CPU/memory limits and rolls it out, without re-running `init` to change two numbers. Takes either explicit `cpu`/`memory` (each optional; naming only one leaves the other unchanged) or `applyRecommendation: true` to size from this environment's own standing sizing recommendation — resolved from usage history retained inside this pod, so the value is never retyped by the caller. See [Agent reference · `erun resize`](/agent-reference/cli-flags#erun-resize) for exactly what the recommendation reasons about and the resolution algorithm.
@@ -593,6 +595,8 @@ Changes the runtime pod's CPU/memory limits and rolls it out, without re-running
   }
 }
 ```
+
+Before resolving the target, the standing recommendation's own reasoning is traced — one `sizing:` line per resource verdict plus a `sizing-evidence:` line, both readable in the tool's `trace` output — even when the resolved plan turns out to be a no-op, so "already sized" always comes with the window and counters it was decided from.
 
 A resize whose resolved target equals the current recorded size is a no-op (`plan.noOp: true`) and does not deploy. It moves only the runtime container's own limits — the throttle/OOM ceiling and the namespace `ResourceQuota` draw those limits count against — never the scheduler's request (a small fixed value independent of this setting), the `erun-dind` sidecar's own limits, or any PVC; disk is out of scope until the chart's PVC sizes are values-driven.
 
