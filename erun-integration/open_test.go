@@ -238,6 +238,22 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_tty_dry_run_falls_back_to_no_shell", func(t *testing.T) {
+		// The stale-forward recovery advice names bare `erun open <tenant>
+		// <env>`, which a non-interactive caller (an MCP client, an
+		// orchestrator, a script) runs with no TTY on stdin — this harness's
+		// default piped stdin stands in for that. Without --no-shell on the
+		// command line, open must still take the no-shell branch on its own:
+		// a real kubectl exec -it there would read EOF and return almost
+		// instantly, exiting before anything supervises the port-forwards
+		// just started.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/no_tty_dry_run_falls_back_to_no_shell", normalize.Apply(result.Combined))
+	})
+
 	// zshAliasLine is the exact alias production appends for team/dev under
 	// zsh; the tests assert the startup file gains this line verbatim.
 	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
@@ -640,7 +656,12 @@ func TestOpen(t *testing.T) {
 		// runs, which holds the tab until the runtime is reachable.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1 mirrors the desktop's real invocation: an --app-session
+		// tab runs inside a dtach-allocated pty, so stdin really is a TTY there,
+		// unlike this harness's piped default. Without it open would now take the
+		// non-interactive no-shell branch instead of the shell preview this
+		// scenario exists to lock.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_dry_run_pure_open_does_not_deploy", normalize.Apply(result.Combined))
 	})
@@ -774,7 +795,8 @@ func TestOpen(t *testing.T) {
 		// model rather than the agent's own default.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_wraps_dtach_and_launches_claude", normalize.Apply(result.Combined))
 	})
@@ -793,7 +815,8 @@ func TestOpen(t *testing.T) {
 				"  defaultmodel: fable\n"+
 				"  verbosedebug: true\n"+
 				"  effort: high\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", normalize.Apply(result.Combined))
 	})
@@ -807,7 +830,8 @@ func TestOpen(t *testing.T) {
 			"claude:\n"+
 				"  models: [opus]\n"+
 				"  defaultmodel: fable\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_falls_back_to_available_when_default_dropped", normalize.Apply(result.Combined))
 	})
@@ -823,7 +847,8 @@ func TestOpen(t *testing.T) {
 		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
 			"claude:\n"+
 				"  usemantle: true\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_gateway_auth_disables_remote_control", normalize.Apply(result.Combined))
 	})
@@ -834,7 +859,8 @@ func TestOpen(t *testing.T) {
 		// no claude launch and no contribute prelude in the launcher body.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_shell_dry_run_wraps_dtach", normalize.Apply(result.Combined))
 	})
@@ -847,7 +873,8 @@ func TestOpen(t *testing.T) {
 		// reattachable session.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "contribute-ai", "--contribute", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_contribute_ai_dry_run_preludes_clone", normalize.Apply(result.Combined))
 	})
@@ -1517,6 +1544,10 @@ func TestOpen(t *testing.T) {
 			ExecExitCodes:  []int{0},
 		})...)
 		envVars = append(envVars, openHostOSOverride)
+		// ERUN_FORCE_TTY=1: this scenario locks the interactive shell path (the
+		// form an operator at a real terminal runs); without it, stdin's
+		// non-TTY default in this harness would take the no-shell branch instead.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		holderPID := fixture.StartStalePortHolder(t, 26100)
 		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
 			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
@@ -1661,6 +1692,10 @@ func TestOpen(t *testing.T) {
 			ExecExitCodes:  []int{0},
 			SeedKeyFile:    seededKeyFile,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY, which
+		// would now take the no-shell branch instead.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1684,6 +1719,43 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
+	t.Run("no_tty_real_run_keeps_forwards_without_a_shell", func(t *testing.T) {
+		// The reported failure, end to end and for real (not a dry-run trace):
+		// a non-interactive `erun open` must never drop into an interactive
+		// shell that reads EOF and exits almost instantly, taking the
+		// port-forwards it just started down with it. This harness's default
+		// stdin is already non-TTY, standing in for the MCP client/orchestrator/
+		// script that hits this in practice. The kubectl port-forward stub
+		// really binds 127.0.0.1:26100, so dialing it again after open has
+		// already exited is the proof that the forward outlived the command —
+		// not just that no error was printed.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/no_tty_real_run_keeps_forwards_without_a_shell", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(stubsDir, "exec-calls")); err == nil {
+			t.Fatal("a non-interactive open must never invoke the interactive shell exec")
+		}
+		conn, err := netDialTimeout("tcp", "127.0.0.1:26100", time.Second)
+		if err != nil {
+			t.Fatalf("MCP port-forward must still be listening after open returns without a shell: %v", err)
+		}
+		_ = conn.Close()
+	})
+
 	t.Run("shell_real_run_session_taken_over_exits_with_notice", func(t *testing.T) {
 		// Takeover handover, end to end: the persistent session's exec
 		// wrapper exits 76 when another ERun window re-attaches the session.
@@ -1705,6 +1777,9 @@ func TestOpen(t *testing.T) {
 			SSHPort:        26122,
 			ExecExitCodes:  []int{76},
 		})...)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy —
+		// an --app-session tab runs inside a real dtach pty.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("takeover must end the shell loop cleanly, exit %d: %s", result.ExitCode, result.Combined)
@@ -1797,6 +1872,9 @@ func TestOpen(t *testing.T) {
 			PodsJSON:       podsJSON,
 			EventsJSON:     eventsJSON,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 1 {
 			t.Fatalf("expected exit 1 from the failed rollout wait, got %d: %s", result.ExitCode, result.Combined)
@@ -1832,6 +1910,9 @@ func TestOpen(t *testing.T) {
 		// the seam confirms erun-devops published so it installs it instead of
 		// refusing.
 		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1883,6 +1964,9 @@ func TestOpen(t *testing.T) {
 			ExecExitCodes:  []int{137, 0},
 			PodsJSON:       healthyPodsJSON,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("pod replacement must reattach cleanly, exit %d: %s", result.ExitCode, result.Combined)

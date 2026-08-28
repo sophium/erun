@@ -65,7 +65,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 	ctx.TraceCommand("", "kubectl", args...)
 
-	return startSSHDPortForward(statePath, expectedState, args, info)
+	return startSSHDPortForward(ctx, statePath, expectedState, args, info)
 }
 
 // adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
@@ -105,7 +105,7 @@ func stopStaleSSHDPortForward(state, expectedState sshdPortForwardState, localPo
 	}
 }
 
-func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
+func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return common.SSHConnectionInfo{}, err
@@ -133,6 +133,7 @@ func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, 
 	}
 
 	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "sshd", cmd.Process, info.Port, err)
 		return common.SSHConnectionInfo{}, err
 	}
 	return info, nil

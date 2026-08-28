@@ -67,7 +67,7 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	ctx.TraceCommand("", "kubectl", args...)
 
-	return startMCPPortForward(statePath, expectedState, args, localPort)
+	return startMCPPortForward(ctx, statePath, expectedState, args, localPort)
 }
 
 // adoptForeignMCPPortForward reuses a pre-existing kubectl port-forward already
@@ -128,7 +128,7 @@ func stopStaleMCPPortForward(state, expectedState mcpPortForwardState, localPort
 	waitForLocalPortToClose(localPort)
 }
 
-func startMCPPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
+func startMCPPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return 0, err
@@ -156,9 +156,24 @@ func startMCPPortForward(statePath string, expectedState mcpPortForwardState, ar
 	}
 
 	if err := waitForMCPPortForward(localPort, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "mcp", cmd.Process, localPort, err)
 		return 0, err
 	}
 	return localPort, nil
+}
+
+// releaseUnreachablePortForward stops a forward that was just started but
+// never became reachable within its startup wait, so a slow or failed
+// kubectl port-forward does not sit bound to the port claiming to be there —
+// the "held but the edge never answers" shape that looks identical to a
+// genuinely stale forward to the next caller. Best-effort: the process may
+// already be gone, and the caller's own error already reports the failure.
+func releaseUnreachablePortForward(ctx common.Context, kind string, process *os.Process, localPort int, cause error) {
+	ctx.Trace(fmt.Sprintf("%s: releasing port-forward for 127.0.0.1:%d — it never became reachable: %s", kind, localPort, strings.TrimSpace(cause.Error())))
+	if process != nil {
+		_ = process.Kill()
+	}
+	waitForLocalPortToClose(localPort)
 }
 
 func waitForMCPPortForward(localPort int, logPath string) error {
