@@ -52,6 +52,22 @@ describe('LandingScreen content', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 
+  it("renders the instance's own logo in the header when one is configured", () => {
+    render(
+      <LandingScreen
+        brand="Acme"
+        logoUrl="https://cdn.acme.example/logo.svg"
+        tagline={undefined}
+        docsUrl={undefined}
+        oidc={OIDC}
+        fallbackReason={undefined}
+      />,
+    );
+
+    const header = screen.getByRole('banner');
+    expect(header.querySelector('img')).toHaveAttribute('src', 'https://cdn.acme.example/logo.svg');
+  });
+
   it('falls back to the bundled tagline and brand when the instance sets none', () => {
     render(
       <LandingScreen

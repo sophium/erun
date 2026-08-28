@@ -173,6 +173,9 @@ The whole block is optional. An empty block means the project runs no platform d
 | `apiurl` | string | no | This deployment's own API base URL, e.g. `https://api.frs-prod.services.erunpaas.com`. Served unauthenticated at [`GET /v1/platform`](/agent-reference/api-protocol#platform-endpoint) so a client can discover it; an unset value renders as an empty string, never an error. |
 | `consoleurl` | string | no | This deployment's hosted web console URL. Same discovery contract as `apiurl`. |
 | `brand` | string | no | This deployment's display name, if set. Same discovery contract as `apiurl`. |
+| `docsurl` | string | no | The documentation site this deployment's own surfaces link to, e.g. `https://docs.erunpaas.com`. Default `https://docs.<basedomain>`. Must be an absolute `http`/`https` URL when set; a trailing slash is normalized away. Same discovery contract as `apiurl`. |
+| `tagline` | string | no | The one-line pitch this deployment's signed-out landing page leads with. Unset leaves the client's bundled product tagline in place. Same discovery contract as `apiurl`. |
+| `logourl` | string | no | Absolute URL of this deployment's logo, e.g. `https://erunpaas.com/logo.svg`. It is a URL rather than a path the platform serves, because one built console image serves every instance and carries no brand asset. Must be an absolute `http`/`https` URL when set; unset — or a URL the browser cannot load — leaves the client's generic mark. Same discovery contract as `apiurl`. |
 
 ```yaml
 # <repo>/.erun/config.yaml
@@ -183,13 +186,25 @@ platform:
   caaissuer: letsencrypt.org   # optional; authorizes only this CA on the zone
   apiurl: https://api.frs-prod.services.erunpaas.com     # optional; served at GET /v1/platform
   consoleurl: https://console.frs-prod.services.erunpaas.com # optional; served at GET /v1/platform
-  # serviceszone, authhost, and nameservers default from basedomain:
+  brand: Acme                                            # optional; served at GET /v1/platform
+  tagline: Ship it, prove it.                            # optional; else the bundled product tagline
+  logourl: https://acme.example/logo.svg                 # optional; else a generic mark
+  # serviceszone, authhost, docsurl, and nameservers default from basedomain:
   #   serviceszone: services.erunpaas.com
   #   authhost:     auth.erunpaas.com
+  #   docsurl:      https://docs.erunpaas.com
   #   nameservers:  [ns1.erunpaas.com, ns2.erunpaas.com]
 ```
 
 A second vendor installs the same artifacts under their own names — e.g. `basedomain: kppaas.com`, `env: kp-prod` — with no code changes.
+
+**Error behaviour.** The block is validated when `erun deploy`/`erun expose` resolves the plan, before any chart work, and a malformed value fails the command (exit code 1) rather than being threaded onward:
+
+- `basedomain` unset while any other field is set → `platform config: basedomain is required when a platform block is set`.
+- `basedomain` / `serviceszone` / `authhost` not a valid domain, or a host not at or under `basedomain` → `platform config: serviceszone "<v>" must be "<basedomain>" or a subdomain of it`.
+- `authoritativeip` that does not parse as an IP → `platform config: authoritativeip "<v>" is not a valid IP address`.
+- `env` that is not a DNS-safe namespace label → `platform config: env "<v>" must be a DNS-safe namespace label (lowercase letters, digits, and hyphens)`.
+- `docsurl` / `logourl` that is not an absolute `http`/`https` URL → `platform config: logourl "<v>" must be an absolute URL including the scheme and host, for example "https://<basedomain>/logo.svg"`. These values are rendered by a browser as a link and an image, so a bare host or a relative path would become a dead link the page itself cannot explain — the message names the shape expected and an example under this deployment's own domain.
 
 ---
 

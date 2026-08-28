@@ -1,0 +1,6 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: spec resolution failed: platform config: logourl "cdn.acme.example/logo.svg" must be an absolute URL including the scheme and host, for example "https://erunpaas.com/logo.svg"
+==> Deploy failed team/dev: platform config: logourl "cdn.acme.example/logo.svg" must be an absolute URL including the scheme and host, for example "https://erunpaas.com/logo.svg"
+platform config: logourl "cdn.acme.example/logo.svg" must be an absolute URL including the scheme and host, for example "https://erunpaas.com/logo.svg"

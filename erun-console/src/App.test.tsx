@@ -64,4 +64,54 @@ describe('App signed-out route', () => {
       await screen.findByRole('heading', { level: 1, name: 'Acme, from idea to production.' }),
     ).toBeInTheDocument();
   });
+
+  // The bundled defaults are what an unconfigured instance shows, and they are
+  // what every instance showed while the platform still had no way to send
+  // these three fields — so the configured case needs its own coverage, end to
+  // end from the discovery response to the rendered page.
+  it("renders the instance's own logo from platform discovery", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({ ...PLATFORM, logoUrl: 'https://cdn.acme.example/logo.svg' }),
+        ),
+      ),
+    );
+    renderWithStore(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector('img')).toHaveAttribute(
+        'src',
+        'https://cdn.acme.example/logo.svg',
+      );
+    });
+  });
+
+  it('falls back to the bundled defaults when the platform sends none of the three', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({ ...PLATFORM, brand: '', docsUrl: '', tagline: '', logoUrl: '' }),
+        ),
+      ),
+    );
+    renderWithStore(<App />);
+
+    // The bundled tagline, the public docs site, and the generic mark — a
+    // half-configured instance renders a coherent page, never a blank hero or
+    // a broken image.
+    expect(
+      await screen.findByRole('heading', {
+        level: 1,
+        name: 'Agentic coding from idea to production, without compromising compliance.',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Read the docs' })).toHaveAttribute(
+      'href',
+      'https://docs.erunpaas.com',
+    );
+    expect(document.querySelector('img')).toBeNull();
+  });
 });

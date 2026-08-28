@@ -93,6 +93,20 @@ Running your apex for something else already (a marketing site)? Set `console.ap
 
 **Signing in needs no console rebuild.** Unlike before, the console does not need `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` baked into its image — it resolves the issuer and its OIDC client id at runtime from [`GET /v1/platform`](/agent-reference/api-protocol#platform-endpoint), so the same built image serves every instance. **(Planned.)** The operator-facing config for populating that endpoint's `issuer`/`consoleClientId` (so it reflects the SPA client registered in [Hosted IdP § step 4](#hosted-idp) above) is landing alongside the backend work this depends on; until it does, an unset or absent `/v1/platform` falls back to the console's own `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` build-time values, which remain a local-dev override.
 
+**Putting your own brand on the front door.** The signed-out landing page reads its name, docs link, pitch, and logo from the same `platform:` block as everything else in this section — `brand`, `docsurl`, `tagline`, and `logourl` ([field reference](/reference/configuration#platform-block)) — so a deploy is all it takes, with no console rebuild:
+
+```yaml
+# <repo>/.erun/config.yaml
+platform:
+  basedomain: acme.example
+  brand: Acme
+  tagline: Ship it, prove it.
+  logourl: https://acme.example/logo.svg
+  # docsurl defaults to https://docs.acme.example
+```
+
+Each one is optional and independent. Leave any of them out and that part of the page keeps the bundled ERun default, so a partly-configured instance still reads as a finished page: no blank headline, and no broken image if the logo URL stops resolving.
+
 ### Error behaviour
 
 | Failure mode | What happens | Recovery |
@@ -103,6 +117,8 @@ Running your apex for something else already (a marketing site)? Set `console.ap
 | The apex/www redirect is enabled but no apex host resolves | `erun deploy` aborts at the chart render with `console.apexRedirectEnabled is true but no apex host could be resolved`; exit code 1, nothing applied | Set `basedomain` in the env's `platform:` block, or `console.apexHost`/`console.wwwHost`, or `console.apexRedirectEnabled=false` |
 | The apex/www hosts don't resolve at all | The Helm chart's Ingress/Middleware are only half the picture — DNS is separate. Confirm the `terraform-erun-cloudflare-apex` module has actually been applied for this env | Apply it via your `terraform-<tenant>/` tree, pointed at the cluster's ingress IP |
 | Visiting the apex redirects to a `404`/wrong host | `platform.consoleUrl` names a different console than this chart's own `console.externalDomain` | Align `platform.consoleUrl` with the deployed console's host, or leave it unset so the redirect falls back to `console.externalDomain` |
+| `platform.docsurl`/`platform.logourl` is not an absolute URL | `erun deploy` aborts before any chart work with `platform config: logourl "<v>" must be an absolute URL including the scheme and host, for example …`; exit code 1, nothing applied | Write the full URL including `https://` — these are handed to a browser verbatim, so a bare host would render as a dead link or image |
+| The configured logo doesn't appear on the landing page | The URL resolved but the browser could not load it (moved asset, blocked origin, wrong path). The header falls back to the generic mark rather than showing a broken image | Open the `logourl` directly in a browser; fix the asset or the URL, then reload the console — no redeploy of the console image is needed |
 
 ## Hosted registry {#hosted-registry-admin}
 

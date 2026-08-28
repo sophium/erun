@@ -93,7 +93,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 
 | Method | Path | Description | Required scope |
 |---|---|---|---|
-| `GET` | `/v1/platform` | Unauthenticated self-discovery a caller resolves **before** signing in: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and `brand`. Response below. | None — no bearer required |
+| `GET` | `/v1/platform` | Unauthenticated self-discovery a caller resolves **before** signing in: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and white-label surface (`brand`, `docsUrl`, `tagline`, `logoUrl`). Response below. | None — no bearer required |
 | `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
@@ -139,13 +139,18 @@ The only endpoint besides `/healthz` that requires **no credential of any kind**
   "consoleUrl": "https://console.acme.erunpaas.com",
   "consoleClientId": "console-app-id",
   "cliClientId": "cli-app-id",
-  "brand": "Acme"
+  "brand": "Acme",
+  "docsUrl": "https://docs.acme.erunpaas.com",
+  "tagline": "Ship it, prove it.",
+  "logoUrl": "https://acme.erunpaas.com/logo.svg"
 }
 ```
 
-Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response.
+Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand`/`docsUrl`/`tagline`/`logoUrl` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response.
 
-**How the console uses it.** On load, before rendering the sign-in prompt, the console fetches this endpoint and drives its OIDC Authorization Code + PKCE flow from `issuer` + `consoleClientId` (see [Sign-in](#sign-in-oidc) for the flow itself; `src/auth/auth.ts` is the implementation). A console built against an **older API with no `/v1/platform`** gets a `404`, and against a **newer API with the fields left unset** gets `200` with empty strings — both fall back to its own build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` (a local-dev override only), rather than failing to render. `apiUrl`/`consoleUrl`/`cliClientId`/`brand` are carried for forward compatibility (a future branded sign-in page, a CLI `erun login` flow); the console does not consume them yet.
+`docsUrl` defaults to `https://docs.<basedomain>` when the platform block sets a base domain, so an instance links its own documentation with nothing configured. `tagline` and `logoUrl` have no default — empty is what keeps the client's bundled product text and generic mark in place. `logoUrl` is deliberately an **absolute URL**, not a path this API serves: one built console image serves every instance and carries no brand asset, so the logo lives wherever the operator hosts it.
+
+**How the console uses it.** On load, before rendering the sign-in prompt, the console fetches this endpoint and drives its OIDC Authorization Code + PKCE flow from `issuer` + `consoleClientId` (see [Sign-in](#sign-in-oidc) for the flow itself; `src/auth/auth.ts` is the implementation). A console built against an **older API with no `/v1/platform`** gets a `404`, and against a **newer API with the fields left unset** gets `200` with empty strings — both fall back to its own build-time `VITE_OIDC_ISSUER`/`VITE_OIDC_CLIENT_ID` (a local-dev override only), rather than failing to render. `brand`, `docsUrl`, `tagline`, and `logoUrl` are what the signed-out landing page renders — the document title, the docs link, the `<h1>` pitch, and the header mark respectively — each falling back to a bundled product default when empty, so a half-configured instance renders a coherent page rather than a blank hero. A `logoUrl` the browser cannot load falls back to the same generic mark as an unset one, so a moved or blocked asset never leaves a broken image on the front door. `apiUrl`/`consoleUrl`/`cliClientId` are carried for other clients (a CLI `erun login` flow); the console does not consume them yet.
 
 **How `erun cloud` uses it.** A caller (an `erun cloud init <platform-api-url>`-style flow) uses this response to then fetch `<issuer>/.well-known/openid-configuration` and proceed with the Device Authorization Grant (falling back to Authorization Code + PKCE when the issuer advertises no device endpoint) against `cliClientId`. See the [erun cloud provider](#erun-cloud-provider) section below.
 
@@ -786,17 +791,6 @@ A **role** is a named, tenant-owned bundle of permissions; a **permission** is o
     { "apiMethod": "GET", "apiPath": "/v1/reviews" },
     { "apiMethodPattern": "^GET$", "apiPathPattern": "^/v1/reviews/.*$" }
   ]
-### `POST /v1/invites`, `GET /v1/invites`, `DELETE /v1/invites/{invite_id}` {#invites}
-
-Registration is invite-only (issue #1483): self-registration on the platform's IdP is closed via [`allowRegister`](/agent-reference/identity-administration#org-settings), and this is the replacement path for adding a member. An invite is a **server-side record** — revocable and listable up until it is accepted — not a self-contained signed token; the token field below is the only part of it that ever leaves the backend.
-
-Create and list act on the caller's own resolved tenant by default. An explicit `tenantId` (body field for the `POST`, `?tenantId=` query param for the `GET`) targets a **different** tenant, honored only when the caller's resolved tenant is `OPERATIONS` — the same cross-tenant precedent [`POST`/`GET /v1/users`](#post-v1users-and-get-v1users) uses. This is deliberate for an invite whose target is an `OPERATIONS` tenant: accepting it lands the invitee with `erun_operations` database access across every tenant, so minting one needs the same operations-only gate as any other cross-tenant action today. A distinct permission scoped specifically to "invite into an OPERATIONS tenant" (rather than reusing the coarser operations-tenant-membership check) is now expressible: the role-assignment layer has since shipped, so this coarser tenant-type gate is a deliberate carry-over to be narrowed, not a missing capability.
-
-```jsonc
-// POST /v1/invites body — every field optional
-{
-  "email": "bob@example.com",   // optional — pins the invite to one email; accept refuses a different one
-  "tenantId": "019a…"           // optional — operations-only cross-tenant target
 }
 
 // 201 response
@@ -840,6 +834,22 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 | `400` | `POST /v1/roles`: `name` is empty, no permissions given, or a permission fails the exact/pattern-exclusivity, method-enum, or regex-compile checks above. `POST /v1/users/{user_id}/roles`: `roleId` is empty. | Fix the request body per the rules above. |
 | `404` | The `role_id` or `user_id` does not exist in the caller's tenant (a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to your own tenant. |
 | `409` | `POST /v1/roles`: a role with this name, or one of its permissions, already exists in the tenant. `POST /v1/users/{user_id}/roles`: the user already holds this role. `DELETE .../roles/{role_id}`: the lockout guard above refused the revoke. | Use a different name, or accept the existing grant; for the lockout case, grant a recovery role to another user (or the same user) before revoking this one. |
+
+### `POST /v1/invites`, `GET /v1/invites`, `DELETE /v1/invites/{invite_id}` {#invites}
+
+Registration is invite-only (issue #1483): self-registration on the platform's IdP is closed via [`allowRegister`](/agent-reference/identity-administration#org-settings), and this is the replacement path for adding a member. An invite is a **server-side record** — revocable and listable up until it is accepted — not a self-contained signed token; the token field below is the only part of it that ever leaves the backend.
+
+Create and list act on the caller's own resolved tenant by default. An explicit `tenantId` (body field for the `POST`, `?tenantId=` query param for the `GET`) targets a **different** tenant, honored only when the caller's resolved tenant is `OPERATIONS` — the same cross-tenant precedent [`POST`/`GET /v1/users`](#post-v1users-and-get-v1users) uses. This is deliberate for an invite whose target is an `OPERATIONS` tenant: accepting it lands the invitee with `erun_operations` database access across every tenant, so minting one needs the same operations-only gate as any other cross-tenant action today. A distinct permission scoped specifically to "invite into an OPERATIONS tenant" (rather than reusing the coarser operations-tenant-membership check) is now expressible: the role-assignment layer has since shipped, so this coarser tenant-type gate is a deliberate carry-over to be narrowed, not a missing capability.
+
+```jsonc
+// POST /v1/invites body — every field optional
+{
+  "email": "bob@example.com",   // optional — pins the invite to one email; accept refuses a different one
+  "tenantId": "019a…"           // optional — operations-only cross-tenant target
+}
+
+// 201 response
+{
   "inviteId": "019a…",
   "tenantId": "019a…",
   "token": "kX92n…",             // the invite's credential — build the accept link from this

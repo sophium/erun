@@ -2093,13 +2093,47 @@ func TestDeploy(t *testing.T) {
 		// the deploy -> platform-config -> helm wiring end to end, including the
 		// resolved auth host reaching the API's trusted-issuer list as
 		// api.oidcAllowedIssuers=https://auth.<basedomain> — a platform's control
-		// plane trusts its own hosted IdP without an operator patching anything.
+		// plane trusts its own hosted IdP without an operator patching anything,
+		// and the front-door docs link defaulting to docs.<basedomain> so a
+		// platform points at its own documentation with nothing configured.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 212.93.120.230\n")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/platform_config_threads_into_helm_set", normalize.Apply(result.Combined))
+	})
+
+	t.Run("platform_config_threads_white_label_values_into_helm_set", func(t *testing.T) {
+		// An operator's own docs URL, tagline, and logo travel the same
+		// platform.* path consoleurl and brand already do, so the instance's
+		// pre-sign-in front door reflects its own brand instead of the bundled
+		// product defaults. A configured docsurl wins over the
+		// docs.<basedomain> default, and a trailing slash is normalized away so
+		// the client's own deep links under it do not double up.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  brand: Acme\n  docsurl: https://handbook.acme.example/erun/\n  tagline: Ship it, prove it.\n  logourl: https://cdn.acme.example/logo.svg\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/platform_config_threads_white_label_values_into_helm_set", normalize.Apply(result.Combined))
+	})
+
+	t.Run("rejects_malformed_platform_logo_url", func(t *testing.T) {
+		// A logourl that is not an absolute URL would reach a browser as a dead
+		// image on the instance's front door, with nothing on the page able to
+		// explain it — so it is refused at plan time, and the refusal names the
+		// shape expected plus an example under this deployment's own domain
+		// rather than only saying "invalid".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  logourl: cdn.acme.example/logo.svg\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a malformed platform logourl, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/rejects_malformed_platform_logo_url", normalize.Apply(result.Combined))
 	})
 
 	t.Run("components_rejects_unknown_name", func(t *testing.T) {
