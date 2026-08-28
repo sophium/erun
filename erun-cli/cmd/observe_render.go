@@ -170,18 +170,32 @@ func writeObserveHelmRelease(ctx common.Context, release *common.ObservedHelmRel
 	if release == nil {
 		return nil
 	}
-	if release.Error != "" {
-		if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error); err != nil {
-			return err
-		}
-	}
 	if !release.Found {
-		if release.Error == "" {
-			_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: not found in namespace\n", release.Name)
-			return err
-		}
-		return nil
+		return writeObserveHelmReleaseNotFound(ctx, release)
 	}
+	if err := writeObserveHelmReleaseDetails(ctx, release); err != nil {
+		return err
+	}
+	if release.Error != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "  warning: %s\n", release.Error)
+		return err
+	}
+	return nil
+}
+
+// writeObserveHelmReleaseNotFound distinguishes a confirmed absence (no
+// Error) from a read that failed (Error set): a caller must never see the
+// same "nothing here" line for both.
+func writeObserveHelmReleaseNotFound(ctx common.Context, release *common.ObservedHelmRelease) error {
+	if release.Error != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)
+		return err
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: not found in namespace\n", release.Name)
+	return err
+}
+
+func writeObserveHelmReleaseDetails(ctx common.Context, release *common.ObservedHelmRelease) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
 		release.Name, release.Revision, valueOrNone(release.Status), valueOrNone(release.Chart), valueOrNone(release.ChartVersion), valueOrNone(release.AppVersion)); err != nil {
 		return err

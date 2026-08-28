@@ -237,6 +237,27 @@ func TestObserve(t *testing.T) {
 		golden.Equal(t, "observe/real_run_helm_release_read_forbidden", normalize.Apply(result.Combined))
 	})
 
+	// real_run_text_output_reports_helm_release_warning locks the human-
+	// readable rendering of a release that was read successfully (Found:
+	// true) but flagged as not looking like erun's own chart: the full
+	// release details must still print, plus a warning line — never the
+	// "could not read" wording that path uses when nothing was read at all.
+	t.Run("real_run_text_output_reports_helm_release_warning", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
+		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},` +
+			`"chart":{"metadata":{"name":"unrelated-app","version":"2.3.0","appVersion":"2.3.0"}},"config":{}}`
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_text_output_reports_helm_release_warning", normalize.Apply(result.Combined))
+	})
+
 	// real_run_helm_release_chart_not_erun confirms a release found under the
 	// expected name but installed from an unrelated chart is flagged rather
 	// than silently reported as if it were erun's own runtime release.
