@@ -23,8 +23,8 @@ import (
 // reports Restricted instead of a bare empty list.
 func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiExposureList{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("list environment exposures", selection.Tenant, selection.Environment); err != nil {
+		return uiExposureList{}, err
 	}
 	req, configured, notConfiguredReason, err := a.resolveExposureRequest(selection)
 	if err != nil {
@@ -49,8 +49,8 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 // commits on submit, matching every other Manage dialog save action).
 func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposedService, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiExposedService{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
+		return uiExposedService{}, err
 	}
 	service := strings.TrimSpace(input.Service)
 	targetIP := strings.TrimSpace(input.TargetIP)
@@ -83,8 +83,8 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 // eruncommon.RunUnexposeService).
 func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiUnexposeResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("unexpose environment", selection.Tenant, selection.Environment); err != nil {
+		return uiUnexposeResult{}, err
 	}
 	projectRoot := a.exposeProjectRoot()
 	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {

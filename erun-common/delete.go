@@ -57,8 +57,8 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if tenant == "" || environment == "" {
-		return DeleteEnvironmentResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
+		return DeleteEnvironmentResult{}, err
 	}
 
 	envConfig, configPath, err := store.LoadEnvConfig(tenant, environment)

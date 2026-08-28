@@ -31,8 +31,8 @@ func downloadAgentOutputViaRuntime(result eruncommon.OpenResult, params eruncomm
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
 func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputsListResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.RuntimeOutputsListResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.RuntimeOutputsListResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -50,8 +50,8 @@ func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputs
 // as a <name>.tar.gz archive.
 func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
+		return "", err
 	}
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("output name is required")

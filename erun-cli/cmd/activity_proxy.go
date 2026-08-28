@@ -52,8 +52,8 @@ func runActivitySSHProxy(params activitySSHProxyParams) error {
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.ListenAddress = strings.TrimSpace(params.ListenAddress)
 	params.TargetAddress = strings.TrimSpace(params.TargetAddress)
-	if params.Tenant == "" || params.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
+		return err
 	}
 	if params.ListenAddress == "" || params.TargetAddress == "" {
 		return fmt.Errorf("listen and target addresses are required")

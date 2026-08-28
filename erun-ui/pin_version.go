@@ -59,8 +59,8 @@ func (a *App) RevertPinVersion(selection uiSelection) (uiPinPlan, error) {
 
 func (a *App) runPinCommand(selection uiSelection, target string, preview, revert bool) (uiPinPlan, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiPinPlan{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("run pin command", selection.Tenant, selection.Environment); err != nil {
+		return uiPinPlan{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -169,8 +169,8 @@ func pinSiteLabel(site eruncommon.PinSite) string {
 // picker offers real published versions rather than a free-text box.
 func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("list pinnable versions", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -212,8 +212,8 @@ type uiPinRepoCheckoutStatus struct {
 // that does, since every environment of a tenant shares one repo.
 func (a *App) PinRepoCheckoutStatus(selection uiSelection) (uiPinRepoCheckoutStatus, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiPinRepoCheckoutStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve pin repo checkout status", selection.Tenant, selection.Environment); err != nil {
+		return uiPinRepoCheckoutStatus{}, err
 	}
 	target, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {

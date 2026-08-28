@@ -33,8 +33,8 @@ const runtimeUsageTimeout = 10 * time.Second
 // that turns the Runtime tab into a failure surface.
 func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiRuntimeUsage{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load runtime usage", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeUsage{}, err
 	}
 	usage, err := a.deps.loadRuntimeUsage(a.backgroundContext(), selection)
 	if err != nil {

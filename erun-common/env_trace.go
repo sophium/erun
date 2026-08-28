@@ -22,8 +22,8 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 	}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve env trace log path", tenant, environment); err != nil {
+		return "", err
 	}
 	return filepath.Join(home, ".erun", tenant, environment, "trace.log"), nil
 }

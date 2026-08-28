@@ -87,8 +87,8 @@ func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, d
 func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (UnexposeResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if tenant == "" || environment == "" {
-		return UnexposeResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
+		return UnexposeResult{}, err
 	}
 	if err := ValidateTenantName(tenant); err != nil {
 		return UnexposeResult{}, err

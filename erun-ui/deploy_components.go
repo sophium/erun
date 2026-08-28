@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -22,8 +21,8 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 	selection = normalizeSelection(selection)
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)
-	if tenant == "" || environment == "" {
-		return uiDeployComponents{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
+		return uiDeployComponents{}, err
 	}
 	components, err := eruncommon.ResolveDeployableComponents(
 		a.deps.store,

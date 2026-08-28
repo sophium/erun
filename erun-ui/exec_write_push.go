@@ -48,8 +48,8 @@ func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
 // from the call itself so ExecCommit's own branching stays under the
 // module's cyclomatic-complexity cap.
 func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (branch, message string, err error) {
-	if selection.Tenant == "" || selection.Environment == "" {
-		return "", "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("commit environment working tree", selection.Tenant, selection.Environment); err != nil {
+		return "", "", err
 	}
 	branch = strings.TrimSpace(input.Branch)
 	if branch == "" {
@@ -105,8 +105,8 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (erunco
 func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (eruncommon.PushWorkingTreeBranchResult, error) {
 	selection = normalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.PushWorkingTreeBranchResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.PushWorkingTreeBranchResult{}, err
 	}
 	if branch == "" {
 		return eruncommon.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")

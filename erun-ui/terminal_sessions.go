@@ -21,8 +21,8 @@ import (
 // session is created or fails.
 func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "open", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runOpenSession(ctx, selection, slot, cols, rows)
@@ -131,8 +131,8 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start local session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	cols, rows = clampTerminalSize(cols, rows)
 
@@ -215,8 +215,8 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 // deliberate choice instead of a silent one.
 func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
@@ -353,8 +353,11 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 // satisfies.
 func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if a.ctx == nil || strings.TrimSpace(selection.Tenant) == "" || strings.TrimSpace(selection.Environment) == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start create-version session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
+	}
+	if a.ctx == nil {
+		return startSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -416,8 +419,8 @@ func (a *App) StartDoctorSession(selection uiSelection, cols, rows int) (startSe
 
 func (a *App) runErunCommandInLocal(selection uiSelection, cols, rows int, args []string) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("run erun command in local session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 
 	local, err := a.ensureLocalSession(selection, 0, cols, rows)
@@ -547,8 +550,8 @@ func shellQuoteSafeRune(r rune) bool {
 func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	selection = normalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("open IDE", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	if ide != "vscode" && ide != "intellij" {
 		return fmt.Errorf("unsupported IDE %q", ide)
@@ -695,8 +698,8 @@ func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResul
 
 func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return deleteEnvironmentResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
+		return deleteEnvironmentResult{}, err
 	}
 	expected := eruncommon.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
 	if strings.TrimSpace(confirmation) != expected {
@@ -840,8 +843,8 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	selection = normalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.DiffResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.DiffResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -904,8 +907,8 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 // to the frontend so a long-running deploy does not look frozen.
 func (a *App) ReconnectMCP(selection uiSelection) error {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -1028,8 +1031,8 @@ func (a *App) CloseSession(sessionID int) error {
 // lock would deadlock.
 func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("close environment sessions", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	targets := a.collectAndMarkClosedForSelection(selection)
 	// Close is a real teardown: stop the env's workspace-sync worker so a
@@ -1111,8 +1114,8 @@ func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 // cannot affect it.
 func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return false, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("end AI sessions", selection.Tenant, selection.Environment); err != nil {
+		return false, err
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
 		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment)

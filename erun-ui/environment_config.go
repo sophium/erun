@@ -15,8 +15,8 @@ import (
 
 func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment config", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
@@ -32,8 +32,8 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("save environment config", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 
 	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
@@ -113,8 +113,8 @@ func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.
 // the desktop honors it; CLI users always run the preflight start.
 func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 	value, err := parseAutoStartMode(mode)
 	if err != nil {
@@ -151,8 +151,8 @@ func parseAutoStartMode(mode string) (*bool, error) {
 
 func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("choose workspace-sync local folder", selection.Tenant, selection.Environment); err != nil {
+		return "", err
 	}
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")

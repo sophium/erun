@@ -34,8 +34,8 @@ import (
 func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJob, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment jobs", tenant, environment); err != nil {
+		return nil, err
 	}
 	result, useMCP, err := a.jobsReachability(tenant, environment)
 	if err != nil {
