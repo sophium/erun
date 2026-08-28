@@ -20,3 +20,55 @@ export async function boundingBoxOf(locator: Locator, label: string): Promise<El
   }
   return box;
 }
+
+// Guards the dialog-card overflow regression (erun-kit's DialogContent):
+// with no explicit grid-template-columns, the browser sizes the implicit
+// single column to the max-content width of its widest descendant — an
+// unbroken string with no min-w-0 anywhere above it forces that column, and
+// therefore every sibling grid item, wider than the card's own box. The
+// card's background/border still paint at the correct (clamped) width, so the
+// break is visible only by measuring descendants against it, never by
+// measuring the card alone.
+export interface OverflowingDescendant {
+  tag: string;
+  dataSlot: string | null;
+  overflowRight: number;
+  rectWidth: number;
+  cardWidth: number;
+}
+
+async function overflowingDescendants(card: Locator): Promise<OverflowingDescendant[]> {
+  return card.evaluate((cardEl) => {
+    const cardRect = cardEl.getBoundingClientRect();
+    const entries: OverflowingDescendant[] = [];
+    const walker = document.createTreeWalker(cardEl, NodeFilter.SHOW_ELEMENT);
+    let node: Node | null = walker.currentNode;
+    while (node) {
+      const el = node as Element;
+      const rect = el.getBoundingClientRect();
+      // 1px tolerance absorbs sub-pixel layout rounding, not the regression.
+      if (rect.width > 0 && rect.height > 0 && rect.right - cardRect.right > 1) {
+        entries.push({
+          tag: el.tagName,
+          dataSlot: el.getAttribute('data-slot'),
+          overflowRight: rect.right - cardRect.right,
+          rectWidth: rect.width,
+          cardWidth: cardRect.width,
+        });
+      }
+      node = walker.nextNode();
+    }
+    return entries;
+  });
+}
+
+export async function expectDialogContentStaysWithinCard(
+  card: Locator,
+  label: string,
+): Promise<void> {
+  const entries = await overflowingDescendants(card);
+  expect(
+    entries,
+    `${label}: descendant(s) render wider than the card — ${JSON.stringify(entries)}`,
+  ).toEqual([]);
+}
