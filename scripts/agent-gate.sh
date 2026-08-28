@@ -20,6 +20,17 @@
 # when AGENT_GATE_DETACHED=1 marks this as the job's own re-exec'd body)
 # the command just runs in place via exec, so behaviour and exit status are
 # unchanged from calling it directly.
+#
+# `erun exec job start` replaces a finished record under the same id rather
+# than refusing to reuse it, so that an orchestrator can re-run named work
+# without inventing ids -- but re-invoking this wrapper after the job it
+# started has already finished is exactly the case the doc comment above
+# tells a caller to do ("run this command again to keep waiting"). Calling
+# start unconditionally would discard the outcome the caller came back to
+# collect and start a fresh run in its place, so before starting anything
+# this checks whether the job already finished and, if so, reports that
+# outcome instead. Set AGENT_GATE_RERUN=1 to skip the check and force a new
+# run once the underlying work has genuinely changed.
 
 set -eu
 
@@ -42,6 +53,34 @@ fi
 : "${ERUN_ENVIRONMENT:?agent-gate.sh: ERUN_ENVIRONMENT is not set (expected inside an agent pod)}"
 
 await_timeout="${ERUN_AGENT_GATE_AWAIT_TIMEOUT:-8m}"
+
+if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
+	status_status=0
+	status_line=$(erun exec job status \
+		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+		--id "$job_id" 2>/dev/null) || status_status=$?
+
+	if [ "$status_status" -eq 0 ]; then
+		case "$status_line" in
+		running:*)
+			# Still running: the start/await/output flow below already attaches to
+			# it correctly (start reports "already running" and falls through), so
+			# no special-casing is needed here.
+			;;
+		*)
+			printf 'agent-gate: %s already finished; reporting its recorded outcome instead of starting a new run (set AGENT_GATE_RERUN=1 to force a fresh run)\n' "$job_name" >&2
+			replay_status=0
+			erun exec job await \
+				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+				--id "$job_id" --timeout 1s >&2 || replay_status=$?
+			erun exec job output \
+				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+				--id "$job_id" --max-bytes 16777216
+			exit "$replay_status"
+			;;
+		esac
+	fi
+fi
 
 start_status=0
 start_output=$(erun exec job start \

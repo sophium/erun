@@ -4,7 +4,9 @@
 # the recursion guard is set) it must exec the real command untouched; inside
 # one it must detach through `erun exec job start`/`await`/`output` with the
 # right arguments and propagate the job's real exit status and output. It also
-# covers erun-ui/playwright/run.sh's wiring into that same wrapper.
+# covers erun-ui/playwright/run.sh's wiring into that same wrapper, and the
+# job-status probe that decides whether to replay a finished job's outcome or
+# start a fresh run.
 #
 # Run directly (not wired into `make check`, same reasoning as
 # erun-devops/docker/erun-devops/entrypoint_test.sh): a stub `erun` on PATH
@@ -25,8 +27,11 @@ fail() {
 }
 
 # stub_erun writes a fake `erun` on PATH that records every invocation's argv
-# (one line per call) and answers `exec job start`/`await`/`output` per the
-# STUB_* env vars a test case sets, without ever touching a real job store.
+# (one line per call) and answers `exec job start`/`await`/`output`/`status`
+# per the STUB_* env vars a test case sets, without ever touching a real job
+# store. `exec job status` defaults to "no job" (status 1) so every existing
+# case that never sets STUB_STATUS_* keeps behaving as if no prior record
+# existed, matching what a first invocation actually sees.
 stub_erun() {
 	bin_dir="$1"
 	mkdir -p "$bin_dir"
@@ -46,6 +51,12 @@ case "$1 $2 $3" in
 "exec job output")
 	printf '%s' "${STUB_JOB_OUTPUT:-}"
 	exit "${STUB_OUTPUT_STATUS:-0}"
+	;;
+"exec job status")
+	if [ "${STUB_STATUS_STATUS:-1}" -eq 0 ]; then
+		printf '%s\n' "${STUB_STATUS_LINE:-}"
+	fi
+	exit "${STUB_STATUS_STATUS:-1}"
 	;;
 *)
 	exit 0
@@ -162,6 +173,126 @@ stub_erun "${case_dir}/bin"
 	*) fail "already running: expected the running job's output once it finished, got: $OUT" ;;
 	esac
 	grep -q 'exec job await' "$STUB_ARGV_FILE" || fail "already running: must still await the in-flight job"
+)
+
+# --- the job-status probe reports "running": the start/await/output flow
+# below must still run untouched (start falls through on "already running"
+# exactly as the case above), never treating a running job as finished.
+case_dir="${work_root}/status-running"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='running: make check, pid 123'
+	export STUB_START_STATUS=1
+	export STUB_START_STDERR='job "check" is already running (pid 123); pass a different id or cancel it first'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='resumed output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "status running: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"resumed output"*) ;;
+	*) fail "status running: expected the running job's output once it finished, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "status running: must still start/attach through the normal flow"
+	if grep -q -- '--timeout 1s' "$STUB_ARGV_FILE"; then
+		fail "status running: must not take the finished-replay path for a job still running"
+	fi
+)
+
+# --- a finished job's outcome is replayed rather than starting a new run.
+# `exec job start` must never be called, since that is what discards the
+# finished record.
+case_dir="${work_root}/status-finished-pass"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 0: make check'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='earlier passing output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "status finished pass: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"earlier passing output"*) ;;
+	*) fail "status finished pass: expected the finished job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"already finished"*) ;;
+	*) fail "status finished pass: expected the replay notice, got: $OUT" ;;
+	esac
+	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
+		fail "status finished pass: must never start a new run over a finished record"
+	fi
+	grep -q -- '--timeout 1s' "$STUB_ARGV_FILE" || fail "status finished pass: must await the finished job to learn its real exit status"
+)
+
+# --- a FAILING finished job replays as failing, not as a fresh pass. This is
+# the regression that matters most: replaying a stale pass over a
+# since-broken tree would be worse than the original bug.
+case_dir="${work_root}/status-finished-fail"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 7: make check'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='earlier failing output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "status finished fail: expected the replayed failure to exit nonzero, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"earlier failing output"*) ;;
+	*) fail "status finished fail: expected the finished job's captured output, got: $OUT" ;;
+	esac
+	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
+		fail "status finished fail: must never start a new run over a finished record"
+	fi
+)
+
+# --- AGENT_GATE_RERUN=1 skips the finished-job replay and starts a genuinely
+# new run, so a caller who changed the tree can still force a fresh result.
+case_dir="${work_root}/status-forced-rerun"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent AGENT_GATE_RERUN=1
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 0: make check'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='fresh output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "forced rerun: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"fresh output"*) ;;
+	*) fail "forced rerun: expected the fresh run's captured output, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "forced rerun: must start a new run when AGENT_GATE_RERUN=1"
+	if grep -q 'exec job status' "$STUB_ARGV_FILE"; then
+		fail "forced rerun: must not even probe status when a fresh run was explicitly requested"
+	fi
 )
 
 # --- an unrelated start failure must be fatal: never silently await a job
