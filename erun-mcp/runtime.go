@@ -211,7 +211,18 @@ func resolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (stri
 	resolvedTenant := firstNonEmpty(requestedTenant, serverTenant)
 	resolvedEnvironment := firstNonEmpty(requestedEnvironment, serverEnvironment)
 	if resolvedTenant == "" || resolvedEnvironment == "" {
-		return "", "", fmt.Errorf("tenant and environment are required")
+		var missing []string
+		if resolvedTenant == "" {
+			missing = append(missing, "tenant")
+		}
+		if resolvedEnvironment == "" {
+			missing = append(missing, "environment")
+		}
+		what := strings.Join(missing, "/")
+		return "", "", fmt.Errorf(
+			"%s not resolved: this MCP server was not started bound to a %s, and the call did not supply %s either -- pass %s explicitly in the call, or run this edge for an environment that has it configured",
+			what, what, what, strings.Join(missing, " and "),
+		)
 	}
 	return resolvedTenant, resolvedEnvironment, nil
 }

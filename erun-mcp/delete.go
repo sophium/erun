@@ -26,7 +26,9 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 		}
 		expected := eruncommon.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
-			return nil, JobEnvelopeOutput{}, fmt.Errorf("tenant and environment are required")
+			return nil, JobEnvelopeOutput{}, fmt.Errorf(
+				"tenant/environment not resolved: this MCP server was not started bound to a tenant/environment, and the call did not supply them either -- pass tenant and environment explicitly in the call, or run this edge for an environment that has them configured",
+			)
 		}
 		if !input.Preview && strings.TrimSpace(input.Confirmation) != expected {
 			return nil, JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)

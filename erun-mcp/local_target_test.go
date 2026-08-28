@@ -1,6 +1,7 @@
 package erunmcp
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -60,12 +61,51 @@ func TestResolveLocalTargetAcceptsItsOwnScope(t *testing.T) {
 }
 
 // A server with no scope of its own still needs both values from the caller.
+// The error itself must not be the bare "tenant and environment are
+// required" dead end that made exec_agent's failure unrecoverable: it must
+// name what is missing and what the caller can do about it.
 func TestResolveLocalTargetRequiresBothWhenTheServerHasNoScope(t *testing.T) {
 	runtime := RuntimeConfig{}
-	if _, _, err := resolveLocalTarget(runtime, "", ""); err == nil {
-		t.Error("expected an error when neither the server nor the caller names a target")
+	_, _, err := resolveLocalTarget(runtime, "", "")
+	if err == nil {
+		t.Fatal("expected an error when neither the server nor the caller names a target")
 	}
-	if _, _, err := resolveLocalTarget(runtime, "tenant-a", ""); err == nil {
-		t.Error("expected an error when the environment is missing entirely")
+	assertNamesMissingAndRecovery(t, err, "tenant/environment")
+
+	_, _, err = resolveLocalTarget(runtime, "tenant-a", "")
+	if err == nil {
+		t.Fatal("expected an error when the environment is missing entirely")
 	}
+	assertNamesMissingAndRecovery(t, err, "environment")
+}
+
+// assertNamesMissingAndRecovery insists a target-resolution error names the
+// missing subject and a concrete recovery ("pass ... explicitly"), not just
+// that an error occurred -- a bare "tenant and environment are required"
+// would pass a plain err != nil check but is exactly the dead end this
+// guards against.
+func assertNamesMissingAndRecovery(t *testing.T, err error, wantSubject string) {
+	t.Helper()
+	if err.Error() == "tenant and environment are required" || err.Error() == "tenant is required" || err.Error() == "environment is required" {
+		t.Fatalf("error regressed to a bare required-input message with no recovery: %v", err)
+	}
+	if !strings.Contains(err.Error(), wantSubject) {
+		t.Errorf("error should name %q, got: %v", wantSubject, err)
+	}
+	if !strings.Contains(err.Error(), "pass") {
+		t.Errorf("error should tell the caller to pass the missing value explicitly, got: %v", err)
+	}
+}
+
+// delete's own tenant/environment resolution (scopedTenantEnv, not
+// resolveLocalTarget) hit the identical bare "tenant and environment are
+// required" dead end when neither the server nor the caller named a target.
+// It carries the same fix and deserves the same regression coverage.
+func TestDeleteRefusesWithNamedRecoveryWhenNeitherSideNamesATarget(t *testing.T) {
+	runtime := RuntimeConfig{}
+	_, _, err := deleteTool(runtime)(context.Background(), nil, DeleteInput{Preview: true})
+	if err == nil {
+		t.Fatal("expected an error when neither the server nor the caller names a target")
+	}
+	assertNamesMissingAndRecovery(t, err, "tenant/environment")
 }
