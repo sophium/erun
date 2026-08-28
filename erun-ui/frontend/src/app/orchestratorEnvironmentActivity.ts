@@ -1,3 +1,4 @@
+import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
 import type { OrchestratorEnvRef } from '@/app/slices/orchestratorsSlice';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 
@@ -20,21 +21,45 @@ export interface OrchestratorEnvironmentLine {
   // (unreachable, unknown) rather than reusing 'stopped' or 'failed' for them
   // and losing the distinction those two exist to preserve.
   dot?: StatusDotState;
+  // usage is the compact CPU/memory figure from the usage sweep's cached
+  // reading for this env (environment_usage.go), '' when there is nothing
+  // measurable to show yet — the orchestrator card is where the orchestrator card actually
+  // asked for this.
+  usage: string;
+  usageStale: boolean;
 }
 
 export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): OrchestratorEnvironmentLine {
   const key = `${env.tenant}/${env.environment}`;
   const name = `${env.tenant} / ${env.environment}`;
   const activity = env.activity;
+  const usageSummary = summarizeEnvironmentUsage(env.usage, Date.now());
+  const usage = usageSummary.headline;
+  const usageStale = usageSummary.stale;
 
   if (activity?.outage) {
-    return { key, name, state: 'outage', status: 'Lost connection', dot: 'failed' };
+    return {
+      key,
+      name,
+      state: 'outage',
+      status: 'Lost connection',
+      dot: 'failed',
+      usage,
+      usageStale,
+    };
   }
   if (!activity?.reachable) {
-    return { key, name, state: 'unreachable', status: 'Not open here' };
+    return { key, name, state: 'unreachable', status: 'Not open here', usage, usageStale };
   }
   if (!activity.observed) {
-    return { key, name, state: 'unknown', status: 'Connected — activity unknown' };
+    return {
+      key,
+      name,
+      state: 'unknown',
+      status: 'Connected — activity unknown',
+      usage,
+      usageStale,
+    };
   }
   if (activity.busy) {
     return {
@@ -43,7 +68,9 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       state: 'busy',
       status: activity.detail ? `Busy — ${activity.detail}` : 'Busy',
       dot: 'busy',
+      usage,
+      usageStale,
     };
   }
-  return { key, name, state: 'idle', status: 'Idle', dot: 'running' };
+  return { key, name, state: 'idle', status: 'Idle', dot: 'running', usage, usageStale };
 }

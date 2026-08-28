@@ -22,6 +22,7 @@ import {
 } from '@/components/app/Sidebar.helpers';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 import type { UISelection } from '@/types';
+import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
   return (
@@ -319,6 +320,10 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
   const envBusyDetail = useAppSelector(
     (state) => state.envStatus.activityByEnv[activityKey]?.detail ?? '',
   );
+  // The usage sweep's cached reading for this env, if any — read straight from
+  // the slice (not reduced to a primitive) since the hover card needs the
+  // whole snapshot to render figures, age, and staleness together.
+  const usage = useAppSelector((state) => state.envStatus.usageByEnv[activityKey]);
   return {
     selectedSelection,
     tenants,
@@ -333,6 +338,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     envOutage,
     envBusy,
     envBusyDetail,
+    usage,
   };
 }
 
@@ -342,7 +348,11 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
 function useEnvironmentRowState(
   tenantName: string,
   environmentName: string,
-): EnvironmentRowDerived & { envState: string; indicator: EnvironmentIndicator } {
+): EnvironmentRowDerived & {
+  envState: string;
+  indicator: EnvironmentIndicator;
+  usage: UIEnvironmentUsageSnapshot | undefined;
+} {
   const {
     selectedSelection,
     tenants,
@@ -357,6 +367,7 @@ function useEnvironmentRowState(
     envOutage,
     envBusy,
     envBusyDetail,
+    usage,
   } = useEnvironmentRowSelectors(tenantName, environmentName);
   const derived = deriveEnvironmentRow(
     tenantName,
@@ -393,6 +404,7 @@ function useEnvironmentRowState(
       busy: envBusy,
       detail: envBusyDetail,
     }),
+    usage,
   };
 }
 
@@ -414,6 +426,7 @@ export function EnvironmentRow({
     selection,
     envState,
     indicator,
+    usage,
   } = useEnvironmentRowState(tenantName, environmentName);
   const rowLabel = `${tenantName} / ${environmentName}${isHost ? ' (host)' : isLocal ? ' (local)' : ''}`;
   return (
@@ -436,6 +449,7 @@ export function EnvironmentRow({
         indicator.dot,
       )}
       indicator={indicator}
+      usage={usage}
     >
       <EnvironmentRowOpenButton
         environmentName={environmentName}

@@ -3,6 +3,7 @@
 // name where needed. This file only needs the cluster block for the entry below.
 import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
+import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
 
 export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | 'host' | '';
 
@@ -27,6 +28,7 @@ export interface UIEnvironment {
   sshdEnabled?: boolean;
   autoStart?: boolean;
   activity?: UIEnvironmentActivity;
+  usage?: UIEnvironmentUsageSnapshot;
 }
 
 // UIWorkingIssue is the env worktree's current branch and, when the branch

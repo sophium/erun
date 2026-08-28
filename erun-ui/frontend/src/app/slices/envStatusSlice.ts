@@ -1,5 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
+import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
+
 // Per-env real status behind the sidebar's open dot: a row with live tabs must
 // not read as "running" (green) when the env is actually stopped or its deploy
 // failed — tab presence alone is not running-ness. An absent key means healthy.
@@ -38,11 +40,19 @@ export interface EnvObservedActivity {
 export interface EnvStatusState {
   statusByEnv: Record<string, EnvRealStatus>;
   activityByEnv: Record<string, EnvObservedActivity>;
+  // usageByEnv is the environment-usage sweep's last cached reading per
+  // environment (environment_usage.go), keyed the same way activityByEnv is.
+  // Unlike activity, a quiet reading is not omitted: the figures themselves
+  // are expected to change every sweep, so there is no "still quiet" case to
+  // collapse away, and an absent key means "not yet observed" rather than
+  // "idle".
+  usageByEnv: Record<string, UIEnvironmentUsageSnapshot>;
 }
 
 const initialState: EnvStatusState = {
   statusByEnv: {},
   activityByEnv: {},
+  usageByEnv: {},
 };
 
 export const envStatusSlice = createSlice({
@@ -82,8 +92,16 @@ export const envStatusSlice = createSlice({
       }
       state.activityByEnv[key] = activity;
     },
+    setEnvUsageForEnv(
+      state,
+      action: PayloadAction<{ key: string; usage: UIEnvironmentUsageSnapshot }>,
+    ) {
+      const { key, usage } = action.payload;
+      state.usageByEnv[key] = usage;
+    },
   },
 });
 
-export const { setEnvActivityForEnv, setEnvStatusForEnv } = envStatusSlice.actions;
+export const { setEnvActivityForEnv, setEnvStatusForEnv, setEnvUsageForEnv } =
+  envStatusSlice.actions;
 export default envStatusSlice.reducer;

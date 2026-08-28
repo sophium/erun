@@ -2,11 +2,12 @@ import type { UITenant } from '@/types';
 
 import { stateApi } from './api/stateApi';
 import { planEnvActivitySeed } from './envActivitySeed';
+import { planEnvUsageSeed } from './envUsageSeed';
 import { readError } from './errors';
 import { showTerminalError, showTerminalMessage } from './notificationThunks';
 import { loadOrchestrators, restoreOpenOrchestrators } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
-import { setEnvActivityForEnv } from './slices/envStatusSlice';
+import { setEnvActivityForEnv, setEnvUsageForEnv } from './slices/envStatusSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
   setCloudProviders,
@@ -30,6 +31,14 @@ import { loadInterruptedActivityNotice } from './windowCloseThunks';
 function seedEnvActivity(dispatch: AppDispatch, tenants: UITenant[]): void {
   for (const seed of planEnvActivitySeed(tenants)) {
     dispatch(setEnvActivityForEnv(seed));
+  }
+}
+
+// seedEnvUsage is the same seeding shape for the usage sweep's cached
+// readings (environment_usage.go) — see planEnvUsageSeed.
+function seedEnvUsage(dispatch: AppDispatch, tenants: UITenant[]): void {
+  for (const seed of planEnvUsageSeed(tenants)) {
+    dispatch(setEnvUsageForEnv(seed));
   }
 }
 
@@ -64,6 +73,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     const tenants = normalizeBootTenants(loaded.tenants);
     dispatch(setTenants(tenants));
     seedEnvActivity(dispatch, tenants);
+    seedEnvUsage(dispatch, tenants);
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
     dispatch(setSelected(loaded.selected ?? null));
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));

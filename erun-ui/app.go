@@ -29,6 +29,7 @@ const (
 	orchestratorShellEvent      = "orchestrator-shell-activity"
 	envStatusEvent              = "env-status"
 	envActivityEvent            = "env-activity"
+	envUsageEvent               = "env-usage"
 	appCloseGateEvent           = "app-close-gate"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
@@ -143,6 +144,10 @@ type App struct {
 	// sweep announces transitions rather than restating a quiet environment
 	// every tick. See environment_activity.go.
 	envActivity map[string]environmentActivityState
+	// envUsage is the last cached usage reading published per environment, kept
+	// so a hover card renders a cached figure with its age rather than
+	// triggering a probe of its own. See environment_usage.go.
+	envUsage map[string]environmentUsageReading
 	// forwardRepairs tracks, per environment, the bounded repair episode for a
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
