@@ -91,23 +91,29 @@ func runningImageDrift(release *ObservedHelmRelease, pods []ObservedPod) []strin
 // runtimePodDrift compares the env config's recorded runtime pod sizing
 // against what the release actually rendered. Both sides are the release's
 // own record of intent, not a live cgroup read, so this stays a plain
-// `helm status` comparison rather than reaching into the pod.
+// `helm status` comparison rather than reaching into the pod. Unlike deploy,
+// which must resolve a concrete value to pass to helm and so normalizes an
+// unset field to NormalizeRuntimePodResources' package default, a config field
+// left empty here asserts nothing about the environment's shape — the same
+// reasoning the recordedVersion/runtimeImage checks above already apply — so
+// each field compares only when the config actually recorded one, instead of
+// diffing the release against a manufactured default nobody configured.
 func runtimePodDrift(req ShellLaunchParams, release *ObservedHelmRelease) []string {
 	if release.RuntimePod == (RuntimePodResources{}) {
 		return nil
 	}
-	recorded := NormalizeRuntimePodResources(req.RuntimePod)
+	recorded := req.RuntimePod
 	live := release.RuntimePod
 	var findings []string
-	if recorded.CPU != live.CPU {
+	if cpu := strings.TrimSpace(recorded.CPU); cpu != "" && cpu != live.CPU {
 		findings = append(findings, fmt.Sprintf(
 			"env config runtimepod CPU limit (%s) does not match the release's runtime.resources.limits.cpu (%s)",
-			recorded.CPU, live.CPU))
+			cpu, live.CPU))
 	}
-	if recorded.Memory != live.Memory {
+	if memory := strings.TrimSpace(recorded.Memory); memory != "" && memory != live.Memory {
 		findings = append(findings, fmt.Sprintf(
 			"env config runtimepod memory limit (%s) does not match the release's runtime.resources.limits.memory (%s)",
-			recorded.Memory, live.Memory))
+			memory, live.Memory))
 	}
 	return findings
 }
