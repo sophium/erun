@@ -1,0 +1,78 @@
+{{- /* Literal names, not tenant-templated: unlike erun's own published
+       platform component charts (erun-backend-api and friends, which many
+       tenants deploy and so scope every name by .Values.tenant), this chart
+       is authored for one tenant's own one-off component and is never
+       redeployed under a different tenant. __COMPONENT__ is expected to
+       already carry the tenant prefix (see SKILL.md "Inputs to collect"),
+       so naming the Deployment/Service literally __COMPONENT__ both matches
+       the literal contract in conventions-spec.md ("Kubernetes resources:
+       Deployment/Service named <component>") and is already the
+       "<tenant>-<service>" shape `erun expose` targets. */ -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $image := default (printf "%s/__COMPONENT__:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "__COMPONENT__") -}}
+{{- $port := default __PORT__ .Values.containerPort -}}
+{{- $healthPath := default "__HEALTH_PATH__" .Values.healthCheckPath -}}
+{{- $replicas := default 1 .Values.replicas -}}
+{{- $resources := default (dict "requests" (dict "cpu" "100m" "memory" "128Mi") "limits" (dict "cpu" "500m" "memory" "512Mi")) .Values.resources -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: __COMPONENT__
+  labels:
+    app: __COMPONENT__
+spec:
+  type: ClusterIP
+  selector:
+    app: __COMPONENT__
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __COMPONENT__
+  labels:
+    app: __COMPONENT__
+spec:
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: __COMPONENT__
+  template:
+    metadata:
+      labels:
+        app: __COMPONENT__
+    spec:
+      containers:
+        - name: __COMPONENT__
+          image: {{ $image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+          env:
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
+            {{- range .Values.extraEnv }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ $healthPath }}
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: {{ $healthPath }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml $resources | nindent 12 }}
