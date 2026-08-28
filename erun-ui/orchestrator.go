@@ -95,15 +95,19 @@ type orchestratorEnvInput struct {
 	Directory   string `json:"directory"`
 }
 
-// orchestratorEnvCandidate is an agent env the operator can link, with the host
-// directory the orchestrator reviews it in. Mirrored distinguishes the two kinds
-// of review directory: a workspace-sync mirror the operator may place anywhere,
-// or the env's own worktree on this machine, whose path is derived and fixed.
+// orchestratorEnvCandidate is an env the operator considered linking, eligible
+// or not. Mirrored distinguishes the two kinds of review directory an eligible
+// env carries: a workspace-sync mirror the operator may place anywhere, or the
+// env's own worktree on this machine, whose path is derived and fixed. An
+// ineligible env carries no directory — IneligibleReason explains, in
+// operator language, why it cannot be linked instead.
 type orchestratorEnvCandidate struct {
 	Tenant           string `json:"tenant"`
 	Environment      string `json:"environment"`
+	Eligible         bool   `json:"eligible"`
 	DefaultDirectory string `json:"defaultDirectory"`
 	Mirrored         bool   `json:"mirrored"`
+	IneligibleReason string `json:"ineligibleReason"`
 }
 
 // orchestratorEnvInfo is the JSON-safe view of one linked environment.
@@ -230,6 +234,19 @@ func orchestratableEnv(env eruncommon.EnvConfig) bool {
 	default:
 		return false
 	}
+}
+
+// orchestratorIneligibilityReason explains, in the operator's language, why an
+// env orchestratableEnv rejects cannot be linked — reusing that function's own
+// reasoning rather than restating it. Returns "" for an eligible env.
+func orchestratorIneligibilityReason(env eruncommon.EnvConfig) string {
+	if orchestratableEnv(env) {
+		return ""
+	}
+	if env.ResolvedType() == eruncommon.EnvironmentTypeRuntime {
+		return "Runtime environments have no worktree to review and no in-pod agent to delegate to, so they can't be linked to an orchestrator."
+	}
+	return "This environment's type isn't recognized, so it can't be linked to an orchestrator."
 }
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
@@ -1243,10 +1260,14 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 	return eruncommon.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
 }
 
-// ListOrchestratorEnvCandidates returns the agent environments the operator can
-// link, each with the host directory the orchestrator reviews it in: a mirror the
-// sync fills for a remote-agent env, or the worktree itself for a local-agent env,
-// which is already on this machine because the pod hostPath-mounts it.
+// ListOrchestratorEnvCandidates returns every environment the operator could
+// consider linking, eligible or not — an env orchestratableEnv rejects is
+// still listed, disabled, with IneligibleReason explaining why, rather than
+// silently dropped: an operator who knows an env exists must be able to see
+// that it was considered. An eligible env also carries the host directory the
+// orchestrator reviews it in: a mirror the sync fills for a remote-agent env,
+// or the worktree itself for a local-agent env, which is already on this
+// machine because the pod hostPath-mounts it.
 func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -1259,16 +1280,17 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 			continue
 		}
 		for _, env := range envs {
-			if !orchestratableEnv(env) {
-				continue
+			candidate := orchestratorEnvCandidate{
+				Tenant:      tenant.Name,
+				Environment: env.Name,
+				Eligible:    orchestratableEnv(env),
 			}
-			directory, mirrored := orchestratorReviewDirectory(tenant.Name, env)
-			out = append(out, orchestratorEnvCandidate{
-				Tenant:           tenant.Name,
-				Environment:      env.Name,
-				DefaultDirectory: directory,
-				Mirrored:         mirrored,
-			})
+			if candidate.Eligible {
+				candidate.DefaultDirectory, candidate.Mirrored = orchestratorReviewDirectory(tenant.Name, env)
+			} else {
+				candidate.IneligibleReason = orchestratorIneligibilityReason(env)
+			}
+			out = append(out, candidate)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {

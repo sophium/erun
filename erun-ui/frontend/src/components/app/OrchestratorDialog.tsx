@@ -1,5 +1,4 @@
 import { Button } from 'erun-kit';
-import { Checkbox } from 'erun-kit';
 import {
   Dialog,
   DialogContent,
@@ -10,7 +9,7 @@ import {
 } from 'erun-kit';
 import { Input } from 'erun-kit';
 import { Label } from 'erun-kit';
-import { AlertTriangle, FolderOpen, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react';
+import { AlertTriangle, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -26,23 +25,14 @@ import {
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
 import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
+import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
+import {
+  type EnvCandidate,
+  envKey,
+} from '@/components/app/OrchestratorDialog.Environments.helpers';
 import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog.Guidance';
 
-import { ChooseLocalRepoPath, ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
-
-interface EnvCandidate {
-  tenant: string;
-  environment: string;
-  defaultDirectory: string;
-  // A mirrored env is reviewed in a synced copy the operator may place anywhere;
-  // otherwise the review directory is the env's own worktree on this machine and
-  // its path is derived from the env, not chosen here.
-  mirrored: boolean;
-}
-
-function envKey(tenant: string, environment: string): string {
-  return `${tenant} ${environment}`;
-}
+import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
 
 // OrchestratorDialog creates or edits a persisted orchestrator: a name and the
 // agent environments it links, each with the host directory it reviews read-only.
@@ -405,118 +395,5 @@ function OrchestratorDeleteConfirm({
         </Button>
       </DialogFooter>
     </>
-  );
-}
-
-function EnvironmentsField({
-  candidates,
-  selected,
-  onToggle,
-  onDirectoryChange,
-}: {
-  candidates: EnvCandidate[];
-  selected: OrchestratorEnvRef[];
-  onToggle: (candidate: EnvCandidate, checked: boolean) => void;
-  onDirectoryChange: (ref: OrchestratorEnvRef, directory: string) => void;
-}): React.ReactElement {
-  return (
-    <div className="space-y-1.5">
-      <Label>Environments</Label>
-      {candidates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No agent environments yet. Initialize one to orchestrate it.
-        </p>
-      ) : (
-        <div className="max-h-56 space-y-2 overflow-y-auto">
-          {candidates.map((candidate) => {
-            const ref = selected.find(
-              (entry) =>
-                envKey(entry.tenant, entry.environment) ===
-                envKey(candidate.tenant, candidate.environment),
-            );
-            return (
-              <EnvironmentRow
-                key={envKey(candidate.tenant, candidate.environment)}
-                candidate={candidate}
-                selectedRef={ref}
-                onToggle={onToggle}
-                onDirectoryChange={onDirectoryChange}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EnvironmentRow({
-  candidate,
-  selectedRef,
-  onToggle,
-  onDirectoryChange,
-}: {
-  candidate: EnvCandidate;
-  selectedRef: OrchestratorEnvRef | undefined;
-  onToggle: (candidate: EnvCandidate, checked: boolean) => void;
-  onDirectoryChange: (ref: OrchestratorEnvRef, directory: string) => void;
-}): React.ReactElement {
-  const browse = (): void => {
-    if (!selectedRef) {
-      return;
-    }
-    void ChooseLocalRepoPath(selectedRef.directory).then((dir) => {
-      if (dir.trim() !== '') {
-        onDirectoryChange(selectedRef, dir.trim());
-      }
-    });
-  };
-  return (
-    <div className="rounded-sm border border-border/60 px-2 py-1.5">
-      <label className="flex items-center gap-2 text-sm">
-        <Checkbox
-          checked={Boolean(selectedRef)}
-          onCheckedChange={(checked) => {
-            onToggle(candidate, checked === true);
-          }}
-        />
-        {candidate.tenant} / {candidate.environment}
-        <span className="text-xs text-muted-foreground">
-          {candidate.mirrored ? 'synced mirror' : 'worktree on this machine'}
-        </span>
-      </label>
-      {selectedRef ? (
-        <div className="mt-1.5 flex items-center gap-1.5 pl-6">
-          {candidate.mirrored ? (
-            <>
-              <Input
-                className="h-7 font-mono text-xs"
-                value={selectedRef.directory}
-                onChange={(event) => {
-                  onDirectoryChange(selectedRef, event.target.value);
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-xs"
-                className="size-7 flex-none"
-                aria-label={`Choose sync directory for ${candidate.tenant} / ${candidate.environment}`}
-                onClick={browse}
-              >
-                <FolderOpen aria-hidden="true" />
-              </Button>
-            </>
-          ) : (
-            // Derived from the env's repository path, so it is shown rather than
-            // offered for editing: there is no mirror to place, and the operator
-            // moves it by changing the env's repository path.
-            <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-              {candidate.defaultDirectory}
-            </p>
-          )}
-        </div>
-      ) : null}
-    </div>
   );
 }

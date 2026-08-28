@@ -105,7 +105,8 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 // TestListOrchestratorEnvCandidatesCoversBothAgentTypes locks the capability: an
 // orchestrator can link either agent type, and each candidate carries where that
 // env is reviewed — a mirror the operator may place anywhere, or the local-agent
-// worktree already on this machine. A runtime env stays out: nothing to review.
+// worktree already on this machine. A runtime env is still listed, disabled,
+// with a reason rather than dropped without trace.
 // TestOrchestratableEnvCoversHost locks in that a host env links like
 // local-agent and remote-agent — the issue's own recommendation (#1380): a
 // host env's worktree is already the operator's own checkout, so the
@@ -150,24 +151,60 @@ func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOrchestratorEnvCandidates failed: %v", err)
 	}
-	if len(candidates) != 2 {
-		t.Fatalf("expected both agent envs and no runtime env, got %+v", candidates)
+	if len(candidates) != 3 {
+		t.Fatalf("expected both agent envs plus the ineligible runtime env, got %+v", candidates)
 	}
-	dev, laptop := candidates[0], candidates[1]
-	if dev.Environment != "dev" || laptop.Environment != "laptop" {
-		t.Fatalf("expected dev then laptop, got %+v", candidates)
+	dev, laptop, rt := candidates[0], candidates[1], candidates[2]
+	if dev.Environment != "dev" || laptop.Environment != "laptop" || rt.Environment != "runtime" {
+		t.Fatalf("expected dev, laptop, runtime in that order, got %+v", candidates)
 	}
-	if !dev.Mirrored {
-		t.Fatalf("expected the remote-agent env to be reviewed in a mirror, got %+v", dev)
+	if !dev.Eligible || !dev.Mirrored {
+		t.Fatalf("expected the remote-agent env to be eligible and reviewed in a mirror, got %+v", dev)
 	}
 	if !strings.HasSuffix(dev.DefaultDirectory, "orchestrators"+string(os.PathSeparator)+"frs-dev") {
 		t.Fatalf("unexpected mirror directory: %q", dev.DefaultDirectory)
 	}
-	if laptop.Mirrored {
-		t.Fatalf("expected the local-agent env to be reviewed in place, got %+v", laptop)
+	if !laptop.Eligible || laptop.Mirrored {
+		t.Fatalf("expected the local-agent env to be eligible and reviewed in place, got %+v", laptop)
 	}
 	if laptop.DefaultDirectory != laptopRepo {
 		t.Fatalf("local-agent review directory = %q, want the env worktree %q", laptop.DefaultDirectory, laptopRepo)
+	}
+	if rt.Eligible {
+		t.Fatalf("expected the runtime env to stay ineligible, got %+v", rt)
+	}
+	if rt.DefaultDirectory != "" || rt.Mirrored {
+		t.Fatalf("expected the ineligible runtime env to carry no review directory, got %+v", rt)
+	}
+	if rt.IneligibleReason == "" {
+		t.Fatalf("expected the runtime env to carry an operator-facing reason, got %+v", rt)
+	}
+}
+
+// TestOrchestratorIneligibilityReasonExplainsEachRejectedType locks the
+// operator-facing copy: an eligible env carries no reason, a runtime env
+// names the concrete gap (no worktree, no in-pod agent), and an unresolved
+// type still gets an actionable — if generic — explanation rather than "".
+func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
+	cases := []struct {
+		envType    eruncommon.EnvironmentType
+		wantEmpty  bool
+		wantSubstr string
+	}{
+		{eruncommon.EnvironmentTypeLocalAgent, true, ""},
+		{eruncommon.EnvironmentTypeRemoteAgent, true, ""},
+		{eruncommon.EnvironmentTypeHost, true, ""},
+		{eruncommon.EnvironmentTypeRuntime, false, "no worktree"},
+		{"", false, "type"},
+	}
+	for _, tc := range cases {
+		got := orchestratorIneligibilityReason(eruncommon.EnvConfig{Type: tc.envType})
+		if tc.wantEmpty && got != "" {
+			t.Errorf("orchestratorIneligibilityReason(type=%q) = %q, want empty", tc.envType, got)
+		}
+		if !tc.wantEmpty && !strings.Contains(got, tc.wantSubstr) {
+			t.Errorf("orchestratorIneligibilityReason(type=%q) = %q, want substring %q", tc.envType, got, tc.wantSubstr)
+		}
 	}
 }
 
