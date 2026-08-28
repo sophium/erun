@@ -221,6 +221,20 @@ after touching it — like `erun-devops/docker/erun-devops/entrypoint_test.sh`,
 it asserts process/argv behavior against a stubbed `erun` and is not wired
 into `make check`.
 
+The criterion for wrapping a command this way is "long enough that a harness
+will background it", never the target's name — `make check` was simply the
+first one found this way. `erun-ui/playwright/run.sh` (longer than `make
+check` itself; see `erun-ui/playwright/AGENTS.md` § "Headless Launch") and
+`make integration-test` (routinely run standalone per § "Integration Test
+Gate" below, and the single longest component of `check-gate`) are wired
+through the same wrapper for that reason. `erun release` / `erun build
+--release` were checked and are not: the merge queue already runs a release
+as a detached job in an agent env (see § "Integration Test Gate" below), and
+nothing tells an agent to run either directly as routine, foreground,
+per-change validation the way `make check`, `make integration-test`, and the
+playwright suite are. Re-check this list when a new command earns that same
+routine-and-long status.
+
 ## Code Comments
 
 - Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.
@@ -249,7 +263,7 @@ Probe artifacts the agent leaves behind during verification (injected files, man
 
 - `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.
 - This repository intentionally has no hosted CI (#521): GitHub-hosted runners are ephemeral, which defeats erun's daemon-centric build caching, and erun provides its own build system and merge queue instead. Both halves of that queue now exist in `erun-backend-api`: promoting a review to `MERGE` dispatches `internal/mergeexec` to build the prospective merge of the review's source onto its *current* target and gate it with a real `erun build`, pushing only on green — so `MERGED` means a merge actually happened and a build actually passed, not a caller's assertion — and an accepted (now actually-merged) review then enqueues a release, run by a per-tenant serial queue as a Job in an agent env with warm caches. It is opt-in per control plane and is not yet a required status check, so the gate is still enforced where it always was for this repository's own PRs: run it locally before merging, and every erun-driven build anywhere re-runs it via the image's test stage (see `erun-devops/AGENTS.md` § "Build Workflow"). Do not reintroduce GitHub Actions workflows for build or test gating.
-- Run `go test ./...` (or `make integration-test`) under `erun-integration/` before pushing any change that touches `erun-cli`, `erun-common`, the runtime entrypoint, the chart deploy plumbing, or any integration golden. If a scenario is red on your machine but you believe it is "platform-dependent" or "flaky", that is a defect to fix (see the host-OS pinning guidance in `erun-integration/AGENTS.md`), not a reason to ship.
+- Run `go test ./...` (or `make integration-test`) under `erun-integration/` before pushing any change that touches `erun-cli`, `erun-common`, the runtime entrypoint, the chart deploy plumbing, or any integration golden. If a scenario is red on your machine but you believe it is "platform-dependent" or "flaky", that is a defect to fix (see the host-OS pinning guidance in `erun-integration/AGENTS.md`), not a reason to ship. `make integration-test` is itself wired through `scripts/agent-gate.sh` (see § "Long Gates Detach Themselves Inside An Agent Pod" above) since it is routinely run standalone and is long enough on its own to hit the same foreground-timeout failure; `make check-gate` depends on the underlying `integration-test-gate` target directly so a `make check` run never nests one detached job inside another.
 - The integration suite runs the compiled binary as a subprocess against per-command `--dry-run` goldens. The contract for `--dry-run` is therefore a hard public-surface boundary: every action and every decision the command would take must appear as a trace line, regardless of whether downstream input resolution succeeds. Treat a missing trace as a bug, not a documentation gap.
 - Coverage is gated on `erun-cli` + `erun-common` only, and the integration suite is the single source of truth for that coverage — unit tests in those packages do not count toward the gate, so write the integration scenario for new `erun-cli`/`erun-common` behavior and delete unit tests that overlap one. Other modules (`erun-mcp`, `erun-backend`, `erun-ui`) are validated by their own per-module suites.
 - Do not skip integration scenarios to make the suite green. If a regression is discovered, leave the failing scenario in place so the gate fails until the regression is fixed; that is the suite working as designed.

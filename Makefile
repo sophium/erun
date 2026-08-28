@@ -1,4 +1,4 @@
-.PHONY: integration-test lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -142,7 +142,17 @@ test-postgres-restart:
 # directly with --update-golden (./erun-integration/scripts/integration-test.sh
 # --update-golden) — gate mode refuses outright if UPDATE_GOLDEN is set in the
 # environment, so it cannot be reseeded via `make check UPDATE_GOLDEN=1`.
+#
+# Detaches through the same wrapper as `check` below, since root AGENTS.md
+# tells contributors to run this standalone before pushing and it is long
+# enough on its own to hit the same foreground-timeout failure inside an
+# agent pod. check-gate depends on integration-test-gate directly rather than
+# on this target, so a `make check` run never nests one detached job inside
+# another.
 integration-test:
+	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
+
+integration-test-gate:
 	./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
@@ -164,4 +174,4 @@ check:
 # which is inert outside an agent pod); a failure tags no image.
 # test-postgres-restart is deliberately excluded -- see its own comment above
 # for why.
-check-gate: lint test-erun-ui test-frontend helm-chart-tests integration-test
+check-gate: lint test-erun-ui test-frontend helm-chart-tests integration-test-gate

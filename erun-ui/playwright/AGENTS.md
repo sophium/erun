@@ -28,6 +28,7 @@ The suite owns its config root (issue #483). `fixtures/seedRoot.ts` is the singl
 
 There is only one supported way to run the suite. The shell script `run.sh` in this directory is the single entry point — `yarn` scripts call it for convenience, and the desktop build/packaging flow invokes it too.
 
+- `run.sh` is wired through `scripts/agent-gate.sh`, the same wrapper `make check` uses (root `AGENTS.md` § "Long Gates Detach Themselves Inside An Agent Pod"): outside an agent pod it behaves exactly as documented below, but inside one it detaches the whole run — build, lint, and the suite itself — through erun's own job primitive and awaits it for a bounded window, so this suite (longer than `make check`) never sits as an ordinary foreground command for an agent's harness to auto-background. A timeout says to run the same `run.sh` invocation again to keep waiting.
 - One-shot from this directory:
   ```sh
   ./run.sh

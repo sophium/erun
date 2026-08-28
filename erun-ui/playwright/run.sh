@@ -30,6 +30,20 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ERUN_UI_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 BIN_PATH="$ERUN_UI_DIR/bin/erun-app"
 
+# Detach the whole run through scripts/agent-gate.sh, the same wrapper `make
+# check` uses, so this suite (longer than `make check` itself) never sits as
+# an ordinary foreground command for an in-pod coding agent's harness to
+# auto-background into a bare task handle. Outside an agent pod agent-gate.sh
+# execs straight through with no behaviour change. RUN_SH_AGENT_GATED marks
+# that this invocation already made that one pass, so the re-exec of this
+# same script (either agent-gate.sh's own straight-through, or the job body
+# it starts) does not route through here again.
+if [ -z "${AGENT_GATE_DETACHED:-}" ] && [ "${RUN_SH_AGENT_GATED:-0}" != "1" ]; then
+	RUN_SH_AGENT_GATED=1
+	export RUN_SH_AGENT_GATED
+	exec "$ERUN_UI_DIR/../scripts/agent-gate.sh" ui-playwright "erun-ui/playwright/run.sh $*" -- "$SCRIPT_DIR/run.sh" "$@"
+fi
+
 FORCE_BUILD=0
 HEADED=0
 PORT=34123
