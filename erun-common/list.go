@@ -215,7 +215,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		ContainerRegistries: EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
 		RuntimePod:          env.RuntimePod,
-		Sizing:              listEnvironmentSizing(tenant.Name, env),
+		Sizing:              EnvironmentRuntimeSizing(tenant.Name, env),
 		ManagedCloud:        env.ManagedCloud,
 		DisableBuildScript:  env.DisableBuildScript,
 		PlatformAccount:     env.PlatformAccount,
@@ -232,10 +232,11 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 	}
 }
 
-// listEnvironmentSizing attaches the standing recommendation when there is one.
-// A read failure is silence rather than an error: `erun list` is the fleet's
-// orientation command and must not fail over an advisory line.
-func listEnvironmentSizing(tenant string, env EnvConfig) *RuntimeSizingRecommendation {
+// EnvironmentRuntimeSizing attaches the standing recommendation when there is
+// one. A read failure is silence rather than an error: every caller of this
+// (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
+// must not fail over it.
+func EnvironmentRuntimeSizing(tenant string, env EnvConfig) *RuntimeSizingRecommendation {
 	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return nil

@@ -261,6 +261,23 @@ func traceRuntimeResizePlanActions(ctx Context, tenant, environment string, plan
 	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC", tenant, environment))
 }
 
+// traceRuntimeSizingRecommendation surfaces the standing recommendation resize
+// already loaded to resolve its target, before it acts on it. Without this, a
+// verdict resize computed but did not act on (e.g. a resource left at `hold`
+// while another raises) was invisible, and a no-op reported "already sized"
+// with no way to see why -- the same reasoning `erun list` already prints
+// under `runtime-pod:`, repeated here because resize is where an operator or
+// the desktop's Runtime tab actually watches this recommendation resolve.
+func traceRuntimeSizingRecommendation(ctx Context, tenant, environment string, recommendation *RuntimeSizingRecommendation) {
+	if recommendation == nil {
+		return
+	}
+	for _, verdict := range recommendation.Verdicts {
+		ctx.Trace(fmt.Sprintf("resize: %s/%s sizing: %s", tenant, environment, FormatRuntimeSizingVerdict(verdict)))
+	}
+	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, FormatRuntimeSizingEvidence(*recommendation)))
+}
+
 // traceRuntimeResizeOverriddenLeases names every holder the resize is about to
 // roll through, so an override is never silent.
 func traceRuntimeResizeOverriddenLeases(ctx Context, tenant, environment string, leases []EnvironmentActivityLease) {
@@ -308,7 +325,8 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 	}
 	tenant, environment := target.Tenant, target.Environment
 
-	recommendation := listEnvironmentSizing(tenant, target.EnvConfig)
+	recommendation := EnvironmentRuntimeSizing(tenant, target.EnvConfig)
+	traceRuntimeSizingRecommendation(ctx, tenant, environment, recommendation)
 	plan, err := ResolveRuntimeResizePlan(tenant, environment, target.EnvConfig.RuntimePod, target.EnvConfig.NamespaceQuota, params.Input, recommendation)
 	if err != nil {
 		return RuntimeResizeResult{}, err

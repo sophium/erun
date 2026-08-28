@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -304,30 +303,12 @@ func runtimeSizingLines(sizing *common.RuntimeSizingRecommendation, indent strin
 	}
 	verdicts := make([]string, 0, len(sizing.Verdicts))
 	for _, verdict := range sizing.Verdicts {
-		verdicts = append(verdicts, runtimeSizingVerdictLabel(verdict))
+		verdicts = append(verdicts, common.FormatRuntimeSizingVerdict(verdict))
 	}
-	evidence := sizing.Evidence
 	return []string{
 		indent + "sizing: " + strings.Join(verdicts, "; "),
-		indent + fmt.Sprintf("sizing-evidence: %s observed, %d samples, %d restarts, knob=%s, from %s (not loadavg)",
-			common.FormatObservedWindow(time.Duration(evidence.ObservedSeconds)*time.Second),
-			evidence.Samples, evidence.Restarts, sizing.Knob, strings.Join(evidence.Signals, ", ")),
+		indent + "sizing-evidence: " + common.FormatRuntimeSizingEvidence(*sizing),
 	}
-}
-
-func runtimeSizingVerdictLabel(verdict common.RuntimeSizingVerdict) string {
-	label := verdict.Resource + " " + string(verdict.Action)
-	if suggested := strings.TrimSpace(verdict.Suggested); suggested != "" {
-		label += " to " + suggested
-	}
-	if current := strings.TrimSpace(verdict.Current); current != "" {
-		label += " from " + current
-	}
-	label += " (" + verdict.Reason
-	if verdict.Confidence != "" {
-		label += ", " + string(verdict.Confidence) + " confidence"
-	}
-	return label + ")"
 }
 
 func runtimePodLabel(pod common.RuntimePodResources) string {

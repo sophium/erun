@@ -54,6 +54,35 @@ func TestRuntimeSizingFromOutputParsesNoOp(t *testing.T) {
 	}
 }
 
+// TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp is the reported
+// defect itself: a no-op resolves to "already sized as recommended" with no
+// actions to show, so the verdict/evidence lines are the only way the tab can
+// explain why -- e.g. a peak comfortably under the shrink boundary that the
+// window is too short to act on.
+func TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp(t *testing.T) {
+	output := "resize: myapp/prod sizing: memory insufficient-evidence from 23552Mi (peak 12153Mi of 23552Mi (52%), but only 1h12m observed of the 24h0m a shrink needs)\n" +
+		"resize: myapp/prod sizing: cpu insufficient-evidence from 12 (0.00% of scheduling periods throttled (0 of 376556), but only 1h12m observed of the 24h0m a shrink needs)\n" +
+		"resize: myapp/prod sizing-evidence: 1h12m observed, 120 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)\n" +
+		"resize: myapp/prod is already sized at cpu=12 memory=23552Mi; no change\n"
+
+	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, output)
+
+	if !got.Available || !got.NoOp {
+		t.Fatalf("expected an available no-op, got %+v", got)
+	}
+	wantVerdicts := []string{
+		"memory insufficient-evidence from 23552Mi (peak 12153Mi of 23552Mi (52%), but only 1h12m observed of the 24h0m a shrink needs)",
+		"cpu insufficient-evidence from 12 (0.00% of scheduling periods throttled (0 of 376556), but only 1h12m observed of the 24h0m a shrink needs)",
+	}
+	if !reflect.DeepEqual(got.Verdicts, wantVerdicts) {
+		t.Fatalf("unexpected verdicts:\n got %+v\nwant %+v", got.Verdicts, wantVerdicts)
+	}
+	wantEvidence := "1h12m observed, 120 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)"
+	if got.Evidence != wantEvidence {
+		t.Fatalf("unexpected evidence:\n got %q\nwant %q", got.Evidence, wantEvidence)
+	}
+}
+
 // TestRuntimeSizingFromOutputHandlesUnrecognisedOutput covers a version drift
 // or a truly empty successful run: no known line survives, so the tab reports
 // "nothing available" rather than a blank success.

@@ -131,6 +131,42 @@ test.describe('manage dialog sizing recommendation panel', () => {
     await app.manageDialog.waitForClosed();
   });
 
+  // The reported defect itself: a no-op ("Already sized as recommended") must
+  // not go silent about why. This is exactly the operator complaint the fix
+  // addresses -- a comfortable peak the shrink gate withholds because the
+  // observed window is too short, previously invisible on this panel.
+  test('a no-op recommendation still shows the evidence behind it', async ({ app, seededEnv }) => {
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeSizing(app.page, {
+      initial: {
+        tenant,
+        environment,
+        available: true,
+        noOp: true,
+        verdicts: [
+          'memory insufficient-evidence from 23552Mi (peak 12153Mi of 23552Mi (52%), but only 1h12m observed of the 24h0m a shrink needs)',
+          'cpu insufficient-evidence from 12 (0.00% of scheduling periods throttled (0 of 376556), but only 1h12m observed of the 24h0m a shrink needs)',
+        ],
+        evidence:
+          '1h12m observed, 120 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)',
+      },
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeSizingPanel();
+    await expect(panel).toContainText('Already sized as recommended.');
+    // The evidence line answers exactly what the bare verdict cannot: what
+    // was measured, over what window, and why it falls short of a shrink.
+    await expect(panel).toContainText('only 1h12m observed of the 24h0m a shrink needs');
+    await expect(panel).toContainText('1h12m observed, 120 samples, 0 restarts');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
   // Unlike the two tests above, this one does not stub LoadRuntimeSizing, so
   // the seeded (inert, never-deployed) env's real probe runs against the
   // harness's stub kubectl and fails for real.

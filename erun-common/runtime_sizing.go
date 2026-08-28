@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -438,6 +439,35 @@ func runtimeUsageUnavailable(latest RuntimeUsage) []string {
 		unavailable = append(unavailable, latest.CPU.Unavailable)
 	}
 	return unavailable
+}
+
+// FormatRuntimeSizingVerdict renders one resource's verdict as prose: the
+// direction, the suggested/current values when set, and the reason -- the
+// same text every consumer (`erun list`, `erun resize`) shows, so a
+// recommendation reads identically wherever it appears.
+func FormatRuntimeSizingVerdict(verdict RuntimeSizingVerdict) string {
+	label := verdict.Resource + " " + string(verdict.Action)
+	if suggested := strings.TrimSpace(verdict.Suggested); suggested != "" {
+		label += " to " + suggested
+	}
+	if current := strings.TrimSpace(verdict.Current); current != "" {
+		label += " from " + current
+	}
+	label += " (" + verdict.Reason
+	if verdict.Confidence != "" {
+		label += ", " + string(verdict.Confidence) + " confidence"
+	}
+	return label + ")"
+}
+
+// FormatRuntimeSizingEvidence renders the window, sample count, restarts,
+// knob, and signal sources a recommendation was computed from -- the input a
+// verdict cannot be judged without.
+func FormatRuntimeSizingEvidence(sizing RuntimeSizingRecommendation) string {
+	evidence := sizing.Evidence
+	return fmt.Sprintf("%s observed, %d samples, %d restarts, knob=%s, from %s (not loadavg)",
+		FormatObservedWindow(time.Duration(evidence.ObservedSeconds)*time.Second),
+		evidence.Samples, evidence.Restarts, sizing.Knob, strings.Join(evidence.Signals, ", "))
 }
 
 // FormatObservedWindow renders an evidence window at minute resolution. Whole
