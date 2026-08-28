@@ -9,7 +9,7 @@ import "time"
 // way the Runtime tab's on-demand reading already does. It reuses LoadRuntimeUsage
 // unchanged (the same kubectl-exec probe the Runtime tab's refresh button
 // drives), but calls it from a bounded sweep instead of per-hover: hovering an
-// environment must never trigger a probe of its own (#1029/#1031's precedent).
+// environment must never trigger a probe of its own (the same precedent the activity poller set).
 
 // environmentUsageInterval paces the usage sweep. It is slower than
 // environmentActivityInterval (20s, environment_activity.go) because each

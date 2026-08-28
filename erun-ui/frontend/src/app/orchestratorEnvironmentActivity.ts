@@ -23,7 +23,7 @@ export interface OrchestratorEnvironmentLine {
   dot?: StatusDotState;
   // usage is the compact CPU/memory figure from the usage sweep's cached
   // reading for this env (environment_usage.go), '' when there is nothing
-  // measurable to show yet — the orchestrator card is where #1383 actually
+  // measurable to show yet — the orchestrator card is where the orchestrator card actually
   // asked for this.
   usage: string;
   usageStale: boolean;
