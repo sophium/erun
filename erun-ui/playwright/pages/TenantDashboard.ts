@@ -175,6 +175,10 @@ export class TenantDashboard {
     return this.page.getByRole('button', { name: 'Connect', exact: true });
   }
 
+  connectErrorAlert(): Locator {
+    return this.page.getByRole('alert');
+  }
+
   chooseAliasHeading(): Locator {
     return this.page.getByText('Choose which platform to use', { exact: true });
   }

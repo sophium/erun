@@ -247,7 +247,7 @@ func newCloudInitERunCmd(store common.CloudStore, deps common.CloudDependencies)
 			"a loopback listener when the issuer advertises no device endpoint.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun cloud init erun --api-url https://api.frs-prod.services.erunpaas.com",
+		Example:      "  erun cloud init erun --api-url " + common.HostedPlatformAPIURL,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCloudInitERunCommand(commandContext(cmd), store, params, deps)
 		},

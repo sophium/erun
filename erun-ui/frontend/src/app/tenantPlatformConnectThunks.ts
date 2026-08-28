@@ -3,6 +3,7 @@
 // first time, and enrolling the signed-in identity into it. Split out of
 // tenantDialogThunks.ts to keep that file under eslint's 500-line cap.
 
+import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import type { TenantDashboardState } from '@/app/state';
 
 import { tenantApi } from './api/tenantApi';
@@ -48,9 +49,26 @@ export const connectTenantPlatform =
         }),
       );
     } catch (error) {
-      dispatch(patchTenantDashboard({ connecting: false, connectError: readError(error) }));
+      dispatch(
+        patchTenantDashboard({
+          connecting: false,
+          connectError: connectFailureMessage(error, trimmed),
+        }),
+      );
     }
   };
+
+// connectFailureMessage names the standard host beside a verification
+// failure — unless the operator already tried it — so a mistyped or
+// self-hosted URL that does not resolve is recoverable inline, without
+// leaving the panel to go rediscover the right value.
+function connectFailureMessage(error: unknown, attempted: string): string {
+  const message = readError(error);
+  if (attempted === HOSTED_PLATFORM_API_URL) {
+    return message;
+  }
+  return `${message} The hosted erun platform is normally reachable at ${HOSTED_PLATFORM_API_URL}.`;
+}
 
 export const setEnrollUsernameDraft =
   (value: string): AppThunk =>

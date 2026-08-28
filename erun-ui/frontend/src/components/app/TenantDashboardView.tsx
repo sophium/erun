@@ -132,7 +132,7 @@ function TenantDashboardBlockedCard({
     );
   }
   if (dashboard.data?.platformState) {
-    return <TenantPlatformStateCard tenant={tenant} data={dashboard.data} />;
+    return <TenantPlatformStateCard data={dashboard.data} />;
   }
   // A whole-dashboard apiError with no platformState is a failure this build
   // could not classify into one of the named states — diagnosed as far as
