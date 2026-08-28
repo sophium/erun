@@ -194,6 +194,33 @@ surface an agent fully controls: its own final turn.
   unfinished, uncommitted, or unrecovered, and the orchestrator believed it
   because nothing in the job's own status said otherwise (erun#1374).
 
+## Long Gates Detach Themselves Inside An Agent Pod
+
+`make check` is a thin front door (`scripts/agent-gate.sh`) around the real
+gate, `check-gate`. Outside an agent pod — a human's terminal, CI, a plain
+`docker build` — it execs `check-gate` directly and behavior is unchanged.
+Inside a coding agent's own pod (`ERUN_ENV_TYPE` `local-agent` or
+`remote-agent`) it instead detaches `check-gate` through `erun exec job
+start` and blocks on `erun exec job await` for a bounded window, because an
+ordinary foreground `make check` run (20-40 minutes) outruns a coding agent's
+own foreground window and gets auto-backgrounded into a bare task handle —
+exactly the case § "One Agent Job Is One Run" above warns about, except here
+the agent never chose to background anything. The fix has to be structural,
+not a prompt reminder: two lanes given opposite instructions ("foreground
+only, never poll" vs. the exact `job start`/`job await` invocations to use)
+both fell into the same turn-per-poll loop anyway, because nothing rejected
+the ordinary foreground invocation either agent actually typed. Whatever the
+caller does — wait once, or re-run the same command after a timeout — the
+cost is a small, bounded number of calls, and the job's real exit code and
+full captured output still reach the caller once it finishes.
+
+Apply the same pattern to any other command whose normal run time can exceed
+an agent's foreground window (see `scripts/agent-gate.sh`'s own header
+comment for the exact mechanics). Run `scripts/agent-gate_test.sh` directly
+after touching it — like `erun-devops/docker/erun-devops/entrypoint_test.sh`,
+it asserts process/argv behavior against a stubbed `erun` and is not wired
+into `make check`.
+
 ## Code Comments
 
 - Keep comments terse and abstract: explain the application behavior and intent behind the code — the "why" — not the mechanics a reader can see in the code itself.

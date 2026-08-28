@@ -68,6 +68,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     npm install -g yarn@1.22.22
 
 COPY Makefile /src/Makefile
+COPY scripts /src/scripts
 COPY package.json yarn.lock /src/
 COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common

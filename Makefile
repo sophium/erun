@@ -1,4 +1,4 @@
-.PHONY: integration-test lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check
+.PHONY: integration-test lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -145,9 +145,23 @@ test-postgres-restart:
 integration-test:
 	./erun-integration/scripts/integration-test.sh
 
+# The front door. Everywhere but an agent pod this is check-gate by another
+# name: scripts/agent-gate.sh execs it directly and exits with exactly its
+# status. Inside an agent pod's own coding-agent session (ERUN_ENV_TYPE
+# local-agent or remote-agent) it instead detaches check-gate through erun's
+# job primitive and awaits it for a bounded window, so a 20-40 minute run
+# never sits as an ordinary foreground command for an agent harness to
+# auto-background into a bare task handle -- the caller either gets the real
+# result or a timeout that says to call `make check` again, either way in a
+# small, bounded number of calls. See scripts/agent-gate.sh for why this is
+# the fix and not just documentation.
+check:
+	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
+
 # The full in-build gate: golangci-lint, erun-ui's own Go tests, the frontend
 # kit + console gates, the erun-devops/k8s chart tests, then the integration
-# suite + coverage. The erun-devops image test stage runs this; a failure
-# tags no image. test-postgres-restart is deliberately excluded -- see its
-# own comment above for why.
-check: lint test-erun-ui test-frontend helm-chart-tests integration-test
+# suite + coverage. The erun-devops image test stage runs this (via `check`,
+# which is inert outside an agent pod); a failure tags no image.
+# test-postgres-restart is deliberately excluded -- see its own comment above
+# for why.
+check-gate: lint test-erun-ui test-frontend helm-chart-tests integration-test
