@@ -103,9 +103,21 @@ test-erun-ui:
 # dependency `yarn install`'s package-registry fetch does not already impose
 # on this gate. Run it locally before a PR that touches a shadcn primitive
 # (see erun-kit/AGENTS.md); it is not re-verified on every image build.
+#
+# The issue-reference gate runs here rather than as a per-package ESLint
+# rule: scripts/check-issue-references.mjs is the TypeScript-side twin of
+# erun-integration/issue_reference_test.go (see that file's header), and one
+# script scanning all three source roots in a single pass gives it the same
+# repo-wide shrink-only baseline the Go gate uses, which a rule duplicated
+# across three separate flat configs could not do on its own. It needs only
+# the `typescript` package this step's own `yarn install` already resolves,
+# not each package's full type-aware lint setup.
 test-frontend:
 	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
 	@yarn install --frozen-lockfile
+	@echo ">> issue-reference gate (erun-kit, erun-ui/frontend, erun-console)"
+	@node --test scripts/check-issue-references.test.mjs
+	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
 	@echo ">> erun-kit gates"
 	@(cd erun-kit && yarn typecheck && yarn lint && yarn format:check && yarn build)
 	@echo ">> erun-console gates"
