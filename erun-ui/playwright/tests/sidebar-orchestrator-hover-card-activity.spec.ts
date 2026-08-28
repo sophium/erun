@@ -327,4 +327,105 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).not.toContainText('Nudges');
   });
+
+  // Linked through a stubbed ListOrchestrators (like the tests above) rather
+  // than the suite's static pw/alpha link: alpha is the desktop's own
+  // auto-opened default environment, whose real idle/activity polling would
+  // keep overwriting the injected event underneath this test. A seededEnv is
+  // never opened, so nothing but the driven event touches its activity.
+  test('a card holding an outage clears it once the same environment recovers, and the row agrees', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await stubOrchestratorList(
+      page,
+      snapshot({ environments: [{ tenant, environment, directory: '/tmp/a' }] }),
+    );
+    await app.reboot();
+
+    const dot = app.sidebar.envOpenDot(tenant, environment);
+    const dialog = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
+
+    // A retry that re-hovers a row the pointer never left is a no-op — the
+    // browser only fires mouseenter on a genuine boundary crossing, so a
+    // popover that closed for any other reason (e.g. the screenshot below
+    // scrolling it out of view) would then never reopen. Moving off first
+    // guarantees every retry re-triggers a real enter.
+    async function rehover(): Promise<void> {
+      await page.mouse.move(0, 0);
+      await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    }
+
+    // This is the transition the bug lost: a card that already rendered once
+    // must pick up a later event, not just whatever the fetch it booted from
+    // handed it.
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: false, observed: false, outage: true, busy: false },
+      async () => {
+        await rehover();
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+        await expect(dialog).toContainText('Lost connection', { timeout: 1_000 });
+        await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
+        // Taken while still converged and hovered — a screenshot outside this
+        // callback can race the popover's own close-on-mouse-leave timer.
+        await dialog.screenshot({
+          path: '/home/erun/.erun/outputs/orchestrator-card-live-state/card-outage.png',
+        });
+      },
+    );
+
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: true, observed: true, outage: false, busy: false },
+      async () => {
+        await rehover();
+        await expect(dialog).toContainText('Idle', { timeout: 1_000 });
+        await expect(dialog).not.toContainText('Lost connection', { timeout: 1_000 });
+        await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
+        await dialog.screenshot({
+          path: '/home/erun/.erun/outputs/orchestrator-card-live-state/card-recovered.png',
+        });
+      },
+    );
+  });
 });
+
+interface EnvActivityEvent {
+  tenant: string;
+  environment: string;
+  reachable: boolean;
+  observed: boolean;
+  outage?: boolean;
+  busy: boolean;
+  detail?: string;
+}
+
+// Mirrors erun-ui/environment_activity.go's env-activity event. The backend's
+// own sweep also runs on a timer against this seeded (inert) env and can
+// overwrite the injected value with its own "unreachable" observation, so
+// every assertion driven by this helper is re-driven until it converges,
+// bounded by a real timeout rather than a guessed delay.
+async function driveEnvActivity(
+  page: Page,
+  event: EnvActivityEvent,
+  assertions: () => Promise<void>,
+): Promise<void> {
+  await expect(async () => {
+    await emitEnvActivity(page, event);
+    await assertions();
+  }).toPass({ timeout: 20_000 });
+}
+
+async function emitEnvActivity(page: Page, payload: EnvActivityEvent): Promise<void> {
+  await page.evaluate((event) => {
+    const runtime = (
+      window as unknown as {
+        runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
+      }
+    ).runtime;
+    runtime.EventsEmit('env-activity', event);
+  }, payload);
+}

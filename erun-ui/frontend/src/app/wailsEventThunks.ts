@@ -33,6 +33,7 @@ import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { recordDoctorOutcome } from './slices/doctorSlice';
 import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
+import { setEnvActivityForOrchestratorEnvs } from './slices/orchestratorsSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
 import {
   clearPendingOpenAfterDeploy,
@@ -119,6 +120,13 @@ export const handleEnvStatus =
 // answering, and whether work is in flight — so a row driven from the CLI or by
 // an in-pod agent shows its condition instead of rendering blank (Nielsen #1,
 // visibility of system status).
+//
+// It also patches every orchestrator env ref for this tenant/environment, not
+// just the sidebar row's own copy: an orchestrator card joins the same
+// activity onto its linked envs at read-model build time, and nothing kept
+// that joined copy current between builds — so a card could keep reporting an
+// outage the row had already recovered from. Driving both off this one event
+// is what keeps the two surfaces from disagreeing about one environment.
 export const handleEnvActivity =
   (payload: EnvActivityPayload): AppThunk =>
   (dispatch) => {
@@ -127,19 +135,16 @@ export const handleEnvActivity =
     if (!tenant || !environment) {
       return;
     }
+    const activity = {
+      reachable: payload.reachable,
+      observed: payload.observed,
+      outage: payload.outage === true,
+      busy: payload.busy,
+      detail: (payload.detail ?? '').trim(),
+    };
     const key = selectionKey({ tenant, environment });
-    dispatch(
-      setEnvActivityForEnv({
-        key,
-        activity: {
-          reachable: payload.reachable,
-          observed: payload.observed,
-          outage: payload.outage === true,
-          busy: payload.busy,
-          detail: (payload.detail ?? '').trim(),
-        },
-      }),
-    );
+    dispatch(setEnvActivityForEnv({ key, activity }));
+    dispatch(setEnvActivityForOrchestratorEnvs({ tenant, environment, activity }));
   };
 
 // handleAppStatus surfaces a backend status line to the user.

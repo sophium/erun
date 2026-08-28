@@ -105,6 +105,31 @@ export const orchestratorsSlice = createSlice({
       state.busy = false;
       state.error = action.payload;
     },
+    // setEnvActivityForOrchestratorEnvs is the live half of the activity join:
+    // a fetch (setOrchestrators) joins the poller's snapshot onto each env ref
+    // at that instant, but nothing previously kept it current between fetches,
+    // so a card could still show an outage the poller had already cleared. This
+    // patches every ref across every orchestrator that names the given
+    // tenant/environment, driven by the same env-activity event that already
+    // updates the sidebar row (see envStatusSlice.setEnvActivityForEnv), so the
+    // two never read from inputs of different ages again.
+    setEnvActivityForOrchestratorEnvs(
+      state,
+      action: PayloadAction<{
+        tenant: string;
+        environment: string;
+        activity: UIEnvironmentActivity;
+      }>,
+    ) {
+      const { tenant, environment, activity } = action.payload;
+      for (const orchestrator of state.items) {
+        for (const ref of orchestrator.environments) {
+          if (ref.tenant === tenant && ref.environment === environment) {
+            ref.activity = activity;
+          }
+        }
+      }
+    },
   },
 });
 
@@ -114,5 +139,6 @@ export const {
   closeOrchestratorDialog,
   setOrchestratorsBusy,
   setOrchestratorsError,
+  setEnvActivityForOrchestratorEnvs,
 } = orchestratorsSlice.actions;
 export default orchestratorsSlice.reducer;
