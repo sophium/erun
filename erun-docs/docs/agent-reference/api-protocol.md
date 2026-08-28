@@ -734,7 +734,8 @@ Both act on the caller's own resolved tenant by default. An explicit `tenantId` 
   "username": "alice",              // required
   "issuer": "https://idp.example",  // optional — links the external identity so the enrollee can actually sign in
   "subject": "alice@idp.example",   // optional — required together with issuer
-  "tenantId": "019a…"               // optional — operations-only cross-tenant target
+  "tenantId": "019a…",              // optional — operations-only cross-tenant target
+  "roleIds": ["019a7fa5-…-f70"]     // optional — grant these roles instead of the zero-role default
 }
 
 // 201 response
@@ -749,7 +750,9 @@ Both act on the caller's own resolved tenant by default. An explicit `tenantId` 
 }
 ```
 
-Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build. Enrollment grants the same predefined `ReadAll`/`WriteAll` roles every bootstrapped user gets — this is the safe default for a tenant's first user (see [empty-database bootstrap](#tenant-issuers) above), not the only role shape a tenant can hold. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator narrows a user's access after enrollment.
+Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build.
+
+**Role assignment default.** An enrolled user gets exactly the roles named in `roleIds`. Omitting `roleIds` enrolls with **zero roles** — a user who can sign in but do nothing until someone with a grant-capable role grants one, the same "may do nothing" state [the capability set](#capability-set) already models. The one exception is the target tenant's **first** user: that enrollment still gets the predefined `ReadAll`/`WriteAll` roles regardless of `roleIds`, matching [empty-database bootstrap](#tenant-issuers) above — without it, a tenant whose first (and only) user held nothing could never grant anything, since granting a role is itself a permission-gated call. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator lists existing roles and grants/revokes them after enrollment.
 
 This endpoint requires the caller to already know the enrollee's `issuer`/`subject` from the identity provider. [`POST /v1/identity/users`](/agent-reference/identity-administration) is the higher-level alternative for a platform running its own IdP (Zitadel): it creates the IdP identity itself and calls this same mapping with the subject the IdP returns, in one action, restricted to an `OPERATIONS` tenant.
 
@@ -775,11 +778,12 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 |---|---|---|
 | `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
+| `404` | `POST /v1/users`: a `roleIds` entry does not name a role in the target tenant. | Fix the role id, or create the role first via [`POST /v1/roles`](#roles-endpoints). |
 | `409` | `POST /v1/users`: a user with that `username` already exists in the target tenant (`users_tenant_username_key`). | Use a different username, or omit `tenantId` if you meant your own tenant. |
 
 ### Roles and role assignment {#roles-endpoints}
 
-A **role** is a named, tenant-owned bundle of permissions; a **permission** is one API method + path grant, either an exact pair (`apiMethod`/`apiPath`) or a regex pattern pair (`apiMethodPattern`/`apiPathPattern`) — the same shape `role_permissions` stores and [the capability set](#capability-set) resolves against. `ReadAll` and `WriteAll` are two such roles, predefined per tenant and granted to every bootstrapped user; a tenant can also define its own narrower roles and assign them instead. All five endpoints below act on the caller's own resolved tenant — RLS scopes every read and write, and there is no operations-tenant cross-tenant override (unlike `/v1/users`).
+A **role** is a named, tenant-owned bundle of permissions; a **permission** is one API method + path grant, either an exact pair (`apiMethod`/`apiPath`) or a regex pattern pair (`apiMethodPattern`/`apiPathPattern`) — the same shape `role_permissions` stores and [the capability set](#capability-set) resolves against. `ReadAll` and `WriteAll` are two such predefined roles, created per tenant on first use and granted automatically only to a tenant's bootstrap first user (see [`POST /v1/users`](#post-v1users-and-get-v1users) above) — every later enrollment holds nothing until someone grants it a role, predefined or custom. All five endpoints below act on the caller's own resolved tenant — RLS scopes every read and write, and there is no operations-tenant cross-tenant override (unlike `/v1/users`).
 
 **`GET /v1/roles`** lists the tenant's roles with their permissions. **`POST /v1/roles`** creates one:
 

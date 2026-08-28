@@ -117,6 +117,25 @@ func TestCreateUserMapsConflictToStatusConflict(t *testing.T) {
 	}
 }
 
+func TestCreateUserPassesThroughExplicitRoleIDs(t *testing.T) {
+	users := &stubUserEnrollmentRepository{}
+	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice","roleIds":["role-1","role-2"]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(users.gotCreate.RoleIDs) != 2 || users.gotCreate.RoleIDs[0] != "role-1" || users.gotCreate.RoleIDs[1] != "role-2" {
+		t.Fatalf("gotCreate.RoleIDs = %+v, want [role-1 role-2]", users.gotCreate.RoleIDs)
+	}
+}
+
+func TestCreateUserMapsUnknownRoleToStatusNotFound(t *testing.T) {
+	users := &stubUserEnrollmentRepository{createErr: repository.ErrNotFound}
+	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice","roleIds":["missing-role"]}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
 func TestListUsersScopesToOwnTenantByDefault(t *testing.T) {
 	users := &stubUserEnrollmentRepository{users: []model.User{{UserID: "u1", TenantID: "tenant-a", Username: "alice"}}}
 	rec := getUsers(t, users, string(model.TenantTypeCompany), "tenant-a", "")

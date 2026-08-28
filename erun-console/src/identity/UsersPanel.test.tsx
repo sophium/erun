@@ -334,6 +334,115 @@ describe('UsersPanel', () => {
     expect(deactivateCalled).toBe(true);
   });
 
+  it('offers Manage roles only for an enrolled user with an erun mapping', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'idp-1',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-1',
+          },
+          { id: 'idp-2', username: 'stranger', state: 'USER_STATE_ACTIVE', enrolled: false },
+          { id: 'svc-1', username: 'admin-sa', state: 'USER_STATE_ACTIVE', isMachine: true },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('alice');
+
+    expect(screen.getAllByRole('button', { name: 'Manage roles' })).toHaveLength(1);
+  });
+
+  it('opens the roles dialog and grants a listed role to the user', async () => {
+    let grantBody: unknown;
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'idp-1',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-1',
+          },
+        ]);
+      }
+      if (req.url === '/v1/roles') {
+        return jsonResponse([
+          { roleId: 'role-read', tenantId: 't1', name: 'ReadAll', permissions: [] },
+          { roleId: 'role-write', tenantId: 't1', name: 'WriteAll', permissions: [] },
+        ]);
+      }
+      if (req.url === '/v1/users/erun-1/roles' && req.method === 'GET') {
+        return jsonResponse([]);
+      }
+      if (req.url === '/v1/users/erun-1/roles' && req.method === 'POST') {
+        grantBody = req.body;
+        return jsonResponse({ tenantId: 't1', userId: 'erun-1', roleId: 'role-read' }, 201);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('alice');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage roles' }));
+    await screen.findByText('Roles for alice');
+    await screen.findByText('This user holds no roles yet.');
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Grant a role' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'ReadAll' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Grant' }));
+
+    await waitFor(() => {
+      expect(grantBody).toEqual({ roleId: 'role-read' });
+    });
+  });
+
+  it('surfaces the lockout-guard refusal when revoking the last grant-capable role', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'idp-1',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-1',
+          },
+        ]);
+      }
+      if (req.url === '/v1/roles') {
+        return jsonResponse([
+          { roleId: 'role-write', tenantId: 't1', name: 'WriteAll', permissions: [] },
+        ]);
+      }
+      if (req.url === '/v1/users/erun-1/roles' && req.method === 'GET') {
+        return jsonResponse([{ roleId: 'role-write', tenantId: 't1', name: 'WriteAll' }]);
+      }
+      if (req.url === '/v1/users/erun-1/roles/role-write' && req.method === 'DELETE') {
+        return jsonResponse(
+          { message: 'revoking this role would leave the tenant with no user able to grant roles' },
+          409,
+        );
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<UsersPanel token="dev-token" />);
+    await screen.findByText('alice');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage roles' }));
+    await screen.findByText('Roles for alice');
+    fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/revoke role failed/);
+    // The refused revoke must leave the role in place, not optimistically clear it.
+    expect(screen.getByText('WriteAll')).toBeInTheDocument();
+  });
+
   it('reactivates an inactive user on a single click, with no confirmation gate', async () => {
     let reactivateCalled = false;
     let listCount = 0;

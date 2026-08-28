@@ -26,6 +26,7 @@ import * as React from 'react';
 import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
+import { UserRolesDialog } from './UserRolesDialog';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
 // backend actually took: with mail configured, the identity provider emails
@@ -288,10 +289,12 @@ function UserRow({
   user,
   onSetActive,
   onRequestDeactivate,
+  onManageRoles,
 }: {
   user: IdentityUser;
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
+  onManageRoles: (user: IdentityUser) => void;
 }): React.ReactElement {
   const active = user.state === 'USER_STATE_ACTIVE';
   // The platform's own machine accounts (login-client, admin-sa) are the
@@ -306,6 +309,23 @@ function UserRow({
       <TableCell>{user.state}</TableCell>
       <TableCell>
         <MembershipBadge user={user} />
+      </TableCell>
+      <TableCell>
+        {/* Only an enrolled erun user has role assignments to manage — a
+            machine account or an IdP-only, not-yet-enrolled account has no
+            erun user row for a role to attach to. */}
+        {user.enrolled && user.erunUserId !== undefined && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onManageRoles(user);
+            }}
+          >
+            Manage roles
+          </Button>
+        )}
       </TableCell>
       <TableCell>
         {canToggle && (
@@ -333,10 +353,12 @@ function UsersTable({
   users,
   onSetActive,
   onRequestDeactivate,
+  onManageRoles,
 }: {
   users: IdentityUser[];
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
+  onManageRoles: (user: IdentityUser) => void;
 }): React.ReactElement {
   if (users.length === 0) {
     return <EmptyState icon={<Users />} heading="No users enrolled yet." />;
@@ -349,6 +371,7 @@ function UsersTable({
           <TableHead>Email</TableHead>
           <TableHead>State</TableHead>
           <TableHead>Membership</TableHead>
+          <TableHead>Roles</TableHead>
           <TableHead />
         </TableRow>
       </TableHeader>
@@ -359,6 +382,7 @@ function UsersTable({
             user={user}
             onSetActive={onSetActive}
             onRequestDeactivate={onRequestDeactivate}
+            onManageRoles={onManageRoles}
           />
         ))}
       </TableBody>
@@ -370,10 +394,12 @@ function UsersBody({
   usersState,
   onSetActive,
   onRequestDeactivate,
+  onManageRoles,
 }: {
   usersState: UsersState;
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
+  onManageRoles: (user: IdentityUser) => void;
 }): React.ReactElement {
   if (usersState.status === 'loading') {
     return (
@@ -394,14 +420,15 @@ function UsersBody({
       users={usersState.users}
       onSetActive={onSetActive}
       onRequestDeactivate={onRequestDeactivate}
+      onManageRoles={onManageRoles}
     />
   );
 }
 
-// UsersPanel is the console's IdP-identity administration surface (issue
-// #1209): enroll a colleague (creates the IdP identity and the erun user
-// mapping in one action) and deactivate/reactivate an existing one. Only
-// rendered for an OPERATIONS tenant — see App.tsx.
+// UsersPanel is the console's IdP-identity administration surface: enroll a
+// colleague (creates the IdP identity and the erun user mapping in one
+// action), deactivate/reactivate an existing one, and manage which roles an
+// enrolled user holds. Only rendered for an OPERATIONS tenant — see App.tsx.
 export function UsersPanel({ token }: { token: string }): React.ReactElement {
   const { usersState, enrollState, enroll, setActive, dismissTemporaryPassword } =
     useUsersController(token);
@@ -410,6 +437,7 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
   const [pendingDeactivate, setPendingDeactivate] = React.useState<IdentityUser | undefined>(
     undefined,
   );
+  const [managingRoles, setManagingRoles] = React.useState<IdentityUser | undefined>(undefined);
   return (
     <Card aria-labelledby="identity-users-heading">
       <CardHeader>
@@ -420,6 +448,7 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
           usersState={usersState}
           onSetActive={setActive}
           onRequestDeactivate={setPendingDeactivate}
+          onManageRoles={setManagingRoles}
         />
         <EnrollForm enroll={enrollState} onEnroll={enroll} />
       </CardContent>
@@ -437,6 +466,16 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
             setPendingDeactivate(undefined);
           }}
           onConfirm={setActive}
+        />
+      )}
+      {managingRoles?.erunUserId !== undefined && (
+        <UserRolesDialog
+          username={managingRoles.username}
+          userId={managingRoles.erunUserId}
+          token={token}
+          onClose={() => {
+            setManagingRoles(undefined);
+          }}
         />
       )}
     </Card>
