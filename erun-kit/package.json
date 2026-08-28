@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "shadcn": "shadcn",
-    "shadcn:check": "shadcn add button card checkbox command dialog input label popover select table tabs textarea tooltip --overwrite --yes && node scripts/reapply-dialog-clamp.mjs && git diff --exit-code -- src/components/ui src/lib/utils.ts src/styles/theme.css components.json package.json yarn.lock"
+    "shadcn:check": "node scripts/check-shadcn-drift.mjs"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.12.0",
