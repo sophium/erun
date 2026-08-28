@@ -69,7 +69,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	ctx.TraceCommand("", "kubectl", args...)
 
-	return startAPIPortForward(statePath, expectedState, args, localPort)
+	return startAPIPortForward(ctx, statePath, expectedState, args, localPort)
 }
 
 // ensureAPIPortForwardDryRun previews the port-forward without a live cluster
@@ -141,7 +141,7 @@ func checkAPIDeploymentPresent(args []string) (bool, error) {
 	return false, fmt.Errorf("failed to check API deployment: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
-func startAPIPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
+func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return 0, err
@@ -157,16 +157,17 @@ func startAPIPortForward(statePath string, expectedState mcpPortForwardState, ar
 	cmd := common.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
 	expectedState.ProcessID = cmd.Process.Pid
 	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		_ = cmd.Process.Kill()
+		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
 		return 0, err
 	}
 	if err := waitForAPIPortForward(localPort, logPath); err != nil {
-		_ = cmd.Process.Kill()
+		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
 		return 0, err
 	}
 	return localPort, nil

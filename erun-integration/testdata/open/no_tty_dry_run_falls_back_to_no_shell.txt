@@ -1,0 +1,19 @@
+kubectl config use-context 'test-context' >/dev/null &&
+kubectl config set-context --current --namespace='team-dev' >/dev/null &&
+cd '<TMP>'
+audit: erun open --dry-run --no-alias-prompt team dev
+config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=shell
+open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
+runtime run state: deployment team-devops is absent from namespace team-dev
+open: team-devops is not deployed, so there is nothing to wake
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment team-api -o name
+open: port-forwarding service/team-api if the check above finds the deployment present
+open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open
+kubectl config use-context test-context
+kubectl config set-context --current --namespace=team-dev
+cd <TMP>

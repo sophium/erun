@@ -22,6 +22,11 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
+// stdinIsTerminal decides whether open may safely block on an interactive
+// shell. A var (like currentHostOS above) so tests can force the TTY branch
+// via ERUN_FORCE_TTY, the same seam writerIsTerminal already honors.
+var stdinIsTerminal = func() bool { return writerIsTerminal(os.Stdin) }
+
 // refuseOpenForHostEnvironment refuses `open` against a host env: it has no
 // pod and no cluster to open a kubectl-exec shell into. Its worktree is
 // already the operator's own directory, so the resolution here is to open
@@ -101,7 +106,10 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			"`erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience " +
 			"shortcut: builds-here envs build→push→deploy, runtime envs install the current version). " +
 			"Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup " +
-			"commands for your current shell.\n\n" +
+			"commands for your current shell. Without a TTY on stdin (an MCP client, an " +
+			"orchestrator, a script) open skips the shell automatically and behaves like " +
+			"--no-shell instead: the port-forwards still come up, but open never launches a " +
+			"shell that would read EOF and exit immediately.\n\n" +
 			"Opening is also how you start an environment you stopped with `erun stop`. That makes " +
 			"open an operator gesture: anything that respawns it automatically to re-establish a " +
 			"dropped session must pass --reconnect, which reattaches without starting a stopped " +
@@ -382,6 +390,16 @@ func (r *resolvedOpenRunner) run() error {
 	}
 	if r.options.NoShell {
 		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
+		return r.emitNoShellSetup()
+	}
+	if !stdinIsTerminal() {
+		// A non-interactive caller (an MCP client, an orchestrator, a script) is
+		// exactly the shape that hits this: kubectl exec -it reads EOF on a
+		// non-TTY stdin and returns almost instantly, so open would exit right
+		// behind it having done nothing to keep the port-forwards it just started
+		// alive or supervised. Falling back to the --no-shell behavior keeps them
+		// up without gambling a shell that cannot stay open.
+		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
 		return r.emitNoShellSetup()
 	}
 
