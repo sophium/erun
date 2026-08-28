@@ -6,6 +6,7 @@ export type TenantDashboardTab =
   | 'Merge queue'
   | 'Builds'
   | 'Audit log'
+  | 'Registration'
   | 'API log';
 
 // TenantDashboard POM. Unlike the dialogs, this view replaces the main pane
@@ -216,5 +217,108 @@ export class TenantDashboard {
 
   platformContactLine(): Locator {
     return this.page.getByText('Platform:', { exact: false });
+  }
+
+  // Registration tab: the tenant/environment registration path
+  // `erun platform` gives the CLI, surfaced in the desktop.
+  twoRegistriesNotice(): Locator {
+    return this.activePanel().getByText('live in this machine', { exact: false });
+  }
+
+  contextsHeading(): Locator {
+    return this.activePanel().getByRole('heading', { name: 'Cloud contexts' });
+  }
+
+  contextsEmptyState(): Locator {
+    return this.activePanel().getByText('No cloud contexts registered', { exact: true });
+  }
+
+  // FieldLabel appends a visually-hidden "(required)" to the accessible
+  // name, so this intentionally does not use exact matching; .first() picks
+  // the context form's Name field over the environment register form's.
+  contextNameInput(): Locator {
+    return this.activePanel().getByLabel('Name').first();
+  }
+
+  contextAliasInput(): Locator {
+    return this.activePanel().getByLabel('Cloud provider alias');
+  }
+
+  contextRegionInput(): Locator {
+    return this.activePanel().getByLabel('Region');
+  }
+
+  previewContextButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Preview context plan' });
+  }
+
+  registerContextButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Register context' });
+  }
+
+  previewProvisioningButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Preview provisioning plan' });
+  }
+
+  previewEnvNameInput(): Locator {
+    return this.activePanel().getByLabel('Environment name');
+  }
+
+  environmentsHeading(): Locator {
+    return this.activePanel().getByRole('heading', { name: 'Hosted environments' });
+  }
+
+  environmentsEmptyState(): Locator {
+    return this.activePanel().getByText('No hosted environments registered', { exact: true });
+  }
+
+  registerEnvNameInput(): Locator {
+    return this.activePanel().getByLabel('Name').last();
+  }
+
+  registerEnvironmentButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Register environment' });
+  }
+
+  registrationRestrictedNote(): Locator {
+    return this.activePanel().getByText('Registering anything on the platform needs');
+  }
+
+  environmentsTable(): Locator {
+    return this.activePanel().getByRole('table').last();
+  }
+
+  environmentRow(name: string): Locator {
+    return this.environmentsTable().locator('tbody tr').filter({ hasText: name });
+  }
+
+  deployButtonFor(name: string): Locator {
+    return this.environmentRow(name).getByRole('button', { name: 'Deploy' });
+  }
+
+  stopButtonFor(name: string): Locator {
+    return this.environmentRow(name).getByRole('button', { name: 'Stop' });
+  }
+
+  // deleteButtonFor is the same control before and after the confirmation
+  // step starts (DeleteControl keeps the label "Delete" for both — only the
+  // surrounding row changes), so one locator serves the initial click and
+  // the confirmed one.
+  deleteButtonFor(name: string): Locator {
+    return this.environmentRow(name).getByRole('button', { name: 'Delete', exact: true });
+  }
+
+  deleteConfirmInputFor(name: string): Locator {
+    return this.environmentRow(name).getByRole('textbox');
+  }
+
+  deleteCancelButtonFor(name: string): Locator {
+    return this.environmentRow(name).getByRole('button', { name: 'Cancel' });
+  }
+
+  // recoverableNote is the "expected, not broken" outcome — a quota cap or a
+  // deploy already in flight — rendered role="status", never role="alert".
+  recoverableNote(text: string): Locator {
+    return this.activePanel().getByText(text, { exact: false });
   }
 }

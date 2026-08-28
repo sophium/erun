@@ -44,6 +44,12 @@ Replace `<operator>` with the Operator's name (`rihards-develop`, `alice-hotfix`
 
 Per-user config lives under `~/.config/erun/` (global defaults, per-tenant, per-environment); per-project config sits at `<repo>/.erun/config.yaml` committed alongside the code. Exact paths per OS: [Config locations](/reference/config-locations).
 
+## Local tenants and environments vs. a hosted platform's own
+
+The tenant and environments described on this page are **local**: rows in the config above, on this machine, that every `erun` command reads and writes directly. A **hosted erun platform** — the kind [`erun platform`](/cli/platform) talks to — keeps its own, separate tenant and environment rows in its own database. The two are not linked automatically: creating a tenant or environment here does not create anything there, even when the names match, and vice versa.
+
+If you want a local environment to also be reachable as a hosted one — with its own URL, its own registered lifecycle, deployable from anywhere — you register it on the platform explicitly. See [Managing hosted environments](/collaboration/hosted-environments) for the CLI walkthrough, or open the desktop app's tenant dashboard and switch to its **Registration** tab, which lists what is already registered on the platform right alongside the local tenant and environments the sidebar shows, so the two are never confused for one another.
+
 ## Agent mode
 
 Some environments run in **agent mode** — environments where the Operator and the Agent actively develop, side by side. The mode is about *how the env behaves*, not about *who works there*: both Operator and Agent share every agent env equally.

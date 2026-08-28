@@ -22,6 +22,12 @@ function dashboard(panels: UITenantDashboardPanel[]): UITenantDashboard {
     canCreateReview: false,
     canAdvanceMergeQueue: false,
     canOverrideMergeQueue: false,
+    canCreateContext: false,
+    canRegisterEnvironment: false,
+    canPreviewProvision: false,
+    canDeployEnvironment: false,
+    canStopEnvironment: false,
+    canDeleteEnvironment: false,
   };
 }
 
@@ -35,7 +41,7 @@ test('a tab the user may not open does not render', () => {
   ]);
   assert.deepEqual(
     visibleTenantDashboardTabs(data).map((descriptor) => descriptor.tab),
-    ['users', 'reviews', 'builds', 'api-log'],
+    ['users', 'reviews', 'builds', 'registration', 'api-log'],
   );
 });
 
@@ -47,15 +53,21 @@ test('a panel that failed still renders its tab, so the failure is visible', () 
 test('a dashboard that reported no panels keeps every tab', () => {
   // An unknown permission is not a denied one: before the load answers, nothing
   // may be hidden.
-  assert.equal(visibleTenantDashboardTabs(null).length, 6);
+  assert.equal(visibleTenantDashboardTabs(null).length, 7);
   assert.equal(
     visibleTenantDashboardTabs({
       tenant: 'frs',
       canCreateReview: false,
       canAdvanceMergeQueue: false,
       canOverrideMergeQueue: false,
+      canCreateContext: false,
+      canRegisterEnvironment: false,
+      canPreviewProvision: false,
+      canDeployEnvironment: false,
+      canStopEnvironment: false,
+      canDeleteEnvironment: false,
     }).length,
-    6,
+    7,
   );
 });
 

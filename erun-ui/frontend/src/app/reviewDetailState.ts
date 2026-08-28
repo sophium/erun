@@ -4,7 +4,16 @@
 // import keeps working.
 import type { UIReviewDetail, UITenantDashboard } from '@/types';
 
-export type TenantDashboardTab = 'users' | 'reviews' | 'queue' | 'builds' | 'audit' | 'api-log';
+import { defaultRegistrationState, type RegistrationState } from './tenantRegistrationState';
+
+export type TenantDashboardTab =
+  | 'users'
+  | 'reviews'
+  | 'queue'
+  | 'builds'
+  | 'audit'
+  | 'registration'
+  | 'api-log';
 
 // ReviewFilterState backs the Reviews tab's one-click discovery filters.
 // Both can be on at once (author=me AND reviewer=me is a valid, if narrow,
@@ -34,6 +43,10 @@ export interface TenantDashboardState {
   enrollUsernameDraft: string;
   enrolling: boolean;
   enrollError: string;
+  // registration backs the Registration tab's forms and per-environment
+  // action state — split into its own module (tenantRegistrationState.ts)
+  // since it is sizable on its own.
+  registration: RegistrationState;
 }
 
 // ReviewDetailState backs the dialog a Reviews-tab row opens. draftBody
@@ -102,6 +115,7 @@ export const defaultTenantDashboard = (): TenantDashboardState => ({
   enrollUsernameDraft: '',
   enrolling: false,
   enrollError: '',
+  registration: defaultRegistrationState(),
 });
 
 export const defaultReviewDetail = (): ReviewDetailState => ({

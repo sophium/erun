@@ -1890,7 +1890,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
 	}
 	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}

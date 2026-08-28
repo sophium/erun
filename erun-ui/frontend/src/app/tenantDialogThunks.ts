@@ -19,6 +19,7 @@ import {
   type TenantDialogState,
 } from './state';
 import type { AppThunk } from './store';
+import { defaultRegistrationState } from './tenantRegistrationState';
 import { requireController } from './thunkExtra';
 
 export const openTenantDialog =
@@ -266,6 +267,7 @@ export const openTenantDashboard =
         enrollUsernameDraft: sameTenant ? currentDashboard.enrollUsernameDraft : '',
         enrolling: false,
         enrollError: '',
+        registration: sameTenant ? currentDashboard.registration : defaultRegistrationState(),
       }),
     );
     dispatch(setReviewOpen(false));

@@ -17,6 +17,7 @@ import tenantDashboardReducer, { setTenantDashboard } from './slices/tenantDashb
 import tenantsReducer from './slices/tenantsSlice';
 import type { AppDispatch } from './store';
 import { loadTenantDashboard } from './tenantDialogThunks';
+import { defaultRegistrationState } from './tenantRegistrationState';
 
 // loginPrimaryCloudProvider logs in and updates the sidebar's alias state,
 // but never re-fetched whatever surface had failed with a stale identity —
@@ -67,6 +68,12 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
         canCreateReview: false,
         canAdvanceMergeQueue: false,
         canOverrideMergeQueue: false,
+        canCreateContext: false,
+        canRegisterEnvironment: false,
+        canPreviewProvision: false,
+        canDeployEnvironment: false,
+        canStopEnvironment: false,
+        canDeleteEnvironment: false,
       },
       reviewFilter: { mine: false, waitingOnMe: false },
       platformAliasOverride: '',
@@ -76,6 +83,7 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
       enrollUsernameDraft: '',
       enrolling: false,
       enrollError: '',
+      registration: defaultRegistrationState(),
     }),
   );
 }

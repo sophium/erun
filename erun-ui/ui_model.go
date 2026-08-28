@@ -278,6 +278,142 @@ type uiTenantDashboard struct {
 	// filter by.
 	MineReviewCount        *int `json:"mineReviewCount,omitempty"`
 	WaitingOnMeReviewCount *int `json:"waitingOnMeReviewCount,omitempty"`
+	// Contexts/Environments are the Registration tab's two lists: the
+	// platform's own cloud contexts (managed clusters) and hosted
+	// environments — the objects `erun platform` registers, distinct from
+	// (and with no automatic link to) this machine's local tenant/env config.
+	// Each degrades independently (ContextsRestricted/ContextsError,
+	// EnvironmentsRestricted/EnvironmentsError) so a caller denied one list,
+	// or a list read that fails, does not blank the other.
+	Contexts               []uiPlatformContext     `json:"contexts,omitempty"`
+	ContextsRestricted     string                  `json:"contextsRestricted,omitempty"`
+	ContextsError          string                  `json:"contextsError,omitempty"`
+	Environments           []uiPlatformEnvironment `json:"environments,omitempty"`
+	EnvironmentsRestricted string                  `json:"environmentsRestricted,omitempty"`
+	EnvironmentsError      string                  `json:"environmentsError,omitempty"`
+	// CanCreateContext/CanRegisterEnvironment/CanPreviewProvision/
+	// CanDeployEnvironment/CanStopEnvironment/CanDeleteEnvironment report
+	// whether the signed-in user may attempt each registration write at all,
+	// so the composing forms/buttons can be hidden rather than rendered to
+	// fail on submit, mirroring CanCreateReview/CanAdvanceMergeQueue above.
+	CanCreateContext       bool `json:"canCreateContext"`
+	CanRegisterEnvironment bool `json:"canRegisterEnvironment"`
+	CanPreviewProvision    bool `json:"canPreviewProvision"`
+	CanDeployEnvironment   bool `json:"canDeployEnvironment"`
+	CanStopEnvironment     bool `json:"canStopEnvironment"`
+	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
+}
+
+// uiPlatformContext mirrors eruncommon.PlatformContext's JSON-safe subset the
+// dashboard's Registration tab renders.
+type uiPlatformContext struct {
+	ContextID          string `json:"contextId"`
+	Name               string `json:"name"`
+	Provider           string `json:"provider"`
+	CloudProviderAlias string `json:"cloudProviderAlias,omitempty"`
+	Region             string `json:"region,omitempty"`
+	InstanceType       string `json:"instanceType,omitempty"`
+	KubernetesContext  string `json:"kubernetesContext,omitempty"`
+	Status             string `json:"status"`
+	ProvisionError     string `json:"provisionError,omitempty"`
+}
+
+// uiPlatformEnvironment mirrors eruncommon.PlatformEnvironment's JSON-safe
+// subset the dashboard's Registration tab renders.
+type uiPlatformEnvironment struct {
+	EnvironmentID     string `json:"environmentId"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	ContextID         string `json:"contextId,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	Status            string `json:"status"`
+	ProvisionError    string `json:"provisionError,omitempty"`
+	DeployedVersion   string `json:"deployedVersion,omitempty"`
+	DeleteError       string `json:"deleteError,omitempty"`
+}
+
+// uiCreatePlatformContextInput registers (or, with Preview set, only
+// previews) a cloud context on the platform: the hosted managed cluster an
+// environment deploys into.
+type uiCreatePlatformContextInput struct {
+	Tenant             string `json:"tenant"`
+	Name               string `json:"name"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	Region             string `json:"region"`
+	InstanceType       string `json:"instanceType,omitempty"`
+	DiskType           string `json:"diskType,omitempty"`
+	DiskSizeGB         int    `json:"diskSizeGb,omitempty"`
+	Preview            bool   `json:"preview,omitempty"`
+}
+
+// uiPlatformContextOutcome is CreatePlatformContext's result. Kind
+// "conflict"/"unavailable" is a refusal that is itself an expected,
+// actionable state, carried in Message verbatim from the platform — never
+// rendered as a raw error; only "accepted" carries Context (a real create) or
+// Plan (a preview).
+type uiPlatformContextOutcome struct {
+	Kind    string             `json:"kind"`
+	Context *uiPlatformContext `json:"context,omitempty"`
+	Plan    []string           `json:"plan,omitempty"`
+	Message string             `json:"message,omitempty"`
+}
+
+// uiPlatformProvisionInput previews the ordered plan for provisioning a
+// hosted environment — quota, placement, namespace, register, deploy —
+// without creating anything. Pass either KubernetesContext to reuse an
+// existing cluster, or the Context* trio to preview bootstrapping a new one.
+type uiPlatformProvisionInput struct {
+	Tenant                    string `json:"tenant"`
+	EnvName                   string `json:"envName"`
+	EnvType                   string `json:"envType"`
+	KubernetesContext         string `json:"kubernetesContext,omitempty"`
+	ContextName               string `json:"contextName,omitempty"`
+	ContextCloudProviderAlias string `json:"contextCloudProviderAlias,omitempty"`
+	ContextRegion             string `json:"contextRegion,omitempty"`
+	ContextInstanceType       string `json:"contextInstanceType,omitempty"`
+	ContextDiskType           string `json:"contextDiskType,omitempty"`
+	ContextDiskSizeGB         int    `json:"contextDiskSizeGb,omitempty"`
+}
+
+// uiPlatformProvisionResult mirrors eruncommon.PlatformProvisionResult:
+// always a successful preview, QuotaOk names whether the plan can actually
+// register without hitting the tenant's quota cap.
+type uiPlatformProvisionResult struct {
+	Plan    []string `json:"plan"`
+	QuotaOk bool     `json:"quotaOk"`
+}
+
+// uiRegisterPlatformEnvironmentInput registers a hosted environment.
+type uiRegisterPlatformEnvironmentInput struct {
+	Tenant            string `json:"tenant"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	ContextID         string `json:"contextId,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+}
+
+// uiPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input: the
+// registered environment to act on, plus an optional Version (deploy only)
+// for redeploying at an explicit published version.
+type uiPlatformEnvironmentActionInput struct {
+	Tenant        string `json:"tenant"`
+	EnvironmentID string `json:"environmentId"`
+	Version       string `json:"version,omitempty"`
+}
+
+// uiPlatformEnvironmentOutcome is the shared result for
+// RegisterPlatformEnvironment/DeployPlatformEnvironment/
+// StopPlatformEnvironment/DeletePlatformEnvironment. Kind "conflict" (a
+// quota cap, or another deploy/delete already in flight) and "unavailable"
+// (no deploy executor configured on this control plane) are expected,
+// actionable outcomes carried in Message verbatim from the platform — never
+// raw errors; only "accepted" carries Environment.
+type uiPlatformEnvironmentOutcome struct {
+	Kind        string                 `json:"kind"`
+	Environment *uiPlatformEnvironment `json:"environment,omitempty"`
+	Message     string                 `json:"message,omitempty"`
 }
 
 // uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab

@@ -59,25 +59,28 @@ const tenantDashboardTimeout = 10 * time.Second
 
 // Panel tab ids, shared with the frontend's tab strip.
 const (
-	tenantDashboardTabUsers   = "users"
-	tenantDashboardTabReviews = "reviews"
-	tenantDashboardTabQueue   = "queue"
-	tenantDashboardTabBuilds  = "builds"
-	tenantDashboardTabAudit   = "audit"
+	tenantDashboardTabUsers        = "users"
+	tenantDashboardTabReviews      = "reviews"
+	tenantDashboardTabQueue        = "queue"
+	tenantDashboardTabBuilds       = "builds"
+	tenantDashboardTabAudit        = "audit"
+	tenantDashboardTabRegistration = "registration"
 )
 
 // The API reads each panel is made of, in canonical route-template form — the
 // same form the platform reports capabilities in.
 const (
-	tenantDashboardReadWhoami      = "GET /v1/whoami"
-	tenantDashboardReadReviews     = "GET /v1/reviews"
-	tenantDashboardReadReview      = "GET /v1/reviews/{review_id}"
-	tenantDashboardReadMergeQueue  = "GET /v1/reviews/merge-queue"
-	tenantDashboardReadBuilds      = "GET /v1/reviews/{review_id}/builds"
-	tenantDashboardReadComments    = "GET /v1/reviews/{review_id}/comments"
-	tenantDashboardWriteComment    = "POST /v1/reviews/{review_id}/comments"
-	tenantDashboardReadAuditEvents = "GET /v1/audit-events"
-	tenantDashboardReadUsers       = "GET /v1/users"
+	tenantDashboardReadWhoami       = "GET /v1/whoami"
+	tenantDashboardReadReviews      = "GET /v1/reviews"
+	tenantDashboardReadReview       = "GET /v1/reviews/{review_id}"
+	tenantDashboardReadMergeQueue   = "GET /v1/reviews/merge-queue"
+	tenantDashboardReadBuilds       = "GET /v1/reviews/{review_id}/builds"
+	tenantDashboardReadComments     = "GET /v1/reviews/{review_id}/comments"
+	tenantDashboardWriteComment     = "POST /v1/reviews/{review_id}/comments"
+	tenantDashboardReadAuditEvents  = "GET /v1/audit-events"
+	tenantDashboardReadUsers        = "GET /v1/users"
+	tenantDashboardReadContexts     = "GET /v1/contexts"
+	tenantDashboardReadEnvironments = "GET /v1/environments"
 )
 
 // loadTenantDashboardData resolves every panel independently. One panel the
@@ -115,6 +118,7 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	loadTenantDashboardReviewThreadCounts(ctx, client, capabilities, dashboard, reviewsOutcome)
 	loadTenantDashboardReviewFilterCounts(ctx, client, capabilities, dashboard, whoami.UserID)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
+	loadTenantDashboardRegistration(ctx, client, capabilities, dashboard)
 	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
 	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
 	dashboard.CanOverrideMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
