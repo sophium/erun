@@ -164,7 +164,7 @@ export const issueReferenceBaseline = {
   'erun-console/src/identity/InvitesPanel.tsx': 2,
   'erun-console/src/identity/OrgSettingsPanel.tsx': 1,
   'erun-console/src/identity/SmtpSettingsPanel.tsx': 1,
-  'erun-console/src/identity/UsersPanel.tsx': 3,
+  'erun-console/src/identity/UsersPanel.tsx': 2,
   'erun-console/src/identity/controller.ts': 1,
   'erun-console/src/shell/AppShell.tsx': 2,
   'erun-console/src/shell/ConsoleSidebar.tsx': 1,
