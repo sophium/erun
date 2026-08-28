@@ -42,7 +42,7 @@ for (const { what, from, to } of REPLACEMENTS) {
       `reapply-dialog-clamp: could not find the stock text for "${what}" in ${FILE}.\n` +
         `Expected to find:\n  ${from}\n` +
         `Upstream shadcn has changed this primitive. Re-derive the clamp against the new output ` +
-        `and update this script -- do not delete it, or the dialog overflow regression returns.`
+        `and update this script -- do not delete it, or the dialog overflow regression returns.`,
     );
     process.exit(1);
   }

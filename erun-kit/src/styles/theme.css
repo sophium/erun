@@ -194,4 +194,23 @@
     font-family: var(--font-sans);
     letter-spacing: var(--letter-spacing);
   }
+
+  /* A bare `grid` gets one implicit `auto` column, and an `auto` track sizes to
+     the max-content width of its widest item. Inside a dialog that is a trap:
+     one unbroken string -- a long file path, a UUID -- widens the track, and
+     every sibling grid item with it, past the card's clamped box, while the
+     card's own background and border still paint at the correct width. The
+     result is in-flow content rendering on top of the application behind the
+     dialog. DialogContent clamps its own track, but each nested grid between
+     the card and the offending text has to clamp too, and there are dozens of
+     them across both apps -- so the default belongs here rather than at every
+     call site.
+
+     `:where()` contributes no specificity and `@layer base` loses to Tailwind's
+     `utilities` layer, so this is only a default: any explicit `grid-cols-*`
+     on a grid inside a dialog still wins, and multi-column dialog layouts are
+     unaffected. */
+  :where([data-slot='dialog-content'] .grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
