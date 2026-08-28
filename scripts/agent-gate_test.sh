@@ -3,7 +3,8 @@
 # Tests for agent-gate.sh's own control flow: outside an agent pod (or once
 # the recursion guard is set) it must exec the real command untouched; inside
 # one it must detach through `erun exec job start`/`await`/`output` with the
-# right arguments and propagate the job's real exit status and output.
+# right arguments and propagate the job's real exit status and output. It also
+# covers erun-ui/playwright/run.sh's wiring into that same wrapper.
 #
 # Run directly (not wired into `make check`, same reasoning as
 # erun-devops/docker/erun-devops/entrypoint_test.sh): a stub `erun` on PATH
@@ -227,4 +228,124 @@ mkdir -p "$case_dir"
 	esac
 )
 
+# --- erun-ui/playwright/run.sh: wired through the same agent-gate.sh wrapper
+# as `make check`. run.sh's own body needs yarn/node/playwright to actually
+# run the suite, so these cases stub only `erun` and assert on what reaches
+# `erun exec job start` -- the start/await/output plumbing itself is already
+# covered above; this section only checks that run.sh routes into it
+# correctly and forwards its own arguments faithfully.
+playwright_run_sh="${script_dir}/../erun-ui/playwright/run.sh"
+
+run_playwright() {
+	set +e
+	OUT=$("$playwright_run_sh" "$@" 2>&1)
+	STATUS=$?
+	set -e
+}
+
+# --- outside an agent pod: run.sh must behave exactly as before. --port with
+# no value fails fast inside run.sh's own flag parsing, well before it would
+# ever reach yarn/playwright, so this proves both "no erun call happened" and
+# "the real script body still ran in place".
+case_dir="${work_root}/playwright-outside-agent"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	unset ERUN_ENV_TYPE AGENT_GATE_DETACHED RUN_SH_AGENT_GATED
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	run_playwright --port
+	[ "$STATUS" -eq 2 ] || fail "playwright outside agent pod: expected exit 2, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"--port requires a value"*) ;;
+	*) fail "playwright outside agent pod: expected run.sh's own error, got: $OUT" ;;
+	esac
+	if [ -s "$STUB_ARGV_FILE" ]; then
+		fail "playwright outside agent pod: erun must never be invoked, argv was: $(cat "$STUB_ARGV_FILE")"
+	fi
+)
+
+# --- the recursion guard: already inside the detached job body
+# (AGENT_GATE_DETACHED=1), run.sh must not wrap itself again.
+case_dir="${work_root}/playwright-detached-guard"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent AGENT_GATE_DETACHED=1
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset RUN_SH_AGENT_GATED
+	run_playwright --port
+	[ "$STATUS" -eq 2 ] || fail "playwright detached guard: expected exit 2, got $STATUS ($OUT)"
+	if [ -s "$STUB_ARGV_FILE" ]; then
+		fail "playwright detached guard: erun must never be invoked, argv was: $(cat "$STUB_ARGV_FILE")"
+	fi
+)
+
+# --- inside an agent pod: detach through the same start/await/output flow as
+# make check, with every original argument forwarded to the re-invoked run.sh
+# faithfully, and the job's captured output/exit status returned untouched.
+case_dir="${work_root}/playwright-happy-path"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='playwright job output'
+	unset RUN_SH_AGENT_GATED
+	run_playwright --build --skip-lint -- --grep "manage dialog sizing" --reporter=list
+	[ "$STATUS" -eq 0 ] || fail "playwright happy path: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"playwright job output"*) ;;
+	*) fail "playwright happy path: expected the job's captured output, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "playwright happy path: job start was never called"
+	grep -q -- '--id ui-playwright' "$STUB_ARGV_FILE" || fail "playwright happy path: job id was not passed through"
+	grep -q -- '--env AGENT_GATE_DETACHED=1' "$STUB_ARGV_FILE" || fail "playwright happy path: recursion guard was not threaded into the job's env"
+	grep -q -- 'playwright/run.sh --build --skip-lint -- --grep manage dialog sizing --reporter=list' "$STUB_ARGV_FILE" \
+		|| fail "playwright happy path: original arguments were not forwarded intact, argv was: $(cat "$STUB_ARGV_FILE")"
+	grep -q 'exec job await' "$STUB_ARGV_FILE" || fail "playwright happy path: job await was never called"
+	grep -q 'exec job output' "$STUB_ARGV_FILE" || fail "playwright happy path: job output was never read back"
+)
+
+# --- the job id stays stable across invocations even as the arguments
+# change, so a caller re-invoking run.sh with the same command after a
+# timeout keeps awaiting the same job rather than starting a new one.
+case_dir="${work_root}/playwright-stable-id"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+
+	unset RUN_SH_AGENT_GATED
+	export STUB_JOB_OUTPUT=first
+	run_playwright --grep "spec one" >/dev/null
+
+	unset RUN_SH_AGENT_GATED
+	export STUB_JOB_OUTPUT=second
+	run_playwright --headed --grep "spec two" >/dev/null
+
+	starts=$(grep -c -- 'exec job start.*--id ui-playwright' "$STUB_ARGV_FILE" || true)
+	[ "$starts" -eq 2 ] || fail "playwright stable id: expected both invocations to start a job with the same id, argv was: $(cat "$STUB_ARGV_FILE")"
+	grep -q -- 'spec one' "$STUB_ARGV_FILE" || fail "playwright stable id: first invocation's arguments were lost"
+	grep -q -- 'spec two' "$STUB_ARGV_FILE" || fail "playwright stable id: second invocation's arguments were lost"
+)
+
 echo "ok: agent-gate.sh"
+echo "ok: erun-ui/playwright/run.sh detachment wiring"
