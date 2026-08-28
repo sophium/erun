@@ -215,7 +215,7 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		if err != nil {
 			t.Fatalf("open %s: %v", os.DevNull, err)
 		}
-		defer devNull.Close()
+		defer func() { _ = devNull.Close() }()
 		cmd.Stdin = devNull
 	} else {
 		cmd.Stdin = bytes.NewBufferString(opts.Stdin)
