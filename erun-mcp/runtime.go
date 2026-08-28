@@ -211,20 +211,28 @@ func resolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (stri
 	resolvedTenant := firstNonEmpty(requestedTenant, serverTenant)
 	resolvedEnvironment := firstNonEmpty(requestedEnvironment, serverEnvironment)
 	if resolvedTenant == "" || resolvedEnvironment == "" {
-		var missing []string
-		if resolvedTenant == "" {
-			missing = append(missing, "tenant")
-		}
-		if resolvedEnvironment == "" {
-			missing = append(missing, "environment")
-		}
-		what := strings.Join(missing, "/")
-		return "", "", fmt.Errorf(
-			"%s not resolved: this MCP server was not started bound to a %s, and the call did not supply %s either -- pass %s explicitly in the call, or run this edge for an environment that has it configured",
-			what, what, what, strings.Join(missing, " and "),
-		)
+		return "", "", errMissingLocalTarget(resolvedTenant == "", resolvedEnvironment == "")
 	}
 	return resolvedTenant, resolvedEnvironment, nil
+}
+
+// errMissingLocalTarget names exactly what is missing (tenant, environment,
+// or both) and what the caller can do about it, instead of the bare "tenant
+// and environment are required" dead end this replaced: that message named
+// no operation, no subject, and no recovery.
+func errMissingLocalTarget(missingTenant, missingEnvironment bool) error {
+	var missing []string
+	if missingTenant {
+		missing = append(missing, "tenant")
+	}
+	if missingEnvironment {
+		missing = append(missing, "environment")
+	}
+	what := strings.Join(missing, "/")
+	return fmt.Errorf(
+		"%s not resolved: this MCP server was not started bound to a %s, and the call did not supply %s either -- pass %s explicitly in the call, or run this edge for an environment that has it configured",
+		what, what, what, strings.Join(missing, " and "),
+	)
 }
 
 func firstNonEmpty(values ...string) string {

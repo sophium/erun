@@ -74,33 +74,43 @@ func TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema(t *testing.T) {
 	for _, tool := range tools.Tools {
 		tool := tool
 		t.Run(tool.Name, func(t *testing.T) {
-			if toolsExcludedFromRequiredInputAudit[tool.Name] {
-				t.Skip("excluded: mutates real state with no preview mode -- see toolsExcludedFromRequiredInputAudit")
-			}
-			props, required := schemaPropertiesAndRequired(t, tool)
-			readOnly := tool.Annotations != nil && tool.Annotations.ReadOnlyHint
-			_, hasPreview := props["preview"]
-			if !readOnly && !hasPreview {
-				t.Skip("excluded: not read-only and has no preview mode to call it side-effect free")
-			}
-
-			args := map[string]any{}
-			for _, name := range required {
-				args[name] = placeholderFor(props[name])
-			}
-			if hasPreview {
-				args["preview"] = true
-			}
-
-			result, callErr := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tool.Name, Arguments: args})
-			if callErr != nil {
-				assertErrorNamesOnlyOwnSchemaProperties(t, tool.Name, props, callErr.Error())
-				return
-			}
-			if result.IsError {
-				assertErrorNamesOnlyOwnSchemaProperties(t, tool.Name, props, resultText(result))
-			}
+			auditToolRequiredInputAgainstItsOwnSchema(t, session, tool)
 		})
+	}
+}
+
+// auditToolRequiredInputAgainstItsOwnSchema calls one tool with only its own
+// schema-required properties (skipping tools this audit cannot call
+// side-effect free) and checks the outcome names no property its schema
+// cannot carry. Split out of TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema
+// to keep that test's own branching within the module's complexity budget.
+func auditToolRequiredInputAgainstItsOwnSchema(t *testing.T, session *mcp.ClientSession, tool *mcp.Tool) {
+	t.Helper()
+	if toolsExcludedFromRequiredInputAudit[tool.Name] {
+		t.Skip("excluded: mutates real state with no preview mode -- see toolsExcludedFromRequiredInputAudit")
+	}
+	props, required := schemaPropertiesAndRequired(t, tool)
+	readOnly := tool.Annotations != nil && tool.Annotations.ReadOnlyHint
+	_, hasPreview := props["preview"]
+	if !readOnly && !hasPreview {
+		t.Skip("excluded: not read-only and has no preview mode to call it side-effect free")
+	}
+
+	args := map[string]any{}
+	for _, name := range required {
+		args[name] = placeholderFor(props[name])
+	}
+	if hasPreview {
+		args["preview"] = true
+	}
+
+	result, callErr := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tool.Name, Arguments: args})
+	if callErr != nil {
+		assertErrorNamesOnlyOwnSchemaProperties(t, tool.Name, props, callErr.Error())
+		return
+	}
+	if result.IsError {
+		assertErrorNamesOnlyOwnSchemaProperties(t, tool.Name, props, resultText(result))
 	}
 }
 
