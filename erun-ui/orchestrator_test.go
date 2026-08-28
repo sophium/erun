@@ -102,11 +102,12 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 	return app, laptopRepo
 }
 
-// TestListOrchestratorEnvCandidatesCoversBothAgentTypes locks the capability: an
-// orchestrator can link either agent type, and each candidate carries where that
-// env is reviewed — a mirror the operator may place anywhere, or the local-agent
-// worktree already on this machine. A runtime env is still listed, disabled,
-// with a reason rather than dropped without trace.
+// The three TestListOrchestratorEnvCandidates* tests below lock the
+// capability: an orchestrator can link either agent type, and each candidate
+// carries where that env is reviewed — a mirror the operator may place
+// anywhere, or the local-agent worktree already on this machine. A runtime
+// env is still listed, disabled, with a reason rather than dropped without
+// trace.
 // TestOrchestratableEnvCoversHost locks in that a host env links like
 // local-agent and remote-agent — the issue's own recommendation (#1380): a
 // host env's worktree is already the operator's own checkout, so the
@@ -143,8 +144,12 @@ func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
 	}
 }
 
-func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
-	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
+// listOrchestratorTestCandidates is the shared fixture read for the
+// candidate-shape assertions below: dev (remote-agent), laptop (local-agent),
+// runtime (ineligible), in that sorted order.
+func listOrchestratorTestCandidates(t *testing.T) (dev, laptop, rt orchestratorEnvCandidate, laptopRepo string) {
+	t.Helper()
+	app, repo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
 	candidates, err := app.ListOrchestratorEnvCandidates()
@@ -154,22 +159,38 @@ func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
 	if len(candidates) != 3 {
 		t.Fatalf("expected both agent envs plus the ineligible runtime env, got %+v", candidates)
 	}
-	dev, laptop, rt := candidates[0], candidates[1], candidates[2]
+	dev, laptop, rt = candidates[0], candidates[1], candidates[2]
 	if dev.Environment != "dev" || laptop.Environment != "laptop" || rt.Environment != "runtime" {
 		t.Fatalf("expected dev, laptop, runtime in that order, got %+v", candidates)
 	}
+	return dev, laptop, rt, repo
+}
+
+func TestListOrchestratorEnvCandidatesReviewsARemoteAgentEnvInAMirror(t *testing.T) {
+	dev, _, _, _ := listOrchestratorTestCandidates(t)
 	if !dev.Eligible || !dev.Mirrored {
 		t.Fatalf("expected the remote-agent env to be eligible and reviewed in a mirror, got %+v", dev)
 	}
 	if !strings.HasSuffix(dev.DefaultDirectory, "orchestrators"+string(os.PathSeparator)+"frs-dev") {
 		t.Fatalf("unexpected mirror directory: %q", dev.DefaultDirectory)
 	}
+}
+
+func TestListOrchestratorEnvCandidatesReviewsALocalAgentEnvInPlace(t *testing.T) {
+	_, laptop, _, laptopRepo := listOrchestratorTestCandidates(t)
 	if !laptop.Eligible || laptop.Mirrored {
 		t.Fatalf("expected the local-agent env to be eligible and reviewed in place, got %+v", laptop)
 	}
 	if laptop.DefaultDirectory != laptopRepo {
 		t.Fatalf("local-agent review directory = %q, want the env worktree %q", laptop.DefaultDirectory, laptopRepo)
 	}
+}
+
+// TestListOrchestratorEnvCandidatesKeepsARuntimeEnvListedButIneligible locks
+// the fix: a runtime env stays in the list, disabled, with an operator-facing
+// reason, rather than being dropped without trace.
+func TestListOrchestratorEnvCandidatesKeepsARuntimeEnvListedButIneligible(t *testing.T) {
+	_, _, rt, _ := listOrchestratorTestCandidates(t)
 	if rt.Eligible {
 		t.Fatalf("expected the runtime env to stay ineligible, got %+v", rt)
 	}
