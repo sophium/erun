@@ -64,9 +64,7 @@ export class OrchestratorDialog {
   // defaulting to 'New orchestrator' silently aimed at a dialog that is not
   // open, so an Edit-mode caller waited out the full timeout on a Cancel
   // button that was never going to appear.
-  async cancel(
-    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
-  ): Promise<void> {
+  async cancel(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Promise<void> {
     await this.locator(mode).getByRole('button', { name: 'Cancel' }).click();
   }
 
