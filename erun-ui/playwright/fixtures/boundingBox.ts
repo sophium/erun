@@ -67,8 +67,20 @@ export async function expectDialogContentStaysWithinCard(
   label: string,
 ): Promise<void> {
   const entries = await overflowingDescendants(card);
+  // One blown-out grid track drags every descendant with it, so a raw dump is
+  // hundreds of near-identical entries and the actual culprit is invisible.
+  // Name the widest few, which are the ones sizing the track.
+  const worst = [...entries]
+    .sort((a, b) => b.rectWidth - a.rectWidth)
+    .slice(0, 5)
+    .map(
+      (e) =>
+        `${e.tag}${e.dataSlot ? `[${e.dataSlot}]` : ''} ${e.rectWidth.toFixed(0)}px ` +
+        `in a ${e.cardWidth.toFixed(0)}px card (${e.overflowRight.toFixed(0)}px past its right edge)`,
+    );
   expect(
     entries,
-    `${label}: descendant(s) render wider than the card — ${JSON.stringify(entries)}`,
+    `${label}: ${entries.length} descendant(s) render wider than the card. Widest:\n  ` +
+      worst.join('\n  '),
   ).toEqual([]);
 }
