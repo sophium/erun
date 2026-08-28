@@ -49,7 +49,7 @@ test.describe('dialog content stays within its own card', () => {
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog',
     );
-    await app.orchestratorDialog.cancel();
+    await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');
   });
 
@@ -75,7 +75,7 @@ test.describe('dialog content stays within its own card', () => {
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog (long Windows path)',
     );
-    await app.orchestratorDialog.cancel();
+    await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');
   });
 
@@ -133,7 +133,7 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog at deviceScaleFactor 1.5',
     );
-    await app.orchestratorDialog.cancel();
+    await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');
   });
 });
