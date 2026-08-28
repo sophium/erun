@@ -254,6 +254,23 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_tty_dry_run_falls_back_to_no_shell", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_tty_dry_run_falls_back_to_no_shell_stdin_dev_null", func(t *testing.T) {
+		// The scenario above already runs with stdin unset, which erun.Run
+		// binds to an in-memory pipe — never a character device, so it cannot
+		// reproduce a stat-based TTY check confusing a non-terminal character
+		// device for a terminal. Binding stdin to the real OS null device
+		// (StdinFromDevNull) is what actually exercises that: /dev/null is a
+		// character device but not a terminal, and a `command < /dev/null`
+		// invocation is the conventional way callers make a command
+		// non-interactive. Same assertion as the scenario above; the point of
+		// this one is the stdin source, not a different resolved plan.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, StdinFromDevNull: true})
+		golden.Equal(t, "open/no_tty_dry_run_falls_back_to_no_shell", normalize.Apply(result.Combined))
+	})
+
 	// zshAliasLine is the exact alias production appends for team/dev under
 	// zsh; the tests assert the startup file gains this line verbatim.
 	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
