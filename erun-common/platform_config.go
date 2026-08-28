@@ -146,10 +146,7 @@ func (c PlatformConfig) Validate() error {
 	if !isDNSName(resolved.BaseDomain) {
 		return fmt.Errorf("platform config: basedomain %q is not a valid domain name", resolved.BaseDomain)
 	}
-	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
-		return err
-	}
-	if err := validatePlatformHost("authhost", resolved.AuthHost, resolved.BaseDomain); err != nil {
+	if err := validatePlatformAddresses(resolved); err != nil {
 		return err
 	}
 	if resolved.AuthoritativeIP != "" && net.ParseIP(resolved.AuthoritativeIP) == nil {
@@ -158,13 +155,24 @@ func (c PlatformConfig) Validate() error {
 	if resolved.Env != "" && normalizeNamespaceName(resolved.Env) != resolved.Env {
 		return fmt.Errorf("platform config: env %q must be a DNS-safe namespace label (lowercase letters, digits, and hyphens)", resolved.Env)
 	}
+	return nil
+}
+
+// validatePlatformAddresses checks every field that names somewhere reachable:
+// the two derived hosts, which must stay under the deployment's own base
+// domain, and the two browser-facing discovery URLs, which may point anywhere
+// but must be absolute.
+func validatePlatformAddresses(resolved PlatformConfig) error {
+	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
+		return err
+	}
+	if err := validatePlatformHost("authhost", resolved.AuthHost, resolved.BaseDomain); err != nil {
+		return err
+	}
 	if err := validatePlatformURL("docsurl", resolved.DocsURL, "https://docs."+resolved.BaseDomain); err != nil {
 		return err
 	}
-	if err := validatePlatformURL("logourl", resolved.LogoURL, "https://"+resolved.BaseDomain+"/logo.svg"); err != nil {
-		return err
-	}
-	return nil
+	return validatePlatformURL("logourl", resolved.LogoURL, "https://"+resolved.BaseDomain+"/logo.svg")
 }
 
 // validatePlatformURL keeps a browser-facing discovery URL an absolute http(s)
