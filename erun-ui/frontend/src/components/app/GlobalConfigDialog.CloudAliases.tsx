@@ -46,9 +46,13 @@ export function CloudAliasesSection({
   const providers = dialog.config.cloudProviders ?? [];
   return (
     <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <Label>Cloud aliases</Label>
-        <div className="flex gap-1.5">
+      {/* Three labelled add actions plus Refresh do not fit beside the label in
+          a narrow dialog, so the row wraps rather than spilling past the card.
+          min-w-0 lets the label shrink instead of pinning the row wider than
+          its container. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Label className="min-w-0">Cloud aliases</Label>
+        <div className="flex flex-wrap justify-end gap-1.5">
           {/* Once at least one alias exists, the header is the add affordance;
               the empty state below owns it while there are none, so the two
               surfaces never both offer the same action at once (see
