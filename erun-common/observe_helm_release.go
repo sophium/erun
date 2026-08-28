@@ -154,17 +154,16 @@ func populateObservedChartFields(release *ObservedHelmRelease, listArgs []string
 	}
 	entry := entries[0]
 	release.AppVersion = entry.AppVersion
-	switch {
-	case entry.Chart == "":
+	if entry.Chart == "" {
 		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("helm list returned an empty chart field for release %q — chart/chartVersion could not be determined", releaseName))
-	default:
-		if name, version, ok := splitHelmChartNameVersion(entry.Chart); ok {
-			release.Chart = name
-			release.ChartVersion = version
-		} else {
-			release.Chart = entry.Chart
-			release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("could not separate release %q's chart name from its version in %q — showing the combined value as chart", releaseName, entry.Chart))
-		}
+		return
+	}
+	if name, version, ok := splitHelmChartNameVersion(entry.Chart); ok {
+		release.Chart = name
+		release.ChartVersion = version
+	} else {
+		release.Chart = entry.Chart
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("could not separate release %q's chart name from its version in %q — showing the combined value as chart", releaseName, entry.Chart))
 	}
 }
 
