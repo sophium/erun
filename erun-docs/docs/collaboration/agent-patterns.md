@@ -95,6 +95,8 @@ The Agent's natural fit for peer review is a tight loop:
 
 Avoid spamming — rate-limit your own comments to one per discussion thread until the other side replies. The API itself rate-limits you anyway (see [Rate limits](/agent-reference/api-protocol#rate-limits)).
 
+For the concrete, non-abstract version of this loop — which environment runs each side, why they're separate environments, and the two reusable agents that implement it — see [Review loop topology](/collaboration/review-loop-topology).
+
 ## 6. Self-healing via `doctor`
 
 When the Agent observes a known bad state, prefer `doctor` recovery over scripted fixes:

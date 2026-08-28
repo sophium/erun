@@ -120,6 +120,8 @@ Acceptance criteria use Given-When-Then for testable conditions, or simple bulle
 
 Tasks separating a Story into smaller activities is what lets different *types* of Agents own a slice of the Story lifecycle without coordinating directly. Each Agent watches for a specific Task to exist (or not), and creates / completes / posts to it.
 
+The **Build Agent** and **Review Agent** rows below are an abstract sketch of a pattern erun ships concretely as two reusable agents, `erun-builder` and `erun-reviewer`, each in its own environment — see [Review loop topology](/collaboration/review-loop-topology).
+
 | Agent type | Watches for | Does |
 |---|---|---|
 | **Requirements Agent** | A new customer requirements doc, change request, or ticket. | Reads the input; creates Epics. For each Epic, creates Stories with title + description. |

@@ -43,7 +43,7 @@ The `creatorUserId` is set server-side from the authenticated JWT — agents can
 
 Comments form a forest: top-level comments anchor to a `(commitId, filePath, line)` triple; replies anchor to a `parentCommentId` and must share their root's `commitId`, `filePath`, and `line`. A comment's address is the full triple — two files can share a line number in the same commit without colliding. A review's comments are scoped by `reviewId`, so listing returns the full forest in a single call. Clients (agents or UIs) reconstruct the tree by grouping on `parentCommentId`.
 
-## Open / closed
+## Open / closed {#comment-status}
 
 A comment thread starts `OPEN`. Only the root comment's own author can close it via `PATCH /status`; a reply's status cannot be changed independently — closing or reopening acts on the thread as a whole, through its root. `CLOSED` is a soft state — the thread is preserved in history but typically hidden from default views.
 

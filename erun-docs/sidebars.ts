@@ -130,6 +130,11 @@ const sidebars: SidebarsConfig = {
           label: 'Agent patterns',
         },
         {
+          type: 'doc',
+          id: 'collaboration/review-loop-topology',
+          label: 'Review loop topology',
+        },
+        {
           type: 'category',
           label: 'erun API',
           link: { type: 'generated-index' },
@@ -156,6 +161,7 @@ const sidebars: SidebarsConfig = {
             'agent-reference/metrics-spec',
             'agent-reference/workspace-sync-spec',
             'agent-reference/skills-spec',
+            'agent-reference/agents-spec',
           ],
         },
         {

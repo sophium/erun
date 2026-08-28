@@ -661,6 +661,10 @@ claude_md_tmp="${claude_md}.tmp.$$"
 # Install baked skills, refreshing an unmodified one when the image's copy
 # changed; in-pod edits are preserved (see /usr/local/bin/erun-install-skills).
 erun-install-skills /etc/erun/skills "${claude_dir}/skills"
+# Same install/refresh/preserve policy for reusable agents (single files
+# instead of directories; see /usr/local/bin/erun-install-agents). Codex has
+# no reusable-agent equivalent yet, so this only runs for Claude.
+erun-install-agents /etc/erun/agents "${claude_dir}/agents"
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \
 CLAUDE_STATE_PATH="${claude_state}" \
