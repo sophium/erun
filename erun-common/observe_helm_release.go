@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -42,6 +43,22 @@ func observeHelmStatusArgs(req ShellLaunchParams) []string {
 	return append(args, "-o", "json")
 }
 
+// observeHelmListArgs builds a read-only `helm list -o json` invocation
+// filtered to exactly the runtime release. `helm status -o json` carries no
+// chart metadata at all (its top-level keys are apply_method, config, info,
+// manifest, name, namespace, version — no chart), so observe reads chart and
+// appVersion from list instead, which does carry them.
+func observeHelmListArgs(req ShellLaunchParams, releaseName string) []string {
+	args := []string{"list", "--filter", "^" + regexp.QuoteMeta(releaseName) + "$"}
+	if strings.TrimSpace(req.Namespace) != "" {
+		args = append(args, "--namespace", req.Namespace)
+	}
+	if strings.TrimSpace(req.KubernetesContext) != "" {
+		args = append(args, "--kube-context", req.KubernetesContext)
+	}
+	return append(args, "-o", "json")
+}
+
 // helmStatusOutput is a deliberately partial parse of `helm status -o json`,
 // matching the podStatusList idiom elsewhere in observe: unknown fields are
 // ignored so a helm version's extra output does not break observe. Config is
@@ -57,21 +74,34 @@ type helmStatusOutput struct {
 	Info      struct {
 		Status string `json:"status"`
 	} `json:"info"`
-	Chart struct {
-		Metadata struct {
-			Name       string `json:"name"`
-			Version    string `json:"version"`
-			AppVersion string `json:"appVersion"`
-		} `json:"metadata"`
-	} `json:"chart"`
 	Config map[string]interface{} `json:"config"`
+}
+
+// helmListEntry is a deliberately partial parse of one `helm list -o json`
+// entry: chart (rendered as "<name>-<version>") and app_version are the
+// fields helmStatusOutput cannot carry (see observeHelmListArgs).
+type helmListEntry struct {
+	Chart      string `json:"chart"`
+	AppVersion string `json:"app_version"`
+}
+
+// helmChartNameVersionPattern splits a `helm list` chart string such as
+// "erun-devops-1.0.206" into its name and semver-shaped version.
+var helmChartNameVersionPattern = regexp.MustCompile(`^(.+)-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)*)$`)
+
+func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
+	match := helmChartNameVersionPattern.FindStringSubmatch(chart)
+	if match == nil {
+		return "", "", false
+	}
+	return match[1], match[2], true
 }
 
 // fetchObservedHelmRelease reads the runtime release's status. A missing
 // release and a failed read are both reported as Found: false, distinguished
 // by Error: a missing release means "confirmed nothing deployed", a non-empty
 // Error means "could not tell" plus what to do about it.
-func fetchObservedHelmRelease(args []string, releaseName, namespace string) *ObservedHelmRelease {
+func fetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
 		if isHelmReleaseNotFound(stderr) {
@@ -84,22 +114,67 @@ func fetchObservedHelmRelease(args []string, releaseName, namespace string) *Obs
 		return &ObservedHelmRelease{Name: releaseName, Error: fmt.Sprintf("observe: could not parse helm status for release %q: %v", releaseName, jsonErr)}
 	}
 	release := &ObservedHelmRelease{
-		Name:         status.Name,
-		Found:        true,
-		Revision:     status.Version,
-		Status:       status.Info.Status,
-		Chart:        status.Chart.Metadata.Name,
-		ChartVersion: status.Chart.Metadata.Version,
-		AppVersion:   status.Chart.Metadata.AppVersion,
+		Name:     status.Name,
+		Found:    true,
+		Revision: status.Version,
+		Status:   status.Info.Status,
 	}
 	if overrides := findNestedStringMap(status.Config, "imageOverrides"); overrides != nil {
 		release.ImageOverrides = overrides
 	}
 	release.RuntimePod = findRuntimePodResourceLimits(status.Config)
+	populateObservedChartFields(release, listArgs, releaseName, namespace)
 	if release.Chart != "" && !strings.Contains(strings.ToLower(release.Chart), "devops") {
-		release.Error = fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, DevopsComponentName, release.Name)
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("release %q's chart is %q, which does not look like an erun runtime chart (expected one named like %q) — verify with 'helm get chart %s'", release.Name, release.Chart, DevopsComponentName, release.Name))
 	}
 	return release
+}
+
+// populateObservedChartFields fills Chart/ChartVersion/AppVersion from `helm
+// list`, the only one of observe's two helm reads that carries them. When
+// that read genuinely cannot resolve them, it appends to release.Error
+// instead of leaving Chart/ChartVersion/AppVersion at their zero value: an
+// empty string there must never be read as "the release has no chart" when
+// the truth is "observe could not look" — the same hazard Found/Error already
+// guards against for the release as a whole.
+func populateObservedChartFields(release *ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
+	raw, stderr, err := runObserveHelm(listArgs)
+	if err != nil {
+		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+observeHelmReadErrorMessage(releaseName, namespace, stderr, err))
+		return
+	}
+	var entries []helmListEntry
+	if jsonErr := json.Unmarshal(raw, &entries); jsonErr != nil {
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("observe: could not parse helm list output for release %q: %v", releaseName, jsonErr))
+		return
+	}
+	if len(entries) == 0 {
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("helm status found release %q but helm list did not — chart/appVersion could not be determined", releaseName))
+		return
+	}
+	entry := entries[0]
+	release.AppVersion = entry.AppVersion
+	if entry.Chart == "" {
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("helm list returned an empty chart field for release %q — chart/chartVersion could not be determined", releaseName))
+		return
+	}
+	if name, version, ok := splitHelmChartNameVersion(entry.Chart); ok {
+		release.Chart = name
+		release.ChartVersion = version
+	} else {
+		release.Chart = entry.Chart
+		release.Error = appendObserveHelmReleaseError(release.Error, fmt.Sprintf("could not separate release %q's chart name from its version in %q — showing the combined value as chart", releaseName, entry.Chart))
+	}
+}
+
+func appendObserveHelmReleaseError(existing, addition string) string {
+	if addition == "" {
+		return existing
+	}
+	if existing == "" {
+		return addition
+	}
+	return existing + "; " + addition
 }
 
 // runObserveHelm runs a read-only `helm` invocation, matching

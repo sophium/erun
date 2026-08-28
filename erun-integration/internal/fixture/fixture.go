@@ -1387,6 +1387,30 @@ func StubKubectlGetJSON(t testing.TB, dir string, responses map[string]string) s
 	return StubBinaryWithScript(t, dir, "kubectl", body.String())
 }
 
+// StubHelmObserve writes a helm stub that dispatches on the subcommand
+// (status or list) to return statusStdout or listStdout, for observe's two
+// distinct real read-only helm calls in one run: `helm status -o json`, which
+// carries no chart metadata at all, and `helm list -o json`, which is where
+// observe actually reads chart/appVersion (see fetchObservedHelmRelease). A
+// call to any other subcommand exits 1 naming the unstubbed argv.
+func StubHelmObserve(t testing.TB, dir, statusStdout, listStdout string) string {
+	t.Helper()
+	body := "case \"$1\" in\n" +
+		"  status)\n" +
+		"    cat <<'ERUN_STUB_HELM_STATUS'\n" +
+		strings.TrimRight(statusStdout, "\n") + "\n" +
+		"ERUN_STUB_HELM_STATUS\n" +
+		"    ;;\n" +
+		"  list)\n" +
+		"    cat <<'ERUN_STUB_HELM_LIST'\n" +
+		strings.TrimRight(listStdout, "\n") + "\n" +
+		"ERUN_STUB_HELM_LIST\n" +
+		"    ;;\n" +
+		"  *) echo \"unstubbed helm call: $*\" >&2; exit 1 ;;\n" +
+		"esac\n"
+	return StubBinaryWithScript(t, dir, "helm", body)
+}
+
 // StubBinaryMergingIntoRemoteOnce writes a stub for name that, on its first
 // invocation only, commits and pushes one commit from repoDir onto origin's
 // branch, then exits 0 like a plain stub. It stands in for a pull request

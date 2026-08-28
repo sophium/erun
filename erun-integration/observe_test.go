@@ -36,12 +36,26 @@ func observeStubResponses() map[string]string {
 // release that agrees in every field with observeStubResponses' pod and with
 // SeedTenantEnv's recorded runtimeversion (1.0.0) and default runtimepod
 // (DefaultRuntimePodCPU/Memory), so scenarios built on it report no drift
-// unless they deliberately mutate one side.
+// unless they deliberately mutate one side. It carries no "chart" key at all,
+// matching real `helm status -o json` output exactly (see
+// fetchObservedHelmRelease's doc comment) rather than the shape a caller
+// might assume it has.
 func observeHelmStatusStub() string {
 	return `{"name":"team-devops","namespace":"team-dev","version":3,"info":{"status":"deployed"},` +
-		`"chart":{"metadata":{"name":"erun-devops","version":"1.0.0","appVersion":"1.0.0"}},` +
 		`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
 		`"runtime":{"resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}}}`
+}
+
+// observeHelmListStub is a `helm list -o json` body for the "team-devops"
+// release: the one real helm read that carries chart and app_version.
+func observeHelmListStub(chart, appVersion string) string {
+	return `[{"name":"team-devops","namespace":"team-dev","chart":"` + chart + `","app_version":"` + appVersion + `"}]`
+}
+
+// observeHelmListStubDefault is observeHelmListStub for the "erun-devops"
+// chart at the version observeHelmStatusStub/SeedTenantEnv agree on.
+func observeHelmListStubDefault() string {
+	return observeHelmListStub("erun-devops-1.0.0", "1.0.0")
 }
 
 func TestObserve(t *testing.T) {
@@ -105,7 +119,7 @@ func TestObserve(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		fixture.StubHelmObserve(t, stubs, observeHelmStatusStub(), observeHelmListStubDefault())
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -121,7 +135,7 @@ func TestObserve(t *testing.T) {
 		responses := observeStubResponses()
 		responses["secret db-credentials"] = `{"data":{"password":"c2VjcmV0"}}`
 		fixture.StubKubectlGetJSON(t, stubs, responses)
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		fixture.StubHelmObserve(t, stubs, observeHelmStatusStub(), observeHelmListStubDefault())
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--secret", "db-credentials=password", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -139,7 +153,7 @@ func TestObserve(t *testing.T) {
 		responses := observeStubResponses()
 		responses["secret db-credentials"] = `{"data":{"password":"c2VjcmV0"}}`
 		fixture.StubKubectlGetJSON(t, stubs, responses)
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		fixture.StubHelmObserve(t, stubs, observeHelmStatusStub(), observeHelmListStubDefault())
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--secret", "db-credentials=other-key", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -160,7 +174,7 @@ func TestObserve(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		fixture.StubHelmObserve(t, stubs, observeHelmStatusStub(), observeHelmListStubDefault())
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -185,11 +199,10 @@ func TestObserve(t *testing.T) {
 		// found by hand with kubectl/helm.
 		responses["pods"] = `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"10.43.0.100:5000/sophium/erun-devops:1.0.0-tini","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`
 		fixture.StubKubectlGetJSON(t, stubs, responses)
-		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":5,"info":{"status":"deployed"},` +
-			`"chart":{"metadata":{"name":"erun-devops","version":"1.0.202","appVersion":"1.0.202"}},` +
+		statusStub := `{"name":"team-devops","namespace":"team-dev","version":5,"info":{"status":"deployed"},` +
 			`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
 			`"runtime":{"resources":{"limits":{"cpu":"8","memory":"16384Mi"}}}}}`
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		fixture.StubHelmObserve(t, stubs, statusStub, observeHelmListStub("erun-devops-1.0.202", "1.0.202"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -247,9 +260,8 @@ func TestObserve(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
-		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},` +
-			`"chart":{"metadata":{"name":"unrelated-app","version":"2.3.0","appVersion":"2.3.0"}},"config":{}}`
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		statusStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},"config":{}}`
+		fixture.StubHelmObserve(t, stubs, statusStub, observeHelmListStub("unrelated-app-2.3.0", "2.3.0"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -266,9 +278,8 @@ func TestObserve(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
-		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},` +
-			`"chart":{"metadata":{"name":"unrelated-app","version":"2.3.0","appVersion":"2.3.0"}},"config":{}}`
-		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		statusStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},"config":{}}`
+		fixture.StubHelmObserve(t, stubs, statusStub, observeHelmListStub("unrelated-app-2.3.0", "2.3.0"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
