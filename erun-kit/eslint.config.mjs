@@ -18,6 +18,15 @@ export default tseslint.config(
   },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
+  {
+    // Plain JS/MJS (the shadcn reapply script) sits outside the TypeScript
+    // program, so the type-aware rules above have no type information for it
+    // and error out on load. This is typescript-eslint's own prescribed
+    // handling for such files -- not a rigor downgrade: every type-aware rule
+    // still applies in full to all .ts/.tsx, which is where the source lives.
+    files: ['**/*.{js,mjs,cjs}'],
+    ...tseslint.configs.disableTypeChecked,
+  },
   jsxA11y.flatConfigs.recommended,
   {
     files: ['**/*.{ts,tsx}'],
