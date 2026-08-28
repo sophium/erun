@@ -5,6 +5,7 @@ import {
   StartCloudInitCloudflareSession,
 } from '../../wailsjs/go/main/App';
 import { cloudApi } from './api/cloudApi';
+import { tenantApi } from './api/tenantApi';
 import {
   cloudContextDraftForConfig,
   idleCloudContextAction,
@@ -249,6 +250,66 @@ export const startCloudflareCloudInit = (): AppThunk<Promise<void>> =>
     'cloudflare',
     StartCloudInitCloudflareSession,
   );
+
+// startERunCloudInit reaches the exact code path the tenant dashboard's
+// Connect panel already uses (tenantApi's connectERunPlatform, which attaches
+// the alias with no sign-in of its own), then signs in through
+// loginGlobalCloudProvider the same way an existing alias row's own Login
+// button does — so settings never grows a second, sign-in-less way to create
+// an erun alias.
+export const startERunCloudInit =
+  (apiUrl: string): AppThunk<Promise<boolean>> =>
+  async (dispatch, getState) => {
+    const trimmed = apiUrl.trim();
+    const dialog = getState().globalConfigDialog;
+    if (!trimmed || dialog.busy || dialog.configLoading) {
+      return false;
+    }
+    dispatch(
+      patchGlobalConfigDialog({
+        busy: true,
+        busyAction: 'cloud-provider-erun-init',
+        busyTarget: '',
+        error: '',
+      }),
+    );
+    try {
+      const provider = await dispatch(
+        tenantApi.endpoints.connectERunPlatform.initiate({ apiUrl: trimmed }),
+      ).unwrap();
+      const currentConfig = getState().globalConfigDialog.config;
+      dispatch(
+        patchGlobalConfigDialog({
+          config: {
+            ...currentConfig,
+            cloudProviders: replaceCloudProvider(currentConfig.cloudProviders ?? [], provider),
+          },
+          erunApiUrlDraft: '',
+          busy: false,
+          busyAction: '',
+          busyTarget: '',
+          error: '',
+        }),
+      );
+      dispatch(
+        showTerminalMessage(`Connected erun platform alias ${provider.alias}. Signing in...`),
+      );
+      void dispatch(loginGlobalCloudProvider(provider.alias));
+      return true;
+    } catch (error) {
+      const message = readError(error);
+      dispatch(
+        patchGlobalConfigDialog({
+          busy: false,
+          busyAction: '',
+          busyTarget: '',
+          error: message,
+        }),
+      );
+      dispatch(showTerminalError(message));
+      return false;
+    }
+  };
 
 export const loginGlobalCloudProvider =
   (alias: string): AppThunk<Promise<void>> =>

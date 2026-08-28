@@ -311,9 +311,10 @@ export interface UIAWSCloudAliasInput {
 }
 
 // Canonical cloud provider type strings; must match erun-common's
-// CloudProviderAWS / CloudProviderCloudflare.
+// CloudProviderAWS / CloudProviderCloudflare / CloudProviderERun.
 export const CloudProviderAWS = 'aws';
 export const CloudProviderCloudflare = 'cloudflare';
+export const CloudProviderERun = 'erun';
 
 // UIEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
 // view: the alias attached for that type (empty when none) and the aliases the

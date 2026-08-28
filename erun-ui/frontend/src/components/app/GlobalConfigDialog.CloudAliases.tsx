@@ -1,4 +1,13 @@
-import { Button, EmptyState, Label } from 'erun-kit';
+import {
+  Button,
+  EmptyState,
+  FieldLabel,
+  Input,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from 'erun-kit';
 import { Cloud, LoaderCircle, Plus, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
@@ -7,6 +16,8 @@ import {
   refreshCloudProviders,
   startAWSCloudInit,
   startCloudflareCloudInit,
+  startERunCloudInit,
+  updateGlobalConfigDialog,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
@@ -15,11 +26,16 @@ import {
   cloudProviderTypeLabel,
 } from '@/components/app/GlobalConfigDialog.helpers';
 import { CloudAliasAction, CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
-import { CloudProviderAWS, CloudProviderCloudflare, type UICloudProviderStatus } from '@/types';
+import {
+  CloudProviderAWS,
+  CloudProviderCloudflare,
+  CloudProviderERun,
+  type UICloudProviderStatus,
+} from '@/types';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-const providerGroupOrder = [CloudProviderAWS, CloudProviderCloudflare];
+const providerGroupOrder = [CloudProviderAWS, CloudProviderCloudflare, CloudProviderERun];
 
 export function CloudAliasesSection({
   dialog,
@@ -33,7 +49,11 @@ export function CloudAliasesSection({
       <div className="flex items-center justify-between gap-2">
         <Label>Cloud aliases</Label>
         <div className="flex gap-1.5">
-          <AddProviderButtons dialog={dialog} />
+          {/* Once at least one alias exists, the header is the add affordance;
+              the empty state below owns it while there are none, so the two
+              surfaces never both offer the same action at once (see
+              CloudAddActions, the one definition both render). */}
+          {providers.length > 0 && <CloudAddActions dialog={dialog} />}
           <Button
             type="button"
             variant="ghost"
@@ -55,81 +75,126 @@ export function CloudAliasesSection({
   );
 }
 
-// Alias creation is delegated to the CLI's guided `erun cloud init` flow, so
-// the desktop never hosts its own add-provider form.
-function AddProviderButtons({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
+// CloudAddActions is the single definition of every "add a cloud alias"
+// action. Both the header (once aliases exist) and the empty state (before
+// any do) render this same list, so a provider type can never be added to one
+// surface and forgotten in the other. AWS and Cloudflare hand off to the
+// CLI's own guided `erun cloud init` terminal flow; erun collects its one
+// required field (the platform API URL) in-app and reaches the same
+// connect-and-sign-in code path the tenant dashboard's Connect panel uses.
+function CloudAddActions({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={dialog.busy}
-        onClick={() => void dispatch(startAWSCloudInit())}
-      >
-        {dialog.busyAction === 'cloud-provider-init' ? (
-          <LoaderCircle className="animate-spin" aria-hidden="true" />
-        ) : (
-          <Plus aria-hidden="true" />
-        )}
-        AWS
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={dialog.busy}
-        onClick={() => void dispatch(startCloudflareCloudInit())}
-      >
-        {dialog.busyAction === 'cloud-provider-cloudflare-init' ? (
-          <LoaderCircle className="animate-spin" aria-hidden="true" />
-        ) : (
-          <Plus aria-hidden="true" />
-        )}
-        Cloudflare
-      </Button>
+      <AddAWSButton dialog={dialog} />
+      <AddCloudflareButton dialog={dialog} />
+      <AddERunButton dialog={dialog} />
     </>
   );
 }
 
-function CloudAliasesEmptyState({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+function AddAWSButton({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={dialog.busy}
+      onClick={() => void dispatch(startAWSCloudInit())}
+    >
+      {dialog.busyAction === 'cloud-provider-init' ? (
+        <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : (
+        <Plus aria-hidden="true" />
+      )}
+      Add AWS account
+    </Button>
+  );
+}
+
+function AddCloudflareButton({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={dialog.busy}
+      onClick={() => void dispatch(startCloudflareCloudInit())}
+    >
+      {dialog.busyAction === 'cloud-provider-cloudflare-init' ? (
+        <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : (
+        <Plus aria-hidden="true" />
+      )}
+      Add Cloudflare token
+    </Button>
+  );
+}
+
+// AddERunButton is the one in-app add form on this surface: unlike AWS and
+// Cloudflare (which hand off to a guided CLI terminal), attaching a hosted
+// erun platform needs exactly one value the operator already knows — the
+// platform's API URL — so a popover collects it without leaving Settings.
+function AddERunButton({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const [open, setOpen] = React.useState(false);
+  const submitting = dialog.busyAction === 'cloud-provider-erun-init';
+  const draft = dialog.erunApiUrlDraft;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" disabled={dialog.busy}>
+          {submitting ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Plus aria-hidden="true" />
+          )}
+          Add erun platform
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="grid w-80 gap-2" align="end">
+        <FieldLabel htmlFor="cloud-alias-erun-api-url" required>
+          Platform API URL
+        </FieldLabel>
+        <Input
+          id="cloud-alias-erun-api-url"
+          placeholder="https://api.<tenant>-prod.services.erunpaas.com"
+          value={draft}
+          disabled={dialog.busy}
+          onChange={(event) => {
+            dispatch(updateGlobalConfigDialog({ erunApiUrlDraft: event.target.value }));
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={dialog.busy || !draft.trim()}
+          onClick={() => {
+            void dispatch(startERunCloudInit(draft)).then((connected) => {
+              if (connected) {
+                setOpen(false);
+              }
+            });
+          }}
+        >
+          {submitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+          {submitting ? 'Connecting...' : 'Connect'}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CloudAliasesEmptyState({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   return (
     <EmptyState
       icon={<Cloud />}
       heading="No cloud aliases yet"
-      body="Add a cloud account so ERun can deploy environments to it. Add an AWS account for compute, or a Cloudflare token for DNS and zone delegation."
+      body="Add a cloud account so ERun can deploy environments to it: an AWS account for compute, a Cloudflare token for DNS and zone delegation, or an erun platform to connect this machine to a hosted erun platform."
       action={
         <div className="flex flex-wrap justify-center gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={dialog.busy}
-            onClick={() => void dispatch(startAWSCloudInit())}
-          >
-            {dialog.busyAction === 'cloud-provider-init' ? (
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Plus aria-hidden="true" />
-            )}
-            Add AWS account
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={dialog.busy}
-            onClick={() => void dispatch(startCloudflareCloudInit())}
-          >
-            {dialog.busyAction === 'cloud-provider-cloudflare-init' ? (
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Plus aria-hidden="true" />
-            )}
-            Add Cloudflare token
-          </Button>
+          <CloudAddActions dialog={dialog} />
         </div>
       }
     />

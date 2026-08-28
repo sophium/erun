@@ -50,17 +50,25 @@ export class GlobalConfigDialog {
     return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
   }
 
-  // --- Add-provider picker ---
+  // --- Add-provider actions ---
   //
-  // Adding a provider delegates to the CLI's guided `erun cloud init` flow, not
-  // an in-app form; the add buttons launch that flow and close the dialog.
+  // AWS and Cloudflare delegate to the CLI's guided `erun cloud init` flow, not
+  // an in-app form; those add buttons launch that flow and close the dialog.
+  // erun collects its one required field (the platform API URL) in a popover
+  // without leaving Settings — see addERunButton/erunApiUrlInput/connectERun.
+  // The same three buttons render in the header (once aliases exist) and in
+  // the empty state (before any do) — never both at once.
 
   addAWSButton(): Locator {
-    return this.locator().getByRole('button', { name: 'AWS', exact: true });
+    return this.locator().getByRole('button', { name: 'Add AWS account', exact: true });
   }
 
   addCloudflareButton(): Locator {
-    return this.locator().getByRole('button', { name: 'Cloudflare', exact: true });
+    return this.locator().getByRole('button', { name: 'Add Cloudflare token', exact: true });
+  }
+
+  addERunButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add erun platform', exact: true });
   }
 
   async clickAddAWS(): Promise<void> {
@@ -73,9 +81,27 @@ export class GlobalConfigDialog {
 
   // The in-app add form was removed in favour of the guided CLI flow; specs use
   // this locator to assert it resolves to zero matches — the negative invariant
-  // that the desktop hosts no bespoke add form.
+  // that the desktop hosts no bespoke add form for Cloudflare.
   cloudflareForm(): Locator {
     return this.page.locator('form[aria-label="Add Cloudflare token"]');
+  }
+
+  // The erun add popover is portal'd to document.body by Radix, so these
+  // query at page level rather than inside the dialog locator.
+  erunApiUrlInput(): Locator {
+    return this.page.locator('#cloud-alias-erun-api-url');
+  }
+
+  erunConnectButton(): Locator {
+    return this.page.locator('[data-slot="popover-content"]').getByRole('button', {
+      name: /Connect|Connecting/,
+    });
+  }
+
+  async connectERunPlatform(apiUrl: string): Promise<void> {
+    await this.addERunButton().click();
+    await this.erunApiUrlInput().fill(apiUrl);
+    await this.erunConnectButton().click();
   }
 
   async refreshCloudProviders(): Promise<void> {

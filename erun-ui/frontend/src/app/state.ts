@@ -253,9 +253,14 @@ export interface GlobalConfigDialogState {
   open: boolean;
   config: UIERunConfig;
   cloudContextDraft: UICloudContextInitInput;
+  // erunApiUrlDraft is the "Add erun platform" popover's own input — the only
+  // field InitERunCloudProvider needs; everything else is discovered from the
+  // platform itself.
+  erunApiUrlDraft: string;
   configLoading: boolean;
   busy: boolean;
-  // 'cloud-provider-init' is the AWS add action; 'cloud-provider-cloudflare-init' is Cloudflare.
+  // 'cloud-provider-init' is the AWS add action; 'cloud-provider-cloudflare-init' is Cloudflare;
+  // 'cloud-provider-erun-init' is the erun platform add action.
   busyAction:
     | ''
     | 'save'
@@ -263,6 +268,7 @@ export interface GlobalConfigDialogState {
     | 'cloud-context-power'
     | 'cloud-provider-init'
     | 'cloud-provider-cloudflare-init'
+    | 'cloud-provider-erun-init'
     | 'cloud-provider-login';
   busyTarget: string;
   error: string;
@@ -503,6 +509,7 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   open: false,
   config: defaultERunConfig(),
   cloudContextDraft: defaultCloudContextInitInput(),
+  erunApiUrlDraft: '',
   configLoading: false,
   busy: false,
   busyAction: '',

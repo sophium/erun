@@ -27,6 +27,7 @@ export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
         cloudContexts: [],
       },
       cloudContextDraft: defaultCloudContextInitInput(),
+      erunApiUrlDraft: '',
       configLoading: true,
       busy: false,
       busyAction: '',

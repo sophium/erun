@@ -1,3 +1,5 @@
+import { CloudProviderERun } from '@/types';
+
 export const NOT_CONFIGURED_VALUE = '__none__';
 
 export const dialogErrorClassName =
@@ -33,6 +35,8 @@ export function cloudProviderTypeLabel(provider: string): string {
       return 'AWS accounts';
     case 'cloudflare':
       return 'Cloudflare tokens';
+    case CloudProviderERun:
+      return 'Hosted platforms';
     default:
       return provider.trim() ? `${provider.trim().toUpperCase()} aliases` : 'Other aliases';
   }
@@ -43,6 +47,12 @@ export function cloudProviderSummary(provider: {
   username?: string;
   accountId?: string;
 }): string {
+  // erun's alias always carries the fixed username "erun" (InitERunCloudProvider
+  // names it before any sign-in exists) — repeating it after the platform host
+  // would read as noise, so show just the host that identifies the platform.
+  if (provider.provider.trim().toLowerCase() === CloudProviderERun) {
+    return provider.accountId ? `Hosted platform at ${provider.accountId}` : 'Hosted erun platform';
+  }
   const providerName = provider.provider.toUpperCase();
   if (provider.accountId && provider.username) {
     return `${providerName} account ${provider.accountId} - ${provider.username}`;
