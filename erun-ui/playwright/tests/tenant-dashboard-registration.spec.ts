@@ -8,7 +8,7 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// The Registration tab (#1470) closes the gap TenantPlatformState.tsx's
+// The Registration tab closes the gap TenantPlatformState.tsx's
 // readiness machine stops short of: an operator authenticated and enrolled
 // still has no desktop path to register a tenant/environment on the hosted
 // platform. Like tenant-dashboard-permissions.spec.ts, this stubs the

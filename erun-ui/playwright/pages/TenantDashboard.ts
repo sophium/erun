@@ -219,7 +219,7 @@ export class TenantDashboard {
     return this.page.getByText('Platform:', { exact: false });
   }
 
-  // Registration tab (#1470): the tenant/environment registration path
+  // Registration tab: the tenant/environment registration path
   // `erun platform` gives the CLI, surfaced in the desktop.
   twoRegistriesNotice(): Locator {
     return this.activePanel().getByText('live in this machine', { exact: false });
