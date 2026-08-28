@@ -390,6 +390,18 @@ func TestNoIssueReferenceInCode(t *testing.T) {
 // above. A cleanup that removes a reference without lowering its baseline
 // entry here would otherwise let the debt silently look larger than it is
 // forever.
+//
+// A baselined file that is absent from root entirely is skipped rather than
+// compared: this walker only ever runs against whatever tree it was pointed
+// at, and a narrowed tree (a container build context that COPYs a subset of
+// the repo, for instance) legitimately does not contain every file a full
+// checkout does. Zero hits from a file that is not there and zero hits from
+// a file that was genuinely cleaned up are indistinguishable by count alone,
+// so treating an absent file as "cleaned up" silently defeats the shrink-only
+// contract for exactly the files a narrowed tree omits. Skipping instead
+// means a genuinely stale entry still fails here on any tree that does
+// contain the file -- including a full checkout -- so the contract holds
+// everywhere the file exists to check.
 func TestIssueReferenceBaselineIsCurrent(t *testing.T) {
 	root := repoRoot(t)
 	counts := map[string]int{}
@@ -397,6 +409,12 @@ func TestIssueReferenceBaselineIsCurrent(t *testing.T) {
 		counts[hit.file]++
 	}
 	for file, baseline := range issueReferenceBaseline {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s: %v", file, err)
+		}
 		if actual := counts[file]; actual < baseline {
 			t.Errorf("%s: issueReferenceBaseline claims %d hit(s) but only %d remain -- lower the baseline entry", file, baseline, actual)
 		}

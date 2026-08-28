@@ -199,6 +199,14 @@ func TestNoBareRequiredInputError(t *testing.T) {
 // KnownUnsurfacedRoutes. A fix that lowers a file's count without lowering
 // its baseline entry here would otherwise let the debt silently look larger
 // than it is forever.
+//
+// A baselined file absent from root is skipped rather than compared, the
+// same reasoning as issueReferenceBaseline's own baseline-is-current check:
+// a narrowed tree (a container build context COPYing a subset of the repo)
+// can legitimately omit a file a full checkout has, and a walker cannot tell
+// "cleaned up" from "not here" by hit count alone. The full-checkout run
+// still enforces the shrink-only contract for every file, since only there
+// do all baselined files exist to compare.
 func TestBareRequiredInputBaselineIsCurrent(t *testing.T) {
 	root := repoRoot(t)
 	counts := map[string]int{}
@@ -206,6 +214,12 @@ func TestBareRequiredInputBaselineIsCurrent(t *testing.T) {
 		counts[hit.file]++
 	}
 	for file, baseline := range bareRequiredInputBaseline {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			t.Fatalf("stat %s: %v", file, err)
+		}
 		if actual := counts[file]; actual < baseline {
 			t.Errorf("%s: bareRequiredInputBaseline claims %d hit(s) but only %d remain -- lower the baseline entry (see https://github.com/sophium/erun/issues/1506)", file, baseline, actual)
 		}
