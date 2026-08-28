@@ -70,6 +70,7 @@ export function RuntimeSizingField({
           applyResize(false);
         }}
       />
+      <RuntimeSizingEvidence verdicts={data?.verdicts ?? []} evidence={data?.evidence} />
       <RuntimeSizingResizeOutcome
         isError={resizeState.isError}
         error={resizeState.error}
@@ -194,6 +195,41 @@ function RuntimeSizingActions({
       >
         Resize to this
       </Button>
+    </div>
+  );
+}
+
+// RuntimeSizingEvidence answers the question a bare verdict cannot: what was
+// measured, over what window, and why it leads to this recommendation. Shown
+// under the summary for every state a standing recommendation can resolve to
+// -- including "Already sized as recommended", which otherwise reads as a
+// dead end an operator cannot audit or argue with (see the "no dead ends"
+// rule in root AGENTS.md). Rendered inline rather than behind a
+// tooltip/popover since this is exactly the diagnostic detail the operator
+// came to this panel to see, not a supplemental aside.
+function RuntimeSizingEvidence({
+  verdicts,
+  evidence,
+}: {
+  verdicts: string[];
+  evidence?: string;
+}): React.ReactElement | null {
+  if (verdicts.length === 0 && !evidence) {
+    return null;
+  }
+  return (
+    <div
+      className="grid gap-1 rounded-[var(--radius)] bg-muted/40 p-2 text-[11px] leading-[1.4] text-muted-foreground"
+      role="status"
+    >
+      {verdicts.length > 0 && (
+        <ul className="grid gap-0.5">
+          {verdicts.map((verdict) => (
+            <li key={verdict}>{verdict}</li>
+          ))}
+        </ul>
+      )}
+      {evidence && <p>{evidence}</p>}
     </div>
   );
 }

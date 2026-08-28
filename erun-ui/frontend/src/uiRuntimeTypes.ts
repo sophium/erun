@@ -124,4 +124,11 @@ export interface UIRuntimeSizingRecommendation {
   message?: string;
   noOp?: boolean;
   actions?: UIRuntimeSizingAction[];
+  // verdicts and evidence are the reasoning behind actions/noOp -- one prose
+  // line per resource, then the window/sample count the recommendation was
+  // computed from. Present whenever the environment has a standing
+  // recommendation, even when it resolves to noOp, so a bare "already sized"
+  // is never a dead end.
+  verdicts?: string[];
+  evidence?: string;
 }

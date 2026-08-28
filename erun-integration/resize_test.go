@@ -138,6 +138,55 @@ func TestResize(t *testing.T) {
 		golden.Equal(t, "resize/dry_run_held_lease_with_override_proceeds", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_apply_recommendation_traces_the_evidence", func(t *testing.T) {
+		// The recommendation resize resolves its target from must not stay
+		// invisible: the trace must show the same verdict/evidence reasoning
+		// `erun list` prints under `runtime-pod:`, so a caller sees not just
+		// what changes but why. This reuses list_test.go's shrink-eligible
+		// fixture (a long, quiet window comfortably under the limit).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 31, samples: 240,
+			peakMemoryBytes: 12742377472, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 376556, throttled: 0, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--apply-recommendation", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "sizing-evidence: 31h12m observed") {
+			t.Fatalf("expected the trace to carry the evidence line, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_apply_recommendation_traces_the_evidence", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_apply_recommendation_no_op_still_traces_why", func(t *testing.T) {
+		// The exact case the recommendation's evidence has to answer: a
+		// no-op that reports "already sized" must not go silent about why --
+		// here a comfortable peak that hasn't been watched long enough for
+		// erun to trust a shrink (short window, `insufficient-evidence`),
+		// which resolves to no action at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 1, samples: 120,
+			peakMemoryBytes: 12742377472, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 376556, throttled: 0, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--apply-recommendation", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "insufficient-evidence") {
+			t.Fatalf("expected the trace to name the unmet gate, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "already sized") {
+			t.Fatalf("expected the plan to resolve to a no-op, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_apply_recommendation_no_op_still_traces_why", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_persists_and_redeploys_via_stubs", func(t *testing.T) {
 		// Drives the real (non-dry-run) path: persist EnvConfig.runtimepod,
 		// take-and-release the resize's own exclusive lease, then roll the

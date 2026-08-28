@@ -32,6 +32,17 @@ var runtimeSizingActionLine = regexp.MustCompile(`^resize: \S+/\S+ (cpu|memory) 
 // runtimeSizingNoOpLine matches "resize: <tenant>/<env> is already sized at cpu=X memory=Y; no change".
 var runtimeSizingNoOpLine = regexp.MustCompile(`^resize: \S+/\S+ is already sized at `)
 
+// runtimeSizingVerdictLine and runtimeSizingEvidenceLine match the trace lines
+// traceRuntimeSizingRecommendation (erun-common/runtime_resize.go) emits
+// before it acts -- one line per resource verdict, then the evidence window
+// they were computed from. Without these the tab could show what changed but
+// never why, which is the same "verdict but no evidence" gap `erun list`
+// already solved under `runtime-pod:`.
+var (
+	runtimeSizingVerdictLine  = regexp.MustCompile(`^resize: \S+/\S+ sizing: (.+)$`)
+	runtimeSizingEvidenceLine = regexp.MustCompile(`^resize: \S+/\S+ sizing-evidence: (.+)$`)
+)
+
 // uiRuntimeSizingAction is one resource's resolved change, mirroring
 // eruncommon.RuntimeResizeAction.
 type uiRuntimeSizingAction struct {
@@ -52,6 +63,13 @@ type uiRuntimeSizingRecommendation struct {
 	Message     string                  `json:"message,omitempty"`
 	NoOp        bool                    `json:"noOp,omitempty"`
 	Actions     []uiRuntimeSizingAction `json:"actions,omitempty"`
+	// Verdicts and Evidence are the reasoning behind Actions/NoOp -- one
+	// prose line per resource, then the window/sample count/knob they were
+	// computed from. Populated whenever the environment has a standing
+	// recommendation, even when it resolves to NoOp, so "Already sized as
+	// recommended" is never a dead end: the operator can see why.
+	Verdicts []string `json:"verdicts,omitempty"`
+	Evidence string   `json:"evidence,omitempty"`
 }
 
 // LoadRuntimeSizing previews applying the environment's own standing
@@ -173,9 +191,17 @@ func runtimeSizingFromOutput(selection uiSelection, output string) uiRuntimeSizi
 		}
 		if match := runtimeSizingActionLine.FindStringSubmatch(line); match != nil {
 			result.Actions = append(result.Actions, uiRuntimeSizingAction{Resource: match[1], From: match[2], To: match[3]})
+			continue
+		}
+		if match := runtimeSizingVerdictLine.FindStringSubmatch(line); match != nil {
+			result.Verdicts = append(result.Verdicts, match[1])
+			continue
+		}
+		if match := runtimeSizingEvidenceLine.FindStringSubmatch(line); match != nil {
+			result.Evidence = match[1]
 		}
 	}
-	if !result.NoOp && len(result.Actions) == 0 {
+	if !result.NoOp && len(result.Actions) == 0 && len(result.Verdicts) == 0 {
 		result.Available = false
 		result.Message = "No standing sizing recommendation is available for this environment yet."
 	}

@@ -18,26 +18,38 @@ type UsageInput struct {
 	Verbosity       int     `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
+// UsageOutput carries the live reading plus the environment's standing sizing
+// recommendation -- the same verdict and evidence `erun list` reports under
+// `runtime-pod:` -- so a caller checking on an environment's health learns
+// both numbers in one call instead of a separate `resize --preview` just to
+// see the reasoning. Embeds RuntimeUsage so every existing field stays at the
+// top level; Sizing is additive.
+type UsageOutput struct {
+	eruncommon.RuntimeUsage
+	Sizing *eruncommon.RuntimeSizingRecommendation `json:"sizing,omitempty"`
+}
+
 // usageTool reads CPU quota utilisation, memory against the container's own
 // cgroup limit, and disk usage for the workspace mount, straight from the
 // runtime container's cgroup v2 files -- no metrics-server required, unlike
 // `kubectl top`. It carries the erun:read capability (see mcpReadOnlyTools):
 // the exec runs a single fixed diagnostic script, never caller-supplied argv,
 // so it is safe to grant an orchestrator that must never reach `exec raw`.
-func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, eruncommon.RuntimeUsage, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, eruncommon.RuntimeUsage, error) {
+func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 		target, err := resolveUsageOpenResult(runtime, input)
 		if err != nil {
-			return nil, eruncommon.RuntimeUsage{}, err
+			return nil, UsageOutput{}, err
 		}
 		req := eruncommon.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		params := eruncommon.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
 		result, err := eruncommon.RunRuntimeUsage(runCtx, nil, req, params)
 		if err != nil {
-			return nil, eruncommon.RuntimeUsage{}, err
+			return nil, UsageOutput{}, err
 		}
-		return nil, result, nil
+		sizing := eruncommon.EnvironmentRuntimeSizing(target.Tenant, target.EnvConfig)
+		return nil, UsageOutput{RuntimeUsage: result, Sizing: sizing}, nil
 	}
 }
 
