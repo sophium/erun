@@ -89,7 +89,9 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     // the Refresh button alone. Stubbing the wrong call leaves the seeded
     // alias in place and the empty state never renders.
     stubRPC(page, {
-      LoadERunConfig: { data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] } },
+      LoadERunConfig: {
+        data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] },
+      },
     });
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
@@ -117,21 +119,21 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
           defaultTenant: SEED_TENANT,
           cloudContexts: [],
           cloudProviders: [
-          {
-            alias: 'me+020362606330@aws',
-            provider: 'aws',
-            status: 'active',
-            username: 'me',
-            accountId: '020362606330',
-          },
-          {
-            alias: 'erun+api.acme.test@erun',
-            provider: 'erun',
-            status: 'expired',
-            username: 'erun',
-            accountId: 'api.acme.test',
-          },
-        ],
+            {
+              alias: 'me+020362606330@aws',
+              provider: 'aws',
+              status: 'active',
+              username: 'me',
+              accountId: '020362606330',
+            },
+            {
+              alias: 'erun+api.acme.test@erun',
+              provider: 'erun',
+              status: 'expired',
+              username: 'erun',
+              accountId: 'api.acme.test',
+            },
+          ],
         },
       },
     });
