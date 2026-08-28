@@ -94,6 +94,10 @@ test.describe('environment usage on the hover cards', () => {
 
     const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await driveEnvUsage(page, freshUsagePayload(), async () => {
+      // Move off first: a retry that re-hovers a row the pointer never left
+      // is a no-op (no genuine mouseenter fires), so a popover that closed
+      // for any other reason would never reopen.
+      await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(dialog).toBeVisible({ timeout: 1_000 });
       await expect(dialog).toContainText('CPU 12.0%', { timeout: 1_000 });
@@ -102,10 +106,11 @@ test.describe('environment usage on the hover cards', () => {
       // own age -- not a bare number an operator cannot interpret.
       await expect(dialog).toContainText('As of', { timeout: 1_000 });
       await expect(dialog).not.toContainText('Stale', { timeout: 1_000 });
-    });
-
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-fresh.png',
+      // Taken while still converged and hovered — a screenshot outside this
+      // callback can race the backend sweep's own overwrite of the reading.
+      await dialog.screenshot({
+        path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-fresh.png',
+      });
     });
   });
 
@@ -123,15 +128,20 @@ test.describe('environment usage on the hover cards', () => {
         staleAfterSeconds: 90,
       }),
       async () => {
+        // Move off first: a retry that re-hovers a row the pointer never
+        // left is a no-op (no genuine mouseenter fires), so a popover that
+        // closed for any other reason would never reopen.
+        await page.mouse.move(0, 0);
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
         await expect(dialog).toBeVisible({ timeout: 1_000 });
         await expect(dialog).toContainText('Stale', { timeout: 1_000 });
+        // Taken while still converged and hovered — a screenshot outside this
+        // callback can race the backend sweep's own overwrite of the reading.
+        await dialog.screenshot({
+          path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-stale.png',
+        });
       },
     );
-
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-stale.png',
-    });
   });
 
   test('an environment with no pod to measure states so, never a bare 0%', async ({
@@ -154,18 +164,23 @@ test.describe('environment usage on the hover cards', () => {
         },
       }),
       async () => {
+        // Move off first: a retry that re-hovers a row the pointer never
+        // left is a no-op (no genuine mouseenter fires), so a popover that
+        // closed for any other reason would never reopen.
+        await page.mouse.move(0, 0);
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
         await expect(dialog).toBeVisible({ timeout: 1_000 });
         await expect(dialog).toContainText('there is no runtime pod to measure', {
           timeout: 1_000,
         });
         await expect(dialog).not.toContainText('0%', { timeout: 1_000 });
+        // Taken while still converged and hovered — a screenshot outside this
+        // callback can race the backend sweep's own overwrite of the reading.
+        await dialog.screenshot({
+          path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-no-pod.png',
+        });
       },
     );
-
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-no-pod.png',
-    });
   });
 
   // pw-orch (the seeded orchestrator) links pw/alpha, so driving one env-usage
@@ -186,10 +201,11 @@ test.describe('environment usage on the hover cards', () => {
       await expect(dialog).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
       await expect(dialog).toContainText('CPU 12.0%', { timeout: 1_000 });
       await expect(dialog).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
-    });
-
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/environment-usage-visual/orchestrator-card-usage.png',
+      // Taken while still converged and hovered — a screenshot outside this
+      // callback can race the backend sweep's own overwrite of the reading.
+      await dialog.screenshot({
+        path: '/home/erun/.erun/outputs/environment-usage-visual/orchestrator-card-usage.png',
+      });
     });
   });
 

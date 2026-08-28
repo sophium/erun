@@ -46,8 +46,8 @@ export function TenantDashboardView(): React.ReactElement | null {
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
   const blocked = tenantDashboardIsBlocked(dashboard);
   return (
-    <section className="grid h-full min-h-0 bg-background text-foreground">
-      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+    <section className="grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-background text-foreground">
+      <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)]">
         <header className="flex min-w-0 items-center justify-between border-b border-border px-5 py-4">
           <div className="min-w-0">
             <h1 className="truncate text-[20px] font-semibold leading-tight tracking-normal">
@@ -184,10 +184,14 @@ function TenantDashboardReadyBody({
       onValueChange={(value) => {
         dispatch(setTenantDashboardTab(value as AppState['tenantDashboard']['tab']));
       }}
-      className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
+      className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
     >
-      <div className="grid gap-2">
-        <TabsList className="w-fit">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+        {/* h-auto + flex-wrap override the primitive's single-row, fixed-height
+            layout: a narrow <main> has less width than the full tab set
+            needs, so the strip wraps onto a second line instead of pushing
+            tabs (and the actions beside it) off-screen with no way back. */}
+        <TabsList className="h-auto w-full flex-wrap justify-start">
           {visibleTabs.map((descriptor) => (
             <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
               {descriptor.label}
