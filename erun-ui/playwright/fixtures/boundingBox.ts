@@ -41,13 +41,26 @@ async function overflowingDescendants(card: Locator): Promise<OverflowingDescend
   return card.evaluate((cardEl) => {
     const cardRect = cardEl.getBoundingClientRect();
     const entries: OverflowingDescendant[] = [];
+    // An element inside a scroll container is clipped by it, so it cannot paint
+    // over what is behind the dialog however far its box extends -- scrolled
+    // content legitimately reaches past the card. Only unclipped descendants
+    // can produce the defect this guards, so anything under a scroller is not
+    // a finding. (The settings dialog has two such containers, which is why
+    // this matters and not only in theory.)
+    const isClipped = (el: Element): boolean => {
+      for (let a = el.parentElement; a && a !== cardEl; a = a.parentElement) {
+        const style = getComputedStyle(a);
+        if (style.overflowX !== 'visible' || style.overflowY !== 'visible') return true;
+      }
+      return false;
+    };
     const walker = document.createTreeWalker(cardEl, NodeFilter.SHOW_ELEMENT);
     let node: Node | null = walker.currentNode;
     while (node) {
       const el = node as Element;
       const rect = el.getBoundingClientRect();
       // 1px tolerance absorbs sub-pixel layout rounding, not the regression.
-      if (rect.width > 0 && rect.height > 0 && rect.right - cardRect.right > 1) {
+      if (rect.width > 0 && rect.height > 0 && rect.right - cardRect.right > 1 && !isClipped(el)) {
         entries.push({
           tag: el.tagName,
           dataSlot: el.getAttribute('data-slot'),
