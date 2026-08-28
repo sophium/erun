@@ -14,13 +14,22 @@ func newObserveCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "observe",
 		Short: "Report an environment's Kubernetes state, read-only",
-		Long: "Report pods, ResourceQuota/LimitRange usage, Ingress hosts and TLS secret\n" +
-			"names, and Certificate readiness for the environment's namespace.\n\n" +
+		Long: "Report pods (each container's name, running image, and resource limits),\n" +
+			"ResourceQuota/LimitRange usage, Ingress hosts and TLS secret names,\n" +
+			"Certificate readiness, and the runtime helm release for the environment's\n" +
+			"namespace.\n\n" +
 			"When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge\n" +
 			"chain is walked automatically, so the reason issuance is stuck (for example a\n" +
 			"webhook solver's RBAC denial) comes back in this one call instead of three more.\n\n" +
-			"Every call is a kubectl get: nothing here can mutate the cluster, which is what\n" +
-			"makes this safe to grant an orchestrator that must never reach for `exec raw`.",
+			"The runtime helm release is reported with its chart/app version and the values\n" +
+			"erun itself sets (image overrides, runtime pod resource limits), and diffed\n" +
+			"against both the running containers and the env config's recorded\n" +
+			"runtimeversion/runtimeimage/runtimepod, so a disagreement (a hand-patched\n" +
+			"image, a resized pod the release never recorded) is named instead of left for\n" +
+			"the reader to spot by comparing two dumps.\n\n" +
+			"Every call is a kubectl get or a helm status: nothing here can mutate the\n" +
+			"cluster, which is what makes this safe to grant an orchestrator that must\n" +
+			"never reach for `exec raw`.",
 		Example: "  erun observe --tenant team --environment dev\n" +
 			"  erun observe --tenant team --environment dev --secret db-credentials=password --output json",
 		Args:          cobra.NoArgs,

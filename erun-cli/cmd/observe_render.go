@@ -27,7 +27,13 @@ func writeObserveResult(ctx common.Context, result common.ObserveResult) error {
 	if err := writeObserveCertificates(ctx, result.Certificates); err != nil {
 		return err
 	}
-	return writeObserveSecrets(ctx, result.Secrets)
+	if err := writeObserveSecrets(ctx, result.Secrets); err != nil {
+		return err
+	}
+	if err := writeObserveHelmRelease(ctx, result.HelmRelease); err != nil {
+		return err
+	}
+	return writeObserveDrift(ctx, result.Drift)
 }
 
 func writeObservePods(ctx common.Context, pods []common.ObservedPod) error {
@@ -44,6 +50,11 @@ func writeObservePods(ctx common.Context, pods []common.ObservedPod) error {
 		}
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: %s (phase %s, restarts %d)\n", pod.Name, status, pod.Phase, pod.RestartCount); err != nil {
 			return err
+		}
+		for _, container := range pod.Containers {
+			if _, err := fmt.Fprintf(ctx.Stdout, "    %s: image %s, limits %s\n", container.Name, valueOrNone(container.Image), formatResourceMap(container.ResourceLimits)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -149,6 +160,69 @@ func writeObserveSecrets(ctx common.Context, secrets []common.ObservedSecretChec
 			line += " error=" + secret.Error
 		}
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeObserveHelmRelease(ctx common.Context, release *common.ObservedHelmRelease) error {
+	if release == nil {
+		return nil
+	}
+	if !release.Found {
+		return writeObserveHelmReleaseNotFound(ctx, release)
+	}
+	if err := writeObserveHelmReleaseDetails(ctx, release); err != nil {
+		return err
+	}
+	if release.Error != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "  warning: %s\n", release.Error)
+		return err
+	}
+	return nil
+}
+
+// writeObserveHelmReleaseNotFound distinguishes a confirmed absence (no
+// Error) from a read that failed (Error set): a caller must never see the
+// same "nothing here" line for both.
+func writeObserveHelmReleaseNotFound(ctx common.Context, release *common.ObservedHelmRelease) error {
+	if release.Error != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)
+		return err
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: not found in namespace\n", release.Name)
+	return err
+}
+
+func writeObserveHelmReleaseDetails(ctx common.Context, release *common.ObservedHelmRelease) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
+		release.Name, release.Revision, valueOrNone(release.Status), valueOrNone(release.Chart), valueOrNone(release.ChartVersion), valueOrNone(release.AppVersion)); err != nil {
+		return err
+	}
+	if len(release.ImageOverrides) > 0 {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  imageOverrides: %s\n", formatResourceMap(release.ImageOverrides)); err != nil {
+			return err
+		}
+	}
+	if release.RuntimePod != (common.RuntimePodResources{}) {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  runtime pod limits: cpu %s, memory %s\n", release.RuntimePod.CPU, release.RuntimePod.Memory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeObserveDrift(ctx common.Context, drift []string) error {
+	if len(drift) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "Drift: none detected")
+		return err
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Drift (%d):\n", len(drift)); err != nil {
+		return err
+	}
+	for _, finding := range drift {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s\n", finding); err != nil {
 			return err
 		}
 	}

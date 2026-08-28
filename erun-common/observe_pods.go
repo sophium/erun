@@ -5,11 +5,23 @@ import "fmt"
 // ObservedPod is one pod's readiness as reported by the Ready condition, plus
 // the reason it is not ready when it isn't.
 type ObservedPod struct {
-	Name         string `json:"name"`
-	Phase        string `json:"phase"`
-	Ready        bool   `json:"ready"`
-	RestartCount int    `json:"restartCount"`
-	Reason       string `json:"reason,omitempty"`
+	Name         string              `json:"name"`
+	Phase        string              `json:"phase"`
+	Ready        bool                `json:"ready"`
+	RestartCount int                 `json:"restartCount"`
+	Reason       string              `json:"reason,omitempty"`
+	Containers   []ObservedContainer `json:"containers,omitempty"`
+}
+
+// ObservedContainer names the image a pod's container is actually running —
+// the single most consequential fact an orchestrator cannot see without this,
+// since a hand-patched or out-of-band image looks identical to the recorded
+// one in every other erun surface — plus the resource limits it was started
+// with, read from the pod spec (status carries no limits of its own).
+type ObservedContainer struct {
+	Name           string            `json:"name"`
+	Image          string            `json:"image"`
+	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
 }
 
 // fetchObservedPods reuses podStatusList/podStatusItem (deploy_pod_watch.go):
@@ -37,8 +49,17 @@ func observedPodFromStatus(item podStatusItem) ObservedPod {
 		Phase: item.Status.Phase,
 		Ready: podStatusReady(item),
 	}
+	specLimits := make(map[string]map[string]string, len(item.Spec.Containers))
+	for _, c := range item.Spec.Containers {
+		specLimits[c.Name] = c.Resources.Limits
+	}
 	for _, cs := range item.Status.ContainerStatuses {
 		pod.RestartCount += cs.RestartCount
+		pod.Containers = append(pod.Containers, ObservedContainer{
+			Name:           cs.Name,
+			Image:          cs.Image,
+			ResourceLimits: specLimits[cs.Name],
+		})
 	}
 	if !pod.Ready {
 		pod.Reason = podStatusNotReadyReason(item)

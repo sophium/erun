@@ -88,12 +88,24 @@ type podStatusItem struct {
 		Name        string            `json:"name"`
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
+	Spec struct {
+		Containers []specContainerEntry `json:"containers"`
+	} `json:"spec"`
 	Status struct {
 		Phase                 string                 `json:"phase"`
 		Conditions            []podConditionEntry    `json:"conditions"`
 		ContainerStatuses     []containerStatusEntry `json:"containerStatuses"`
 		InitContainerStatuses []containerStatusEntry `json:"initContainerStatuses"`
 	} `json:"status"`
+}
+
+// specContainerEntry is `spec.containers[]`: the declared resource limits a
+// container asked for, which status.containerStatuses does not carry.
+type specContainerEntry struct {
+	Name      string `json:"name"`
+	Resources struct {
+		Limits map[string]string `json:"limits"`
+	} `json:"resources"`
 }
 
 // podConditionEntry is a `status.conditions[]` entry. A pod that never gets
@@ -109,6 +121,7 @@ type podConditionEntry struct {
 
 type containerStatusEntry struct {
 	Name         string         `json:"name"`
+	Image        string         `json:"image"`
 	RestartCount int            `json:"restartCount"`
 	Ready        bool           `json:"ready"`
 	State        containerState `json:"state"`
