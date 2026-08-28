@@ -2726,6 +2726,9 @@ func helmPlatformSetArgs(p PlatformConfig) []string {
 		"--set-string", "platform.apiUrl=" + escapeHelmSetValue(p.APIURL),
 		"--set-string", "platform.consoleUrl=" + escapeHelmSetValue(p.ConsoleURL),
 		"--set-string", "platform.brand=" + escapeHelmSetValue(p.Brand),
+		"--set-string", "platform.docsUrl=" + escapeHelmSetValue(p.DocsURL),
+		"--set-string", "platform.tagline=" + escapeHelmSetValue(p.Tagline),
+		"--set-string", "platform.logoUrl=" + escapeHelmSetValue(p.LogoURL),
 	}
 	if len(p.Nameservers) > 0 {
 		if encoded, marshalErr := json.Marshal(p.Nameservers); marshalErr == nil {

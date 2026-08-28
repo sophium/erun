@@ -112,6 +112,9 @@ func run(args []string) error {
 			ConsoleClientID: cfg.PlatformConsoleClientID,
 			CLIClientID:     cfg.PlatformCLIClientID,
 			Brand:           cfg.PlatformBrand,
+			DocsURL:         cfg.PlatformDocsURL,
+			Tagline:         cfg.PlatformTagline,
+			LogoURL:         cfg.PlatformLogoURL,
 		},
 		BootstrapTenantName: cfg.BootstrapTenantName,
 		IdentityAdmin:       optional.identityAdmin,
@@ -155,6 +158,9 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.StringVar(&cfg.PlatformConsoleClientID, "platform-console-client-id", cfg.PlatformConsoleClientID, "The OIDC client id the hosted console authenticates with, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformCLIClientID, "platform-cli-client-id", cfg.PlatformCLIClientID, "The OIDC client id an erun CLI/agent authenticates with, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformBrand, "platform-brand", cfg.PlatformBrand, "This instance's display name, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformDocsURL, "platform-docs-url", cfg.PlatformDocsURL, "The documentation site this instance's own surfaces link to, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformTagline, "platform-tagline", cfg.PlatformTagline, "The one-line pitch this instance's landing page leads with, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformLogoURL, "platform-logo-url", cfg.PlatformLogoURL, "Absolute URL of this instance's logo, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.ACMEEmail, "acme-email", cfg.ACMEEmail, "Contact email for the ACME account a deploy Job uses to provision a hosted env's per-env TLS certificate through the DNS-01 broker; unset skips TLS cert provisioning")
 	flags.StringVar(&cfg.ACMEServer, "acme-server", cfg.ACMEServer, "ACME directory URL for per-env TLS certificate provisioning")
 	flags.StringVar(&cfg.DNS01WebhookGroupName, "dns01-webhook-group-name", cfg.DNS01WebhookGroupName, "API group the cluster's cert-manager DNS-01 webhook shim registers under; must match the shim actually installed in this cluster")
@@ -340,16 +346,21 @@ type apiConfig struct {
 	MergeRepoPath       string
 	// Platform is this instance's own self-describing config, served
 	// unauthenticated at GET /v1/platform so a client can discover it (issuer,
-	// API/console URLs, OIDC client ids, brand) before it has a token. Every
+	// API/console URLs, OIDC client ids, brand, and the white-label docs
+	// URL/tagline/logo its front door renders) before it has a token. Every
 	// field is optional; an absent value renders as an empty string, never an
-	// error. ConsoleClientID/CLIClientID are typically sourced from the
-	// erun-zitadel bootstrap's published ConfigMap, threaded in by the chart.
+	// error, and a client falls back to its own bundled default.
+	// ConsoleClientID/CLIClientID are typically sourced from the erun-zitadel
+	// bootstrap's published ConfigMap, threaded in by the chart.
 	PlatformIssuer          string
 	PlatformAPIURL          string
 	PlatformConsoleURL      string
 	PlatformConsoleClientID string
 	PlatformCLIClientID     string
 	PlatformBrand           string
+	PlatformDocsURL         string
+	PlatformTagline         string
+	PlatformLogoURL         string
 	// BootstrapTenantName is this pod's own declared tenant identity
 	// (ERUN_TENANT: the tenant this control plane runs as, e.g. "frs" on
 	// erunpaas.com). Empty-database bootstrap enrols the platform's own
@@ -414,6 +425,9 @@ func configFromEnv() apiConfig {
 		PlatformConsoleClientID: strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_CLIENT_ID")),
 		PlatformCLIClientID:     strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CLI_CLIENT_ID")),
 		PlatformBrand:           strings.TrimSpace(os.Getenv("ERUN_PLATFORM_BRAND")),
+		PlatformDocsURL:         strings.TrimSpace(os.Getenv("ERUN_PLATFORM_DOCS_URL")),
+		PlatformTagline:         strings.TrimSpace(os.Getenv("ERUN_PLATFORM_TAGLINE")),
+		PlatformLogoURL:         strings.TrimSpace(os.Getenv("ERUN_PLATFORM_LOGO_URL")),
 
 		BootstrapTenantName: strings.TrimSpace(os.Getenv("ERUN_TENANT")),
 

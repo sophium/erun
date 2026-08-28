@@ -19,6 +19,14 @@
 {{- $platformAPIURL := default "" $platform.apiUrl -}}
 {{- $platformConsoleURL := default "" $platform.consoleUrl -}}
 {{- $platformBrand := default "" $platform.brand -}}
+{{- /* The white-label trio a client's front door renders: its own docs link,
+       tagline, and logo. docsUrl arrives pre-defaulted to docs.<baseDomain> by
+       the env's platform config; all three stay empty strings when unset, which
+       is what keeps a client falling back to its bundled product defaults
+       rather than rendering a blank hero or a broken image. */ -}}
+{{- $platformDocsURL := default "" $platform.docsUrl -}}
+{{- $platformTagline := default "" $platform.tagline -}}
+{{- $platformLogoURL := default "" $platform.logoUrl -}}
 {{- $zitadelOIDCClientsConfigMap := default (printf "%s-zitadel-oidc-clients" $tenant) $api.zitadelOIDCClientsConfigMap -}}
 {{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
 {{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
@@ -636,6 +644,12 @@ spec:
               value: {{ $platformConsoleURL | quote }}
             - name: ERUN_PLATFORM_BRAND
               value: {{ $platformBrand | quote }}
+            - name: ERUN_PLATFORM_DOCS_URL
+              value: {{ $platformDocsURL | quote }}
+            - name: ERUN_PLATFORM_TAGLINE
+              value: {{ $platformTagline | quote }}
+            - name: ERUN_PLATFORM_LOGO_URL
+              value: {{ $platformLogoURL | quote }}
             - name: ERUN_PLATFORM_CONSOLE_CLIENT_ID
               valueFrom:
                 configMapKeyRef:

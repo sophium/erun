@@ -517,4 +517,30 @@ rendered=$(render)
 container "${rendered}" | grep -q 'ERUN_MERGE_' &&
     fail "no ERUN_MERGE_* env var should render unless the merge queue is enabled"
 
-echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + merge queue wiring"
+# --- 18. The white-label trio GET /v1/platform serves a pre-sign-in client:
+#         its own docs link, tagline, and logo. They travel the same
+#         platform.* path consoleUrl and brand already do, and each renders as
+#         an empty string when unset so a client keeps falling back to its
+#         bundled default rather than showing a blank hero or a broken image. ---
+rendered=$(render)
+container "${rendered}" >"${core}"
+for var in ERUN_PLATFORM_DOCS_URL ERUN_PLATFORM_TAGLINE ERUN_PLATFORM_LOGO_URL; do
+    grep -q "name: ${var}" "${core}" ||
+        fail "${var} must always render, so an unset value reaches the client as \"\" rather than a missing key"
+    grep -A1 "name: ${var}" "${core}" | grep -q 'value: ""' ||
+        fail "${var} must render as an empty string when the platform config sets none"
+done
+
+rendered=$(render \
+    --set-string platform.docsUrl=https://docs.example.com \
+    --set-string platform.tagline='Example ships faster.' \
+    --set-string platform.logoUrl=https://cdn.example.com/logo.svg)
+container "${rendered}" >"${core}"
+grep -A1 'name: ERUN_PLATFORM_DOCS_URL' "${core}" | grep -q 'value: "https://docs.example.com"' ||
+    fail "platform.docsUrl must render as ERUN_PLATFORM_DOCS_URL"
+grep -A1 'name: ERUN_PLATFORM_TAGLINE' "${core}" | grep -q 'value: "Example ships faster."' ||
+    fail "platform.tagline must render as ERUN_PLATFORM_TAGLINE"
+grep -A1 'name: ERUN_PLATFORM_LOGO_URL' "${core}" | grep -q 'value: "https://cdn.example.com/logo.svg"' ||
+    fail "platform.logoUrl must render as ERUN_PLATFORM_LOGO_URL"
+
+echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + merge queue wiring + platform white-label discovery"

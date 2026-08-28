@@ -21,6 +21,17 @@ type PlatformInfo struct {
 	CLIClientID string `json:"cliClientId"`
 	// Brand is this instance's display name, if the operator set one.
 	Brand string `json:"brand"`
+	// DocsURL is the documentation site this instance's own surfaces link to,
+	// so a client's front door points at the operator's docs instead of the
+	// vendor's.
+	DocsURL string `json:"docsUrl"`
+	// Tagline is the one-line pitch a client's landing page leads with; unset
+	// leaves the client's bundled product default in place.
+	Tagline string `json:"tagline"`
+	// LogoURL is an absolute URL to this instance's logo. Absolute rather than
+	// a path this API serves, because a brand asset does not live in the
+	// console image — one built image serves every instance.
+	LogoURL string `json:"logoUrl"`
 }
 
 // RegisterPlatformRoute registers GET /v1/platform directly on the mux,
