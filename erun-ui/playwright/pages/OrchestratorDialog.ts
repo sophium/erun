@@ -60,6 +60,31 @@ export class OrchestratorDialog {
     });
   }
 
+  // An ineligible env (e.g. runtime) is still listed, disabled, with its
+  // reason as a first-class line under the checkbox row rather than a
+  // tooltip. The checkbox carries an accessible name naming both the env and
+  // that it can't be linked, so it never collides with an eligible row's
+  // plain "<tenant> / <environment>" checkbox name.
+  ineligibleEnvCheckbox(tenant: string, environment: string): Locator {
+    return this.locator().getByRole('checkbox', {
+      name: `${tenant} / ${environment} can't be linked`,
+    });
+  }
+
+  envIneligibleReason(tenant: string, environment: string): Locator {
+    return this.envBlock(tenant, environment).locator('p');
+  }
+
+  // Distinguishes "nothing configured yet" from "several environments, none
+  // eligible" — the two empty states the Environments field must not conflate.
+  environmentsEmptyMessage(): Locator {
+    return this.locator().getByText('No environments yet. Initialize one to orchestrate it.');
+  }
+
+  environmentsAllIneligibleMessage(): Locator {
+    return this.locator().getByText(/environments? found, but none can be linked/);
+  }
+
   // Takes the mode for the same reason locator/waitForOpen/waitForClosed do:
   // defaulting to 'New orchestrator' silently aimed at a dialog that is not
   // open, so an Edit-mode caller waited out the full timeout on a Cancel
