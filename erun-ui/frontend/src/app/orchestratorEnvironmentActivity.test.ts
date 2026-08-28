@@ -70,6 +70,64 @@ test('never observed (no activity at all) reads unreachable, not idle', () => {
   assert.notEqual(line.state, 'idle');
 });
 
+test('a joined usage reading renders its compact headline on the line', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      activity: { reachable: true, observed: true, outage: false, busy: false },
+      usage: {
+        usage: {
+          tenant: 'petios',
+          environment: 'rihards-review',
+          available: true,
+          cpu: { available: true, utilization: '12.0%' },
+          memory: {
+            available: true,
+            current: '512Mi',
+            limit: '2048Mi',
+            percentOfLimit: 25,
+            oomKills: 0,
+          },
+        },
+        observedAtUnix: Math.floor(Date.now() / 1000),
+        staleAfterSeconds: 90,
+      },
+    }),
+  );
+  assert.equal(line.usage, 'CPU 12.0% · Mem 25% of 2048Mi');
+  assert.equal(line.usageStale, false);
+});
+
+test('no joined usage reading yet renders an empty usage line, not a fabricated one', () => {
+  const line = orchestratorEnvironmentLine(env());
+  assert.equal(line.usage, '');
+});
+
+test('a joined usage reading older than its stale window is flagged stale', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      activity: { reachable: true, observed: true, outage: false, busy: false },
+      usage: {
+        usage: {
+          tenant: 'petios',
+          environment: 'rihards-review',
+          available: true,
+          cpu: { available: true, utilization: '5.0%' },
+          memory: {
+            available: true,
+            current: '100Mi',
+            limit: '2048Mi',
+            percentOfLimit: 5,
+            oomKills: 0,
+          },
+        },
+        observedAtUnix: Math.floor(Date.now() / 1000) - 300,
+        staleAfterSeconds: 90,
+      },
+    }),
+  );
+  assert.equal(line.usageStale, true);
+});
+
 test('a long environment name and a long detail survive verbatim for the caller to truncate', () => {
   const longName = 'a'.repeat(120);
   const longDetail = 'holding: ' + 'b'.repeat(120);

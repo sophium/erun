@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
+import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 export interface OrchestratorEnvRef {
   tenant: string;
@@ -12,6 +13,10 @@ export interface OrchestratorEnvRef {
   // sidebar row for the same environment can never disagree about what
   // "busy" or "outage" means. Undefined until the poller has observed it.
   activity?: UIEnvironmentActivity;
+  // usage is the environment-usage sweep's last cached reading for this env
+  // (see uiEnvironment.Usage), joined the same way activity is — undefined
+  // until the sweep has observed it at least once.
+  usage?: UIEnvironmentUsageSnapshot;
 }
 
 // OrchestratorInfo mirrors the Go orchestratorInfo JSON contract: a host-side
@@ -130,6 +135,29 @@ export const orchestratorsSlice = createSlice({
         }
       }
     },
+    // setEnvUsageForOrchestratorEnvs is the usage counterpart to
+    // setEnvActivityForOrchestratorEnvs: the usage sweep's own event patches
+    // every ref across every orchestrator that names the given
+    // tenant/environment, so the orchestrator card and the sidebar hover card
+    // for the same environment read the one cached figure rather than two
+    // fetches of different ages.
+    setEnvUsageForOrchestratorEnvs(
+      state,
+      action: PayloadAction<{
+        tenant: string;
+        environment: string;
+        usage: UIEnvironmentUsageSnapshot;
+      }>,
+    ) {
+      const { tenant, environment, usage } = action.payload;
+      for (const orchestrator of state.items) {
+        for (const ref of orchestrator.environments) {
+          if (ref.tenant === tenant && ref.environment === environment) {
+            ref.usage = usage;
+          }
+        }
+      }
+    },
   },
 });
 
@@ -140,5 +168,6 @@ export const {
   setOrchestratorsBusy,
   setOrchestratorsError,
   setEnvActivityForOrchestratorEnvs,
+  setEnvUsageForOrchestratorEnvs,
 } = orchestratorsSlice.actions;
 export default orchestratorsSlice.reducer;

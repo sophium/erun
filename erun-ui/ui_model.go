@@ -39,6 +39,12 @@ type uiEnvironment struct {
 	// before the turn ends at all. nil means the poller has not observed this
 	// env yet.
 	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+	// Usage is the environment-usage poller's last cached reading for this env,
+	// if any. Populated on the same "nil means not yet observed" contract as
+	// Activity, and for the same reason: a Redux reset that does not restart the
+	// Go process would otherwise have no reading to seed a hover card from until
+	// the next sweep tick.
+	Usage *uiEnvironmentUsageSnapshot `json:"usage,omitempty"`
 }
 
 // uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation
@@ -51,6 +57,18 @@ type uiEnvironmentActivitySnapshot struct {
 	Outage    bool   `json:"outage"`
 	Busy      bool   `json:"busy"`
 	Detail    string `json:"detail,omitempty"`
+}
+
+// uiEnvironmentUsageSnapshot is the environment-usage poller's last cached
+// reading for this env (environment_usage.go), mirroring envUsagePayload minus
+// the tenant/environment identity the event stream carries. ObservedAtUnix and
+// StaleAfterSeconds let a renderer show the reading's age and mark it stale
+// without hardcoding the sweep interval — an unlabelled stale number is worse
+// than none.
+type uiEnvironmentUsageSnapshot struct {
+	Usage             uiRuntimeUsage `json:"usage"`
+	ObservedAtUnix    int64          `json:"observedAtUnix"`
+	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
 }
 
 // uiWorkingIssue backs the sidebar hover card's "what is this env working on".
@@ -108,6 +126,17 @@ type envActivityPayload struct {
 	Outage bool   `json:"outage"`
 	Busy   bool   `json:"busy"`
 	Detail string `json:"detail,omitempty"`
+}
+
+// envUsagePayload is the usage-sweep counterpart to envActivityPayload: a
+// cached reading of what this environment's own runtime pod is using,
+// published on the sweep's cadence rather than per-hover (environment_usage.go).
+type envUsagePayload struct {
+	Tenant            string         `json:"tenant"`
+	Environment       string         `json:"environment"`
+	Usage             uiRuntimeUsage `json:"usage"`
+	ObservedAtUnix    int64          `json:"observedAtUnix"`
+	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
 }
 
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.

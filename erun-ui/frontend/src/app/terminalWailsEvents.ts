@@ -10,6 +10,7 @@ import type {
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
+  EnvUsagePayload,
   OrchestratorShellActivityPayload,
   SSHDInitCompletedPayload,
 } from './model';
@@ -24,6 +25,7 @@ import {
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
   handleEnvStatus,
+  handleEnvUsage,
   handleOrchestratorShellActivity,
   handleReconnectLine,
   handleSSHDInitCompleted,
@@ -65,6 +67,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('env-activity', (payload: EnvActivityPayload) => {
         store.dispatch(handleEnvActivity(payload));
+      }),
+      EventsOn('env-usage', (payload: EnvUsagePayload) => {
+        store.dispatch(handleEnvUsage(payload));
       }),
       EventsOn('doctor-completed', (payload: DoctorCompletedPayload) => {
         store.dispatch(handleDoctorCompleted(payload));

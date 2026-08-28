@@ -7,6 +7,7 @@ export type { DoctorCompletedPayload } from './doctorCompletedPayload';
 export type { EnvActivityPayload } from './envActivityPayload';
 export type { EnvironmentInitializedPayload } from './environmentInitializedPayload';
 export type { EnvStatusPayload } from './envStatusPayload';
+export type { EnvUsagePayload } from './envUsagePayload';
 export type { HiddenSessionMode } from './hiddenSessionMode';
 export type { IDEKind } from './ideKind';
 export type { IdleCloudContextAction } from './idleCloudContextAction';

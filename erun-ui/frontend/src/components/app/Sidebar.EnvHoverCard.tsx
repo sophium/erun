@@ -1,8 +1,11 @@
 import { Popover, PopoverAnchor, PopoverContent } from 'erun-kit';
+import { TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
+import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import type { UISelection, UIWorkingIssue } from '@/types';
+import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
@@ -48,6 +51,7 @@ export function EnvHoverCard({
   runtimeVersion,
   activityLabel,
   indicator,
+  usage,
   children,
 }: {
   className?: string;
@@ -59,6 +63,7 @@ export function EnvHoverCard({
   runtimeVersion: string;
   activityLabel: string;
   indicator: EnvironmentIndicator;
+  usage: UIEnvironmentUsageSnapshot | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -133,6 +138,9 @@ export function EnvHoverCard({
           <HoverRow label="Activity">
             <ActivityState activityLabel={activityLabel} indicator={indicator} />
           </HoverRow>
+          <HoverRow label="Usage">
+            <UsageState usage={usage} />
+          </HoverRow>
         </dl>
       </PopoverContent>
     </Popover>
@@ -176,6 +184,46 @@ function ActivityState({
     return <span>{indicator.activity}</span>;
   }
   return <Muted>{indicator.activity}</Muted>;
+}
+
+// UsageState renders the environment-usage sweep's cached reading
+// (environment_usage.go): a comparable CPU/memory figure with its age, a
+// stated reason when there is nothing measurable (never a bare 0%, which
+// would read as idle-and-healthy rather than "unmeasured"), and a visible
+// staleness flag when the reading has outlived the sweep interval that
+// produced it — an unlabelled stale number is worse than none.
+function UsageState({
+  usage,
+}: {
+  usage: UIEnvironmentUsageSnapshot | undefined;
+}): React.ReactElement {
+  const summary = summarizeEnvironmentUsage(usage, Date.now());
+  if (!summary.hasReading) {
+    return <Muted>{summary.detail}</Muted>;
+  }
+  if (!summary.headline) {
+    return (
+      <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+        <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
+        <span>{summary.detail}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="grid gap-0.5">
+      <span>{summary.headline}</span>
+      <span
+        className={
+          summary.stale
+            ? 'flex items-center gap-1 text-[12px] text-amber-700 dark:text-amber-400'
+            : 'text-[12px] text-muted-foreground'
+        }
+      >
+        {summary.stale && <TriangleAlert aria-hidden="true" className="size-3 shrink-0" />}
+        {summary.stale ? `Stale — as of ${summary.ageLabel} ago` : `As of ${summary.ageLabel} ago`}
+      </span>
+    </span>
+  );
 }
 
 function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement {

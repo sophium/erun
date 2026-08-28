@@ -204,6 +204,18 @@ function OrchestratorEnvironments({
               <span className="block truncate text-[12px] text-muted-foreground">
                 {line.status}
               </span>
+              {line.usage && (
+                <span
+                  className={
+                    line.usageStale
+                      ? 'block truncate text-[12px] text-amber-700 dark:text-amber-400'
+                      : 'block truncate text-[12px] text-muted-foreground'
+                  }
+                >
+                  {line.usage}
+                  {line.usageStale ? ' (stale)' : ''}
+                </span>
+              )}
             </span>
           </span>
         );

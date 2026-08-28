@@ -34,6 +34,10 @@ func (a *App) startActivityPollers() {
 	// one sweeps every configured environment, so one driven from the CLI or by
 	// an in-pod agent stops rendering as untouched.
 	go a.runEnvironmentActivityPoller(stop)
+	// The usage sweep piggybacks on the same reachability observation but runs
+	// on its own slower cadence, since each reading costs a real kubectl exec
+	// rather than a lightweight local check. See environment_usage.go.
+	go a.runEnvironmentUsagePoller(stop)
 }
 
 // stopActivityPollers is idempotent: safe to call more than once.

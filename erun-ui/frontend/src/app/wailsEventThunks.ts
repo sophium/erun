@@ -11,6 +11,7 @@ import type {
   EnvActivityPayload,
   EnvironmentInitializedPayload,
   EnvStatusPayload,
+  EnvUsagePayload,
   OrchestratorShellActivityPayload,
   SSHDInitCompletedPayload,
   TerminalExitSelections,
@@ -31,9 +32,16 @@ import {
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
 import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { recordDoctorOutcome } from './slices/doctorSlice';
-import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
+import {
+  setEnvActivityForEnv,
+  setEnvStatusForEnv,
+  setEnvUsageForEnv,
+} from './slices/envStatusSlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
-import { setEnvActivityForOrchestratorEnvs } from './slices/orchestratorsSlice';
+import {
+  setEnvActivityForOrchestratorEnvs,
+  setEnvUsageForOrchestratorEnvs,
+} from './slices/orchestratorsSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
 import {
   clearPendingOpenAfterDeploy,
@@ -145,6 +153,29 @@ export const handleEnvActivity =
     const key = selectionKey({ tenant, environment });
     dispatch(setEnvActivityForEnv({ key, activity }));
     dispatch(setEnvActivityForOrchestratorEnvs({ tenant, environment, activity }));
+  };
+
+// handleEnvUsage records the usage sweep's cached reading for one environment
+// (environment_usage.go), driving both the sidebar hover card and every
+// orchestrator card that links this environment off the one event — the same
+// join handleEnvActivity performs, so the two surfaces can never disagree
+// about what this environment is using or how stale that reading is.
+export const handleEnvUsage =
+  (payload: EnvUsagePayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const usage = {
+      usage: payload.usage,
+      observedAtUnix: payload.observedAtUnix,
+      staleAfterSeconds: payload.staleAfterSeconds,
+    };
+    const key = selectionKey({ tenant, environment });
+    dispatch(setEnvUsageForEnv({ key, usage }));
+    dispatch(setEnvUsageForOrchestratorEnvs({ tenant, environment, usage }));
   };
 
 // handleAppStatus surfaces a backend status line to the user.
