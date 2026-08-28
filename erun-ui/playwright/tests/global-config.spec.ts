@@ -84,9 +84,21 @@ test.describe('global config dialog', () => {
 
 test.describe('global config dialog — cloud aliases add actions and erun provider', () => {
   test('empty state offers each add action exactly once', async ({ app, page }) => {
-    stubRPC(page, { LoadCloudProviderStatuses: { data: [] } });
+    // The dialog reads its aliases from the config it loads on open
+    // (LoadERunConfig), not from LoadCloudProviderStatuses -- that one backs
+    // the Refresh button alone. Stubbing the wrong call leaves the seeded
+    // alias in place and the empty state never renders.
+    stubRPC(page, {
+      LoadERunConfig: { data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] } },
+    });
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
+
+    // Anchor on the empty state first. Both surfaces render the same three
+    // actions, so a count of 1 holds in either state -- without this the test
+    // would pass even if the empty state never rendered, which is exactly how
+    // it passed while stubbing the wrong call.
+    await expect(app.globalConfigDialog.locator().getByText('No cloud aliases yet')).toBeVisible();
 
     // Regression guard for the four-buttons-two-actions defect: the header
     // and the empty state must never both render the same add action.
@@ -100,8 +112,11 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
 
   test('an erun alias groups under Hosted platforms once aliases exist', async ({ app, page }) => {
     stubRPC(page, {
-      LoadCloudProviderStatuses: {
-        data: [
+      LoadERunConfig: {
+        data: {
+          defaultTenant: SEED_TENANT,
+          cloudContexts: [],
+          cloudProviders: [
           {
             alias: 'me+020362606330@aws',
             provider: 'aws',
@@ -117,6 +132,7 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
             accountId: 'api.acme.test',
           },
         ],
+        },
       },
     });
     await app.sidebar.openSettings();
@@ -142,7 +158,9 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     page,
   }) => {
     const rpc = stubRPC(page, {
-      LoadCloudProviderStatuses: { data: [] },
+      LoadERunConfig: {
+        data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] },
+      },
       ConnectERunPlatform: {
         data: {
           alias: 'erun+api.acme.test@erun',
