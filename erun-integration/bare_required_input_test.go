@@ -8,11 +8,20 @@ package integration
 // exactly `fmt.Errorf("tenant is required")`, plus two siblings in the same
 // erun-common function, after an earlier fix addressed one lone producer and
 // closed its own follow-up audit item unperformed. This is the check that
-// closes the gap: it fails the build the next time one of these exact bare
+// closes the gap: it fails the build the next time one of these bare
 // phrases reappears in non-test Go source anywhere in the repo. It runs as
 // an ordinary `go test` in this module, so it is part of
 // `make integration-test`/`make check` with no extra wiring — the same
 // precedent as desktop_surface_test.go.
+//
+// erun-mcp's exec_agent shipped uncallable because its target-resolution
+// failure used a THIRD phrasing, "tenant and environment are required" —
+// the original gate matched only the two literal strings above, so this
+// exact defect walked straight through it. Matching against a fixed set of
+// literals will always be one phrasing behind; bareRequiredInputPattern
+// below matches the *shape* instead (any bare combination of "tenant"
+// and/or "environment", singular or plural, in either order), so a future
+// reordering or pluralization cannot slip through the same way.
 
 import (
 	"fmt"
@@ -21,29 +30,76 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-// bareRequiredInputPhrases is the exact set of string literals this gate
-// bars from non-test Go source: a bare "<subject> is required" with no
-// operation and no recovery. The fix that added this gate converted every
+// bareRequiredInputPattern matches a bare "<subject> is/are required" with no
+// operation and no recovery, for the closed set of generic nouns this gate
+// tracks: "tenant" and "environment", alone or combined via "and". This is a
+// deliberately narrow generalization -- from an enumeration of exact
+// literals to a shape covering their permutations -- not a blanket "any
+// subject is required" scanner. The fix that added this gate converted every
 // "tenant is required" producer plus its immediate "environment is
-// required" sibling in the same erun-common function — it deliberately did
+// required" sibling in the same erun-common function, and deliberately did
 // not chase every "<X> is required" string in the repo (on the order of 150
 // at the time of writing, including several more "cloud provider alias is
-// required" sites this same audit found but left alone). Most of the rest
+// required" sites that same audit found but left alone). Most of the rest
 // already name their own specific subject (e.g. "review id is required",
 // "target branch is required", "cloud provider alias is required") and are
 // a lower-severity instance of the same class, not the "four words, no
 // operation, no subject beyond a generic noun, no recovery" shape this gate
-// targets. Extend this set only for a phrase that genuinely matches that
-// shape on a reachable path — not for every validation string that happens
-// to end in "is required".
-var bareRequiredInputPhrases = map[string]bool{
-	"tenant is required":      true,
-	"environment is required": true,
+// targets. Widen this pattern's subject set only for a phrase that
+// genuinely matches that shape on a reachable path — not for every
+// validation string that happens to end in "is required".
+var bareRequiredInputPattern = regexp.MustCompile(`^(?:tenant|environment)(?: and (?:tenant|environment))? (?:is|are) required$`)
+
+// bareRequiredInputBaseline is a shrink-only baseline (the same pattern as
+// KnownUnsurfacedRoutes in erun-backend-api/internal/routes/route_audit.go)
+// for the "tenant and environment are required" hits that widening the
+// pattern above newly caught: 65 pre-existing call sites across erun-cli,
+// erun-common, and erun-ui, none of them reachable from the exec_agent bug
+// this gate change was made for. Rewriting all of them to name their own
+// operation and recovery is a distinct, large effort of its own (tracked at
+// https://github.com/sophium/erun/issues/1506), not something to rush inline
+// with a one-tool schema fix. This baseline may only shrink: fixing a site
+// and forgetting to remove its entry here fails TestBareRequiredInputBaselineIsCurrent
+// below, the same way a stale KnownUnsurfacedRoutes entry fails its own gate.
+// The key is the file path relative to the repo root; the value is the exact
+// count of matching literals still in that file.
+var bareRequiredInputBaseline = map[string]int{
+	"erun-cli/cmd/activity.go":         3,
+	"erun-cli/cmd/activity_lease.go":   1,
+	"erun-cli/cmd/activity_proxy.go":   1,
+	"erun-cli/cmd/delete.go":           1,
+	"erun-cli/cmd/job.go":              1,
+	"erun-common/activity.go":          3,
+	"erun-common/delete.go":            1,
+	"erun-common/env_trace.go":         1,
+	"erun-common/idle_stop_pending.go": 4,
+	"erun-common/job_supervisor.go":    1,
+	"erun-common/unexpose.go":          1,
+	"erun-ui/contribute_mode.go":       2,
+	"erun-ui/contribute_sessions.go":   2,
+	"erun-ui/deploy_components.go":     1,
+	"erun-ui/environment_config.go":    4,
+	"erun-ui/environment_health.go":    1,
+	"erun-ui/environment_jobs.go":      1,
+	"erun-ui/environment_stop.go":      1,
+	"erun-ui/env_trace_handlers.go":    1,
+	"erun-ui/exec_write_push.go":       2,
+	"erun-ui/exposure_app.go":          3,
+	"erun-ui/host_open_path.go":        1,
+	"erun-ui/host_workspace.go":        4,
+	"erun-ui/idle_status.go":           3,
+	"erun-ui/outputs.go":               2,
+	"erun-ui/pin_version.go":           3,
+	"erun-ui/runtime_activity.go":      2,
+	"erun-ui/runtime_sizing.go":        2,
+	"erun-ui/runtime_usage.go":         1,
+	"erun-ui/terminal_sessions.go":     11,
 }
 
 // skipDirForBareRequiredInputScan excludes directories that hold no
@@ -61,6 +117,7 @@ func skipDirForBareRequiredInputScan(name string) bool {
 // bareRequiredInputHit is one banned literal found in production source.
 type bareRequiredInputHit struct {
 	position string
+	file     string // path relative to the scan root, forward-slash separated
 	value    string
 }
 
@@ -69,9 +126,9 @@ func (h bareRequiredInputHit) Message() string {
 }
 
 // findBareRequiredInputLiterals parses every non-test .go file under root and
-// returns one hit per exact-match banned string literal. AST-based rather
-// than a text grep so a match inside a comment (not reachable at runtime)
-// does not fail the gate.
+// returns one hit per string literal matching bareRequiredInputPattern.
+// AST-based rather than a text grep so a match inside a comment (not
+// reachable at runtime) does not fail the gate.
 func findBareRequiredInputLiterals(t testing.TB, root string) []bareRequiredInputHit {
 	t.Helper()
 	var hits []bareRequiredInputHit
@@ -93,16 +150,21 @@ func findBareRequiredInputLiterals(t testing.TB, root string) []bareRequiredInpu
 		if parseErr != nil {
 			return fmt.Errorf("parse %s: %w", path, parseErr)
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return fmt.Errorf("relativize %s: %w", path, relErr)
+		}
+		rel = filepath.ToSlash(rel)
 		ast.Inspect(file, func(n ast.Node) bool {
 			lit, ok := n.(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}
 			value, unquoteErr := strconv.Unquote(lit.Value)
-			if unquoteErr != nil || !bareRequiredInputPhrases[value] {
+			if unquoteErr != nil || !bareRequiredInputPattern.MatchString(value) {
 				return true
 			}
-			hits = append(hits, bareRequiredInputHit{position: fset.Position(lit.Pos()).String(), value: value})
+			hits = append(hits, bareRequiredInputHit{position: fset.Position(lit.Pos()).String(), file: rel, value: value})
 			return true
 		})
 		return nil
@@ -113,13 +175,40 @@ func findBareRequiredInputLiterals(t testing.TB, root string) []bareRequiredInpu
 	return hits
 }
 
-// TestNoBareRequiredInputError fails when a bare "<subject> is required"
-// string literal (bareRequiredInputPhrases) reappears in non-test Go source
-// anywhere in the repo.
+// TestNoBareRequiredInputError fails when a bare tenant/environment
+// required-input literal (bareRequiredInputPattern) reappears in non-test Go
+// source anywhere in the repo, beyond what bareRequiredInputBaseline already
+// carries for a given file. A file with no baseline entry gets zero
+// tolerance -- any hit there is a brand new instance of the bug. A file with
+// a baseline entry may not exceed it: that would be a new call site added
+// next to the tracked ones, not fixing them.
 func TestNoBareRequiredInputError(t *testing.T) {
 	root := repoRoot(t)
+	counts := map[string]int{}
 	for _, hit := range findBareRequiredInputLiterals(t, root) {
-		t.Errorf("%s", hit.Message())
+		counts[hit.file]++
+		if counts[hit.file] > bareRequiredInputBaseline[hit.file] {
+			t.Errorf("%s", hit.Message())
+		}
+	}
+}
+
+// TestBareRequiredInputBaselineIsCurrent fails when a baselined file's actual
+// hit count has dropped below what bareRequiredInputBaseline still claims --
+// the same shrink-only enforcement FindStaleBaselineEntries applies to
+// KnownUnsurfacedRoutes. A fix that lowers a file's count without lowering
+// its baseline entry here would otherwise let the debt silently look larger
+// than it is forever.
+func TestBareRequiredInputBaselineIsCurrent(t *testing.T) {
+	root := repoRoot(t)
+	counts := map[string]int{}
+	for _, hit := range findBareRequiredInputLiterals(t, root) {
+		counts[hit.file]++
+	}
+	for file, baseline := range bareRequiredInputBaseline {
+		if actual := counts[file]; actual < baseline {
+			t.Errorf("%s: bareRequiredInputBaseline claims %d hit(s) but only %d remain -- lower the baseline entry (see https://github.com/sophium/erun/issues/1506)", file, baseline, actual)
+		}
 	}
 }
 
@@ -180,5 +269,35 @@ func requireAlias(alias string) error {
 	}
 	if hits[0].value != "tenant is required" {
 		t.Fatalf("expected the hit to carry the matched phrase, got %q", hits[0].value)
+	}
+	if hits[0].file != "production.go" {
+		t.Fatalf("expected the hit to carry the relative file path, got %q", hits[0].file)
+	}
+}
+
+// TestBareRequiredInputPatternCatchesShapeVariants is the regression for the
+// bug this gate widening exists to fix: exec_agent's target resolution
+// failed with "tenant and environment are required", a third phrasing the
+// old literal-enumeration gate did not know about. This locks that the
+// pattern generalizes over conjunction order and singular/plural, not just
+// the two original literals, while still leaving an unrelated
+// specifically-named subject alone.
+func TestBareRequiredInputPatternCatchesShapeVariants(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"tenant is required", true},
+		{"environment is required", true},
+		{"tenant and environment are required", true},
+		{"environment and tenant are required", true},
+		{"tenant and environment is required", true},
+		{"review id is required", false},
+		{"cloud provider alias is required", false},
+		{"tenant and environment are required to deploy", false},
+	} {
+		if got := bareRequiredInputPattern.MatchString(tc.value); got != tc.want {
+			t.Errorf("bareRequiredInputPattern.MatchString(%q) = %v, want %v", tc.value, got, tc.want)
+		}
 	}
 }
