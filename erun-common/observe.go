@@ -21,7 +21,8 @@ type ObserveSecretCheck struct {
 }
 
 // ObserveResult is an environment's observed Kubernetes state: a read-only
-// snapshot an orchestrator can act on without composing kubectl by hand.
+// snapshot an orchestrator can act on without composing kubectl or helm by
+// hand.
 type ObserveResult struct {
 	Tenant         string                  `json:"tenant"`
 	Environment    string                  `json:"environment"`
@@ -32,14 +33,23 @@ type ObserveResult struct {
 	Ingresses      []ObservedIngress       `json:"ingresses"`
 	Certificates   []ObservedCertificate   `json:"certificates"`
 	Secrets        []ObservedSecretCheck   `json:"secrets,omitempty"`
+	// HelmRelease is the runtime release's own record of what should be
+	// running. Nil in dry-run, where nothing was read yet.
+	HelmRelease *ObservedHelmRelease `json:"helmRelease,omitempty"`
+	// Drift names every disagreement found between the live release, the
+	// running pods, and what the env config records — the pre-deploy
+	// live-vs-plan diff an orchestrator must do before any env-shaping
+	// deploy. Empty means nothing disagreed, not that nothing was checked.
+	Drift []string `json:"drift,omitempty"`
 }
 
-// RunObservation reads pods, quota/limit usage, ingress routing, and
-// certificate readiness for one namespace, walking a Certificate's
-// CertificateRequest -> Order -> Challenge chain when it is not Ready so the
-// caller gets the failure reason without composing that walk itself. It is
-// read-only by construction: every kubectl call below is a literal `get`
-// against a fixed resource kind, never a caller-supplied verb.
+// RunObservation reads pods, quota/limit usage, ingress routing, certificate
+// readiness, and the runtime helm release for one namespace, walking a
+// Certificate's CertificateRequest -> Order -> Challenge chain when it is not
+// Ready so the caller gets the failure reason without composing that walk
+// itself. It is read-only by construction: every kubectl call below is a
+// literal `get` against a fixed resource kind, and the one helm call is a
+// literal `status`, never a caller-supplied verb.
 func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
 	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
@@ -48,12 +58,15 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	limitArgs := observeGetArgs(req, "limitrange")
 	ingressArgs := observeGetArgs(req, "ingress")
 	certArgs := observeGetArgs(req, "certificates.cert-manager.io")
+	helmArgs := observeHelmStatusArgs(req)
+	releaseName := RuntimeReleaseName(req.Tenant)
 
 	ctx.TraceCommand("", "kubectl", podArgs...)
 	ctx.TraceCommand("", "kubectl", quotaArgs...)
 	ctx.TraceCommand("", "kubectl", limitArgs...)
 	ctx.TraceCommand("", "kubectl", ingressArgs...)
 	ctx.TraceCommand("", "kubectl", certArgs...)
+	ctx.TraceCommand("", "helm", helmArgs...)
 	ctx.Trace("observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason")
 
 	secretArgs := make([][]string, len(params.Secrets))
@@ -85,6 +98,9 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	for i, check := range params.Secrets {
 		result.Secrets = append(result.Secrets, fetchObservedSecretCheck(secretArgs[i], check))
 	}
+
+	result.HelmRelease = fetchObservedHelmRelease(helmArgs, releaseName, req.Namespace)
+	result.Drift = computeObserveDrift(req, result.HelmRelease, result.Pods)
 
 	return result, nil
 }

@@ -4,10 +4,20 @@
   "namespace": "team-dev",
   "pods": [
     {
-      "name": "web-0",
+      "name": "team-devops-abc123",
       "phase": "Running",
       "ready": true,
-      "restartCount": 0
+      "restartCount": 0,
+      "containers": [
+        {
+          "name": "erun-devops",
+          "image": "registry.example/test/erun-devops:<VERSION>",
+          "resourceLimits": {
+            "cpu": "4",
+            "memory": "8916Mi"
+          }
+        }
+      ]
     }
   ],
   "resourceQuotas": [
@@ -79,7 +89,23 @@
         }
       ]
     }
-  ]
+  ],
+  "helmRelease": {
+    "name": "team-devops",
+    "found": true,
+    "revision": 3,
+    "status": "deployed",
+    "chart": "erun-devops",
+    "chartVersion": "<VERSION>",
+    "appVersion": "<VERSION>",
+    "imageOverrides": {
+      "erun-devops": "registry.example/test/erun-devops:<VERSION>"
+    },
+    "runtimePod": {
+      "cpu": "4",
+      "memory": "8916Mi"
+    }
+  }
 }
 audit: erun observe --output json
 observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

@@ -90,30 +90,20 @@
       ]
     }
   ],
-  "secrets": [
-    {
-      "name": "db-credentials",
-      "key": "other-key",
-      "exists": true,
-      "hasKey": false
-    }
-  ],
   "helmRelease": {
     "name": "team-devops",
     "found": true,
-    "revision": 3,
+    "revision": 1,
     "status": "deployed",
-    "chart": "erun-devops",
+    "chart": "unrelated-app",
     "chartVersion": "<VERSION>",
     "appVersion": "<VERSION>",
-    "imageOverrides": {
-      "erun-devops": "registry.example/test/erun-devops:<VERSION>"
-    },
-    "runtimePod": {
-      "cpu": "4",
-      "memory": "8916Mi"
-    }
-  }
+    "runtimePod": {},
+    "error": "release \"team-devops\"'s chart is \"unrelated-app\", which does not look like an erun runtime chart (expected one named like \"erun-devops\") — verify with 'helm get chart team-devops'"
+  },
+  "drift": [
+    "env config runtimeversion (<VERSION>) does not match the release's app version (<VERSION>)"
+  ]
 }
-audit: erun observe --output json --secret <redacted>
+audit: erun observe --output json
 observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

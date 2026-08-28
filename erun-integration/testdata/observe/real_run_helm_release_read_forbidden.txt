@@ -90,30 +90,15 @@
       ]
     }
   ],
-  "secrets": [
-    {
-      "name": "db-credentials",
-      "key": "other-key",
-      "exists": true,
-      "hasKey": false
-    }
-  ],
   "helmRelease": {
     "name": "team-devops",
-    "found": true,
-    "revision": 3,
-    "status": "deployed",
-    "chart": "erun-devops",
-    "chartVersion": "<VERSION>",
-    "appVersion": "<VERSION>",
-    "imageOverrides": {
-      "erun-devops": "registry.example/test/erun-devops:<VERSION>"
-    },
-    "runtimePod": {
-      "cpu": "4",
-      "memory": "8916Mi"
-    }
-  }
+    "found": false,
+    "runtimePod": {},
+    "error": "observe: not authorized to read helm release \"team-devops\" in namespace \"team-dev\" (Error: query: failed to query with labels: secrets is forbidden: User \"system:serviceaccount:team-dev:erun\" cannot list resource \"secrets\" in API group \"\" in the namespace \"team-dev\") — helm release state is stored as Secrets, so the caller's kubeconfig needs read access to Secrets in this namespace"
+  },
+  "drift": [
+    "env config records runtimeversion <VERSION> but no runtime helm release \"team-devops\" was found in namespace \"team-dev\""
+  ]
 }
-audit: erun observe --output json --secret <redacted>
+audit: erun observe --output json
 observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

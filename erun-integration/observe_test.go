@@ -12,14 +12,16 @@ import (
 )
 
 // observeStubResponses is the canned `kubectl get <resource> -o json` bodies
-// shared by the observe real-run scenarios: one pod, one quota, one limit
-// range, one ingress, and a Certificate that is not Ready. The
-// CertificateRequest -> Order -> Challenge chain resolves to a Challenge
+// shared by the observe real-run scenarios: one pod running the runtime
+// container (named and imaged the way the real erun-devops chart names it,
+// so the release-vs-pod image drift check has a real name to match on), one
+// quota, one limit range, one ingress, and a Certificate that is not Ready.
+// The CertificateRequest -> Order -> Challenge chain resolves to a Challenge
 // whose reason is an RBAC denial on the webhook solver — the exact failure
 // class #1138 exists to surface without three more hand-built kubectl calls.
 func observeStubResponses() map[string]string {
 	return map[string]string{
-		"pods":                                `{"items":[{"metadata":{"name":"web-0"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"app","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
+		"pods": `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
 		"resourcequota":                       `{"items":[{"metadata":{"name":"erun-quota"},"status":{"hard":{"limits.cpu":"4"},"used":{"limits.cpu":"1"}}}]}`,
 		"limitrange":                          `{"items":[{"metadata":{"name":"erun-limits"},"spec":{"limits":[{"type":"Container","default":{"cpu":"1"},"defaultRequest":{"cpu":"100m"}}]}}]}`,
 		"ingress":                             `{"items":[{"metadata":{"name":"web"},"spec":{"rules":[{"host":"dev.example.test"}],"tls":[{"hosts":["dev.example.test"],"secretName":"web-tls"}]}}]}`,
@@ -28,6 +30,18 @@ func observeStubResponses() map[string]string {
 		"orders.acme.cert-manager.io":         `{"items":[{"metadata":{"name":"wildcard-order-1","ownerReferences":[{"kind":"CertificateRequest","name":"wildcard-abc"}]},"status":{"state":"pending"}}]}`,
 		"challenges.acme.cert-manager.io":     `{"items":[{"metadata":{"name":"wildcard-challenge-1","ownerReferences":[{"kind":"Order","name":"wildcard-order-1"}]},"spec":{"type":"DNS-01","dnsName":"*.dev.example.test"},"status":{"state":"invalid","reason":"RBAC denied: solvers.acme.cert-manager.io is forbidden: cannot create resource challenges"}}]}`,
 	}
+}
+
+// observeHelmStatusStub is a `helm status -o json` body for the "team-devops"
+// release that agrees in every field with observeStubResponses' pod and with
+// SeedTenantEnv's recorded runtimeversion (1.0.0) and default runtimepod
+// (DefaultRuntimePodCPU/Memory), so scenarios built on it report no drift
+// unless they deliberately mutate one side.
+func observeHelmStatusStub() string {
+	return `{"name":"team-devops","namespace":"team-dev","version":3,"info":{"status":"deployed"},` +
+		`"chart":{"metadata":{"name":"erun-devops","version":"1.0.0","appVersion":"1.0.0"}},` +
+		`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
+		`"runtime":{"resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}}}`
 }
 
 func TestObserve(t *testing.T) {
@@ -91,7 +105,8 @@ func TestObserve(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -106,7 +121,8 @@ func TestObserve(t *testing.T) {
 		responses := observeStubResponses()
 		responses["secret db-credentials"] = `{"data":{"password":"c2VjcmV0"}}`
 		fixture.StubKubectlGetJSON(t, stubs, responses)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--secret", "db-credentials=password", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -123,7 +139,8 @@ func TestObserve(t *testing.T) {
 		responses := observeStubResponses()
 		responses["secret db-credentials"] = `{"data":{"password":"c2VjcmV0"}}`
 		fixture.StubKubectlGetJSON(t, stubs, responses)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
 		result := erun.Run(t, []string{"observe", "--secret", "db-credentials=other-key", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -132,5 +149,110 @@ func TestObserve(t *testing.T) {
 			t.Fatalf("secret value leaked into output: %s", got)
 		}
 		golden.Equal(t, "observe/real_run_secret_missing_key_never_reveals_value", normalize.Apply(result.Combined))
+	})
+
+	// real_run_text_output_reports_images_release_and_drift locks the
+	// human-readable rendering of the new sections (container images, the
+	// helm release, and a clean "no drift" verdict) with observeHelmStatusStub's
+	// baseline, which agrees with the pod stub and SeedTenantEnv on every field.
+	t.Run("real_run_text_output_reports_images_release_and_drift", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: observeHelmStatusStub()})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_text_output_reports_images_release_and_drift", normalize.Apply(result.Combined))
+	})
+
+	// real_run_reports_release_drift is the scenario #1448 exists for: a helm
+	// release's own recorded values disagreeing with the running container
+	// (a hand-patched, out-of-band image) and with the env config's recorded
+	// runtimeversion/runtimepod must be named, not left for the reader to spot
+	// by comparing dumps by eye.
+	t.Run("real_run_reports_release_drift", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		responses := observeStubResponses()
+		// The running container's image and resource limits diverge from what
+		// the release itself records below (1.0.0 / 4 CPU / 8916Mi), the exact
+		// "hand-patched" and "resized without a matching redeploy" shapes #1448
+		// found by hand with kubectl/helm.
+		responses["pods"] = `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"10.43.0.100:5000/sophium/erun-devops:1.0.0-tini","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`
+		fixture.StubKubectlGetJSON(t, stubs, responses)
+		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":5,"info":{"status":"deployed"},` +
+			`"chart":{"metadata":{"name":"erun-devops","version":"1.0.202","appVersion":"1.0.202"}},` +
+			`"config":{"imageOverrides":{"erun-devops":"registry.example/test/erun-devops:1.0.0"},` +
+			`"runtime":{"resources":{"limits":{"cpu":"8","memory":"16384Mi"}}}}}`
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_reports_release_drift", normalize.Apply(result.Combined))
+	})
+
+	// real_run_helm_release_not_found confirms an absent release is reported
+	// as a confirmed "not found", distinct from a read that failed, and still
+	// flags that the env config expected one (#1448's "no dead ends" bar: an
+	// empty section must not look identical whether nothing is deployed or
+	// observe simply could not look).
+	t.Run("real_run_helm_release_not_found", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stderr: `Error: release: not found`, ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_helm_release_not_found", normalize.Apply(result.Combined))
+	})
+
+	// real_run_helm_release_read_forbidden confirms an RBAC-denied read names
+	// the cause and the remedy instead of leaving the release section empty in
+	// a way indistinguishable from "nothing deployed here".
+	t.Run("real_run_helm_release_read_forbidden", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   `Error: query: failed to query with labels: secrets is forbidden: User "system:serviceaccount:team-dev:erun" cannot list resource "secrets" in API group "" in the namespace "team-dev"`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_helm_release_read_forbidden", normalize.Apply(result.Combined))
+	})
+
+	// real_run_helm_release_chart_not_erun confirms a release found under the
+	// expected name but installed from an unrelated chart is flagged rather
+	// than silently reported as if it were erun's own runtime release.
+	t.Run("real_run_helm_release_chart_not_erun", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubKubectlGetJSON(t, stubs, observeStubResponses())
+		releaseStub := `{"name":"team-devops","namespace":"team-dev","version":1,"info":{"status":"deployed"},` +
+			`"chart":{"metadata":{"name":"unrelated-app","version":"2.3.0","appVersion":"2.3.0"}},"config":{}}`
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stdout: releaseStub})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
+		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_helm_release_chart_not_erun", normalize.Apply(result.Combined))
 	})
 }

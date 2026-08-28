@@ -150,6 +150,11 @@ type ShellLaunchParams struct {
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
 	RuntimeImage string
+	// RuntimeVersion and RuntimePod are the env config's recorded runtime
+	// deploy intent, threaded through so observe can diff them against what
+	// the live helm release and running pods actually hold.
+	RuntimeVersion string
+	RuntimePod     RuntimePodResources
 }
 
 type ShellLaunchPreview struct {
@@ -589,6 +594,8 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
 		Claude:             result.EnvConfig.Claude,
 		RuntimeImage:       strings.TrimSpace(result.EnvConfig.RuntimeImage),
+		RuntimeVersion:     strings.TrimSpace(result.EnvConfig.RuntimeVersion),
+		RuntimePod:         result.EnvConfig.RuntimePod,
 	}
 }
 

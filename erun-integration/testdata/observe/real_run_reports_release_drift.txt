@@ -11,7 +11,7 @@
       "containers": [
         {
           "name": "erun-devops",
-          "image": "registry.example/test/erun-devops:<VERSION>",
+          "image": "<VERSION>.100:5000/sophium/erun-devops:<VERSION>",
           "resourceLimits": {
             "cpu": "4",
             "memory": "8916Mi"
@@ -90,18 +90,10 @@
       ]
     }
   ],
-  "secrets": [
-    {
-      "name": "db-credentials",
-      "key": "other-key",
-      "exists": true,
-      "hasKey": false
-    }
-  ],
   "helmRelease": {
     "name": "team-devops",
     "found": true,
-    "revision": 3,
+    "revision": 5,
     "status": "deployed",
     "chart": "erun-devops",
     "chartVersion": "<VERSION>",
@@ -110,10 +102,16 @@
       "erun-devops": "registry.example/test/erun-devops:<VERSION>"
     },
     "runtimePod": {
-      "cpu": "4",
-      "memory": "8916Mi"
+      "cpu": "8",
+      "memory": "16384Mi"
     }
-  }
+  },
+  "drift": [
+    "env config runtimeversion (<VERSION>) does not match the release's app version (<VERSION>)",
+    "release records imageOverrides.erun-devops = registry.example/test/erun-devops:<VERSION> but the running container \"erun-devops\"'s image is <VERSION>.100:5000/sophium/erun-devops:<VERSION>",
+    "env config runtimepod CPU limit (4) does not match the release's runtime.resources.limits.cpu (8)",
+    "env config runtimepod memory limit (8916Mi) does not match the release's runtime.resources.limits.memory (16384Mi)"
+  ]
 }
-audit: erun observe --output json --secret <redacted>
+audit: erun observe --output json
 observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason
