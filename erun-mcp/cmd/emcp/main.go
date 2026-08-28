@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -43,6 +44,18 @@ func run(args []string, stderr io.Writer, info eruncommon.BuildInfo, runServer s
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 2
+	}
+
+	if flags.NArg() > 0 {
+		leftover := flags.Args()
+		dropped := leftover[1:]
+		msg := fmt.Sprintf("emcp: flag parsing stopped at unrecognized argument %q", leftover[0])
+		if len(dropped) > 0 {
+			msg += fmt.Sprintf("; flags after it were never applied: %s", strings.Join(dropped, " "))
+		}
+		msg += "; likely cause: a preceding bool flag was given a space-separated value — write it as --flag=value (e.g. --metrics-enabled=true) instead of --flag value\n"
+		_, _ = fmt.Fprint(stderr, msg)
 		return 2
 	}
 

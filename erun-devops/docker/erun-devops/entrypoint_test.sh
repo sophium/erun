@@ -91,7 +91,7 @@ prepare_run enabled
 start_run true devops
 wait_for '[ -s "${run_dir}/emcp-argv" ]' || fail "the devops path should start emcp when the edge is enabled"
 argv=$(head -n 1 "${run_dir}/emcp-argv")
-for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--metrics-host 0.0.0.0" "--metrics-port 9100" "--metrics-enabled true" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
+for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--metrics-host 0.0.0.0" "--metrics-port 9100" "--metrics-enabled=true" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
     case "${argv}" in
         *"${flag}"*) ;;
         *) fail "emcp argv is missing '${flag}': ${argv}" ;;
@@ -99,6 +99,39 @@ for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--metrics-host 0.0.0.
 done
 grep -q 'starting erun MCP on 0.0.0.0:17000/mcp, metrics on 0.0.0.0:9100 (enabled=true)' "${log}" ||
     fail "the edge start and metrics listener should be logged"
+
+# A space-separated bool flag (e.g. `--metrics-enabled true`) sets the bool from
+# its own presence and leaves the bare "true" as the first positional argument,
+# which stops Go's flag.Parse there — every flag after it (including --tenant
+# and --environment) is silently dropped. Walk the captured argv the same way
+# emcp's flag set would and fail if any bare positional token would stop
+# parsing before every flag, including the ones after --metrics-enabled, is
+# consumed.
+assert_argv_parses_through() {
+    _argv="$1"
+    # shellcheck disable=SC2086
+    set -- ${_argv}
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --metrics-enabled)
+                fail "bool flag --metrics-enabled must be written as --metrics-enabled=<value>, not space-separated: ${_argv}"
+                ;;
+            --metrics-enabled=*)
+                shift
+                ;;
+            --host | --port | --path | --metrics-host | --metrics-port | --tenant | --environment | --repo-path | --kubernetes-context | --namespace)
+                shift 2
+                ;;
+            --*)
+                shift
+                ;;
+            *)
+                fail "unparsed positional argument '$1' would stop emcp's flag.Parse before later flags are applied: ${_argv}"
+                ;;
+        esac
+    done
+}
+assert_argv_parses_through "${argv}"
 
 # --- 2. Supervised: killing the server restarts it and logs the restart ---
 first_pid=$(head -n 1 "${run_dir}/emcp-pids")

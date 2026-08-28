@@ -1061,7 +1061,7 @@ exec_runtime_mcp() {
         --path "${ERUN_MCP_PATH:-/mcp}" \
         --metrics-host "${ERUN_METRICS_HOST:-0.0.0.0}" \
         --metrics-port "${ERUN_METRICS_PORT:-9100}" \
-        --metrics-enabled "${ERUN_METRICS_ENABLED:-true}" \
+        --metrics-enabled="${ERUN_METRICS_ENABLED:-true}" \
         --tenant "${ERUN_TENANT:-}" \
         --environment "${ERUN_ENVIRONMENT:-}" \
         --repo-path "$(runtime_repo_dir)" \

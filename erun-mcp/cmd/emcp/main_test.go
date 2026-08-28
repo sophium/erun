@@ -81,6 +81,60 @@ func assertRuntimeContext(t *testing.T, got erunmcp.RuntimeContext) {
 	}
 }
 
+func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
+	stderr := new(bytes.Buffer)
+	called := false
+
+	exitCode := run([]string{
+		"--metrics-enabled", "true",
+		"--tenant", "tenant-a", "--environment", "dev",
+	}, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+		called = true
+		return nil
+	})
+	if exitCode != 2 {
+		t.Fatalf("expected refusal exit code 2, got %d", exitCode)
+	}
+	if called {
+		t.Fatal("expected server not to start when leftover positional arguments remain")
+	}
+	got := stderr.String()
+	if !strings.Contains(got, `"true"`) || !strings.Contains(got, "--flag=value") {
+		t.Fatalf("unexpected stderr: %q", got)
+	}
+	if !strings.Contains(got, "flags after it were never applied: --tenant tenant-a --environment dev") {
+		t.Fatalf("expected stderr to name the dropped flags, got: %q", got)
+	}
+}
+
+func TestRunRefusesUnrecognizedPositionalArgument(t *testing.T) {
+	stderr := new(bytes.Buffer)
+	called := false
+
+	exitCode := run([]string{
+		"bogus", "--tenant", "tenant-a",
+	}, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+		called = true
+		return nil
+	})
+	if exitCode != 2 {
+		t.Fatalf("expected refusal exit code 2, got %d", exitCode)
+	}
+	if called {
+		t.Fatal("expected server not to start when leftover positional arguments remain")
+	}
+	got := stderr.String()
+	if !strings.Contains(got, `"bogus"`) {
+		t.Fatalf("expected stderr to name the unrecognized argument, got: %q", got)
+	}
+	if !strings.Contains(got, "flags after it were never applied: --tenant tenant-a") {
+		t.Fatalf("expected stderr to name the dropped flags, got: %q", got)
+	}
+	if !strings.Contains(got, "likely cause") {
+		t.Fatalf("expected the bool-flag explanation to be phrased as a guess, got: %q", got)
+	}
+}
+
 func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	stderr := new(bytes.Buffer)
 
