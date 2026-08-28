@@ -31,12 +31,14 @@ func (s *stubIdentityAdmin) GetSMTPStatus(context.Context) (zitadel.SMTPStatus, 
 }
 
 type stubIdentityUserCreator struct {
-	created   model.User
-	err       error
-	gotParams repository.CreateUserParams
+	created     model.User
+	err         error
+	gotParams   repository.CreateUserParams
+	createCalls int
 }
 
 func (s *stubIdentityUserCreator) Create(_ context.Context, params repository.CreateUserParams) (model.User, error) {
+	s.createCalls++
 	s.gotParams = params
 	if s.err != nil {
 		return model.User{}, s.err
@@ -130,7 +132,7 @@ func TestIdentityServiceEnrollFailsClosedWhenIdPCreateFails(t *testing.T) {
 	if _, err := svc.Enroll(context.Background(), EnrollIdentityParams{Username: "alice", Email: "alice@example.com"}); err == nil {
 		t.Fatal("want an error when the IdP create fails")
 	}
-	if users.gotParams != (repository.CreateUserParams{}) {
+	if users.createCalls != 0 {
 		t.Fatalf("erun user create must not run when the IdP half never landed, got %+v", users.gotParams)
 	}
 }

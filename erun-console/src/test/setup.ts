@@ -34,3 +34,9 @@ if (typeof window.ResizeObserver === 'undefined') {
 if (typeof window.matchMedia === 'undefined') {
   window.matchMedia = matchMediaStub;
 }
+// jsdom has no layout engine, so Element.prototype.scrollIntoView does not
+// exist; Radix's Select scrolls its highlighted item into view whenever the
+// listbox opens, which throws with no stub here.
+if (typeof Element.prototype.scrollIntoView === 'undefined') {
+  Element.prototype.scrollIntoView = (): undefined => undefined;
+}

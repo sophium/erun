@@ -26,11 +26,15 @@ type UserRoutes struct {
 // no external identity yet (it cannot sign in until one is linked, which this
 // API does not yet support outside creation). TenantID targets another
 // tenant explicitly and is honored only for an operations-scoped caller.
+// RoleIDs grants those roles at enrollment instead of the zero-role default;
+// omit it to enroll with no roles (the tenant's first user still gets
+// ReadAll/WriteAll regardless, so a new tenant is never unusable).
 type enrollUserRequest struct {
-	Username string `json:"username"`
-	Issuer   string `json:"issuer,omitempty"`
-	Subject  string `json:"subject,omitempty"`
-	TenantID string `json:"tenantId,omitempty"`
+	Username string   `json:"username"`
+	Issuer   string   `json:"issuer,omitempty"`
+	Subject  string   `json:"subject,omitempty"`
+	TenantID string   `json:"tenantId,omitempty"`
+	RoleIDs  []string `json:"roleIds,omitempty"`
 }
 
 func RegisterUserRoutes(register ProtectedRouteRegistrar, users UserEnrollmentRepository) {
@@ -94,10 +98,15 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		Issuer:   strings.TrimSpace(body.Issuer),
 		Subject:  strings.TrimSpace(body.Subject),
 		TenantID: overrideTenantID,
+		RoleIDs:  body.RoleIDs,
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) {
 			writeError(w, http.StatusConflict, "a user with this username already exists in the target tenant")
+			return
+		}
+		if errors.Is(err, repository.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "one or more requested roles do not exist in this tenant")
 			return
 		}
 		writeRepositoryError(w, err)

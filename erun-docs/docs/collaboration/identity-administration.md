@@ -18,6 +18,7 @@ Signed in as an Operator on an **OPERATIONS** tenant, the console's **Users** vi
 - **List every identity** the platform's IdP knows about, with its current state.
 - **Deactivate** a user, which blocks their next sign-in immediately. The console asks you to confirm before it takes effect, naming the person and the consequence.
 - **Reactivate** a deactivated user.
+- **Manage a user's roles.** A newly enrolled user starts with **no access at all** — they can sign in and do nothing until someone grants them a role. Click **Manage roles** on their row to see what they hold today, grant one of the tenant's defined roles, or revoke one. The tenant's first user is the one exception: they still get full access automatically, since a brand-new tenant with nobody able to grant anything would otherwise be stuck. For the full role/permission model, see [Agent reference · erun API protocol](/agent-reference/api-protocol#roles-endpoints).
 
 The **Org settings** view lets you read and change:
 

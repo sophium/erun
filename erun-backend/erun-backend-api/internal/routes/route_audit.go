@@ -33,7 +33,6 @@ var InternalAPIRoutes = map[string]bool{
 // the same change, or the gate fails.
 var KnownUnsurfacedRoutes = map[string]bool{
 	"DELETE /v1/reviews/{review_id}/reviewers/{user_id}": true,
-	"DELETE /v1/users/{user_id}/roles/{role_id}":         true,
 	"GET /v1/quota":                                              true,
 	"GET /v1/releases":                                           true,
 	"GET /v1/releases/{release_id}":                              true,
@@ -42,12 +41,9 @@ var KnownUnsurfacedRoutes = map[string]bool{
 	"GET /v1/reviews/{review_id}/comments":                       true,
 	"GET /v1/reviews/{review_id}/releases":                       true,
 	"GET /v1/reviews/{review_id}/reviewers":                      true,
-	"GET /v1/roles":                                              true,
 	"GET /v1/tenant-issuers":                                     true,
 	"GET /v1/tenants":                                            true,
 	"GET /v1/usage-events":                                       true,
-	"GET /v1/users":                                              true,
-	"GET /v1/users/{user_id}/roles":                              true,
 	"PATCH /v1/reviews/{review_id}/comments/{comment_id}/status": true,
 	"PATCH /v1/reviews/{review_id}/status":                       true,
 	"PATCH /v1/tenant-issuers":                                   true,
@@ -60,9 +56,6 @@ var KnownUnsurfacedRoutes = map[string]bool{
 	"POST /v1/reviews/{review_id}/builds":                        true,
 	"POST /v1/reviews/{review_id}/comments":                      true,
 	"POST /v1/reviews/{review_id}/reviewers":                     true,
-	"POST /v1/roles":                                             true,
 	"POST /v1/tenants":                                           true,
-	"POST /v1/users":                                             true,
-	"POST /v1/users/{user_id}/roles":                             true,
 	"PUT /v1/tenants/{tenant_id}/quota":                          true,
 }

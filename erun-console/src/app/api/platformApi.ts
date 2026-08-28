@@ -23,6 +23,8 @@ export const platformApi = createApi({
     'OrgSettings',
     'SmtpSettings',
     'Invites',
+    'Roles',
+    'UserRoles',
   ],
   endpoints: () => ({}),
 });
