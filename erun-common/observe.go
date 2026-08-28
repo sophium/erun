@@ -58,8 +58,9 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	limitArgs := observeGetArgs(req, "limitrange")
 	ingressArgs := observeGetArgs(req, "ingress")
 	certArgs := observeGetArgs(req, "certificates.cert-manager.io")
-	helmArgs := observeHelmStatusArgs(req)
 	releaseName := RuntimeReleaseName(req.Tenant)
+	helmArgs := observeHelmStatusArgs(req)
+	helmListArgs := observeHelmListArgs(req, releaseName)
 
 	ctx.TraceCommand("", "kubectl", podArgs...)
 	ctx.TraceCommand("", "kubectl", quotaArgs...)
@@ -67,6 +68,7 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	ctx.TraceCommand("", "kubectl", ingressArgs...)
 	ctx.TraceCommand("", "kubectl", certArgs...)
 	ctx.TraceCommand("", "helm", helmArgs...)
+	ctx.TraceCommand("", "helm", helmListArgs...)
 	ctx.Trace("observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason")
 
 	secretArgs := make([][]string, len(params.Secrets))
@@ -99,7 +101,7 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 		result.Secrets = append(result.Secrets, fetchObservedSecretCheck(secretArgs[i], check))
 	}
 
-	result.HelmRelease = fetchObservedHelmRelease(helmArgs, releaseName, req.Namespace)
+	result.HelmRelease = fetchObservedHelmRelease(helmArgs, helmListArgs, releaseName, req.Namespace)
 	result.Drift = computeObserveDrift(req, result.HelmRelease, result.Pods)
 
 	return result, nil
