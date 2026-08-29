@@ -825,6 +825,15 @@ The immediate response only confirms the job started; `exec_job_status` returns 
 { "job": { "id": "suite", "state": "unknown", "exitCode": null, "aliveAgeMs": 6120,
            "reason": "job supervisor 4242 is gone without recording an exit status; the runtime pod was most likely replaced" },
   "timedOut": false, … }
+
+// an agent job (kind: agent) whose working tree still had uncommitted
+// changes when it ended: exitCode 0, state exited, but never a success —
+// the supervisor made a checkpoint commit and pushed it on the agent's
+// behalf. See [Agent reference · Working tree checkpoints](/agent-reference/cli-flags#worktree-checkpoints).
+{ "job": { "id": "sweep", "state": "exited", "exitCode": 0, "kind": "agent",
+           "worktreeDirty": true, "worktreeBranch": "feature/1564-checkpoint",
+           "worktreeCommit": "a1b2c3d", "worktreePushed": true, "worktreeRemote": "origin" },
+  "timedOut": false, … }
 ```
 
 `exec_job_output` pages through the merged stdout + stderr:

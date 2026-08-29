@@ -642,12 +642,17 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 // that group after the leader is gone — work the leader backgrounded and
 // never waited for — is answered here, not left for the exit code alone to
 // misreport as a clean success.
+//
+// captureAgentJobWorktreeOutcome runs here too, before the exit code alone
+// could be read as the whole story: an agent job's own working tree is
+// something its exit status says nothing about at all (see job_worktree.go).
 func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
 	code, signal, reason, jobState := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
 	recorder.update(func(job *EnvironmentJob) {
 		job.State = jobState
 		job.EndedAt = time.Now()
@@ -659,6 +664,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		}
 		job.Reason = reason
 		job.ExitCode = &code
+		worktree.apply(job)
 	})
 	return nil
 }

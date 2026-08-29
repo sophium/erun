@@ -435,7 +435,33 @@ func jobExitedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
 	}
-	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobWorktreeSuffix surfaces a dirty working tree on any terminal line, so a
+// job that otherwise looks like a clean success still shows the one thing its
+// exit status cannot: uncommitted work in its own working directory, and
+// whether the supervisor managed to check-point it. See job_worktree.go in
+// erun-common for what this reports and why.
+func jobWorktreeSuffix(job common.EnvironmentJob) string {
+	if !job.WorktreeDirty {
+		return ""
+	}
+	return ", " + jobWorktreeSummary(job)
+}
+
+// jobWorktreeSummary is the human-readable half of jobWorktreeSuffix, reused
+// by jobAwaitExit's error text so the two surfaces never describe the same
+// outcome differently.
+func jobWorktreeSummary(job common.EnvironmentJob) string {
+	switch {
+	case job.WorktreePushed:
+		return fmt.Sprintf("working tree was dirty; checkpointed as %s and pushed to %s", job.WorktreeCommit, job.WorktreeRemote)
+	case job.WorktreeCommit != "":
+		return fmt.Sprintf("working tree was dirty; checkpointed as %s but not pushed: %s", job.WorktreeCommit, job.WorktreeReason)
+	default:
+		return fmt.Sprintf("working tree was dirty and left uncommitted: %s", job.WorktreeReason)
+	}
 }
 
 // jobAbandonedLine is rendered distinctly from both exited and unknown: the
@@ -449,7 +475,7 @@ func jobAbandonedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
 	}
-	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
 // jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
@@ -463,7 +489,7 @@ func jobGateIncompleteLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
 	}
-	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
 func jobUnknownLine(job common.EnvironmentJob) string {
@@ -616,6 +642,8 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
 	case result.Job.State == common.EnvironmentJobStateGateIncomplete:
 		return fmt.Errorf("job %q ended while work it started was still running: %s", result.Job.ID, result.Job.Reason)
+	case result.Job.WorktreeDirty:
+		return fmt.Errorf("job %q ended with an uncommitted working tree: %s", result.Job.ID, jobWorktreeSummary(result.Job))
 	default:
 		return fmt.Errorf("job %q exited %d", result.Job.ID, jobExitCodeOrUnset(result.Job))
 	}

@@ -236,6 +236,40 @@ type EnvironmentJob struct {
 	// synchronously. Nil for every other kind, and for a task that has not
 	// finished yet.
 	Result json.RawMessage `json:"result,omitempty"`
+
+	// WorktreeDirty is set only for a finished agent job whose Dir was a git
+	// working tree that still had uncommitted changes (tracked or untracked,
+	// respecting .gitignore) when the job ended. False for every command job,
+	// for an agent job with no working directory or one outside a git repo,
+	// and for an agent job that left its tree clean — none of those cases are
+	// distinguishable from each other, and none of them need to be: this field
+	// exists only to make "the agent's turn ended with unsaved work" visible,
+	// which an exit code alone cannot say. See job_worktree.go.
+	WorktreeDirty bool `json:"worktreeDirty,omitempty"`
+	// WorktreeBranch is the branch HEAD pointed at when the check ran, "HEAD"
+	// literal when detached, empty when WorktreeDirty is false.
+	WorktreeBranch string `json:"worktreeBranch,omitempty"`
+	// WorktreeDetached is true when HEAD was not on a branch at all. A
+	// checkpoint commit there would be unreachable the moment HEAD moves, so
+	// the supervisor never attempts one in that state.
+	WorktreeDetached bool `json:"worktreeDetached,omitempty"`
+	// WorktreeCommit is the machine-authored checkpoint commit the supervisor
+	// made to preserve a dirty tree, empty when it made none — whether because
+	// the tree was clean, committing was refused as unsafe, or the commit
+	// itself failed (see WorktreeReason for which).
+	WorktreeCommit string `json:"worktreeCommit,omitempty"`
+	// WorktreePushed reports whether WorktreeCommit reached WorktreeRemote. A
+	// commit that exists only in this working tree is exactly as exposed to a
+	// lost pod as the uncommitted changes it was meant to save.
+	WorktreePushed bool `json:"worktreePushed,omitempty"`
+	// WorktreeRemote is the remote WorktreeCommit was pushed to, empty when
+	// nothing was pushed.
+	WorktreeRemote string `json:"worktreeRemote,omitempty"`
+	// WorktreeReason explains a dirty tree the supervisor could not fully
+	// resolve: why no checkpoint commit was made, or why one was made but not
+	// pushed. Empty when WorktreeDirty is false, or when a commit was made and
+	// pushed cleanly.
+	WorktreeReason string `json:"worktreeReason,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.
@@ -245,13 +279,18 @@ func (j EnvironmentJob) Finished() bool {
 }
 
 // Succeeded is the only definition of success: an outcome was captured and it
-// was zero, with nothing left running behind it. An unknown job is never a
-// success, and neither is an abandoned or gate-incomplete one — a zero exit
-// code from the process that started work it never waited for, whether that
-// work is an unreaped process in its own group or a sibling job record, is
-// not the same claim as a zero exit code from a job that finished cleanly.
+// was zero, with nothing left running behind it and nothing left uncommitted
+// in its own working tree. An unknown job is never a success, and neither is
+// an abandoned or gate-incomplete one — a zero exit code from the process
+// that started work it never waited for, whether that work is an unreaped
+// process in its own group or a sibling job record, is not the same claim as
+// a zero exit code from a job that finished cleanly. A dirty working tree is
+// the same shape of not-actually-clean finish: whatever the supervisor
+// managed to preserve on the agent's behalf (see job_worktree.go), the agent
+// itself did not commit its own work, and that is worth a caller's attention
+// even when everything else about the run looks fine.
 func (j EnvironmentJob) Succeeded() bool {
-	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0
+	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 && !j.WorktreeDirty
 }
 
 // LoadEnvironmentJob returns one job with its state resolved, reconciling and

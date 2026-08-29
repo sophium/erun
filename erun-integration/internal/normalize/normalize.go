@@ -121,6 +121,9 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},
 	{regexp.MustCompile(`\bcommit = [0-9a-f]{7,12}\b`), "commit = <SHORTSHA>"},
+	// A job's dirty-working-tree checkpoint names the real commit it made,
+	// which is content-derived and differs per run of the same fixture repo.
+	{regexp.MustCompile(`\bcheckpointed as [0-9a-f]{7,12}\b`), "checkpointed as <SHORTSHA>"},
 	// Real git output in a real-run scenario: `git commit` prints
 	// `[<branch> <sha>]` and `git push` prints an indented `<old>..<new>` range
 	// per ref. Both carry the commit the fixture repo happened to produce on
