@@ -2,7 +2,6 @@ package erunmcp
 
 import (
 	"context"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -29,15 +28,14 @@ func aiSessionsTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}
-		now := time.Now()
 		if input.Session != "" {
-			status, err := eruncommon.LoadAISessionStatus(tenant, environment, input.Session, now)
+			status, err := eruncommon.LoadAISessionStatus(tenant, environment, input.Session)
 			if err != nil {
 				return nil, AISessionsResult{}, err
 			}
 			return nil, AISessionsResult{Sessions: []eruncommon.AISessionStatus{status}}, nil
 		}
-		statuses, err := eruncommon.LoadAISessionStatuses(tenant, environment, now)
+		statuses, err := eruncommon.LoadAISessionStatuses(tenant, environment)
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}

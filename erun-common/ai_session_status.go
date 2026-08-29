@@ -141,9 +141,7 @@ func RecordAISessionEvent(params AISessionEventParams) error {
 		ExitReason: strings.TrimSpace(params.ExitReason),
 	}
 	if record.Tool == "" {
-		if existing, ok, err := loadAISessionRecord(tenant, environment, sessionID); err == nil && ok {
-			record.Tool = existing.Tool
-		}
+		record.Tool = previouslyReportedAISessionTool(tenant, environment, sessionID)
 	}
 
 	data, err := json.MarshalIndent(record, "", "  ")
@@ -154,10 +152,23 @@ func RecordAISessionEvent(params AISessionEventParams) error {
 	return os.WriteFile(aiSessionPath(dir, sessionID), data, 0o644)
 }
 
+// previouslyReportedAISessionTool carries the tool name forward from an
+// earlier event when a later one (e.g. a bare exit) omits it, so the tool
+// column of a resolved status does not go blank mid-session. Any lookup
+// failure is silently treated as "no prior tool" rather than failing the
+// event this call is trying to record.
+func previouslyReportedAISessionTool(tenant, environment, sessionID string) string {
+	existing, ok, err := loadAISessionRecord(tenant, environment, sessionID)
+	if err != nil || !ok {
+		return ""
+	}
+	return existing.Tool
+}
+
 // LoadAISessionStatus resolves the current status for one session. A session
 // with no recorded event at all reads as Idle - there has never been an AI
 // session running under this id - rather than an error.
-func LoadAISessionStatus(tenant, environment, sessionID string, now time.Time) (AISessionStatus, error) {
+func LoadAISessionStatus(tenant, environment, sessionID string) (AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	sessionID = strings.TrimSpace(sessionID)
@@ -174,22 +185,16 @@ func LoadAISessionStatus(tenant, environment, sessionID string, now time.Time) (
 	if !ok {
 		return AISessionStatus{SessionID: sessionID, State: AISessionStateIdle, Reason: "no AI session activity recorded for this id"}, nil
 	}
-	if now.IsZero() {
-		now = time.Now()
-	}
-	return ResolveAISessionStatus(record, now), nil
+	return ResolveAISessionStatus(record), nil
 }
 
 // LoadAISessionStatuses resolves every session recorded for an environment,
 // sorted by session id for a stable, diffable listing.
-func LoadAISessionStatuses(tenant, environment string, now time.Time) ([]AISessionStatus, error) {
+func LoadAISessionStatuses(tenant, environment string) ([]AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := errMissingTenantOrEnvironment("list AI session statuses", tenant, environment); err != nil {
 		return nil, err
-	}
-	if now.IsZero() {
-		now = time.Now()
 	}
 	dir, err := aiSessionDir(tenant, environment)
 	if err != nil {
@@ -205,21 +210,32 @@ func LoadAISessionStatuses(tenant, environment string, now time.Time) ([]AISessi
 
 	statuses := make([]AISessionStatus, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+		record, ok := readAISessionRecordFile(filepath.Join(dir, entry.Name()))
+		if !ok {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var record AISessionRecord
-		if err := json.Unmarshal(data, &record); err != nil {
-			continue
-		}
-		statuses = append(statuses, ResolveAISessionStatus(record, now))
+		statuses = append(statuses, ResolveAISessionStatus(record))
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].SessionID < statuses[j].SessionID })
 	return statuses, nil
+}
+
+// readAISessionRecordFile reads one session file for LoadAISessionStatuses's
+// directory scan. A non-JSON entry, an unreadable file, or a malformed one is
+// silently skipped rather than failing the whole listing over one bad file.
+func readAISessionRecordFile(path string) (AISessionRecord, bool) {
+	if !strings.HasSuffix(path, ".json") {
+		return AISessionRecord{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return AISessionRecord{}, false
+	}
+	var record AISessionRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return AISessionRecord{}, false
+	}
+	return record, true
 }
 
 // ResolveAISessionStatus derives the current state purely from the last
@@ -227,10 +243,7 @@ func LoadAISessionStatuses(tenant, environment string, now time.Time) ([]AISessi
 // been since that event, which is the property that makes AwaitingInput
 // representable at all. A session that reported TurnEnd an hour ago is still
 // AwaitingInput: nothing said otherwise since.
-func ResolveAISessionStatus(record AISessionRecord, now time.Time) AISessionStatus {
-	if now.IsZero() {
-		now = time.Now()
-	}
+func ResolveAISessionStatus(record AISessionRecord) AISessionStatus {
 	status := AISessionStatus{
 		SessionID:    record.SessionID,
 		Tool:         record.Tool,

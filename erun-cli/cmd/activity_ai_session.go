@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -105,15 +104,14 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 		return err
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	now := time.Now()
 	if sessionID != "" {
-		status, err := common.LoadAISessionStatus(tenant, environment, sessionID, now)
+		status, err := common.LoadAISessionStatus(tenant, environment, sessionID)
 		if err != nil {
 			return err
 		}
 		return writeAISessionStatuses(cmd, []common.AISessionStatus{status}, jsonOutput)
 	}
-	statuses, err := common.LoadAISessionStatuses(tenant, environment, now)
+	statuses, err := common.LoadAISessionStatuses(tenant, environment)
 	if err != nil {
 		return err
 	}

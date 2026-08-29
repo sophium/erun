@@ -5,6 +5,25 @@ import (
 	"time"
 )
 
+// recordAISessionEventForTest records an event and fails the test on error,
+// keeping the scenario steps below to one line each.
+func recordAISessionEventForTest(t *testing.T, params AISessionEventParams) {
+	t.Helper()
+	if err := RecordAISessionEvent(params); err != nil {
+		t.Fatalf("record %s: %v", params.Event, err)
+	}
+}
+
+// loadAISessionStatusForTest resolves a status and fails the test on error.
+func loadAISessionStatusForTest(t *testing.T, tenant, environment, sessionID string) AISessionStatus {
+	t.Helper()
+	status, err := LoadAISessionStatus(tenant, environment, sessionID)
+	if err != nil {
+		t.Fatalf("load status for %s: %v", sessionID, err)
+	}
+	return status
+}
+
 // TestAISessionAwaitingInputIsNotIdleDuringLongSilence is the load-bearing
 // case a PTY output-volume heuristic cannot represent: a session that
 // finished its turn and is waiting on the human produces no output at all,
@@ -15,83 +34,66 @@ import (
 func TestAISessionAwaitingInputIsNotIdleDuringLongSilence(t *testing.T) {
 	isolateActivityCache(t)
 	tenant, environment, sessionID := "acme", "dev", "session-1"
-	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	if err := RecordAISessionEvent(AISessionEventParams{
-		Tenant: tenant, Environment: environment, SessionID: sessionID,
-		Tool: "claude", Event: AISessionEventTurnStart, Now: start,
-	}); err != nil {
-		t.Fatalf("record turn-start: %v", err)
-	}
-	busy, err := LoadAISessionStatus(tenant, environment, sessionID, start)
-	if err != nil {
-		t.Fatalf("load after turn-start: %v", err)
-	}
-	if busy.State != AISessionStateBusy {
-		t.Fatalf("after turn-start: want busy, got %s", busy.State)
-	}
+	t.Run("turn-start reads as busy", func(t *testing.T) {
+		recordAISessionEventForTest(t, AISessionEventParams{
+			Tenant: tenant, Environment: environment, SessionID: sessionID,
+			Tool: "claude", Event: AISessionEventTurnStart,
+		})
+		if got := loadAISessionStatusForTest(t, tenant, environment, sessionID); got.State != AISessionStateBusy {
+			t.Fatalf("after turn-start: want busy, got %s", got.State)
+		}
+	})
 
-	turnEnd := start.Add(2 * time.Minute)
-	if err := RecordAISessionEvent(AISessionEventParams{
-		Tenant: tenant, Environment: environment, SessionID: sessionID,
-		Event: AISessionEventTurnEnd, Now: turnEnd,
-	}); err != nil {
-		t.Fatalf("record turn-end: %v", err)
-	}
+	// No further events arrive after turn-end - the session is silent
+	// because it is waiting on the human, not because it went away. This
+	// must not decay into Idle no matter how long the silence runs (there is
+	// no elapsed-time input to this model at all, so "how long" isn't even
+	// simulated here - the absence of a timeout is the point).
+	t.Run("turn-end reads as awaiting-input and carries the tool forward", func(t *testing.T) {
+		recordAISessionEventForTest(t, AISessionEventParams{
+			Tenant: tenant, Environment: environment, SessionID: sessionID,
+			Event: AISessionEventTurnEnd,
+		})
+		got := loadAISessionStatusForTest(t, tenant, environment, sessionID)
+		if got.State != AISessionStateAwaitingInput {
+			t.Fatalf("after turn-end with no further output: want awaiting-input, got %s (reason %q)", got.State, got.Reason)
+		}
+		if got.Tool != "claude" {
+			t.Fatalf("tool should carry forward from the earlier event, got %q", got.Tool)
+		}
+	})
 
-	// No further events arrive - the session is silent because it is
-	// waiting on the human, not because it went away. An hour of silence
-	// must not decay this into Idle.
-	muchLater := turnEnd.Add(1 * time.Hour)
-	awaiting, err := LoadAISessionStatus(tenant, environment, sessionID, muchLater)
-	if err != nil {
-		t.Fatalf("load during silence: %v", err)
-	}
-	if awaiting.State != AISessionStateAwaitingInput {
-		t.Fatalf("during long silence after turn-end: want awaiting-input, got %s (reason %q)", awaiting.State, awaiting.Reason)
-	}
-	if awaiting.Tool != "claude" {
-		t.Fatalf("tool should carry forward from the earlier event, got %q", awaiting.Tool)
-	}
+	t.Run("a session that never reported anything is idle, not awaiting-input", func(t *testing.T) {
+		awaiting := loadAISessionStatusForTest(t, tenant, environment, sessionID)
+		idle := loadAISessionStatusForTest(t, tenant, environment, "never-started")
+		if idle.State != AISessionStateIdle {
+			t.Fatalf("session with no recorded event: want idle, got %s", idle.State)
+		}
+		if awaiting.State == idle.State {
+			t.Fatalf("awaiting-input must not collapse into idle")
+		}
+	})
 
-	// A session that never reported anything is genuinely Idle, and must not
-	// be confused with one that is silently awaiting input.
-	idle, err := LoadAISessionStatus(tenant, environment, "never-started", muchLater)
-	if err != nil {
-		t.Fatalf("load unknown session: %v", err)
-	}
-	if idle.State != AISessionStateIdle {
-		t.Fatalf("session with no recorded event: want idle, got %s", idle.State)
-	}
-	if awaiting.State == idle.State {
-		t.Fatalf("awaiting-input must not collapse into idle")
-	}
-
-	// Once the process actually exits, the state changes again and must not
-	// be confused with the awaiting-input state that preceded it.
-	exitCode := 0
-	exitAt := muchLater.Add(time.Minute)
-	if err := RecordAISessionEvent(AISessionEventParams{
-		Tenant: tenant, Environment: environment, SessionID: sessionID,
-		Event: AISessionEventExit, ExitCode: &exitCode, Now: exitAt,
-	}); err != nil {
-		t.Fatalf("record exit: %v", err)
-	}
-	exited, err := LoadAISessionStatus(tenant, environment, sessionID, exitAt.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("load after exit: %v", err)
-	}
-	if exited.State != AISessionStateExited {
-		t.Fatalf("after exit: want exited, got %s", exited.State)
-	}
-	if exited.State == AISessionStateAwaitingInput || exited.State == AISessionStateIdle {
-		t.Fatalf("exited must be distinguishable from both awaiting-input and idle")
-	}
+	t.Run("exit reads as exited, distinct from awaiting-input and idle", func(t *testing.T) {
+		exitCode := 0
+		recordAISessionEventForTest(t, AISessionEventParams{
+			Tenant: tenant, Environment: environment, SessionID: sessionID,
+			Event: AISessionEventExit, ExitCode: &exitCode,
+		})
+		got := loadAISessionStatusForTest(t, tenant, environment, sessionID)
+		if got.State != AISessionStateExited {
+			t.Fatalf("after exit: want exited, got %s", got.State)
+		}
+		if got.State == AISessionStateAwaitingInput || got.State == AISessionStateIdle {
+			t.Fatalf("exited must be distinguishable from both awaiting-input and idle")
+		}
+	})
 }
 
 func TestAISessionNotifyResolvesToAwaitingInput(t *testing.T) {
 	record := AISessionRecord{SessionID: "s", Event: AISessionEventNotify, At: time.Now()}
-	status := ResolveAISessionStatus(record, time.Now())
+	status := ResolveAISessionStatus(record)
 	if status.State != AISessionStateAwaitingInput {
 		t.Fatalf("notify event: want awaiting-input, got %s", status.State)
 	}
@@ -100,33 +102,22 @@ func TestAISessionNotifyResolvesToAwaitingInput(t *testing.T) {
 func TestAISessionOOMExitIsDistinctFromPlainExit(t *testing.T) {
 	isolateActivityCache(t)
 	tenant, environment := "acme", "dev"
-	now := time.Now()
 
-	if err := RecordAISessionEvent(AISessionEventParams{
+	recordAISessionEventForTest(t, AISessionEventParams{
 		Tenant: tenant, Environment: environment, SessionID: "oom-session",
-		Event: AISessionEventExit, ExitReason: AISessionExitReasonOOM, Now: now,
-	}); err != nil {
-		t.Fatalf("record oom exit: %v", err)
-	}
-	oom, err := LoadAISessionStatus(tenant, environment, "oom-session", now)
-	if err != nil {
-		t.Fatalf("load oom session: %v", err)
-	}
+		Event: AISessionEventExit, ExitReason: AISessionExitReasonOOM,
+	})
+	oom := loadAISessionStatusForTest(t, tenant, environment, "oom-session")
 	if oom.State != AISessionStateOOMKilled {
 		t.Fatalf("exit with oom reason: want oom-killed, got %s", oom.State)
 	}
 
 	exitCode := 1
-	if err := RecordAISessionEvent(AISessionEventParams{
+	recordAISessionEventForTest(t, AISessionEventParams{
 		Tenant: tenant, Environment: environment, SessionID: "plain-exit-session",
-		Event: AISessionEventExit, ExitCode: &exitCode, Now: now,
-	}); err != nil {
-		t.Fatalf("record plain exit: %v", err)
-	}
-	plain, err := LoadAISessionStatus(tenant, environment, "plain-exit-session", now)
-	if err != nil {
-		t.Fatalf("load plain-exit session: %v", err)
-	}
+		Event: AISessionEventExit, ExitCode: &exitCode,
+	})
+	plain := loadAISessionStatusForTest(t, tenant, environment, "plain-exit-session")
 	if plain.State != AISessionStateExited {
 		t.Fatalf("plain exit: want exited, got %s", plain.State)
 	}
@@ -138,21 +129,16 @@ func TestAISessionOOMExitIsDistinctFromPlainExit(t *testing.T) {
 func TestLoadAISessionStatusesListsAllRecordedSessions(t *testing.T) {
 	isolateActivityCache(t)
 	tenant, environment := "acme", "dev-list"
-	now := time.Now()
-	if err := RecordAISessionEvent(AISessionEventParams{
+	recordAISessionEventForTest(t, AISessionEventParams{
 		Tenant: tenant, Environment: environment, SessionID: "b-session",
-		Tool: "codex", Event: AISessionEventTurnStart, Now: now,
-	}); err != nil {
-		t.Fatalf("record b-session: %v", err)
-	}
-	if err := RecordAISessionEvent(AISessionEventParams{
+		Tool: "codex", Event: AISessionEventTurnStart,
+	})
+	recordAISessionEventForTest(t, AISessionEventParams{
 		Tenant: tenant, Environment: environment, SessionID: "a-session",
-		Tool: "claude", Event: AISessionEventTurnEnd, Now: now,
-	}); err != nil {
-		t.Fatalf("record a-session: %v", err)
-	}
+		Tool: "claude", Event: AISessionEventTurnEnd,
+	})
 
-	statuses, err := LoadAISessionStatuses(tenant, environment, now)
+	statuses, err := LoadAISessionStatuses(tenant, environment)
 	if err != nil {
 		t.Fatalf("load statuses: %v", err)
 	}
@@ -172,7 +158,7 @@ func TestLoadAISessionStatusesListsAllRecordedSessions(t *testing.T) {
 
 func TestLoadAISessionStatusesEmptyWhenNoneRecorded(t *testing.T) {
 	isolateActivityCache(t)
-	statuses, err := LoadAISessionStatuses("acme", "never-touched-env", time.Now())
+	statuses, err := LoadAISessionStatuses("acme", "never-touched-env")
 	if err != nil {
 		t.Fatalf("load statuses for untouched env: %v", err)
 	}
