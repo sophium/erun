@@ -821,6 +821,62 @@ exit 0
 		}
 	})
 
+	t.Run("dry_run_in_a_runtime_pod_claims_the_release_version_lease", func(t *testing.T) {
+		// Inside a runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT injected by the
+		// chart), release claims an exclusive, version-scoped activity lease
+		// before doing anything else — the erun#1619 fix for two orchestrators
+		// racing the same release. No other release scenario sets these two
+		// vars, so this is the only golden that shows the claim trace; every
+		// other release scenario is exercising the off-pod, single-caller path
+		// where the claim is a no-op.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		envVars := append(releaseEnv(t, setup), "ERUN_TENANT=erun", "ERUN_ENVIRONMENT=build")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_in_a_runtime_pod_claims_the_release_version_lease", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refuses_when_another_orchestrator_is_already_releasing_the_version", func(t *testing.T) {
+		// Regression for erun#1619: two orchestrators driving the same runtime
+		// pod could both pass every preflight and race the same release, the
+		// loser discovering the collision only via a tag mismatch after minutes
+		// of wasted publishing. Pre-claiming the exact exclusive lease scope
+		// release itself takes — via the activity lease CLI, sharing this
+		// scenario's XDG_CACHE_HOME — simulates "another orchestrator got there
+		// first". release must refuse before it ever touches git — sync-remote
+		// never runs — though execution-plan resolution has already made its
+		// own read-only docker fingerprint check by this point, hence the
+		// docker stub.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+
+		blocker := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "erun", "--environment", "build",
+			"--name", "blocker", "--exclusive", "--scope", "release-version:1.4.2",
+			"--orchestrator", "existing-holder",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if blocker.ExitCode != 0 {
+			t.Fatalf("pre-claim: exit %d: %s", blocker.ExitCode, blocker.Combined)
+		}
+
+		envVars := append(releaseEnv(t, setup), "ERUN_TENANT=erun", "ERUN_ENVIRONMENT=build")
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the version is already being released, got 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1.4.2 is already being released by orchestrator existing-holder") {
+			t.Fatalf("expected the refusal to name the version and the holder:\n%s", result.Combined)
+		}
+
+		// Outside the captured streams: the refusal must leave the version file
+		// untouched, so re-running retries once the other release finishes (or
+		// its claim is reclaimed automatically).
+		assertVersionFile(t, setup, "1.4.2\n")
+	})
+
 	t.Run("dry_run_refuses_to_release_an_image_it_would_not_publish", func(t *testing.T) {
 		// Run from inside one component's build context, release resolves only
 		// that component's build but still stamps and would tag every image on

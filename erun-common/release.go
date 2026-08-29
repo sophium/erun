@@ -221,6 +221,12 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 		syncPackagingChecksums = syncReleasePackagingChecksums
 	}
 
+	release, err := claimReleaseVersion(ctx, spec, os.Getenv)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleasePublishesResolvedImages(spec, publisher); err != nil {
 		return err
