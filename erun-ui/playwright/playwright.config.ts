@@ -54,7 +54,12 @@ function defaultWorkers(): number {
   if (Number.isInteger(override) && override > 0) {
     return override;
   }
-  const byCpu = Math.max(1, os.availableParallelism() - 1);
+  // Two cores per worker, not one: a worker is a Go backend *and* a headless
+  // Chromium, and they compete. Measured on a 4-core environment, 3 workers
+  // (cores - 1) failed two specs on timeouts while 2 workers passed clean; the
+  // 12-core environment runs 6 without a contention failure. Both land on
+  // cores/2, so that is the rule rather than a number picked per machine.
+  const byCpu = Math.max(1, Math.floor(os.availableParallelism() / 2));
   const limitMib = cgroupMemoryLimitMib() ?? Math.floor(os.totalmem() / (1024 * 1024));
   const byMemory = Math.max(1, Math.floor((limitMib * 0.6) / WORKER_BUDGET_MIB));
   return Math.max(1, Math.min(byCpu, byMemory, 6));
