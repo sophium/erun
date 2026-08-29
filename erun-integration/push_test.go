@@ -202,6 +202,44 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_configured_platforms_narrows_push", func(t *testing.T) {
+		// environments.<env>.docker.platforms in .erun/config.yaml applies to
+		// push exactly like build: an environment pinned to one architecture
+		// stops paying to promote or rebuild the other's fingerprint tag when
+		// publishing to its own cluster's registry.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  dev:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected configured docker.platforms to exclude arm64 from the push plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_configured_platforms_narrows_push", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
 		// `erun push --build` is the operator shortcut that builds the current
 		// source first (minting a snapshot version) and pushes that exact

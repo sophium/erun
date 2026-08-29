@@ -154,6 +154,12 @@ type DockerCommandTarget struct {
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
 	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool
+	// Platforms explicitly overrides the docker --platform targets a non-release
+	// build mints (e.g. ["linux/amd64"]), taking precedence over the project's
+	// configured environments.<env>.docker.platforms. It must be empty when
+	// Release is set: a release build always publishes every platform erun
+	// supports, regardless of any override.
+	Platforms []string
 }
 
 type DockerRegistryAuthError struct {

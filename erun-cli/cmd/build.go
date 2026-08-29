@@ -32,8 +32,14 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 			"The build step of the build → release → push → deploy flow. Builds locally " +
 			"without publishing by default; --release stamps and publishes the release version " +
 			"first, and --deploy pushes the images and rolls them out — folding the later steps " +
-			"into one command so the version flows through for you.",
-		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy",
+			"into one command so the version flows through for you.\n\n" +
+			"Every platform erun supports builds by default. --platform narrows a local, " +
+			"non-release build to only the platform(s) named, so an environment whose cluster " +
+			"can only ever run one architecture stops paying for an emulated build of the other; " +
+			"the project's .erun/config.yaml environments.<env>.docker.platforms pins the same " +
+			"choice permanently. A release build always publishes every platform and refuses " +
+			"--platform, since a released artifact must be deployable anywhere.",
+		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy\n  erun build --platform linux/amd64",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -312,6 +318,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
 	cmd.Flags().BoolVar(&target.NoIncremental, "no-incremental", false, "Disable fingerprint-based build caching and rebuild every image from scratch")
+	cmd.Flags().StringSliceVar(&target.Platforms, "platform", nil, "Build only these docker platforms (e.g. linux/amd64), repeatable; overrides the project's configured environments.<env>.docker.platforms. Mutually exclusive with --release, which always publishes every platform erun supports")
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {

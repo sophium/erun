@@ -1,0 +1,2 @@
+audit: erun build --dry-run --platform [linux/amd64] --release
+release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports

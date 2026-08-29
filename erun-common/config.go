@@ -460,10 +460,17 @@ type ProjectEnvironmentConfig struct {
 // (the locally computed fingerprint diverges from the tagged hash).
 type ProjectDockerConfig struct {
 	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
+	// Platforms pins the docker --platform targets a non-release build/push mints
+	// for this environment (e.g. ["linux/amd64"]), for an environment whose
+	// cluster can only ever run one architecture. It never applies to a release
+	// build (`erun build --release`, `erun release`): those always publish every
+	// platform erun supports, since a release artifact must be deployable
+	// anywhere. Empty keeps the default multi-arch build.
+	Platforms []string `yaml:"platforms,omitempty"`
 }
 
 func (c ProjectDockerConfig) IsZero() bool {
-	return len(c.Fingerprints) == 0
+	return len(c.Fingerprints) == 0 && len(c.Platforms) == 0
 }
 
 type ReleaseConfig struct {
@@ -580,6 +587,30 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 			continue
 		}
 		out[name] = hash
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// DockerPlatformsForEnvironment returns the configured docker --platform targets
+// for the given environment, or nil when none is set (keeping the default
+// multi-arch build).
+func (c ProjectConfig) DockerPlatformsForEnvironment(environment string) []string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return nil
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok || len(envConfig.Docker.Platforms) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(envConfig.Docker.Platforms))
+	for _, platform := range envConfig.Docker.Platforms {
+		if platform = strings.TrimSpace(platform); platform != "" {
+			out = append(out, platform)
+		}
 	}
 	if len(out) == 0 {
 		return nil
