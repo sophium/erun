@@ -63,6 +63,15 @@ For an **erun-hosted** alias this performs the OIDC sign-in, and `--flow` select
 
 Reach for `--flow authcode` when the device page's authentication method is the thing that is broken — a passkey that will not assert, an MFA factor you cannot satisfy on this machine. The device page forces a **fresh** authentication, so an existing browser session does not help it; the loopback redirect reuses that session, so an operator who is already signed in completes the login with a click. Before this fallback existed, one unusable method locked the CLI out of every operations-only capability while the same identity worked fine in the console.
 
+`--scope` (repeatable) adds an OAuth scope on top of the baseline `openid offline_access`. A provider's **reserved** scopes are frequently absent from its discovery document — Zitadel's `scopes_supported` advertises only `openid, profile, email, phone, address, offline_access`, and none of the `urn:zitadel:*` family it documents — so there is nothing to negotiate against and such a scope can only be asked for by name. The one that matters for multi-tenancy is `urn:zitadel:iam:user:resourceowner`, which makes the token carry `urn:zitadel:iam:user:resourceowner:id` — the org claim an [org-scoped issuer](/agent-reference/api-protocol) resolves tenants by. Without it a token has no discriminator and an org-scoped mapping resolves nobody.
+
+`--force` re-authenticates even when the stored session is still active. An active session otherwise short-circuits the login, so this is what you need to change the scopes or the flow on an alias that is already signed in — without it the only way to get a differently-scoped token is deleting the cached credential by hand.
+
+```sh
+erun cloud login --alias erun+api.example.com@erun --flow authcode --force \
+  --scope urn:zitadel:iam:user:resourceowner
+```
+
 ### `cloud oidc`
 
 Re-derives and saves the OIDC issuer for an **AWS** alias by minting a short-lived AWS web-identity token and reading its issuer. `--alias` selects it; `--audience` sets the token audience (default `erun-api`). Cloudflare aliases have no OIDC issuer, so this command rejects them.
