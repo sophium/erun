@@ -165,17 +165,23 @@ func guardTool[In, Out any](identity authIdentity, name string, metrics *metrics
 		// registration is whichever caller first produced that set. Its
 		// capabilities are right by construction; its user is not. Prefer the
 		// live caller so the audit line names who actually called.
+		//
+		// caller is a per-call local: this closure is built once at
+		// registration and reused for every call to this tool, so the
+		// captured identity parameter is shared across concurrent callers and
+		// must stay read-only.
+		caller := identity
 		if live, ok := ctx.Value(authContextKey{}).(authIdentity); ok {
-			identity = live
+			caller = live
 		}
 		action := "mcp." + name
-		if !identity.Capabilities.AllowsTool(name) {
+		if !caller.Capabilities.AllowsTool(name) {
 			var zero Out
-			auditToolDecision(identity, name, false)
+			auditToolDecision(caller, name, false)
 			metrics.recordAuditEvent(action, "agent", "error")
 			return nil, zero, fmt.Errorf("tool %q requires the %s capability", name, eruncommon.MCPToolCapability(name))
 		}
-		auditToolDecision(identity, name, true)
+		auditToolDecision(caller, name, true)
 		result, out, err := handler(ctx, req, input)
 		label := mcpCallResultLabel(out, err)
 		metrics.recordMCPCall(name, label)
