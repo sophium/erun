@@ -143,30 +143,7 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 		ctx.Trace("cloud login erun: requesting scope " + scope)
 	}
 
-	var tokens ERunTokens
-	switch {
-	case flow == ERunLoginFlowAuthCode:
-		ctx.Trace("cloud login erun: authorization code + PKCE requested explicitly")
-		tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID, scope)
-	case flow == ERunLoginFlowDevice:
-		if !hasDeviceEndpoint {
-			return CloudProviderStatus{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint; retry with --flow %s", discovery.Issuer, ERunLoginFlowAuthCode)
-		}
-		tokens, err = erunDeviceFlowLogin(ctx, discovery, provider.ERun.ClientID, scope, deps)
-	case hasDeviceEndpoint:
-		// Auto: prefer the device grant, but a failure here is not the end of
-		// the road. The device page forces a fresh authentication, so an
-		// account whose only method there is broken can never finish it —
-		// while the authorization-code redirect reuses the browser session
-		// that same operator may already hold.
-		tokens, err = erunDeviceFlowLogin(ctx, discovery, provider.ERun.ClientID, scope, deps)
-		if err != nil {
-			ctx.Trace("cloud login erun: device flow did not complete (" + err.Error() + "); falling back to authorization code + PKCE")
-			tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID, scope)
-		}
-	default:
-		tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID, scope)
-	}
+	tokens, err := acquireERunLoginTokens(ctx, discovery, provider.ERun.ClientID, scope, flow, hasDeviceEndpoint, deps)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -174,6 +151,38 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}, nil
 	}
 	return persistERunLoginTokens(store, provider, deps, tokens)
+}
+
+// acquireERunLoginTokens picks the grant and runs it. An explicitly requested
+// flow is honoured exactly — including refusing the device grant against an
+// issuer that does not advertise one, rather than silently substituting a
+// different flow. Auto prefers the device grant but falls back to
+// authorization code + PKCE: the device page forces a fresh authentication, so
+// an account whose only method there is broken can never finish it, while the
+// redirect reuses the browser session that same operator may already hold.
+//
+// Split out of erunCloudProviderLogin to keep that function under the cyclop
+// threshold; the selection and its ordering are unchanged.
+func acquireERunLoginTokens(ctx Context, discovery OIDCDiscovery, clientID, scope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
+	switch {
+	case flow == ERunLoginFlowAuthCode:
+		ctx.Trace("cloud login erun: authorization code + PKCE requested explicitly")
+		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+	case flow == ERunLoginFlowDevice:
+		if !hasDeviceEndpoint {
+			return ERunTokens{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint; retry with --flow %s", discovery.Issuer, ERunLoginFlowAuthCode)
+		}
+		return erunDeviceFlowLogin(ctx, discovery, clientID, scope, deps)
+	case hasDeviceEndpoint:
+		tokens, err := erunDeviceFlowLogin(ctx, discovery, clientID, scope, deps)
+		if err == nil {
+			return tokens, nil
+		}
+		ctx.Trace("cloud login erun: device flow did not complete (" + err.Error() + "); falling back to authorization code + PKCE")
+		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+	default:
+		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+	}
 }
 
 // persistERunLoginTokens saves a fresh refresh token (when the grant returned
