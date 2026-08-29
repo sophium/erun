@@ -12,7 +12,7 @@ export interface CurrentTenant {
   type: string;
 }
 
-// TenantSwitcher is the shell chrome above the sidebar nav (#1614): it names
+// TenantSwitcher is the shell chrome above the sidebar nav: it names
 // the scope everything below it operates on, and is always visible — never
 // only while some menu is open. A caller whose identity maps to only one
 // tenant sees it as a plain label; rendering a control here would suggest a
