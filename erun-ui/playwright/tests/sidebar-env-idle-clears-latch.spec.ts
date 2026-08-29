@@ -15,28 +15,18 @@ import { expect, test } from '../fixtures/erunApp.js';
 // environment_activity_observed_test.go; what only the running app can show is
 // that the spinner an orphaned latch produces actually goes away.
 
-// The backend sweeps every environment on its own timer (environmentActivityInterval
-// in environment_activity.go) and reports these inert ones unreachable, so an emit
-// this spec makes can be overwritten before the row settles. Re-driving until it
-// converges is the right shape; the two budgets below are what make it converge.
-// The settle wait has to cover a loaded emit → event → re-render round-trip: at 1s
-// a loaded machine missed it, and because every retry re-emits the latch first, no
-// later attempt inherited the previous one's progress. The outer budget is sized to
-// the sweep, not guessed: at exactly one period it passes or fails on where the tick
-// happens to land — observed doing both, converging at 20.2s once and exhausting the
-// budget once. Two full periods plus margin means a sweep landing anywhere inside
-// the window still leaves a whole period for the emits to converge.
-const SWEEP_PERIOD_MS = 20_000;
-const SETTLE_TIMEOUT_MS = 5_000;
-// Four periods, not two. The sweep is what releases the latch, so convergence
-// needs a tick to land *and* the emit that follows it to settle inside the same
-// window. On an idle machine two periods was ample; once the suite runs specs
-// in parallel the settle is slow enough that two windows no longer reliably
-// contain one, and the budget expired rather than the logic failing. Widening
-// the window is the honest fix here -- the sweep cannot be shortened (it would
-// overwrite the staged state more often) nor lengthened (it would never release
-// the latch at all), so the only free variable is how long we let it converge.
-const CONVERGE_TIMEOUT_MS = SWEEP_PERIOD_MS * 4 + 20_000;
+// The backend's own sweep (environmentActivityInterval in
+// environment_activity.go) is not noise this spec has to survive -- it is the
+// mechanism that releases the latch, so it must keep running. What has to be
+// removed is the race: emitEnvActivityIfChanged only re-emits an environment's
+// activity on a transition, so the very first observation of a brand-new
+// environment always emits once, real or synthetic, and that one-time emit
+// could otherwise land at an arbitrary point later in the test and overwrite
+// state this spec has staged. TriggerEnvironmentActivitySweepNow drives that
+// one-time emit deterministically, before anything is staged, so every later
+// automatic tick observes the same (unreachable) environment, finds nothing
+// changed, and stays quiet for the rest of the test -- no timer to wait for,
+// no budget to size.
 
 test.describe('an idle environment clears a stale desktop latch', () => {
   test('an orphaned running entry stops spinning once the environment reports idle', async ({
@@ -44,12 +34,6 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     page,
     seededEnv,
   }) => {
-    // Convergence is paced by the backend's own sweep, so this test outlasts the
-    // default budget by design rather than by accident.
-    // test.slow() triples the default budget, which is not enough to contain
-    // CONVERGE_TIMEOUT_MS above; an expect budget can never exceed the test
-    // budget holding it, so this is set explicitly rather than multiplied.
-    test.setTimeout(CONVERGE_TIMEOUT_MS + 60_000);
     // A per-test environment, not the restored one: the harness auto-opens that
     // one, and an open in flight is this desktop's own operation, which stays
     // authoritative by design and would hold the row busy for an unrelated
@@ -59,6 +43,8 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     const spinner = sidebar.getByRole('status', {
       name: `Building ${tenant} / ${environment}`,
     });
+
+    await triggerEnvironmentActivitySweepNow(page);
 
     // The latch, and no ending for it — the desktop is left believing a build
     // it started is still running.
@@ -77,20 +63,15 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     });
     await expect(spinner).toBeVisible();
 
-    // The environment's own answer. The backend's sweep also runs against these
-    // inert envs and reports them unreachable, so re-drive until it converges
-    // rather than racing a single emit — a row that never clears still fails.
-    await expect(async () => {
-      await emitRunningBuild(page, tenant, environment);
-      await emitEnvActivity(page, {
-        tenant,
-        environment,
-        reachable: true,
-        observed: true,
-        busy: false,
-      });
-      await expect(spinner).toHaveCount(0, { timeout: SETTLE_TIMEOUT_MS });
-    }).toPass({ timeout: CONVERGE_TIMEOUT_MS });
+    // The environment's own answer clears the latch.
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: true,
+      observed: true,
+      busy: false,
+    });
+    await expect(spinner).toHaveCount(0);
   });
 
   test('an environment that reports work still spins, whoever started it', async ({
@@ -98,28 +79,27 @@ test.describe('an idle environment clears a stale desktop latch', () => {
     page,
     seededEnv,
   }) => {
-    test.slow();
     const { tenant, environment } = seededEnv;
     const sidebar = page.locator('aside').first();
+
+    await triggerEnvironmentActivitySweepNow(page);
 
     // Nothing was started from this desktop at all: the busy row here is
     // entirely the environment's own report, which is the case the corrective
     // must not be able to suppress.
-    await expect(async () => {
-      await emitEnvActivity(page, {
-        tenant,
-        environment,
-        reachable: true,
-        observed: true,
-        busy: true,
-        detail: 'holding: gradle-build',
-      });
-      await expect(
-        sidebar.getByRole('status', {
-          name: `${tenant} / ${environment} is busy — holding: gradle-build`,
-        }),
-      ).toBeVisible({ timeout: SETTLE_TIMEOUT_MS });
-    }).toPass({ timeout: CONVERGE_TIMEOUT_MS });
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: true,
+      observed: true,
+      busy: true,
+      detail: 'holding: gradle-build',
+    });
+    await expect(
+      sidebar.getByRole('status', {
+        name: `${tenant} / ${environment} is busy — holding: gradle-build`,
+      }),
+    ).toBeVisible();
   });
 });
 
@@ -168,4 +148,25 @@ async function emitEnvActivity(
     ).runtime;
     runtime.EventsEmit('env-activity', event);
   }, payload);
+}
+
+// The desktop backend as the browser sees it, narrowed to the one call here.
+interface EnvironmentActivitySweepBridge {
+  go: {
+    main: {
+      App: {
+        TriggerEnvironmentActivitySweep: () => Promise<void>;
+      };
+    };
+  };
+}
+
+// Drives environment_activity.go's sweep synchronously (see the App method's
+// own doc comment for why this consumes the sweep's one-time emit up front
+// rather than parking or widening anything).
+async function triggerEnvironmentActivitySweepNow(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const bridge = window as unknown as EnvironmentActivitySweepBridge;
+    await bridge.go.main.App.TriggerEnvironmentActivitySweep();
+  });
 }
