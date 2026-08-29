@@ -74,6 +74,35 @@ func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitM
 	return nil
 }
 
+// liveRuntimePodResources prefers the live cgroup limits a recommendation's
+// verdicts already read over the configured value, for the same reason
+// RecommendRuntimeSizing itself reasons from cgroups rather than config (see
+// its comment): the in-pod config carries no runtimepod at all when it is
+// silent, so treating the configured value as "current" scores a resize
+// against NormalizeRuntimePodResources' package defaults instead of the size
+// the container is actually running under — the resource a verdict says to
+// hold would then be silently reset to that default. A resource with no
+// verdict reading (no history yet) falls back to the configured value, the
+// only source available for it.
+func liveRuntimePodResources(configured RuntimePodResources, recommendation *RuntimeSizingRecommendation) RuntimePodResources {
+	if recommendation == nil {
+		return configured
+	}
+	live := configured
+	for _, verdict := range recommendation.Verdicts {
+		if verdict.Current == "" {
+			continue
+		}
+		switch verdict.Resource {
+		case "cpu":
+			live.CPU = verdict.Current
+		case "memory":
+			live.Memory = verdict.Current
+		}
+	}
+	return live
+}
+
 // resolveRuntimeResizeTarget applies either the standing recommendation or the
 // explicit values on top of the current sizing, leaving whatever the input does
 // not name unchanged.
@@ -119,7 +148,7 @@ func runtimeResizeActions(current, target RuntimePodResources) []RuntimeResizeAc
 }
 
 func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodResources, ceiling NamespaceResourceQuota, input RuntimeResizeInput, recommendation *RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
-	current = NormalizeRuntimePodResources(current)
+	current = NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
 

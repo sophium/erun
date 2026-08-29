@@ -2,4 +2,4 @@ audit: erun resize --apply-recommendation --dry-run --environment dev --tenant t
 resize: team/dev sizing: memory insufficient-evidence from 23552Mi (peak 12153Mi of 23552Mi (52%), but only 1h12m observed of the 24h0m a shrink needs)
 resize: team/dev sizing: cpu insufficient-evidence from 12 (0.00% of scheduling periods throttled (0 of 376556), but only 1h12m observed of the 24h0m a shrink needs)
 resize: team/dev sizing-evidence: 1h12m observed, 120 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
-resize: team/dev is already sized at cpu=4 memory=8916Mi; no change
+resize: team/dev is already sized at cpu=12 memory=23552Mi; no change
