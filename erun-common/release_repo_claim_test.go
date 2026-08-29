@@ -45,7 +45,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	ctx := newTestClaimContext()
 
 	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	sha, err := takeReleaseRepoClaim(ctx, envA, "1.0.213", holderA, os.Getpid(), now)
+	sha, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, now)
 	if err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	}
 
 	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	_, err = takeReleaseRepoClaim(ctx, envB, "1.0.213", holderB, os.Getpid()+1, now.Add(time.Second))
+	_, err = takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, now.Add(time.Second))
 	if err == nil {
 		t.Fatal("expected a second release of the same version from a different checkout to be refused")
 	}
@@ -64,11 +64,69 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	if !strings.Contains(err.Error(), "orchestrator-a") {
 		t.Errorf("refusal must name the holder so the second environment knows who to wait on, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "build-a") {
+		t.Errorf("refusal must name the losing caller's counterpart environment, got: %v", err)
+	}
 
 	// A release of a different version must not be affected: the claim is
 	// scoped to the version's own ref, not the whole repository.
-	if _, err := takeReleaseRepoClaim(ctx, envB, "1.0.214", holderB, os.Getpid()+1, now.Add(time.Second)); err != nil {
+	if _, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.214", holderB, now.Add(time.Second)); err != nil {
 		t.Fatalf("a release of a different version must not collide with an unrelated one in flight: %v", err)
+	}
+}
+
+// TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset
+// reproduces the shape a real release actually writes (erun#1637):
+// ERUN_ORCHESTRATOR_ID is unset in every in-pod release, so the holder
+// carries only a tenant. Two environments of that same tenant racing the
+// same version must still be told apart in the refusal — "tenant erun"
+// alone does not say which environment to go look at.
+func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(t *testing.T) {
+	envA := newAgentJobTestRepo(t)
+	remote := newBareRemoteForTest(t, envA)
+	runGitForTest(t, envA, "push", "-q", "-u", "origin", "main")
+	envB := cloneRepoForTest(t, remote)
+
+	now := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
+	ctx := newTestClaimContext()
+
+	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+	if _, err := takeReleaseRepoClaim(ctx, envA, "build", "1.0.215", holder, now); err != nil {
+		t.Fatalf("first environment's claim: %v", err)
+	}
+
+	_, err := takeReleaseRepoClaim(ctx, envB, "release", "1.0.215", holder, now.Add(time.Second))
+	if err == nil {
+		t.Fatal("expected a second release of the same version from a different environment to be refused")
+	}
+	if !strings.Contains(err.Error(), "environment build") {
+		t.Errorf("refusal must name the losing caller's counterpart environment, not just its tenant, got: %v", err)
+	}
+}
+
+// TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields guards the
+// rendering itself: either half of the holder/environment pair can be
+// missing (an older claim record predating the environment field, or a
+// holder with nothing else set), and the description must never leave an
+// empty fragment or a dangling separator.
+func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testing.T) {
+	cases := []struct {
+		name        string
+		holder      EnvironmentActivityLeaseHolder
+		environment string
+		want        string
+	}{
+		{"holder and environment", EnvironmentActivityLeaseHolder{Tenant: "erun"}, "build", "tenant erun, environment build"},
+		{"environment only, holder unnamed", EnvironmentActivityLeaseHolder{}, "build", "environment build"},
+		{"holder only, no environment", EnvironmentActivityLeaseHolder{Tenant: "erun"}, "", "tenant erun"},
+		{"neither", EnvironmentActivityLeaseHolder{}, "", "an unnamed holder"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseClaimHolderDescription(tc.holder, tc.environment); got != tc.want {
+				t.Errorf("releaseClaimHolderDescription(%+v, %q) = %q, want %q", tc.holder, tc.environment, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -82,7 +140,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	ctx := newTestClaimContext()
 
 	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	if _, err := takeReleaseRepoClaim(ctx, envA, "1.0.213", holderA, os.Getpid(), start); err != nil {
+	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, start); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
@@ -92,7 +150,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	// lapses.
 	afterLapse := start.Add(releaseVersionClaimTTL + time.Minute)
 	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	sha, err := takeReleaseRepoClaim(ctx, envB, "1.0.213", holderB, os.Getpid()+1, afterLapse)
+	sha, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, afterLapse)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
 	}

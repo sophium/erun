@@ -111,7 +111,7 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env("ERUN_ORCHESTRATOR_ID")), Tenant: tenant}
 	pid := os.Getpid()
 
-	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, holder, pid, time.Now())
+	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func renewReleaseClaims(ctx Context, spec ReleaseSpec, tenant, environment strin
 	if sha == "" {
 		return
 	}
-	if renewed, err := renewReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, holder, pid, time.Now(), sha); err == nil {
+	if renewed, err := renewReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), sha); err == nil {
 		repo.set(renewed)
 	}
 }

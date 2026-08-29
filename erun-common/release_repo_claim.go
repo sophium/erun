@@ -43,12 +43,17 @@ const (
 	releaseRepoClaimMaxAttempts = 3
 )
 
-// releaseRepoClaimRecord is the JSON stored in the claim ref's blob.
+// releaseRepoClaimRecord is the JSON stored in the claim ref's blob. It
+// carries Environment rather than PID: every environment that can push to
+// the release's origin can race this claim, so the environment is what
+// actually identifies a losing caller's counterpart, while a pid only ever
+// named a process in a pod that may already be gone by the time anyone reads
+// it back.
 type releaseRepoClaimRecord struct {
-	Holder    EnvironmentActivityLeaseHolder `json:"holder"`
-	PID       int                            `json:"pid,omitempty"`
-	StartedAt time.Time                      `json:"startedAt"`
-	ExpiresAt time.Time                      `json:"expiresAt"`
+	Holder      EnvironmentActivityLeaseHolder `json:"holder"`
+	Environment string                         `json:"environment,omitempty"`
+	StartedAt   time.Time                      `json:"startedAt"`
+	ExpiresAt   time.Time                      `json:"expiresAt"`
 }
 
 // ReleaseRepoClaimConflictError names the still-live holder of the
@@ -56,14 +61,33 @@ type releaseRepoClaimRecord struct {
 // uses, so a second orchestrator sees one consistent message regardless of
 // which of the two claims refused it.
 type ReleaseRepoClaimConflictError struct {
-	Version   string
-	Holder    EnvironmentActivityLeaseHolder
-	ExpiresAt time.Time
+	Version     string
+	Holder      EnvironmentActivityLeaseHolder
+	Environment string
+	ExpiresAt   time.Time
 }
 
 func (e *ReleaseRepoClaimConflictError) Error() string {
 	return fmt.Sprintf("%s is already being released by %s — wait for it to finish; a holder that crashes or whose pod is replaced is reclaimed automatically on the next attempt",
-		strings.TrimSpace(e.Version), e.Holder.String())
+		strings.TrimSpace(e.Version), releaseClaimHolderDescription(e.Holder, e.Environment))
+}
+
+// releaseClaimHolderDescription renders a holder together with the
+// environment racing it, which is the pair that actually lets a losing
+// caller find their counterpart. Either half can be absent — an older
+// claim record predating this field, or a holder with no other identifying
+// fields set — so each is only appended when present, never leaving a
+// dangling separator or an empty fragment.
+func releaseClaimHolderDescription(holder EnvironmentActivityLeaseHolder, environment string) string {
+	desc := holder.String()
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		return desc
+	}
+	if desc == "an unnamed holder" {
+		return "environment " + environment
+	}
+	return desc + ", environment " + environment
 }
 
 func releaseRepoClaimRef(version string) string {
@@ -81,7 +105,7 @@ func releaseRepoClaimProbeRef(version string) string {
 // from a solo caller with nothing to contend against, so it is treated the
 // same way: proceed without the repository-global claim rather than invent a
 // refusal nothing confirms.
-func takeReleaseRepoClaim(ctx Context, projectRoot, version string, holder EnvironmentActivityLeaseHolder, pid int, now time.Time) (string, error) {
+func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time) (string, error) {
 	ref := releaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
@@ -92,7 +116,7 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, version string, holder Envir
 		}
 
 		if !exists {
-			newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, holder, pid, now)
+			newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
 			if err != nil {
 				return "", err
 			}
@@ -107,10 +131,10 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, version string, holder Envir
 			return "", fmt.Errorf("release: %s exists on %s but its content could not be read: %w", ref, releaseRepoClaimRemote, err)
 		}
 		if releaseRepoClaimHeld(record, now) {
-			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, ExpiresAt: record.ExpiresAt}
+			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, Environment: record.Environment, ExpiresAt: record.ExpiresAt}
 		}
 
-		newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, holder, pid, now)
+		newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
 		if err != nil {
 			return "", err
 		}
@@ -127,8 +151,8 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, version string, holder Envir
 // it (its own renewal having lapsed past the TTL) is never silently
 // overwritten. A failure here is best-effort, matching the local lease's
 // renewal: the caller keeps its last-known sha and tries again next tick.
-func renewReleaseRepoClaim(ctx Context, projectRoot, version string, holder EnvironmentActivityLeaseHolder, pid int, now time.Time, currentSHA string) (string, error) {
-	newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, holder, pid, now)
+func renewReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
+	newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
 	if err != nil {
 		return "", err
 	}
@@ -155,12 +179,12 @@ func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time) bool {
 	return !record.ExpiresAt.IsZero() && now.Before(record.ExpiresAt)
 }
 
-func writeReleaseRepoClaimBlob(ctx Context, projectRoot string, holder EnvironmentActivityLeaseHolder, pid int, now time.Time) (string, error) {
+func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, now time.Time) (string, error) {
 	record := releaseRepoClaimRecord{
-		Holder:    holder,
-		PID:       pid,
-		StartedAt: now,
-		ExpiresAt: now.Add(releaseVersionClaimTTL),
+		Holder:      holder,
+		Environment: environment,
+		StartedAt:   now,
+		ExpiresAt:   now.Add(releaseVersionClaimTTL),
 	}
 	data, err := json.Marshal(record)
 	if err != nil {
