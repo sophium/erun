@@ -5,6 +5,7 @@ import {
   DetachOrchestratorConversation,
   InvestigateFailure,
   ListOrchestrators,
+  ReportBugFailure,
   ResolveOrchestratorToReopen,
   RestartApp,
   RestartOrchestrator,
@@ -14,8 +15,12 @@ import {
   StopOrchestrator,
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
+import { BrowserOpenURL, ClipboardSetText } from '../../wailsjs/runtime/runtime';
+import { stateApi } from './api/stateApi';
+import { buildDiagnosticsIssueURL, diagnosticsIssueBody } from './diagnosticsIssue';
 import { readError } from './errors';
 import type { IDEKind, OrchestratorGuidanceLayer } from './model';
+import { showNotification } from './notificationThunks';
 import { planOrchestratorBusySeed } from './orchestratorBusySeed';
 import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
 import { planOrchestratorShellSeed } from './orchestratorShellActivitySeed';
@@ -337,4 +342,82 @@ export const investigateFailure =
     } catch (error) {
       dispatch(setOrchestratorsError(readError(error)));
     }
+  };
+
+// reportFailure hands a failure to an agent that drafts a GitHub issue for it
+// (root AGENTS.md "Smooth, Seamless, No Dead Ends" — "Report a bug" is a
+// standing action, not a form the operator fills in) rather than widening the
+// existing prefilled-URL handoff. Reuses investigateFailure's exact spawn
+// plumbing and its shared investigation_bounds.go population, so the three
+// outcomes ReportBugFailure can return are handled the same way here:
+//   - admitted: the draft session is focused, the same "reachable, not modal"
+//     feedback investigateFailure already uses instead of a bespoke dialog.
+//   - refused, naming an existing draft/investigation for the same failure:
+//     that session is focused instead, and an info notice says why — the
+//     "repeat click focuses the draft" requirement, not a second agent.
+//   - any other refusal (or no agent available): falls back to the existing
+//     prefilled-URL report, naming the refusal so the operator knows why the
+//     agent path did not apply, never as a silent downgrade.
+export const reportFailure =
+  (report: string, summary: string, tenant: string, environment: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    try {
+      const outcome = await ReportBugFailure(report, tenant, environment, 80, 24);
+      if (outcome.admitted) {
+        dispatch(focusOrchestratorSession(outcome.orchestrator.sessionId));
+        await dispatch(loadOrchestrators());
+        return;
+      }
+      if (outcome.existingId) {
+        await dispatch(loadOrchestrators());
+        const existing = getState().orchestrators.items.find(
+          (item) => item.id === outcome.existingId,
+        );
+        if (existing) {
+          dispatch(focusOrchestratorSession(existing.sessionId));
+        }
+        dispatch(
+          showNotification(
+            'info',
+            outcome.message ?? 'Already drafting a report for this failure.',
+            { tenant, environment },
+          ),
+        );
+        return;
+      }
+      dispatch(openFallbackReportURL(report, summary, tenant, environment, outcome.message ?? ''));
+    } catch (error) {
+      dispatch(openFallbackReportURL(report, summary, tenant, environment, readError(error)));
+    }
+  };
+
+// openFallbackReportURL is the existing DebugPanel.Report.tsx path (a
+// prefilled github.com/sophium/erun issue the operator reviews and submits in
+// the browser), reused here as the never-a-dead-end floor: no agent could
+// draft this report, but the operator still gets a form pre-filled with the
+// evidence rather than an error with nothing behind it.
+const openFallbackReportURL =
+  (
+    report: string,
+    summary: string,
+    tenant: string,
+    environment: string,
+    reason: string,
+  ): AppThunk =>
+  (dispatch, getState) => {
+    const build =
+      stateApi.endpoints.getInitialState.select(undefined)(getState()).data?.build ?? null;
+    const title = tenant && environment ? `${tenant}/${environment}: ${summary}` : summary;
+    const body = diagnosticsIssueBody(report, build);
+    const { url } = buildDiagnosticsIssueURL(title, body);
+    BrowserOpenURL(url);
+    void ClipboardSetText(report);
+    const prefix = reason ? `${reason} ` : '';
+    dispatch(
+      showNotification(
+        'warning',
+        `${prefix}Opened a prefilled issue in the browser instead — the full report is on your clipboard.`,
+        { tenant, environment },
+      ),
+    );
   };

@@ -27,24 +27,39 @@ import (
 // a failure investigated recently, and the live population has room. A refusal
 // is returned as an error so the operator is told which bound stopped it.
 func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows int) (orchestratorInfo, error) {
+	name := "Investigate"
+	if env := strings.TrimSpace(environment); env != "" {
+		name = "Investigate " + env
+	}
+	return a.spawnFailureAgent("investigate", report, tenant, environment, cols, rows, name, func(path string) string {
+		return fmt.Sprintf("A failure report is saved at %s. Read it, then plan to fix the issue, or improve error reporting so similar issues can be fixed faster. If this is an erun platform issue rather than a project issue, file a bug in the erun GitHub tracker (sophium/erun) using the erun-file-issue skill.", path)
+	})
+}
+
+// spawnFailureAgent is the bounded-spawn plumbing shared by every agent a
+// failure report can start — an investigation, or a bug-report draft
+// (report_bug.go): stage the report, admit it against the shared
+// investigation_bounds.go population, spawn the transient orchestrator, and
+// register it as an environment job. idPrefix and prompt are the only things
+// that differ between callers; prompt receives the staged report's path so it
+// can be referenced from the seed text.
+func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, cols, rows int, name string, prompt func(reportPath string) string) (orchestratorInfo, error) {
 	report = strings.TrimSpace(report)
 	if report == "" {
-		return orchestratorInfo{}, fmt.Errorf("nothing to investigate: the failure report is empty")
+		return orchestratorInfo{}, fmt.Errorf("nothing to work from: the failure report is empty")
 	}
 	path, err := a.investigations.stageReport(report)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
-	id := fmt.Sprintf("investigate-%d", time.Now().UnixNano())
+	id := fmt.Sprintf("%s-%d", idPrefix, time.Now().UnixNano())
 	if err := a.investigations.admit(id, report, tenant, environment); err != nil {
 		// The refused report stays staged: it is the record of what was reported,
-		// and for a report too thin to investigate it is also the evidence of the
+		// and for a report too thin to act on it is also the evidence of the
 		// reporting gap that is the real bug.
-		log.Printf("erun-app: investigation refused for %s (%s): report=%s", investigationTargetLabel(tenant, environment), investigationRefusalReason(err), path)
+		log.Printf("erun-app: %s refused for %s (%s): report=%s", idPrefix, investigationTargetLabel(tenant, environment), investigationRefusalReason(err), path)
 		return orchestratorInfo{}, err
 	}
-
-	prompt := fmt.Sprintf("A failure report is saved at %s. Read it, then plan to fix the issue, or improve error reporting so similar issues can be fixed faster. If this is an erun platform issue rather than a project issue, file a bug in the erun GitHub tracker (sophium/erun) using the erun-file-issue skill.", path)
 
 	var envs []eruncommon.OrchestratorEnvConfig
 	if t, env := strings.TrimSpace(tenant), strings.TrimSpace(environment); t != "" && env != "" {
@@ -52,15 +67,11 @@ func (a *App) InvestigateFailure(report, tenant, environment string, cols, rows 
 			{Tenant: t, Environment: env, Directory: a.investigateWorkingDir(t, env)},
 		}
 	}
-	name := "Investigate"
-	if env := strings.TrimSpace(environment); env != "" {
-		name = "Investigate " + env
-	}
 	info, err := a.spawnOrchestratorSession(orchestratorSpawn{
 		id:            id,
 		name:          name,
 		envs:          envs,
-		initialPrompt: prompt,
+		initialPrompt: prompt(path),
 		transient:     true,
 		cols:          cols,
 		rows:          rows,
@@ -155,6 +166,18 @@ func investigationRefusalReason(err error) string {
 		return refusal.reason
 	}
 	return "error"
+}
+
+// investigationRefusalDetails reports the reason, the operator-facing message,
+// and the already-admitted investigation this refusal points at (empty for a
+// hard refusal such as a thin report or a full population), so a caller can
+// offer "focus that one" instead of only surfacing the refusal as an error.
+func investigationRefusalDetails(err error) (reason, message, existingID string) {
+	var refusal *investigationRefusal
+	if errors.As(err, &refusal) {
+		return refusal.reason, refusal.message, refusal.existingID
+	}
+	return "error", err.Error(), ""
 }
 
 // investigateWorkingDir resolves the env's host workspace to run the

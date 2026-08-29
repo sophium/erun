@@ -104,6 +104,10 @@ type investigationRecord struct {
 type investigationRefusal struct {
 	reason  string
 	message string
+	// existingID names the already-admitted investigation this refusal points
+	// at (the same-event and already-investigating reasons only), so a caller
+	// can focus that one instead of only reporting the refusal as an error.
+	existingID string
 }
 
 func (r *investigationRefusal) Error() string { return r.message }
@@ -180,6 +184,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 				reason: "same-event",
 				message: fmt.Sprintf("%s is already being investigated as %s, started %s ago. This report is part of the same failure event, so it was recorded against that investigation instead of starting another.",
 					investigationTargetLabel(tenant, environment), existing.ID, investigationAge(now.Sub(existing.StartedAt))),
+				existingID: existing.ID,
 			}
 		}
 		if existing.Signature == signature {
@@ -188,6 +193,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 				reason: "already-investigating",
 				message: fmt.Sprintf("That failure is already under investigation as %s, started %s ago. Watch or stop that investigation rather than starting a second one for the same failure.",
 					existing.ID, investigationAge(now.Sub(existing.StartedAt))),
+				existingID: existing.ID,
 			}
 		}
 	}

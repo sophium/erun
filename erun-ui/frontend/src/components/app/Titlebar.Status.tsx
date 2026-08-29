@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from 'erun-kit';
-import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
+import { AlertCircle, Bug, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
 import * as React from 'react';
 
 import { openInstallDocs } from '@/app/documentationThunks';
@@ -21,9 +21,10 @@ import {
   dismissTerminalStatus,
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
-import { restartOrchestrator } from '@/app/orchestratorThunks';
+import { reportFailure, restartOrchestrator } from '@/app/orchestratorThunks';
 import type { AppNotification, AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
+import { buildTitlebarFailureReport } from '@/app/titlebarFailureReport';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
@@ -105,6 +106,7 @@ export function TitlebarStatus(): React.ReactElement | null {
         <StatusMessage status={status} />
         {status.action === 'wait-longer' && <StatusWaitAction />}
         <StatusEnvAction status={status} />
+        {status.kind === 'error' && <StatusReportBugAction status={status} />}
         {status.copyOutput &&
           (status.source === 'notification' ? (
             <NotificationCopyAction text={status.copyOutput} />
@@ -384,6 +386,53 @@ function StatusRestartOrchestratorAction({
       }}
     >
       Restart
+    </Button>
+  );
+}
+
+// StatusReportBugAction is the standing action every error status carries —
+// unlike StatusEnvAction, which only renders when a remedy was resolved, this
+// is unconditional (root AGENTS.md "Smooth, Seamless, No Dead Ends": the
+// operator must never read an error pill with nothing to do about it). It
+// renders after any named remedy so a known fix still leads, and hands the
+// failure to an agent that drafts the report (orchestratorThunks.reportFailure)
+// rather than opening a form — the click itself is the only synchronous piece
+// this button can show progress for, so it disables and spins for that
+// admission round-trip; the draft itself continues in its own focused
+// terminal, reachable rather than modal. Dismissing this status once the
+// outcome settles mirrors StatusDeployAction/StatusRestartOrchestratorAction:
+// the operator's recovery surface is now elsewhere (the new draft's terminal,
+// an already-running draft that was focused, or the fallback browser tab), so
+// clearing the queue advances it to whatever comes next rather than leaving a
+// handled error sitting in front of it.
+function StatusReportBugAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const [reporting, setReporting] = React.useState(false);
+  return (
+    <Button
+      className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
+      type="button"
+      variant="ghost"
+      size="xs"
+      disabled={reporting}
+      onClick={() => {
+        setReporting(true);
+        const report = buildTitlebarFailureReport(status);
+        void dispatch(
+          reportFailure(
+            report,
+            status.message,
+            status.envTenant ?? '',
+            status.envEnvironment ?? '',
+          ),
+        ).finally(() => {
+          setReporting(false);
+          dismissTitlebarStatus(dispatch, status);
+        });
+      }}
+    >
+      <Bug aria-hidden="true" />
+      {reporting ? 'Reporting…' : 'Report a bug'}
     </Button>
   );
 }
