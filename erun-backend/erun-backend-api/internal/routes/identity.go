@@ -48,7 +48,7 @@ type IdentityRoutes struct {
 }
 
 // RegisterIdentityRoutes registers the identity-administration surface
-// (issue #1209): the erun-zitadel chart provisions an org-owner Management
+// : the erun-zitadel chart provisions an org-owner Management
 // API credential on every deployment, and until this, nothing consumed it —
 // enrolling a colleague required a second browser tab on Zitadel's own admin
 // console. Every operation here is named individually; this is deliberately
@@ -69,12 +69,12 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	// claim, so a new tenant needs an org for its mapping to point at. Until
 	// this, that was a hand-made org in Zitadel's own console — erun could
 	// register the tenant and the issuer mapping and then had nowhere to
-	// point them (issue #1605).
+	// point them.
 	register(http.MethodPost, "/v1/identity/orgs", http.HandlerFunc(routes.createOrg))
 	register(http.MethodGet, "/v1/identity/org-settings", http.HandlerFunc(routes.getOrgSettings))
 	register(http.MethodPatch, "/v1/identity/org-settings", http.HandlerFunc(routes.updateOrgSettings))
 	// The platform's honest answer to "can this instance send mail at all"
-	// (issue #1168): every flow that reaches a user out of band -- signup
+	//: every flow that reaches a user out of band -- signup
 	// verification, password reset, invitation -- depends on it, and until
 	// this the only signal was Zitadel's own unhandled 404.
 	register(http.MethodGet, "/v1/identity/smtp-settings", http.HandlerFunc(routes.getSMTPSettings))
@@ -178,7 +178,7 @@ type enrollIdentityUserRequest struct {
 // failure or claiming full success.
 //
 // MailDeliveryConfigured/TemporaryPassword/Warning report the other half of
-// what actually landed (issue #1168): a caller cannot tell "invited, check
+// what actually landed: a caller cannot tell "invited, check
 // your inbox" apart from "invited, but nothing could ever be sent" from
 // IdPUser alone, and the difference is exactly which action the operator
 // needs to take next.
@@ -374,7 +374,7 @@ func (r IdentityRoutes) getSMTPSettings(w http.ResponseWriter, req *http.Request
 }
 
 // updateSMTPSettingsRequest is the declarative desired state for the
-// platform's outbound mail (issue #1168), provider-agnostic and sourced
+// platform's outbound mail, provider-agnostic and sourced
 // from wherever the operator holds the credential out of band; Password is
 // omitted on an update that only changes non-secret fields.
 type updateSMTPSettingsRequest struct {

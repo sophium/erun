@@ -48,6 +48,14 @@ var InternalAPIRoutes = map[string]bool{
 // admin surface designed, not just a fetch wired up), and the DNS-01 token
 // mint (needs `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
+	// Creating an org on the platform's own IdP is what makes a second tenant
+	// possible: an org-scoped issuer resolves tenants by the org claim, so a new
+	// tenant needs an org for its mapping to point at. That makes it plainly
+	// operator-facing, not internal — it belongs beside the console's tenant
+	// registration, whose dialog already takes the org-scoped issuer fields. It
+	// is recorded here rather than exempted because it needs a real surface
+	// designed with the rest of identity administration, not a bare button.
+	"POST /v1/identity/orgs":                             true,
 	"GET /v1/releases":                                   true,
 	"GET /v1/releases/{release_id}":                      true,
 	"GET /v1/reviews/{review_id}/builds/{build_id}":      true,
