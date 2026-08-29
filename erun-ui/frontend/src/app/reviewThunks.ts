@@ -2,6 +2,7 @@ import type { DiffResult, UISelection } from '@/types';
 
 import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
+import { pruneStaleDiffReviewStatuses } from './diffReviewStatusThunks';
 import { chooseSelectedDiffPath } from './diffUtils';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
@@ -183,6 +184,7 @@ export const loadReviewDiff =
     // Drop sections for environments no longer in scope, so switching from a
     // two-env orchestrator to a single env tab does not leave stale ones.
     dispatch(pruneEnvDiffs(targets.map((target) => target.envKey)));
+    dispatch(pruneStaleDiffReviewStatuses());
     dispatch(bumpReviewDiff());
     const request = getState().requestCounters.reviewDiff;
     const scopeKey = targets.map((target) => target.envKey).join(',');

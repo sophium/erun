@@ -2,6 +2,7 @@ import { Button, cn } from 'erun-kit';
 import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
+import { loadDiffReviewStatus } from '@/app/diffReviewStatusThunks';
 import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
@@ -13,7 +14,7 @@ import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
-import { StartReviewFromDiffAction } from './DiffList.StartReviewAction';
+import { DiffReviewAction, DiffReviewStatusChip } from './DiffList.ReviewAction';
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
 
 export function DiffList(): React.ReactElement {
@@ -59,11 +60,23 @@ function DiffEnvSection({
   // active environment identity visible while a long diff scrolls), unlike
   // the label styling it wraps.
   //
-  // Unlike the label, the "Start a review" action renders unconditionally —
-  // one persistent affordance per environment section rather than one that
-  // only appears once files have loaded, so it never flickers in and out as
-  // the diff itself loads, errors, or comes back empty.
+  // Unlike the label, the chip and action render unconditionally — a
+  // persistent affordance per environment section rather than one that only
+  // appears once files have loaded, so it never flickers in and out as the
+  // diff itself loads, errors, or comes back empty.
   const targetBranchHint = slot.diff?.reviewBase?.branch?.trim() ?? '';
+  // Resolves the chip once the target branch is known and whenever it
+  // changes -- a background enrichment read, not a user action, the same way
+  // the diff itself auto-loads. loadDiffReviewStatus is a no-op with no
+  // effect on dependency identity when targetBranchHint is still empty.
+  React.useEffect(() => {
+    if (!targetBranchHint) {
+      return;
+    }
+    void dispatch(
+      loadDiffReviewStatus(target.envKey, target.tenant, target.environment, targetBranchHint),
+    );
+  }, [dispatch, target.envKey, target.tenant, target.environment, targetBranchHint]);
   const header = (
     <div
       // data-env-key lets keyboard navigation (TerminalController's
@@ -76,11 +89,15 @@ function DiffEnvSection({
       )}
     >
       {showHeader && <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />}
-      <StartReviewFromDiffAction
-        tenant={target.tenant}
-        environment={target.environment}
-        targetBranch={targetBranchHint}
-      />
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        <DiffReviewStatusChip envKey={target.envKey} tenant={target.tenant} />
+        <DiffReviewAction
+          tenant={target.tenant}
+          environment={target.environment}
+          targetBranch={targetBranchHint}
+          envKey={target.envKey}
+        />
+      </div>
     </div>
   );
 

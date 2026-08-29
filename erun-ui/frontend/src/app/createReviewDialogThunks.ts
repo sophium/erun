@@ -1,6 +1,7 @@
 import { EnvironmentWorkingIssue, TenantReviewCreateCapability } from '../../wailsjs/go/main/App';
 import { execApi } from './api/execApi';
 import { tenantApi } from './api/tenantApi';
+import { loadDiffReviewStatus } from './diffReviewStatusThunks';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
 import { openReviewDetail } from './reviewDetailThunks';
@@ -265,6 +266,19 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
     dispatch(resetCreateReviewDialog());
     dispatch(showNotification('success', `Opened ${review.name || review.reviewId}.`));
     void dispatch(openReviewDetail(review.reviewId, dialog.tenant));
+    // Refreshes this section's chip immediately -- the operator learns the
+    // review now exists from the chip itself, not only from the detail
+    // dialog this also opens (Nielsen #1, visibility of system status).
+    if (dialog.environment) {
+      void dispatch(
+        loadDiffReviewStatus(
+          `${dialog.tenant}/${dialog.environment}`,
+          dialog.tenant,
+          dialog.environment,
+          targetBranch,
+        ),
+      );
+    }
   } catch (error) {
     dispatch(patchCreateReviewDialog({ creating: false, createError: readError(error) }));
   }

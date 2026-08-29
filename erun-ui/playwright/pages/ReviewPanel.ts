@@ -130,6 +130,31 @@ export class ReviewPanel {
       .filter({ hasText: `${tenant} / ${environment}` });
   }
 
+  // envActionHeader locates the sticky per-environment header by its
+  // data-env-key attribute (unlike envSectionHeader, which matches by visible
+  // tenant/environment text and so only resolves in the multi-env case).
+  // Scoped with `.sticky` since `data-env-key` also appears on each of that
+  // environment's own diff-file sections (DiffFileView), which are not sticky.
+  envActionHeader(envKey: string): Locator {
+    return this.page.locator(`[data-env-key="${envKey}"].sticky`);
+  }
+
+  // reviewStatusChip locates the review-status chip's own label text
+  // (DiffList.ReviewAction.tsx's DiffReviewStatusChip), scoped to one
+  // environment section and matched exactly -- a substring match risks
+  // colliding with a longer label sharing the same word (e.g. "Ready" inside
+  // "Already").
+  reviewStatusChip(envKey: string, label: string): Locator {
+    return this.envActionHeader(envKey).getByText(label, { exact: true });
+  }
+
+  // reviewActionButton locates the diff panel's one action button for an
+  // environment section (DiffReviewAction), by its current accessible name --
+  // "Start a review", "Advance queue", "Resolve N threads", "View review", …
+  reviewActionButton(envKey: string, name: string | RegExp): Locator {
+    return this.envActionHeader(envKey).getByRole('button', { name });
+  }
+
   // The "Changed files N" collapsible header inside the aside, distinct from
   // the titlebar's "Toggle changed files list" (which hides the whole aside).
   changedFilesSectionToggle(): Locator {
