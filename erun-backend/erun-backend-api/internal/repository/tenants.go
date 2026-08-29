@@ -124,6 +124,41 @@ func (r *TenantRepository) List(ctx context.Context) ([]model.Tenant, error) {
 	return tenants, err
 }
 
+// Reachable answers "which tenants does the caller's own identity map to" —
+// deliberately the one place besides List's operations branch that crosses the
+// tenant boundary every other query is scoped by, and unlike that branch it is
+// available to any authenticated caller, not just an OPERATIONS tenant. It
+// looks up user_external_ids by the caller's own verified (issuer,
+// external_id) from the security context — never a caller-supplied value —
+// across every tenant_id, and returns tenant identity only (name, type): the
+// caller is authenticated to the one tenant this request already resolved to,
+// not to any of the others this reports, so nothing scoped inside them may
+// leak through here. Runs under WithinSystemTx because the query is keyed on
+// identity, not on the request's own resolved tenant_id, the same reason
+// invites' unauthenticated accept flow needs it.
+func (r *TenantRepository) Reachable(ctx context.Context) ([]model.Tenant, error) {
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return nil, ErrMissingSecurityContext
+	}
+	issuer := strings.TrimSpace(securityContext.ExternalIssuer)
+	externalID := strings.TrimSpace(securityContext.ExternalUserID)
+	if issuer == "" || externalID == "" {
+		return nil, ErrMissingSecurityContext
+	}
+	var tenants []model.Tenant
+	err := r.txs.WithinSystemTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			  FROM user_external_ids uei
+			  JOIN tenants t ON t.tenant_id = uei.tenant_id
+			 WHERE uei.issuer = ? AND uei.external_id = ?
+			 ORDER BY t.created_at ASC
+		`, issuer, externalID).Scan(ctx, &tenants)
+	})
+	return tenants, err
+}
+
 // Current returns the row for the caller's resolved tenant. Because tenants is a
 // root resolution table (not RLS-scoped), the query must scope explicitly by the
 // security context's tenant ID.

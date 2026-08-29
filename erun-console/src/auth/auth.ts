@@ -131,8 +131,13 @@ async function pkceChallenge(verifier: string): Promise<string> {
 
 // beginLogin starts the Authorization Code + PKCE flow: it mints a code verifier
 // and a CSRF state (stashed in sessionStorage for the callback), then redirects
-// the browser to the issuer's authorization endpoint.
-export async function beginLogin(config: OidcConfig): Promise<void> {
+// the browser to the issuer's authorization endpoint. `prompt` is the one
+// standard OIDC param a caller may add on top of the baseline request —
+// `select_account` is what the tenant switcher (shell/tenantSwitch.ts) passes
+// so the IdP offers an account/org picker instead of silently reusing
+// whatever session it already holds, which would make "switch" a no-op for a
+// caller who is still signed into the browser as the same identity.
+export async function beginLogin(config: OidcConfig, prompt?: string): Promise<void> {
   const discovery = await discover(config.issuer);
   const verifier = randomString();
   const state = randomString();
@@ -147,6 +152,9 @@ export async function beginLogin(config: OidcConfig): Promise<void> {
     code_challenge_method: 'S256',
     state,
   });
+  if (prompt !== undefined && prompt.length > 0) {
+    params.set('prompt', prompt);
+  }
   window.location.assign(discovery.authorization_endpoint + '?' + params.toString());
 }
 

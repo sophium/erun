@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  beginLogin,
   completeLogin,
   devBearerToken,
   isAuthCallback,
@@ -45,6 +46,7 @@ afterEach(() => {
 function cleanup(): void {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   sessionStorage.clear();
   setCallbackUrl('');
 }
@@ -71,6 +73,68 @@ describe('oidcConfig', () => {
       clientId: 'console-client',
       redirectUri: window.location.origin + '/',
     });
+  });
+});
+
+// jsdom's Location.assign is non-configurable, so it cannot be vi.spyOn'd or
+// redefined in place; replacing window.location itself with a stub object is
+// the standard workaround. realLocation lets restoreLocation put the live
+// jsdom Location back afterwards, so later tests' history.replaceState-based
+// navigation (setCallbackUrl) keeps working against the real thing.
+let realLocation: Location | undefined;
+
+function stubLocationAssign(): ReturnType<typeof vi.fn> {
+  const assign = vi.fn();
+  realLocation = window.location;
+  Object.defineProperty(window, 'location', {
+    value: { ...realLocation, assign },
+    writable: true,
+    configurable: true,
+  });
+  return assign;
+}
+
+function restoreLocation(): void {
+  if (realLocation === undefined) {
+    return;
+  }
+  Object.defineProperty(window, 'location', {
+    value: realLocation,
+    writable: true,
+    configurable: true,
+  });
+  realLocation = undefined;
+}
+
+describe('beginLogin', () => {
+  it('requests no prompt for an ordinary sign-in', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    await beginLogin(config);
+
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.has('prompt')).toBe(false);
+  });
+
+  // The tenant switcher (shell/tenantSwitch.ts) passes select_account so the
+  // IdP offers an account/org picker instead of silently reusing whatever
+  // session it already holds — without this, "switch" could never land on a
+  // different tenant for a caller still signed into the browser.
+  it('carries an explicit prompt through to the authorization request', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    await beginLogin(config, 'select_account');
+
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.get('prompt')).toBe('select_account');
   });
 });
 

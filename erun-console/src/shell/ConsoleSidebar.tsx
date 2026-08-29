@@ -1,8 +1,10 @@
 import { cn } from 'erun-kit';
 import type * as React from 'react';
 
+import type { OidcConfig } from '../auth/auth';
 import { BrandMark } from './BrandMark';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
+import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
 
 function NavItem({
   section,
@@ -42,11 +44,17 @@ function NavItem({
 // has no equivalent here because there is only one field to derive it from.
 export function ConsoleSidebar({
   brand,
+  token,
+  currentTenant,
+  oidc,
   sections,
   active,
   onSelect,
 }: {
   brand: string | undefined;
+  token: string;
+  currentTenant: CurrentTenant;
+  oidc: OidcConfig | undefined;
   sections: ConsoleSection[];
   active: ConsoleSectionId;
   onSelect: (id: ConsoleSectionId) => void;
@@ -59,6 +67,7 @@ export function ConsoleSidebar({
           {brand && brand.length > 0 ? brand : 'ERun console'}
         </span>
       </div>
+      <TenantSwitcher token={token} current={currentTenant} oidc={oidc} />
       <nav aria-label="Console sections">
         <ul className="grid gap-0.5">
           {sections.map((section) => (

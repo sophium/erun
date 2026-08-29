@@ -17,6 +17,7 @@ import (
 type TenantRepository interface {
 	Create(ctx context.Context, params repository.CreateTenantParams) (model.Tenant, error)
 	List(ctx context.Context) ([]model.Tenant, error)
+	Reachable(ctx context.Context) ([]model.Tenant, error)
 }
 
 type TenantRoutes struct {
@@ -39,12 +40,26 @@ func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantReposi
 	routes := TenantRoutes{tenants: tenants}
 	register(http.MethodPost, "/v1/tenants", http.HandlerFunc(routes.createTenant))
 	register(http.MethodGet, "/v1/tenants", http.HandlerFunc(routes.listTenants))
+	register(http.MethodGet, "/v1/tenants/reachable", http.HandlerFunc(routes.reachableTenants))
 }
 
 // listTenants returns every tenant for an operations-scoped caller, or a
 // single-item list containing only the caller's own tenant otherwise.
 func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
 	tenants, err := r.tenants.List(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tenants)
+}
+
+// reachableTenants answers "which tenants can I, this caller, reach" —
+// available to any authenticated caller (no OPERATIONS gate), unlike
+// listTenants above. See TenantRepository.Reachable for why this is the one
+// route allowed to cross tenant scope on the caller's own behalf.
+func (r TenantRoutes) reachableTenants(w http.ResponseWriter, req *http.Request) {
+	tenants, err := r.tenants.Reachable(req.Context())
 	if err != nil {
 		writeRepositoryError(w, err)
 		return
