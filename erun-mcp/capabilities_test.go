@@ -2,10 +2,13 @@ package erunmcp
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -165,5 +168,107 @@ func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 	}
 	if called {
 		t.Fatal("a refused tool must not run its handler")
+	}
+}
+
+// captureAuditLog redirects the standard logger, which auditToolDecision
+// writes to, into a buffer for the duration of the test. log.SetOutput is
+// process-global, so the previous writer is restored on cleanup (see
+// erun-ui's restoreLogOutputAfter for the same pattern); the standard
+// logger serializes concurrent writers internally, so concurrent callers may
+// safely log through it while the test holds no lock of its own.
+func captureAuditLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var out strings.Builder
+	prev := log.Writer()
+	log.SetOutput(&out)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	return &out
+}
+
+// The closure guardTool returns is built once per tool registration and
+// reused for every call to that tool, so the captured identity must not
+// become shared mutable state across concurrent callers. Each of many
+// concurrent callers, released at the same instant, must see its own audit
+// line -- not another caller's, and not a mix.
+func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
+	out := captureAuditLog(t)
+
+	capabilities := eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)})
+	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		return nil, struct{}{}, nil
+	}
+	guarded := guardTool(authIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
+
+	const callers = 200
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			ctx := withAuthIdentity(context.Background(), authIdentity{
+				Tenant:       "acme",
+				User:         fmt.Sprintf("user-%d", i),
+				Capabilities: capabilities,
+			})
+			<-start
+			if _, _, err := guarded(ctx, nil, struct{}{}); err != nil {
+				t.Errorf("call %d: unexpected refusal: %v", i, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	seen := make(map[string]int, callers)
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		idx := strings.Index(line, "user=")
+		if idx < 0 {
+			t.Fatalf("audit line has no user field: %q", line)
+		}
+		field := line[idx+len("user="):]
+		if sp := strings.IndexByte(field, ' '); sp >= 0 {
+			field = field[:sp]
+		}
+		seen[field]++
+	}
+	for i := 0; i < callers; i++ {
+		want := fmt.Sprintf("user-%d", i)
+		if seen[want] != 1 {
+			t.Fatalf("caller %q was audited %d times, want exactly 1 (audit log: %s)", want, seen[want], out.String())
+		}
+	}
+}
+
+// A call with no live auth context in it (the loopback-only edge, or a
+// misrouted request) must not be audited as whoever called previously. The
+// captured parameter starts at "registration-time" and is never touched by a
+// call that carries no identity, so it must still read that way after a
+// live caller has been through the same closure.
+func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T) {
+	out := captureAuditLog(t)
+
+	capabilities := eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)})
+	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		return nil, struct{}{}, nil
+	}
+	guarded := guardTool(authIdentity{Tenant: "acme", User: "registration-time", Capabilities: capabilities}, "list", nil, handler)
+
+	liveCtx := withAuthIdentity(context.Background(), authIdentity{Tenant: "acme", User: "live-caller", Capabilities: capabilities})
+	if _, _, err := guarded(liveCtx, nil, struct{}{}); err != nil {
+		t.Fatalf("live caller: unexpected refusal: %v", err)
+	}
+
+	if _, _, err := guarded(context.Background(), nil, struct{}{}); err != nil {
+		t.Fatalf("no-auth-context caller: unexpected refusal: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 audit lines, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[1], "user=registration-time") {
+		t.Fatalf("a call with no auth context must be audited as the registered identity, not the previous live caller: %q", lines[1])
 	}
 }
