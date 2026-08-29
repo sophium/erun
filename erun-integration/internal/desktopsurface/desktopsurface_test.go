@@ -244,8 +244,8 @@ func TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint(t *testing.
 }
 
 // TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding
-// locks the mechanism that unblocked #1497's Wails-mediated routes: a route
-// whose literal path never appears in TypeScript because erun-ui/frontend/src
+// locks the mechanism that recognizes Wails-mediated routes: a route whose
+// literal path never appears in TypeScript because erun-ui/frontend/src
 // calls the Wails-bound Go method by name instead is still found, through
 // WailsBinding, as long as that method name is what actually appears.
 func TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding(t *testing.T) {
