@@ -59,7 +59,7 @@ erun open my-tenant feature-a --intellij   # IntelliJ Gateway
 
 For Cursor, Zed, JetBrains Gateway, Neovim's remote plugins, or any other editor that speaks SSH, point it at the local SSH port the desktop holds open. The `--vscode` and `--intellij` flags are convenience launchers; the underlying SSH endpoint is the universal contract.
 
-Agents (Codex, Claude Code, others) attach to the same environment over MCP — see [Desktop app](/desktop/overview) for how the desktop publishes the endpoint.
+Agents (Codex, Claude Code, others) attach to the same environment over MCP — see [Desktop app · Working with an Agent](/desktop/working-with-an-agent) for how the desktop publishes the endpoint.
 
 ## With or without an Agent
 

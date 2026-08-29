@@ -11,7 +11,7 @@ export const TERMINAL_SCROLLBACK = 5000;
 // never more than a hard byte ceiling so a sparse-newline stream can't blow
 // the cap. Both bound cost to O(scrollback), never O(total session history) --
 // this is also the hard memory bound on a single session's retained buffer
-// (documented at erun-docs/docs/desktop/overview.md).
+// (documented at erun-docs/docs/desktop/terminals-and-editors.md).
 export const MAX_RETAINED_LINES = TERMINAL_SCROLLBACK * 2;
 export const MAX_RETAINED_BYTES = 2_000_000;
 

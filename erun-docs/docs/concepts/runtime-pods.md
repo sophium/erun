@@ -127,7 +127,7 @@ leaves JVMs resident, the container build cache grows. That is fine while you ar
 wasteful afterwards — and until now nothing showed it, so a heavy environment had no explanation.
 
 The Runtime tab reports what the pod is running, directly under the resource sliders: how many
-[sessions](/desktop/overview) actually have a live program behind them, and the processes holding
+[sessions](/desktop/resources-and-usage) actually have a live program behind them, and the processes holding
 memory grouped by what they are. It is read-only by default — you see what is there before anything
 is stopped — and the groups that are safe to reclaim carry an action:
 

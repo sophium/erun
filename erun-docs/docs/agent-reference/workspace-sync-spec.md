@@ -4,7 +4,7 @@ title: Workspace sync spec
 
 # Workspace sync spec
 
-> For the Operator view, see [Desktop app · Workspace sync](/desktop/overview) and [`erun sshd sync`](/cli/sshd).
+> For the Operator view, see [Desktop app · Workspace sync](/desktop/workspace-sync) and [`erun sshd sync`](/cli/sshd).
 
 Workspace sync mirrors a `remote-agent` environment's **pod worktree onto the host**, one way, as plain files. It is what gives an operator or a host-side orchestrator a local, readable copy of code that only exists inside the pod — the review surface — plus the artifacts the pod cross-built for this host.
 

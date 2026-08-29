@@ -54,7 +54,7 @@ Every action-oriented command supports `--dry-run` — resolve and print every s
 
 `-v` / `--verbose` streams external tool output; `-vv` adds per-command trace lines for every action and decision; `--time` prints elapsed wall time at the end. Full flag set per command is on the [CLI flag spec](/agent-reference/cli-flags) page.
 
-You never have to re-run a failed command just to capture diagnostics: every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`) automatically appends its full trace to the environment's rolling [trace log](/reference/config-locations#trace-log), readable at any time from the [desktop's Diagnostics console](/desktop/overview#diagnostics-console) — including for runs that finished before you went looking. `--dry-run` previews are never written to it.
+You never have to re-run a failed command just to capture diagnostics: every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`) automatically appends its full trace to the environment's rolling [trace log](/reference/config-locations#trace-log), readable at any time from the [desktop's Diagnostics console](/desktop/diagnostics-console) — including for runs that finished before you went looking. `--dry-run` previews are never written to it.
 
 ## How arguments resolve
 

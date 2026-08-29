@@ -93,7 +93,7 @@ deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version 
 
 The override applies to the runtime release only; component charts keep resolving at `--version`. It is not persisted -- pass it on each deploy that needs it, so an env's recorded state never implies a chart it was not deployed with.
 
-The desktop resolves this before you commit: picking a version reports which chart it would install, disables Deploy when the registry says there is none, and offers the chart that fixes it — see [Desktop app](/desktop/overview).
+The desktop resolves this before you commit: picking a version reports which chart it would install, disables Deploy when the registry says there is none, and offers the chart that fixes it — see [Desktop app · Deploying a version](/desktop/deploying-a-version).
 
 For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
 
