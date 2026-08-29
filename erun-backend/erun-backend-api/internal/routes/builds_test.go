@@ -38,14 +38,14 @@ func (s stubBuildRepository) List(context.Context, apirepository.BuildFilter) ([
 	return nil, s.err
 }
 
-// TestCreateBuildForcesKindRecorded is the impersonation guard for builds.kind
-// the same shape reviews.AuthorUserID already gets: a client cannot assert its
-// own reported build is the merge queue's GATE build.
-func TestCreateBuildForcesKindRecorded(t *testing.T) {
+// TestCreateBuildAcceptsAReportedGateKind: an environment now reports its own
+// merge-queue gate result, so kind=GATE is no longer forced to
+// RECORDED the way a client-supplied authorUserId is ignored.
+func TestCreateBuildAcceptsAReportedGateKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
-		bytes.NewBufferString(`{"successful":true,"commitId":"abc123","version":"1.0.0","kind":"GATE"}`))
+		bytes.NewBufferString(`{"successful":true,"commitId":"abc123","kind":"GATE"}`))
 	req.SetPathValue("review_id", "review-1")
 	rec := httptest.NewRecorder()
 
@@ -54,8 +54,25 @@ func TestCreateBuildForcesKindRecorded(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
-	if service.created.Kind != model.BuildKindRecorded {
-		t.Fatalf("kind persisted = %q, want %q despite the client asserting GATE", service.created.Kind, model.BuildKindRecorded)
+	if service.created.Kind != model.BuildKindGate {
+		t.Fatalf("kind persisted = %q, want %q", service.created.Kind, model.BuildKindGate)
+	}
+}
+
+// TestCreateBuildRejectsAnUnknownKind: kind is one of two known values, not
+// an open string.
+func TestCreateBuildRejectsAnUnknownKind(t *testing.T) {
+	service := &stubBuildService{}
+	routes := BuildRoutes{service: service}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
+		bytes.NewBufferString(`{"successful":true,"commitId":"abc123","kind":"BOGUS"}`))
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	routes.createBuild(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 

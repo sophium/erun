@@ -68,6 +68,18 @@ func (f *fakeReviewRepo) FindActiveMergeReview(_ context.Context, targetBranch s
 	return model.Review{}, repository.ErrNotFound
 }
 
+// FindLastMergedReview picks any MERGED review on targetBranch: tests never
+// have more than one, so insertion order does not matter here the way it
+// does for the real query's ORDER BY.
+func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, targetBranch string) (model.Review, error) {
+	for _, review := range f.reviews {
+		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerged {
+			return *review, nil
+		}
+	}
+	return model.Review{}, repository.ErrNotFound
+}
+
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
 	f.nextID++
 	entry.ReviewMergeQueueID = f.nextID
@@ -125,36 +137,186 @@ func (f *fakeReviewAudit) LogAuditEvent(_ context.Context, event model.AuditEven
 	return nil
 }
 
-// newTestReviewService wires a ReviewService with fakes sized for the common
-// case: no comments recorded anywhere (so no test accidentally trips the
-// unresolved-thread gate by omission) and a working audit logger.
-func newTestReviewService(reviews ReviewRepository, builds ReviewBuildRepository) (*ReviewService, *fakeReviewAudit) {
-	audit := &fakeReviewAudit{}
-	return NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit), audit
+// fakeMergeVerifier is the narrow MergeVerifier dependency: a fixed answer
+// (or error) for whatever commit/branch acceptMerged asks about, so a test
+// can drive each of the three verification conditions independently.
+type fakeMergeVerifier struct {
+	onBranch bool
+	parent   string
+	err      error
 }
 
-// TestUpdateStatusRefusesMergeAndMerged is the API hole the issue reports:
-// MERGED (and MERGE) must never be settable by a caller's PATCH. Only the
-// merge queue's own gate result (MergeQueueService) may write them.
-func TestUpdateStatusRefusesMergeAndMerged(t *testing.T) {
+func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, string, error) {
+	return f.onBranch, f.parent, f.err
+}
+
+// fakeReleaseTrigger records every release TriggerRelease was asked to start.
+type fakeReleaseTrigger struct {
+	requests []ReleaseRequest
+	err      error
+}
+
+func (f *fakeReleaseTrigger) TriggerRelease(_ context.Context, request ReleaseRequest) error {
+	f.requests = append(f.requests, request)
+	return f.err
+}
+
+// newTestReviewService wires a ReviewService with fakes sized for the common
+// case: no comments recorded anywhere (so no test accidentally trips the
+// unresolved-thread gate by omission), a working audit logger, and no merge
+// verifier or release trigger (nil is fine for every test that never reaches
+// a MERGED transition).
+func newTestReviewService(reviews ReviewRepository, builds ReviewBuildRepository) (*ReviewService, *fakeReviewAudit) {
+	audit := &fakeReviewAudit{}
+	return NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit, nil, nil), audit
+}
+
+// TestUpdateStatusRefusesMergeAlways: MERGE is reached only by
+// AdvanceMergeQueue promoting the queue head, never by a caller's PATCH.
+func TestUpdateStatusRefusesMergeAlways(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
-	for _, status := range []model.ReviewStatus{model.ReviewStatusMerge, model.ReviewStatusMerged} {
-		_, err := svc.UpdateStatus(context.Background(), "review-1", status, "build-1")
-		var invalidTransition *InvalidTransitionError
-		if !errors.As(err, &invalidTransition) {
-			t.Fatalf("UpdateStatus(%s) error = %v, want *InvalidTransitionError", status, err)
-		}
-		if !errors.Is(err, repository.ErrInvalidInput) {
-			t.Fatalf("UpdateStatus(%s) error = %v, want it to unwrap to ErrInvalidInput", status, err)
-		}
-		if invalidTransition.From != model.ReviewStatusReady || invalidTransition.To != status {
-			t.Fatalf("InvalidTransitionError = %+v, want from READY to %s", invalidTransition, status)
-		}
-		if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusReady {
-			t.Fatalf("UpdateStatus(%s) changed the review to %s despite being refused", status, got)
-		}
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerge, "build-1", "")
+	var invalidTransition *InvalidTransitionError
+	if !errors.As(err, &invalidTransition) {
+		t.Fatalf("UpdateStatus(MERGE) error = %v, want *InvalidTransitionError", err)
+	}
+	if !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("UpdateStatus(MERGE) error = %v, want it to unwrap to ErrInvalidInput", err)
+	}
+	if invalidTransition.From != model.ReviewStatusReady || invalidTransition.To != model.ReviewStatusMerge {
+		t.Fatalf("InvalidTransitionError = %+v, want from READY to MERGE", invalidTransition)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusReady {
+		t.Fatalf("UpdateStatus(MERGE) changed the review to %s despite being refused", got)
+	}
+}
+
+// TestUpdateStatusRefusesMergedFromAnyStatusButMerge: MERGED is reachable
+// only from MERGE — asserting it from any other status is refused before the
+// git-state checks even run.
+func TestUpdateStatusRefusesMergedFromAnyStatusButMerge(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "build-1", "")
+	var invalidTransition *InvalidTransitionError
+	if !errors.As(err, &invalidTransition) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *InvalidTransitionError", err)
+	}
+	if invalidTransition.From != model.ReviewStatusReady || invalidTransition.To != model.ReviewStatusMerged {
+		t.Fatalf("InvalidTransitionError = %+v, want from READY to MERGED", invalidTransition)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusReady {
+		t.Fatalf("UpdateStatus(MERGED) changed the review to %s despite being refused", got)
+	}
+}
+
+// mergingReviewWithGateBuild sets up a review sitting at MERGE with a
+// successful GATE build already recorded against it — the state every
+// acceptMerged test starts from, so each one only has to vary the one
+// condition it means to exercise.
+func mergingReviewWithGateBuild(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
+	builds := &fakeReviewBuilds{builds: map[string]model.Build{
+		"gate-1": {BuildID: "gate-1", ReviewID: "review-1", Kind: model.BuildKindGate, Successful: true, CommitID: commit},
+	}}
+	return reviews, builds
+}
+
+// TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch is refusal
+// condition 1: a reported merge commit the verifier cannot find on
+// origin/<targetBranch> at all must never become MERGED, however the caller
+// asserts it.
+func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: false}, nil)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("error = %v, want it to unwrap to ErrInvalidInput", err)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE, not moved to MERGED", got)
+	}
+}
+
+// TestAcceptMergedRefusesWhenParentDoesNotMatchTheGatedTargetTip is refusal
+// condition 2: the reported commit is on the branch, but its parent is not
+// the target tip this review was gated against (the previous MERGED
+// review's own merge commit on the same branch) — proof the merge was built
+// against the wrong base.
+func TestAcceptMergedRefusesWhenParentDoesNotMatchTheGatedTargetTip(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	// A different review already merged onto main at commit "real-tip" before
+	// this one was gated — that is the target tip this review's parent has to
+	// match, and it does not.
+	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0"}
+	reviews.reviews["review-0"] = &priorMerge
+	builds.builds["gate-0"] = model.Build{BuildID: "gate-0", ReviewID: "review-0", Kind: model.BuildKindGate, Successful: true, CommitID: "real-tip"}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "wrong-parent"}, nil)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE, not moved to MERGED", got)
+	}
+}
+
+// TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded is refusal
+// condition 3: even a commit that really is on the target branch with the
+// right parent must not become MERGED unless a successful GATE build is
+// actually recorded for it — a buildId pointing at a failed build is not a
+// gate that passed.
+func TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
+	builds := &fakeReviewBuilds{builds: map[string]model.Build{
+		"gate-1": {BuildID: "gate-1", ReviewID: "review-1", Kind: model.BuildKindGate, Successful: false, CommitID: "merge-commit"},
+	}}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true}, nil)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE, not moved to MERGED", got)
+	}
+}
+
+// TestAcceptMergedSucceedsWhenAllThreeConditionsHold proves the checks above
+// are not just refusing everything: a genuinely verified merge does become
+// MERGED and does trigger the release it earned.
+func TestAcceptMergedSucceedsWhenAllThreeConditionsHold(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: ""}, release)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Status != model.ReviewStatusMerged || updated.LastMergedBuildID != "gate-1" {
+		t.Fatalf("updated = %+v, want MERGED with lastMergedBuildId=gate-1", updated)
+	}
+	if len(release.requests) != 1 || release.requests[0].CommitID != "merge-commit" {
+		t.Fatalf("release requests = %+v, want one for merge-commit", release.requests)
 	}
 }
 
@@ -241,7 +403,7 @@ func TestAdvanceMergeQueueRefusesUnresolvedThreads(t *testing.T) {
 	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
 		"review-1": {{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusOpen}},
 	}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{}, nil, nil)
 
 	_, err := svc.AdvanceMergeQueue(context.Background(), "main")
 	var blocked *UnresolvedThreadsError
@@ -274,7 +436,7 @@ func TestAdvanceMergeQueuePromotesWhenAllThreadsResolved(t *testing.T) {
 			{CommentID: "c2", ReviewID: "review-1", ParentCommentID: "c1", Status: model.CommentStatusOpen},
 		},
 	}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{}, nil, nil)
 
 	promoted, err := svc.AdvanceMergeQueue(context.Background(), "main")
 	if err != nil {
@@ -302,7 +464,7 @@ func TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads(t *testing.T) {
 	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
 		"review-head": {{CommentID: "c1", ReviewID: "review-head", Status: model.CommentStatusOpen}},
 	}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{}, nil, nil)
 
 	_, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
 	if err != nil {
@@ -326,7 +488,7 @@ func TestOverrideAdvanceMergeQueueRequiresReason(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
 	audit := &fakeReviewAudit{}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit)
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit, nil, nil)
 
 	for _, reason := range []string{"", "   "} {
 		if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", reason); !errors.Is(err, repository.ErrInvalidInput) {
@@ -352,7 +514,7 @@ func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
 		"review-1": {{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusOpen}},
 	}}
 	audit := &fakeReviewAudit{}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, audit)
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, audit, nil, nil)
 	ctx := security.WithContext(context.Background(), security.Context{
 		TenantID: "tenant-1", ErunUserID: "user-1", ExternalIssuer: "https://issuer.example", ExternalUserID: "sub-1",
 	})
@@ -384,7 +546,7 @@ func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
 func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, nil)
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, nil, nil, nil)
 
 	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); err == nil {
 		t.Fatal("OverrideAdvanceMergeQueue with no audit logger configured: want an error, got nil")
@@ -400,7 +562,7 @@ func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
 func TestOverrideAdvanceMergeQueueRequiresSecurityContext(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
-	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{}, nil, nil)
 
 	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); !errors.Is(err, repository.ErrMissingSecurityContext) {
 		t.Fatalf("error = %v, want ErrMissingSecurityContext", err)

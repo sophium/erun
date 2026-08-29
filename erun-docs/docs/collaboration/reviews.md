@@ -36,9 +36,9 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. |
 | `POST` | `/v1/reviews` | Create a review. Body: `name`, `sourceBranch`, `targetBranch`. Refused with `409 Conflict` if another non-`MERGED`/`CLOSED` review already proposes the same `sourceBranch` onto the same `targetBranch`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
-| `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`. |
+| `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the caller pushed the merge to, fetched to verify the reported commit against the real repository. |
 | `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge for a target branch (status `READY`, not yet promoted). Optional `?targetBranch=<name>`. |
-| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE` and dispatch its merge-queue gate. Body: `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads — see [Merge queue](#merge-queue). Does not itself produce `MERGED`. |
+| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE`. Body: `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads — see [Merge queue](#merge-queue). The promoted review is expected to build and push its own merge and report the outcome; this call does not itself produce `MERGED`. |
 | `POST` | `/v1/reviews/merge-queue/override-advance` | Bypass the unresolved-thread refusal and advance anyway. Body: `targetBranch`, `reason`. A distinct, separately-authorized route — see [Overriding the gate](#overriding-the-gate). |
 | `GET` | `/v1/reviews/{reviewId}/reviewers` | List the review's reviewers. |
 | `POST` | `/v1/reviews/{reviewId}/reviewers` | Add a reviewer. Body: `userId`. |
@@ -94,7 +94,7 @@ stateDiagram-v2
     class MERGED,CLOSED endpoint
 ```
 
-The status transitions are enforced server-side: an Agent cannot directly mark a review `MERGE` or `MERGED` — `PATCH .../status` refuses both. The only path to `MERGED` is the merge queue's own gate: once `merge-queue/advance` promotes a review to `MERGE`, the queue builds the prospective merge of the review's source onto its *current* target branch, gates that build with a real build, and pushes only on green. `MERGED` means that gate actually ran and actually passed, not that any caller asserted it.
+The status transitions are enforced server-side: `MERGE` is reached only by promoting a review through `merge-queue/advance` (or its `override-advance` counterpart) — a caller's `PATCH .../status` asserting `MERGE` directly is always refused. `MERGED` is different: it is accepted from `PATCH .../status` from *any* caller — an Agent's own environment reports it, having done the fetch/merge/build/push itself — but only once the platform can verify it against the real repository. `MERGED` means the fact checks out, not that a particular caller asserted it: see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for the three conditions checked before it is accepted.
 
 ## Status meanings
 
@@ -103,8 +103,8 @@ The status transitions are enforced server-side: an Agent cannot directly mark a
 | `OPEN` | Review exists, no successful build yet, no decision either way. |
 | `FAILED` | The latest build for this review failed. The corresponding build id is stored in `lastFailedBuildId`. |
 | `READY` | The latest build succeeded; the review is mergeable. |
-| `MERGE` | Promoted to the head of its target branch's queue; the merge queue is building the prospective merge and gating it with a build right now. |
-| `MERGED` | The gate build passed and the merge was pushed to the target branch. Terminal. `lastMergedBuildId` records the gate build (kind `GATE`; it publishes nothing, so it carries no version — see [Builds](/collaboration/builds)). |
+| `MERGE` | Promoted to the head of its target branch's queue; whoever promoted it is expected to build the prospective merge, gate it with a build, and push. |
+| `MERGED` | A verified merge landed on the target branch. Terminal. `lastMergedBuildId` records the gate build (kind `GATE`; it publishes nothing, so it carries no version — see [Builds](/collaboration/builds)). |
 | `CLOSED` | Closed without merge (abandoned). Terminal. |
 
 ## Merge queue
@@ -129,11 +129,11 @@ Every endpoint returns a JSON body `{code, message, details}` — `code` is alwa
 
 | Status | When | Example |
 |---|---|---|
-| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly; `override-advance` with a blank or missing `reason`; an empty `targetBranch` on merge-queue advance. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result; `override-advance` with `reason` omitted. |
+| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` directly, or `MERGED` from any status other than `MERGE`; `override-advance` with a blank or missing `reason`; an empty `targetBranch` on merge-queue advance. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGE"}`; `override-advance` with `reason` omitted. |
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
 | `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller; a `buildId` on `PATCH .../status` that doesn't belong to the review or whose `successful` flag doesn't match the target status; `merge-queue/advance` against a target branch with nothing waiting to promote, or while another review is already `MERGE` for that target branch — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table). | `GET /v1/reviews/rev_unknown`; `POST /v1/reviews/merge-queue/advance` on an empty queue. |
-| `409 Conflict` | A second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body. |
+| `409 Conflict` | A second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads; a `MERGED` report the platform could not verify against the real repository. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body; `PATCH .../status` with `{"status": "MERGED"}` whose `buildId`/`remoteUrl` don't check out — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
 | `429 Too Many Requests` `(Planned.)` | Not implemented — no request ever gets this today. Kept here as the target shape; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits). | n/a |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |
 
@@ -141,13 +141,14 @@ Every endpoint returns a JSON body `{code, message, details}` — `code` is alwa
 
 ### Machine error codes
 
-The codes below are the ones this API's review/merge-queue routes can actually distinguish and emit. Two codes sketched in earlier drafts of this table described checks the API does not perform — `UNKNOWN_COMMIT` as "does this commit exist on the source branch" (the API has no git access to check that; a build/review mismatch on `PATCH /status` is a plain `404` instead, above) and `EXPIRED_PAGE_TOKEN` (depends on pagination, which is [not implemented](/agent-reference/api-protocol#pagination)) — both are dropped rather than left describing behavior that doesn't exist.
+The codes below are the ones this API's review/merge-queue routes can actually distinguish and emit. One code sketched in an earlier draft of this table has been dropped rather than left describing behavior that doesn't exist: `EXPIRED_PAGE_TOKEN` depends on pagination, which is [not implemented](/agent-reference/api-protocol#pagination). `UNKNOWN_COMMIT` — "does this commit exist on the source branch" — is still not a route this API can distinguish for an ordinary `RECORDED` build report (a build/review mismatch on `PATCH /status` is a plain `404` instead, above); a `MERGED` report is the one place the API now does fetch the real repository, covered by `MERGE_NOT_VERIFIED` below.
 
 | `code` | When | HTTP status |
 |---|---|---|
-| `INVALID_TRANSITION` | `PATCH /status` asserting `MERGE` or `MERGED` directly. `details.from`/`details.to`/`details.validTargets` name the review's current status, the rejected target, and the statuses actually reachable from `from` per the [Status lifecycle](#status-lifecycle). | `400` |
+| `INVALID_TRANSITION` | `PATCH /status` asserting `MERGE` directly, or `MERGED` from any status other than `MERGE`. `details.from`/`details.to`/`details.validTargets` name the review's current status, the rejected target, and the statuses actually reachable from `from` per the [Status lifecycle](#status-lifecycle). | `400` |
+| `MERGE_NOT_VERIFIED` | `PATCH /status` to `MERGED` whose `buildId` and `remoteUrl` do not check out against the real repository — see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for the three conditions checked. | `409` |
 | `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `READY` reviews waiting — a review already `MERGE` has left that waiting line, so its presence is the separate "another review already merging" case, not this one (that case is a plain `404` with no code above). | `404` |
-| `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
+| `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
 
 ### Pagination + rate limits

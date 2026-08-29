@@ -83,16 +83,8 @@ func (s *stubReviewService) OverrideAdvanceMergeQueue(_ context.Context, targetB
 	return s.review, s.err
 }
 
-func (s *stubReviewService) UpdateStatus(context.Context, string, model.ReviewStatus, string) (model.Review, error) {
+func (s *stubReviewService) UpdateStatus(context.Context, string, model.ReviewStatus, string, string) (model.Review, error) {
 	return s.review, s.err
-}
-
-type recordingDispatcher struct {
-	reviews []model.Review
-}
-
-func (d *recordingDispatcher) Dispatch(_ context.Context, review model.Review) {
-	d.reviews = append(d.reviews, review)
 }
 
 func patchReviewStatus(t *testing.T, routes ReviewRoutes, body string) *httptest.ResponseRecorder {
@@ -120,14 +112,11 @@ func TestUpdateReviewStatusReturnsTheServiceResult(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueDispatchesThePromotedReview: promoting a review to
-// MERGE is what starts its merge gate, and it has to be the review
-// AdvanceMergeQueue actually promoted, not necessarily the one any given
-// caller had in mind.
-func TestAdvanceMergeQueueDispatchesThePromotedReview(t *testing.T) {
+// TestAdvanceMergeQueuePromotesTheReview: the route surfaces exactly the
+// review AdvanceMergeQueue promoted.
+func TestAdvanceMergeQueuePromotesTheReview(t *testing.T) {
 	promoted := model.Review{ReviewID: "review-2", TargetBranch: "main", Status: model.ReviewStatusMerge}
-	dispatcher := &recordingDispatcher{}
-	routes := ReviewRoutes{service: &stubReviewService{review: promoted}, dispatcher: dispatcher}
+	routes := ReviewRoutes{service: &stubReviewService{review: promoted}}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
 	rec := httptest.NewRecorder()
@@ -136,20 +125,8 @@ func TestAdvanceMergeQueueDispatchesThePromotedReview(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if len(dispatcher.reviews) != 1 || dispatcher.reviews[0] != promoted {
-		t.Fatalf("dispatched %+v, want exactly the promoted review %+v", dispatcher.reviews, promoted)
-	}
-}
-
-// TestAdvanceMergeQueueWithoutADispatcherStillPromotes: an unwired merge
-// executor must not stop the promotion itself from being recorded.
-func TestAdvanceMergeQueueWithoutADispatcherStillPromotes(t *testing.T) {
-	routes := ReviewRoutes{service: &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusMerge}}}
-	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
-	rec := httptest.NewRecorder()
-	routes.advanceMergeQueue(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "review-2") {
+		t.Fatalf("body = %q, want the promoted review", rec.Body.String())
 	}
 }
 
@@ -180,8 +157,7 @@ func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
 func TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason(t *testing.T) {
 	promoted := model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge}
 	svc := &stubReviewService{review: promoted}
-	dispatcher := &recordingDispatcher{}
-	routes := ReviewRoutes{service: svc, dispatcher: dispatcher}
+	routes := ReviewRoutes{service: svc}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/override-advance", bytes.NewBufferString(`{"targetBranch":"main","reason":"hotfix"}`))
 	rec := httptest.NewRecorder()
@@ -193,18 +169,14 @@ func TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason(t *testing.T) {
 	if svc.overrideTargetBranch != "main" || svc.overrideReason != "hotfix" {
 		t.Fatalf("service saw targetBranch=%q reason=%q, want main/hotfix", svc.overrideTargetBranch, svc.overrideReason)
 	}
-	if len(dispatcher.reviews) != 1 || dispatcher.reviews[0] != promoted {
-		t.Fatalf("dispatched %+v, want exactly the promoted review %+v", dispatcher.reviews, promoted)
-	}
 }
 
-// TestOverrideAdvanceMergeQueueRefusalIsNotDispatched: a refused override
-// (blank reason, no audit logger configured, ...) must not start a merge gate
-// build for a review that never actually promoted.
-func TestOverrideAdvanceMergeQueueRefusalIsNotDispatched(t *testing.T) {
+// TestOverrideAdvanceMergeQueueRefusalReportsError: a refused override (blank
+// reason, no audit logger configured, ...) must report the failure, not a
+// promotion that never happened.
+func TestOverrideAdvanceMergeQueueRefusalReportsError(t *testing.T) {
 	svc := &stubReviewService{err: apirepository.ErrInvalidInput}
-	dispatcher := &recordingDispatcher{}
-	routes := ReviewRoutes{service: svc, dispatcher: dispatcher}
+	routes := ReviewRoutes{service: svc}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/override-advance", bytes.NewBufferString(`{"targetBranch":"main","reason":""}`))
 	rec := httptest.NewRecorder()
@@ -212,9 +184,6 @@ func TestOverrideAdvanceMergeQueueRefusalIsNotDispatched(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-	if len(dispatcher.reviews) != 0 {
-		t.Fatalf("dispatched %+v, want nothing dispatched for a refused override", dispatcher.reviews)
 	}
 }
 

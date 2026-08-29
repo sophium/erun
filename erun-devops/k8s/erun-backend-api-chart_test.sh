@@ -1,12 +1,14 @@
 #!/bin/sh
 
 # Locks the DBOS system-database wiring for erun-backend-api: live env
-# provisioning and the server-side release queue both require a non-nil
-# DBOSContext (server.go's newEnvironmentProvisioner/newReleaseQueue), and
-# DBOSContext is built only from the DBOS_SYSTEM_DATABASE_URL env var. Before
-# this fix the chart never rendered it under any flag, so api.envDeployer.enabled
-# could never actually enable live deploys -- POST /v1/environments/{id}/deploy
-# always answered 501, no matter what was set.
+# provisioning requires a non-nil DBOSContext (server.go's
+# newEnvironmentProvisioner), and DBOSContext is built only from the
+# DBOS_SYSTEM_DATABASE_URL env var. Before this fix the chart never rendered it
+# under any flag, so api.envDeployer.enabled could never actually enable live
+# deploys -- POST /v1/environments/{id}/deploy always answered 501, no matter
+# what was set. The merge queue's gate and the release queue's run are
+# environment-driven now, not a Job this chart wires -- there is no
+# api.releaseQueue/api.mergeQueue config left to test.
 #
 # Lives beside the chart rather than inside it, like erun-devops-chart_test.sh
 # and erun-zitadel-chart_test.sh: helm renders every file under templates/.
@@ -72,12 +74,6 @@ grep -A1 'name: DBOS_SYSTEM_DATABASE_URL' "${core}" | grep -q 'value: "postgres:
     fail "the DBOS database must be a separate database on the same postgres instance, not ERUN_DATABASE_URL's own database"
 grep -q 'name: ERUN_ENV_DEPLOYER_SERVICE_ACCOUNT' "${core}" ||
     fail "envDeployer.enabled must still wire the deployer service account (unchanged by this fix)"
-
-# --- 3. The release queue needs DBOSContext too (server.go's newReleaseQueue) ---
-rendered=$(render --set-string api.releaseQueue.enabled=true --set-string api.releaseQueue.namespace=team-ux)
-container "${rendered}" >"${core}"
-grep -q 'name: DBOS_SYSTEM_DATABASE_URL' "${core}" ||
-    fail "api.releaseQueue.enabled must also render DBOS_SYSTEM_DATABASE_URL, or the release queue never dispatches"
 
 # --- 4. The DBOS database name and the full URL are overridable ---
 rendered=$(render --set-string api.envDeployer.enabled=true --set-string api.dbos.database=custom_dbos)
@@ -191,13 +187,6 @@ require_role_resource '.CoreV1().Secrets(' secrets "${deployer_role}"
 #         secrets it has no reason to touch.
 grep -q 'verbs: \["create", "get", "update"\]' "${deployer_role}" ||
     fail "the placement-credential secrets grant must be exactly create/get/update, no more and no less"
-
-rendered=$(render --set-string api.releaseQueue.enabled=true --set-string api.releaseQueue.namespace=team-ux)
-queue_role="${work_root}/queue-role.yaml"
-role "${rendered}" team-api-release-queue >"${queue_role}"
-require_role_resource '.BatchV1().Jobs(' jobs "${queue_role}"
-require_role_resource '.CoreV1().Pods(' pods "${queue_role}"
-require_role_resource '.GetLogs(' 'pods/log' "${queue_role}"
 
 cluster_role() {
     awk -v want="  name: $2" '
@@ -452,71 +441,6 @@ grep -A2 'name: zitadel-management-pat' "${rendered}" | grep -q 'secretName: tea
 grep -A3 'name: zitadel-management-pat' "${rendered}" | grep -q 'optional: true' ||
     fail "the zitadel-management-pat volume must be optional -- an env with no zitadel component must still start"
 
-# --- 17. The merge queue needs DBOSContext too (server.go's newMergeQueue),
-#         and its RBAC/env wiring mirrors the release queue's -- create/get/
-#         list/watch/delete on Jobs plus pods/pods-log read, and the workspace
-#         claim + repo path are required (unlike the release queue's, which are
-#         optional): the merge Job fetches, commits, and pushes, so it needs a
-#         real writable checkout, not whatever happens to be baked into the
-#         image. ---
-rendered=$(render \
-    --set-string api.mergeQueue.enabled=true \
-    --set-string api.mergeQueue.namespace=team-ux \
-    --set-string api.mergeQueue.workspaceClaim=team-devops-worktree \
-    --set-string api.mergeQueue.repoPath=/home/erun/git/erun)
-container "${rendered}" >"${core}"
-grep -q 'name: DBOS_SYSTEM_DATABASE_URL' "${core}" ||
-    fail "api.mergeQueue.enabled must also render DBOS_SYSTEM_DATABASE_URL, or the merge queue never dispatches"
-grep -q 'name: ERUN_MERGE_NAMESPACE' "${core}" ||
-    fail "api.mergeQueue.enabled must render ERUN_MERGE_NAMESPACE"
-grep -A1 'name: ERUN_MERGE_NAMESPACE' "${core}" | grep -q 'value: "team-ux"' ||
-    fail "api.mergeQueue.namespace must render as ERUN_MERGE_NAMESPACE"
-grep -A1 'name: ERUN_MERGE_SERVICE_ACCOUNT' "${core}" | grep -q 'value: "team-devops"' ||
-    fail "the merge queue's service account must default to <tenant>-devops, the environment's own runtime SA"
-grep -A1 'name: ERUN_MERGE_WORKSPACE_CLAIM' "${core}" | grep -q 'value: "team-devops-worktree"' ||
-    fail "api.mergeQueue.workspaceClaim must render as ERUN_MERGE_WORKSPACE_CLAIM"
-grep -A1 'name: ERUN_MERGE_REPO_PATH' "${core}" | grep -q 'value: "/home/erun/git/erun"' ||
-    fail "api.mergeQueue.repoPath must render as ERUN_MERGE_REPO_PATH"
-
-merge_role="${work_root}/merge-role.yaml"
-role "${rendered}" team-api-merge-queue >"${merge_role}"
-[ -s "${merge_role}" ] || fail "the merge-queue Role must render when the merge queue is enabled"
-require_role_resource '.BatchV1().Jobs(' jobs "${merge_role}"
-require_role_resource '.CoreV1().Pods(' pods "${merge_role}"
-require_role_resource '.GetLogs(' 'pods/log' "${merge_role}"
-
-merge_binding="${work_root}/merge-binding.yaml"
-awk -v want="  name: team-api-merge-queue" '
-    BEGIN{RS="\n---\n"}
-    $0 ~ /(^|\n)kind: RoleBinding(\n|$)/ && $0 ~ ("(^|\n)" want "(\n|$)") {print}
-' "${rendered}" >"${merge_binding}"
-[ -s "${merge_binding}" ] || fail "the merge-queue RoleBinding must render when the merge queue is enabled"
-grep -q 'namespace: team-ux' "${merge_binding}" ||
-    fail "the merge-queue RoleBinding must bind in the agent environment's own namespace, not the platform namespace"
-
-# Neither the namespace, the workspace claim, nor the repo path may be left
-# unset -- provision.MergeConfig.Configured() requires all of them, and a
-# review promoted to MERGE with a half-wired queue is worse than one that was
-# never wired at all: it looks configured but never gates anything. Called
-# directly (not via render()) so a helm failure here is the assertion, not a
-# script-terminating error.
-helm template test "${chart_dir}" --namespace test --set tenant=team --set environment=prod \
-    --set-string api.mergeQueue.enabled=true >/dev/null 2>&1 &&
-    fail "api.mergeQueue.enabled without a namespace must fail to render"
-helm template test "${chart_dir}" --namespace test --set tenant=team --set environment=prod \
-    --set-string api.mergeQueue.enabled=true --set-string api.mergeQueue.namespace=team-ux >/dev/null 2>&1 &&
-    fail "api.mergeQueue.enabled without a workspaceClaim must fail to render"
-helm template test "${chart_dir}" --namespace test --set tenant=team --set environment=prod \
-    --set-string api.mergeQueue.enabled=true \
-    --set-string api.mergeQueue.namespace=team-ux \
-    --set-string api.mergeQueue.workspaceClaim=team-devops-worktree >/dev/null 2>&1 &&
-    fail "api.mergeQueue.enabled without a repoPath must fail to render"
-
-# Off by default: byte-for-byte unchanged, same as the release queue.
-rendered=$(render)
-container "${rendered}" | grep -q 'ERUN_MERGE_' &&
-    fail "no ERUN_MERGE_* env var should render unless the merge queue is enabled"
-
 # --- 18. The white-label trio GET /v1/platform serves a pre-sign-in client:
 #         its own docs link, tagline, and logo. They travel the same
 #         platform.* path consoleUrl and brand already do, and each renders as
@@ -543,4 +467,4 @@ grep -A1 'name: ERUN_PLATFORM_TAGLINE' "${core}" | grep -q 'value: "Example ship
 grep -A1 'name: ERUN_PLATFORM_LOGO_URL' "${core}" | grep -q 'value: "https://cdn.example.com/logo.svg"' ||
     fail "platform.logoUrl must render as ERUN_PLATFORM_LOGO_URL"
 
-echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + merge queue wiring + platform white-label discovery"
+echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + platform white-label discovery"

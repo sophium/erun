@@ -11,11 +11,10 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/dns01broker"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/gitverify"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mergeexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/registrytoken"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/releaseexec"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
@@ -64,17 +63,6 @@ type HandlerOptions struct {
 	// platform namespace, cluster-admin deployer ServiceAccount). Env provisioning
 	// stays off until all three are set.
 	EnvDeploy provision.EnvDeployConfig
-	// Release is the per-instance placement for release Jobs: the agent
-	// environment whose warm caches the release runs beside, its ServiceAccount,
-	// and the runtime image version. Unset leaves the release queue recording
-	// triggers without running them.
-	Release provision.ReleaseConfig
-	// Merge is the per-instance placement for merge-gate Jobs: the agent
-	// environment whose warm caches and writable checkout the merge queue's gate
-	// build runs against. Unset leaves a review reaching MERGE (via
-	// AdvanceMergeQueue) with nothing to gate it until an operator advances the
-	// queue again by hand.
-	Merge provision.MergeConfig
 	// Platform is this instance's own self-describing config, served
 	// unauthenticated at GET /v1/platform so a client can discover it before it
 	// has a token. Unset fields render as empty strings, never as an error.
@@ -306,25 +294,18 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	if contextCredentials != nil {
 		placementCredentials = contextCredentials
 	}
-	// reviewService is deliberately built with no dependency on the merge
-	// executor: the executor (via BuildService, below) already depends back on
-	// reviewService's own MarkBuildResult, and Go composition cannot wire the
-	// resulting cycle. See AGENTS.md "Merge Queue".
-	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents)
+	// releaseService owns only the release queue's idempotency: recording a
+	// trigger exactly once per (tenant, commit). Running `erun release` is the
+	// environment's own job, not this control plane's — see AGENTS.md "Merge
+	// Queue" — so releaseRoutes has to exist before reviewService, which
+	// triggers it directly on a verified MERGED transition.
+	releaseService := service.NewReleaseService(repos.releases)
+	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService)
+	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents, gitverify.NewRemoteVerifier(), releaseRoutes)
 	commentService := service.NewCommentService(repos.comments)
-	// releaseService records its build against the raw repository, not through
-	// BuildService: by the time a release runs, the review it recorded against
-	// (if any) is already MERGED, so BuildService's extra MarkBuildResult call
-	// would be an inert no-op — going through the raw repository instead is what
-	// keeps releaseService out of the mergeQueueService -> releaseRoutes ->
-	// releaseService cycle that routing it through BuildService would create.
-	releaseService := service.NewReleaseService(repos.releases, repos.builds, newReleaseRunner(options))
-	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService, newReleaseQueue(options, releaseService), repos.tenants)
-	mergeQueueService := service.NewMergeQueueService(repos.reviews, repos.builds, newMergeRunner(options), releaseRoutes)
-	mergeQueue := newMergeQueue(options, mergeQueueService, repos.tenants)
-	buildService := service.NewBuildService(repos.builds, reviewService, mergeQueue)
+	buildService := service.NewBuildService(repos.builds, reviewService)
 	routes.RegisterTenantIssuerRoutes(register, repos.tenantIssuers)
-	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService, mergeQueue)
+	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
 	routes.RegisterBuildRoutes(register, repos.builds, buildService)
 	routes.RegisterCommentRoutes(register, repos.comments, commentService)
 	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
@@ -487,114 +468,6 @@ func newEnvironmentDeleteReconciler(options HandlerOptions, environments *reposi
 		return
 	}
 	provision.NewEnvDeleteReconciler(options.DBOSContext, environments, tenants, contexts, deleter, provision.DefaultDeleteReconcileSchedule)
-}
-
-// newReleaseRunner wires the release Job launcher. Without an in-cluster client
-// there is nothing to launch, so the queue records triggers and the service
-// reports the missing executor rather than a release that silently never ran.
-func newReleaseRunner(options HandlerOptions) service.ReleaseRunner {
-	if options.KubeClient == nil {
-		return nil
-	}
-	return releaseexec.NewLauncher(options.KubeClient)
-}
-
-// newReleaseQueue wires the durable release workflow, which needs DBOS, an
-// in-cluster client, and the full release placement. Anything missing leaves the
-// dispatcher nil: triggers are still recorded and are runnable once the queue is
-// configured.
-func newReleaseQueue(options HandlerOptions, coordinator provision.ReleaseCoordinator) routes.ReleaseDispatcher {
-	if reasons := missingReleaseQueueConfig(options); len(reasons) > 0 {
-		log.Printf("erun api release queue disabled: %s", strings.Join(reasons, "; "))
-		return nil
-	}
-	log.Print("erun api release queue wired: an accepted review's release will run as a Job")
-	return provision.NewReleaseQueue(options.DBOSContext, coordinator, options.Release, newRuntimeImageChecker(options))
-}
-
-// missingReleaseQueueConfig names every unmet precondition for the release
-// queue, so the startup log names exactly what is missing instead of an
-// operator having to read ReleaseConfig.Configured() to find out the queue is
-// off.
-func missingReleaseQueueConfig(options HandlerOptions) []string {
-	var reasons []string
-	if options.DBOSContext == nil {
-		reasons = append(reasons, "DBOS_SYSTEM_DATABASE_URL is not set")
-	}
-	if options.KubeClient == nil {
-		reasons = append(reasons, "no in-cluster Kubernetes client")
-	}
-	release := options.Release
-	if release.Registry == "" {
-		reasons = append(reasons, "Release.Registry is not set")
-	}
-	if release.RuntimeVersion == "" {
-		reasons = append(reasons, "Release.RuntimeVersion is not set")
-	}
-	if release.Namespace == "" {
-		reasons = append(reasons, "Release.Namespace is not set")
-	}
-	if release.ServiceAccount == "" {
-		reasons = append(reasons, "Release.ServiceAccount is not set")
-	}
-	return reasons
-}
-
-// newMergeRunner wires the merge-gate Job launcher. Without an in-cluster
-// client there is nothing to launch, so a promotion to MERGE (AdvanceMergeQueue
-// already recorded it) has no gate run for it.
-func newMergeRunner(options HandlerOptions) service.MergeRunner {
-	if options.KubeClient == nil {
-		return nil
-	}
-	return mergeexec.NewLauncher(options.KubeClient)
-}
-
-// newMergeQueue wires the durable merge-gate workflow, which needs DBOS, an
-// in-cluster client, and the full merge placement — including a writable
-// checkout the merge Job can fetch, commit, and push against. Anything missing
-// leaves the dispatcher nil: a review still reaches MERGE, just with nothing to
-// gate it until an operator advances the queue again by hand.
-func newMergeQueue(options HandlerOptions, coordinator provision.MergeCoordinator, tenants provision.MergeTenantResolver) service.MergeQueueDispatcher {
-	if reasons := missingMergeQueueConfig(options); len(reasons) > 0 {
-		log.Printf("erun api merge queue disabled: a review promoted to MERGE will record the promotion with nothing to gate it: %s", strings.Join(reasons, "; "))
-		return nil
-	}
-	log.Print("erun api merge queue wired: a review promoted to MERGE will be gated by a real erun build before it pushes")
-	return provision.NewMergeQueue(options.DBOSContext, coordinator, options.Merge, tenants, newRuntimeImageChecker(options))
-}
-
-// missingMergeQueueConfig names every unmet precondition for the merge queue,
-// so the startup log names exactly what is missing instead of an operator
-// having to read MergeConfig.Configured() to find out the gate is off.
-func missingMergeQueueConfig(options HandlerOptions) []string {
-	var reasons []string
-	if options.DBOSContext == nil {
-		reasons = append(reasons, "DBOS_SYSTEM_DATABASE_URL is not set")
-	}
-	if options.KubeClient == nil {
-		reasons = append(reasons, "no in-cluster Kubernetes client")
-	}
-	merge := options.Merge
-	if merge.Registry == "" {
-		reasons = append(reasons, "Merge.Registry is not set")
-	}
-	if merge.RuntimeVersion == "" {
-		reasons = append(reasons, "Merge.RuntimeVersion is not set")
-	}
-	if merge.Namespace == "" {
-		reasons = append(reasons, "Merge.Namespace is not set")
-	}
-	if merge.ServiceAccount == "" {
-		reasons = append(reasons, "Merge.ServiceAccount is not set")
-	}
-	if merge.WorkspaceClaim == "" {
-		reasons = append(reasons, "Merge.WorkspaceClaim is not set")
-	}
-	if merge.RepoPath == "" {
-		reasons = append(reasons, "Merge.RepoPath is not set")
-	}
-	return reasons
 }
 
 func registerHealthRoute(mux *http.ServeMux) {
