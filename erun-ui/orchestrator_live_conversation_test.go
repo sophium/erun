@@ -232,6 +232,118 @@ func TestATrackedConversationFromAnotherLaunchIsNotSilentlyAuthoritative(t *test
 	}
 }
 
+// The habituation failure this whole notice family exists to avoid: a launch
+// that resumes the SAME tracked conversation it already told the operator about
+// has nothing new to say, and must say nothing. A notice that fires on every
+// launch forever trains the operator to stop reading it -- including the three
+// warning notices that share its surface and still need to be believed every
+// time they fire.
+func TestRestoreReportsARepeatedTrackedConversationOnlyOnce(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	stageOrchestratorConversation(t, orchestratorSessionID(id))
+	stageOrchestratorConversation(t, live)
+	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
+		ConversationID: live,
+		LaunchID:       recordedLaunchID(t, openPath, id),
+	})
+
+	first := app.ResolveOrchestratorToReopen()
+	if first.ConversationID != live {
+		t.Fatalf("expected the first launch to resume the live conversation %q, got %q", live, first.ConversationID)
+	}
+	if first.Notice == "" {
+		t.Fatal("expected the first divergence between tracked and derived to be reported")
+	}
+
+	second := app.ResolveOrchestratorToReopen()
+	if second.ConversationID != live {
+		t.Fatalf("expected the second launch to resume the same live conversation %q, got %q", live, second.ConversationID)
+	}
+	if second.Notice != "" {
+		t.Fatalf("expected a launch that resumes the conversation already reported to say nothing, got %q", second.Notice)
+	}
+
+	// The record still resolves the same tracked conversation; only the notice
+	// about it is quiet the second time.
+	third := app.ResolveOrchestratorToReopen()
+	if third.Notice != "" {
+		t.Fatalf("expected a third repeat launch to stay silent too, got %q", third.Notice)
+	}
+}
+
+// A tracked conversation that changes AFTER already being reported is new
+// information again and must be reported, even though the orchestrator has
+// already been told about a previous divergence.
+func TestRestoreReportsAChangeToADifferentTrackedConversation(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	const firstLive = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	const secondLive = "22222222-3333-4444-8555-666666666666"
+	stageOrchestratorConversation(t, orchestratorSessionID(id))
+	stageOrchestratorConversation(t, firstLive)
+	stageOrchestratorConversation(t, secondLive)
+	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
+		ConversationID: firstLive,
+		LaunchID:       recordedLaunchID(t, openPath, id),
+	})
+
+	if target := app.ResolveOrchestratorToReopen(); target.Notice == "" || target.ConversationID != firstLive {
+		t.Fatalf("expected the first divergence reported and resumed, got conversation %q notice %q", target.ConversationID, target.Notice)
+	}
+	if target := app.ResolveOrchestratorToReopen(); target.Notice != "" {
+		t.Fatalf("expected the repeat of the same tracked conversation to say nothing, got %q", target.Notice)
+	}
+
+	// A new launch under the SAME entry's launch id, whose session now reports a
+	// different conversation than the one already reported.
+	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
+		ConversationID: secondLive,
+		LaunchID:       recordedLaunchID(t, openPath, id),
+	})
+	target := app.ResolveOrchestratorToReopen()
+	if target.ConversationID != secondLive {
+		t.Fatalf("expected the changed tracked conversation %q resumed, got %q", secondLive, target.ConversationID)
+	}
+	if target.Notice == "" {
+		t.Fatal("expected a change to a different tracked conversation to be reported")
+	}
+	if target := app.ResolveOrchestratorToReopen(); target.Notice != "" {
+		t.Fatalf("expected the repeat of the newly reported conversation to say nothing, got %q", target.Notice)
+	}
+}
+
+// A warning resolution is not a steady state to acclimatise to; it is
+// something that just went wrong, and it must say so on every occurrence, not
+// only the first. A record from an earlier, replaced launch stays wrong on
+// every later launch too.
+func TestAnUnconfirmedTrackedConversationIsReportedOnEveryLaunch(t *testing.T) {
+	app, _, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	id := createAndStartOrchestrator(t, app)
+	const stranded = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	stageOrchestratorConversation(t, orchestratorSessionID(id))
+	stageOrchestratorConversation(t, stranded)
+	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
+		ConversationID: stranded,
+		LaunchID:       "a-launch-that-is-not-this-one",
+	})
+
+	first := app.ResolveOrchestratorToReopen()
+	second := app.ResolveOrchestratorToReopen()
+	for _, target := range []relaunchTarget{first, second} {
+		if !strings.Contains(target.Notice, stranded) {
+			t.Fatalf("expected every launch to report the unconfirmed conversation, got %q", target.Notice)
+		}
+	}
+}
+
 // The same refusal for a record whose conversation is gone: resuming nothing is
 // safer than resuming the wrong thing, and either way the operator hears it.
 func TestATrackedConversationWithNoTranscriptFallsBackAndSaysSo(t *testing.T) {
