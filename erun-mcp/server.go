@@ -501,6 +501,10 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Close a review on the erun platform without merging it. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewCloseTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "review_record-build",
+		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewRecordBuildTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_list",
 		Description: "List a target branch's merge queue on the erun platform, in queue order. Supports preview.",
 	}, reviewMergeQueueListTool(runtime))
@@ -600,6 +604,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_push",
 		Description: "Push the runtime repo's working tree's current branch to a remote. branch must match the tree's actual current branch; the push is refused, loudly, when it does not, rather than pushing whichever branch HEAD happens to be on. A real, immediate mutation of shared remote state — a branch a hosted review or another reviewer can only ever fetch once it has actually landed there. Set preview to verify the branch and trace the push without running it.",
 	}, execPushTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_merge",
+		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
+	}, execMergeTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools

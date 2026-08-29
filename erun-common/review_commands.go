@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -273,6 +274,46 @@ func RunReviewClose(ctx Context, store CloudReadStore, alias, reviewID string, d
 		return PlatformReview{}, nil
 	}
 	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "CLOSED"})
+}
+
+// ReviewRecordBuildParams is the `erun review record-build` input.
+type ReviewRecordBuildParams struct {
+	ReviewID      string
+	CommitID      string
+	Version       string
+	Successful    bool
+	FailureDetail string
+}
+
+// RunReviewRecordBuild records a build against a review. This is the
+// primitive that actually moves a review off OPEN: the backend transitions it
+// to READY (successful) or FAILED (not) as part of recording the build, and
+// promotes it to MERGE if it was already the merge queue's head — there is no
+// separate "set review status" call for this, by design (a READY with no
+// build is a different thing: the missed-merge-window requeue).
+func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformBuild{}, err
+	}
+	details := []string{
+		"commitId=" + params.CommitID,
+		"version=" + params.Version,
+		"successful=" + strconv.FormatBool(params.Successful),
+	}
+	if strings.TrimSpace(params.FailureDetail) != "" {
+		details = append(details, "failureDetail="+params.FailureDetail)
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+params.ReviewID+"/builds", details...)
+	if ctx.DryRun {
+		return PlatformBuild{}, nil
+	}
+	return client.CreateBuild(context.Background(), params.ReviewID, PlatformCreateBuildParams{
+		CommitID:      params.CommitID,
+		Version:       params.Version,
+		Successful:    params.Successful,
+		FailureDetail: params.FailureDetail,
+	})
 }
 
 // RunReviewMergeQueueList lists targetBranch's merge queue.

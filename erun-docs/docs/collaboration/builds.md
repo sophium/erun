@@ -30,31 +30,29 @@ There are two kinds, distinguished by `kind`, and they are against different com
 }
 ```
 
-A failed `GATE` build additionally carries `failureDetail` (a string, the gate's own account of why it did not succeed) instead of `version`.
+A failed build — `GATE` or `RECORDED` — may carry `failureDetail` (a string account of why it did not succeed). The gate always sets its own; a `RECORDED` build's reporter sets it optionally (`erun review record-build --failed --failure-detail "..."`).
 
 ## Endpoints
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. |
-| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new `RECORDED` build. Body: `commitId`, `version`, `successful`. (`GATE` builds are written only by the merge queue itself, never by `POST`.) |
+| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new `RECORDED` build. Body: `commitId`, `version`, `successful`, optional `failureDetail`. (`GATE` builds are written only by the merge queue itself, never by `POST`.) [`erun review record-build`](/cli/review#review-record-build) is the CLI client for this route. |
 | `GET` | `/v1/reviews/{reviewId}/builds/{buildId}` | Fetch one build. |
 
 ## How builds connect to review status
 
-After a build is recorded, the Agent that ran it typically follows up with a status update on the review:
+Recording a `RECORDED` build is the transition, not a precursor to one: `POST /builds` moves the review to `READY` (successful) or `FAILED` (not) as part of the same write, and on to `MERGE` if it was already the merge queue's head. There is no separate `PATCH /reviews/{id}/status` call to make afterward — `erun review record-build` (and the `review_record-build` MCP tool) is the only way an erun client transitions a review off `OPEN`.
 
 ```
 POST /v1/reviews/rev_abc/builds
-{ "commitId": "abc123", "version": "1.2.3", "successful": true }
+{ "commitId": "abc123def456...", "version": "1.2.3", "successful": true }
 
 → response: { "buildId": "bld_xyz", ... }
-
-PATCH /v1/reviews/rev_abc/status
-{ "status": "READY", "buildId": "bld_xyz" }
+→ review rev_abc is now READY, lastReadyBuildId = bld_xyz
 ```
 
-The review's `lastReadyBuildId` (or `lastFailedBuildId` on failure) is updated to point at the build that triggered the transition. Other agents can `GET /v1/reviews/{reviewId}` and immediately see which build the current status reflects.
+The review's `lastReadyBuildId` (or `lastFailedBuildId` on failure) is updated to point at the build that triggered the transition. Other agents can `GET /v1/reviews/{reviewId}` and immediately see which build the current status reflects. `PATCH /reviews/{id}/status` still exists (see [Reviews](/collaboration/reviews)) but is for closing a review, not for reacting to a build.
 
 ## Why builds are server-side resources
 
@@ -172,7 +170,7 @@ A release whose control plane stops reporting for 4 hours is failed with a reaso
 | `version` | Required and must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`) — for a `RECORDED` build. Absent for a `GATE` build, which publishes nothing. |
 | `successful` | Required. Boolean. |
 | `kind` | Ignored on `POST` — every client-reported build is `RECORDED`. `GATE` is written only by the merge queue. |
-| `failureDetail` | Required, non-empty, on a failed `GATE` build. Not settable on `POST` (client-reported builds carry no `failureDetail`). |
+| `failureDetail` | Required, non-empty, on a failed `GATE` build. Optional on a `RECORDED` build's `POST` — a reporter may set it on a failed build to say why; omitted is fine. |
 
 ## Errors
 

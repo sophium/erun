@@ -4,14 +4,15 @@ Usage:
   erun review [command]
 
 Available Commands:
-  close       Close a review without merging it
-  comment     Comment on a line of a review, or reply to an existing comment
-  create      Open a review on the erun platform
-  list        List reviews on the erun platform
-  queue       Inspect and advance a target branch's merge queue
-  resolve     Resolve a comment thread by closing its root comment
-  show        Show a review, its comment threads, and its recorded builds
-  unresolve   Reopen a comment thread by marking its root comment OPEN
+  close        Close a review without merging it
+  comment      Comment on a line of a review, or reply to an existing comment
+  create       Open a review on the erun platform
+  list         List reviews on the erun platform
+  queue        Inspect and advance a target branch's merge queue
+  record-build Record a build against a review, moving it to READY or FAILED
+  resolve      Resolve a comment thread by closing its root comment
+  show         Show a review, its comment threads, and its recorded builds
+  unresolve    Reopen a comment thread by marking its root comment OPEN
 
 Flags:
       --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)

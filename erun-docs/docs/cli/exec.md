@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Five subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), and `push` (push a branch to a remote).
+Repository helpers that run from the project root. Six subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), and `merge` (merge a branch into the current one).
 
 ## Synopsis
 
@@ -14,6 +14,7 @@ erun exec raw COMMAND [ARG...] [flags]
 erun exec write PATH [flags]
 erun exec commit BRANCH [PATH...] [flags]
 erun exec push BRANCH [flags]
+erun exec merge TARGET_BRANCH [flags]
 ```
 
 ## Subcommands
@@ -50,6 +51,14 @@ Pushes the project working tree's current branch to a remote (`origin` by defaul
 
 `--dry-run` verifies the branch and traces the push without running it. Reports the branch, remote, and pushed commit id; add `--output json` for a structured result.
 
+### `exec merge` {#exec-merge}
+
+Fetches TARGET_BRANCH from a remote (`origin` by default; override with `--remote`) and merges it into the project working tree's current branch with an explicit merge commit — **never a rebase**: review comments anchor to a commit id, and a rewrite would orphan every thread on an open review.
+
+A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else with it.
+
+`--dry-run` traces the fetch and merge without running them. Reports the branch, target branch, remote, and merged commit id; add `--output json` for a structured result.
+
 ## Examples
 
 ```bash
@@ -60,6 +69,7 @@ erun exec write values.yaml < new-values.yaml
 echo 'fix the values typo' | erun exec commit main
 echo 'fix the values typo' | erun exec commit main values.yaml
 erun exec push feature/add-widget
+erun exec merge main
 ```
 
 ## Error behaviour
@@ -77,3 +87,5 @@ erun exec push feature/add-widget
 | A PATH argument is blank (`commit`). | Refuses with `path entries must not be blank` rather than falling back to committing everything. |
 | BRANCH does not match the current branch (`push`). | Refuses with `refusing to push: working tree is on branch "X", not the declared "Y"`; nothing is pushed. |
 | The remote rejects the push (`push`), e.g. a non-fast-forward. | Git's own stderr surfaces verbatim; nothing about the local branch changes. |
+| The merge conflicts (`merge`). | Refuses naming every conflicted file and pointing at `git merge --abort`; the worktree is left mid-merge for the caller to resolve. |
+| The fetch or merge fails for another reason (`merge`), e.g. an unknown branch. | Git's own stderr surfaces verbatim; the worktree is unchanged. |

@@ -299,11 +299,12 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_resolve` | Work (idempotent) | Resolve a comment thread by closing its root comment. `commentId` must be the thread's root — resolving a reply fails, naming the root to retry against. |
 | `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
+| `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. |
 | `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
 | `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
 | `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
-All ten support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All eleven support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -335,8 +336,9 @@ The mutations an orchestrator performs constantly on an environment's own reposi
 | `exec_write` | Write `content` to `path` in the runtime repo's working tree, byte-for-byte. `content` is a JSON string field, never composed into a command line, so it round-trips verbatim regardless of what it contains. Refuses if `path` would resolve outside the repo root. Reports the resolved path and byte count written. Set `preview` to trace the write without performing it. |
 | `exec_commit` | Stage every change (or, with `paths` set, only those paths) in the runtime repo's working tree and commit it with `message`, taken the same way as `exec_write`'s content. `branch` is the caller's claim about the current branch, verified against `git rev-parse --abbrev-ref HEAD` rather than assumed — a mismatch is refused, loudly, instead of landing the commit on whichever branch HEAD happens to be on. When `paths` is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set `preview` to verify the branch and trace the files that would be committed without committing. |
 | `exec_push` | Push the runtime repo's working tree's current branch to a remote. `branch` must match the tree's actual current branch, checked the same way as `exec_commit`. A real, immediate mutation of shared remote state — push before opening a review with `review_create`, since the platform can only fetch a branch once it has actually landed there. Set `preview` to verify the branch and trace the push without running it. |
+| `exec_merge` | Fetch `targetBranch` from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome rather than a generic failure; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or run `git merge --abort`. A real, immediate mutation of the working tree. Set `preview` to trace the fetch and merge without running them. |
 
-Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit) / [`erun exec push`](/cli/exec#exec-push). `write`, `commit`, and `diff` (see below) are retired aliases for `exec_write`, `exec_commit`, and `exec_diff`, kept callable for one release (#1186) — new callers should use the `exec_*` names.
+Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit) / [`erun exec push`](/cli/exec#exec-push) / [`erun exec merge`](/cli/exec#exec-merge). `write`, `commit`, and `diff` (see below) are retired aliases for `exec_write`, `exec_commit`, and `exec_diff`, kept callable for one release (#1186) — new callers should use the `exec_*` names.
 
 ### Escape hatch
 
@@ -386,6 +388,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_write` | `erun exec write` | Work |
 | exec | `exec_commit` | `erun exec commit` | Work |
 | exec | `exec_push` | `erun exec push` | Work |
+| exec | `exec_merge` | `erun exec merge` | Work |
 | exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
 | exec | `exec_job_attach` | `erun exec job attach` | Work |
 | exec | `exec_job_status` | `erun exec job status` | Read |
@@ -428,6 +431,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_resolve` | `erun review resolve` | Work |
 | review | `review_unresolve` | `erun review unresolve` | Work |
 | review | `review_close` | `erun review close` | Work |
+| review | `review_record-build` | `erun review record-build` | Work |
 | review | `review_queue_list` | `erun review queue list` | Read |
 | review | `review_queue_advance` | `erun review queue advance` | Work |
 | review | `review_queue_override-advance` | `erun review queue override-advance` | Work |

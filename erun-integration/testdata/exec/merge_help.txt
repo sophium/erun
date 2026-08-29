@@ -1,0 +1,22 @@
+Fetch TARGET_BRANCH from the remote and merge it into the project working tree's current branch with an explicit merge commit. Never rebases: review comments anchor to a commit id, and a rewrite would orphan every thread on an open review.
+
+A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else.
+
+--dry-run traces the fetch and merge without running them.
+
+Usage:
+  erun exec merge TARGET_BRANCH [flags]
+
+Examples:
+  erun exec merge main
+  erun exec merge release/2026.9 --remote upstream
+
+Flags:
+      --dry-run         Resolve and trace mutating actions without executing them.
+  -h, --help            help for merge
+      --remote string   Git remote to fetch and merge from (defaults to origin)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

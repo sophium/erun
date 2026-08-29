@@ -158,6 +158,44 @@ func reviewCloseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 	}
 }
 
+type ReviewRecordBuildInput struct {
+	platformAliasInput
+	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
+	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
+	Version       string `json:"version" jsonschema:"version the build minted (from the build tool's result), required even for a failed build since release resolves the version before the build step runs"`
+	Successful    bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
+	FailureDetail string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
+}
+
+type ReviewRecordBuildResult struct {
+	Preview bool                     `json:"preview"`
+	Build   eruncommon.PlatformBuild `json:"build,omitempty"`
+	Trace   []string                 `json:"trace,omitempty"`
+}
+
+// reviewRecordBuildTool is the only way an erun client transitions a review
+// off OPEN: recording a build moves it to READY (successful) or FAILED (not),
+// and on to MERGE if it was already the merge queue's head. There is no
+// separate "set review status" tool for this — a READY with no build is a
+// different thing entirely (the missed-merge-window requeue).
+func reviewRecordBuildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommitID) == "" || strings.TrimSpace(input.Version) == "" {
+			return nil, ReviewRecordBuildResult{}, fmt.Errorf("reviewId, commitId, and version are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		build, err := eruncommon.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, eruncommon.ReviewRecordBuildParams{
+			ReviewID: input.ReviewID, CommitID: input.CommitID, Version: input.Version,
+			Successful: input.Successful, FailureDetail: input.FailureDetail,
+		}, cloudDependencies())
+		if err != nil {
+			return nil, ReviewRecordBuildResult{}, err
+		}
+		return nil, ReviewRecordBuildResult{Preview: input.Preview, Build: build, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type ReviewCommentStatusInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id the comment belongs to"`

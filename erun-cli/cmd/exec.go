@@ -25,6 +25,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot),
+		newExecMergeCmd(findProjectRoot),
 		jobCmd,
 	)
 }
@@ -266,6 +267,52 @@ func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinder
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Pushed %s to %s (%s).", result.Branch, result.Remote, result.Commit))
+	return ctx.WriteResult(result)
+}
+
+func newExecMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	var remote string
+	cmd := &cobra.Command{
+		Use:   "merge TARGET_BRANCH",
+		Short: "Merge a branch into the project working tree's current branch",
+		Long: "Fetch TARGET_BRANCH from the remote and merge it into the project working tree's current branch " +
+			"with an explicit merge commit. Never rebases: review comments anchor to a commit id, and a rewrite " +
+			"would orphan every thread on an open review.\n\n" +
+			"A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The " +
+			"worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or " +
+			"run `git merge --abort` to back out, before doing anything else.\n\n" +
+			"--dry-run traces the fetch and merge without running them.",
+		Example:      "  erun exec merge main\n  erun exec merge release/2026.9 --remote upstream",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecMergeCommand(commandContext(cmd), findProjectRoot, args[0], remote)
+		},
+	}
+	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, targetBranch, remote string) error {
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return err
+	}
+	result, err := common.MergeWorkingTreeBranch(ctx, projectRoot, common.MergeWorkingTreeBranchParams{
+		TargetBranch: targetBranch,
+		Remote:       remote,
+	}, common.MergeWorkingTreeBranchDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Merged %s/%s into %s (%s).", result.Remote, result.TargetBranch, result.Branch, result.Commit))
 	return ctx.WriteResult(result)
 }
 
