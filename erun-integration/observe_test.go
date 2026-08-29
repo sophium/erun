@@ -288,7 +288,9 @@ func TestObserve(t *testing.T) {
 
 	// real_run_helm_release_read_forbidden confirms an RBAC-denied read names
 	// the cause and the remedy instead of leaving the release section empty in
-	// a way indistinguishable from "nothing deployed here".
+	// a way indistinguishable from "nothing deployed here" — and that the
+	// drift array says the same thing, instead of collapsing to the identical
+	// "not found" line real_run_helm_release_not_found's golden carries.
 	t.Run("real_run_helm_release_read_forbidden", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

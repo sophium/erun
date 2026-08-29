@@ -20,15 +20,49 @@ func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, po
 	var findings []string
 	recordedVersion := strings.TrimSpace(req.RuntimeVersion)
 
-	if !release.Found {
-		if recordedVersion != "" {
-			findings = append(findings, fmt.Sprintf(
-				"env config records runtimeversion %s but no runtime helm release %q was found in namespace %q",
-				recordedVersion, release.Name, req.Namespace))
-		}
-		return findings
+	// release.Found is only false when the helm read itself failed (see
+	// ObservedHelmRelease's doc comment); release.Error then distinguishes a
+	// confirmed absence from a read that could not tell — a caller must never
+	// see the same "not found" line for both. Either way, runningImageDrift
+	// and runtimePodDrift below still run: their own inputs (release fields
+	// populated only on a successful read) make them no-ops here today, but
+	// nothing about this branch should stop them from evaluating whatever
+	// they can.
+	switch {
+	case !release.Found && release.Error != "":
+		findings = append(findings, unreadableReleaseDrift(req, release, recordedVersion)...)
+	case !release.Found:
+		findings = append(findings, missingReleaseDrift(req, release, recordedVersion)...)
+	default:
+		findings = append(findings, foundReleaseDrift(req, release, recordedVersion)...)
 	}
 
+	findings = append(findings, runningImageDrift(release, pods)...)
+	findings = append(findings, runtimePodDrift(req, release)...)
+
+	return findings
+}
+
+func unreadableReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	if recordedVersion == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"env config records runtimeversion %s but the runtime helm release %q in namespace %q could not be read: %s",
+		recordedVersion, release.Name, req.Namespace, release.Error)}
+}
+
+func missingReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	if recordedVersion == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"env config records runtimeversion %s but no runtime helm release %q was found in namespace %q",
+		recordedVersion, release.Name, req.Namespace)}
+}
+
+func foundReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	var findings []string
 	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
 		findings = append(findings, fmt.Sprintf(
 			"env config runtimeversion (%s) does not match the release's app version (%s)",
@@ -42,10 +76,6 @@ func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, po
 				runtimeImage, DevopsComponentName, recorded))
 		}
 	}
-
-	findings = append(findings, runningImageDrift(release, pods)...)
-	findings = append(findings, runtimePodDrift(req, release)...)
-
 	return findings
 }
 
