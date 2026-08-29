@@ -37,7 +37,7 @@ A failed build — `GATE` or `RECORDED` — may carry `failureDetail` (a string 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. |
-| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build. Body: `commitId`, `successful`, optional `failureDetail`, and `kind` (`RECORDED` if omitted). A `RECORDED` build also requires `version`; a `GATE` build must not carry one and must carry `failureDetail` when `successful` is `false`. [`erun review record-build`](/cli/review#review-record-build) is the CLI client for the `RECORDED` case. |
+| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build. Body: `commitId`, `successful`, optional `failureDetail`, and `kind` (`RECORDED` if omitted). A `RECORDED` build also requires `version`; a `GATE` build must not carry one and must carry `failureDetail` when `successful` is `false`. [`erun review record-build`](/cli/review#review-record-build) is the CLI client for both — plain for `RECORDED`, `--gate` for `GATE`. |
 | `GET` | `/v1/reviews/{reviewId}/builds/{buildId}` | Fetch one build. |
 
 ## How builds connect to review status
@@ -85,7 +85,7 @@ A `GATE` build is `POST`ed by whichever environment ran the merge queue's gate f
 }
 ```
 
-A successful `GATE` build has no `version` (the gate publishes nothing) and no `failureDetail`; its `commitId` is the merge commit the environment actually pushed to the target branch. Reporting it does not, by itself, move the review to `MERGED` — a failed `GATE` build does move the review straight to `FAILED` (the same as a failed `RECORDED` build would), but a successful one still needs the review moved to `MERGED` with a separate `PATCH /reviews/{id}/status`, because that is where the platform verifies the build against the real repository before accepting it (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)). Once accepted, the review's `lastMergedBuildId` points at this build.
+A successful `GATE` build has no `version` (the gate publishes nothing) and no `failureDetail`; its `commitId` is the merge commit the environment actually pushed to the target branch. Reporting it does not, by itself, move the review to `MERGED` — a failed `GATE` build does move the review straight to `FAILED` (the same as a failed `RECORDED` build would), but a successful one still needs the review moved to `MERGED` with a separate `PATCH /reviews/{id}/status`, because that is where the platform verifies the build against the real repository before accepting it (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)). [`erun review report-merged`](/cli/review#review-report-merged) is the CLI client for that call. Once accepted, the review's `lastMergedBuildId` points at this build.
 
 ## Release queue
 
