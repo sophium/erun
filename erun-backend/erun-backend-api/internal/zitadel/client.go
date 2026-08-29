@@ -232,7 +232,7 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 // set, so Zitadel emails the enrollee a verification/initialization link
 // rather than this client (or its caller) ever handling a credential for
 // someone else's account. When the platform cannot send that email at all
-// (issue #1168), the caller sets InitialPassword instead -- verified live
+// , the caller sets InitialPassword instead -- verified live
 // against a real Zitadel v4.15.3 instance that AddHumanUser only sends the
 // initialization email "if either the email address is not marked as
 // verified or no password is set" (its own API doc comment), so a set
@@ -313,7 +313,7 @@ type Org struct {
 // an org-scoped issuer resolves tenants by. Without it, onboarding a second
 // tenant onto the platform's own IdP needed a hand-made org in Zitadel's
 // console: erun could register the tenant and the issuer mapping, but had no
-// way to create the org the mapping points at (issue #1605).
+// way to create the org the mapping points at.
 //
 // The org is created but deliberately not made the client's own: this
 // credential stays scoped to the platform's org, and the new org's first

@@ -293,7 +293,7 @@ func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
 }
 
 // TestCreateUserReportsMailNotConfiguredWithATemporaryPassword locks the
-// honest-failure behaviour (issue #1168): when Enroll reports mail delivery
+// honest-failure behaviour: when Enroll reports mail delivery
 // as unconfigured, the response must carry the temporary password and a
 // warning explaining why, not silently look identical to a normal invite.
 func TestCreateUserReportsMailNotConfiguredWithATemporaryPassword(t *testing.T) {
@@ -395,7 +395,7 @@ func TestUpdateSMTPSettingsPassesDeclaredFields(t *testing.T) {
 
 // An org is the per-tenant identity boundary an org-scoped issuer resolves
 // by, so being unable to create one left tenant onboarding dependent on a
-// hand-made org in Zitadel's own console (issue #1605).
+// hand-made org in Zitadel's own console.
 func TestIdentityRoutesCreateOrg(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin}
