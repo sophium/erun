@@ -350,17 +350,7 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 		deps.loadClusterRegistry = loadClusterRegistry
 	}
 	if deps.loadHostedRegistry == nil {
-		deps.loadHostedRegistry = func(ctx context.Context) uiHostedRegistryStatus {
-			if available, ok := hostedRegistryReachabilityOverride(); ok {
-				status := uiHostedRegistryStatus{Host: eruncommon.HostedRegistryHost, Available: available}
-				if !available {
-					status.Reason = "does not resolve"
-					status.Recovery = "Choose a different registry instead."
-				}
-				return status
-			}
-			return loadHostedRegistry(ctx)
-		}
+		deps.loadHostedRegistry = loadHostedRegistryWithTestOverride
 	}
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
@@ -423,6 +413,21 @@ func localPortReachabilityOverride() (bool, bool) {
 		return false, false
 	}
 	return raw == "1", true
+}
+
+// loadHostedRegistryWithTestOverride is the default loadHostedRegistry dep:
+// the test override wins when set, otherwise it defers to the real probe.
+func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
+	available, ok := hostedRegistryReachabilityOverride()
+	if !ok {
+		return loadHostedRegistry(ctx)
+	}
+	status := uiHostedRegistryStatus{Host: eruncommon.HostedRegistryHost, Available: available}
+	if !available {
+		status.Reason = "does not resolve"
+		status.Recovery = "Choose a different registry instead."
+	}
+	return status
 }
 
 // hostedRegistryReachabilityOverride parses ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE
