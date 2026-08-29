@@ -502,8 +502,12 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewCloseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_record-build",
-		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. gate records the merge queue's own GATE build kind instead: the environment a review's merge queue promoted to MERGE reports its own build of the prospective merge this way, and omits version since the gate publishes nothing. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewRecordBuildTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_report-merged",
+		Description: "Report a review MERGED on the erun platform, for the environment a review's merge queue promoted to MERGE once it has fetched the review's target and source, gate-built the prospective squash merge (review_record-build with gate set), and pushed the result. The platform does not take this on trust: it checks buildId names an already-recorded, successful GATE build for this review, then fetches remoteUrl to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewReportMergedTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_list",
 		Description: "List the users assigned to review a review on the erun platform. Supports preview.",

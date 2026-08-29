@@ -276,10 +276,14 @@ func RunReviewClose(ctx Context, store CloudReadStore, alias, reviewID string, d
 	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "CLOSED"})
 }
 
-// ReviewRecordBuildParams is the `erun review record-build` input.
+// ReviewRecordBuildParams is the `erun review record-build` input. Gate
+// reports the merge queue's own GATE build kind instead of an ordinary
+// RECORDED build — see AGENTS.md "Merge Queue". A GATE build carries no
+// version, since the gate publishes nothing.
 type ReviewRecordBuildParams struct {
 	ReviewID      string
 	CommitID      string
+	Gate          bool
 	Version       string
 	Successful    bool
 	FailureDetail string
@@ -296,11 +300,20 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	if err != nil {
 		return PlatformBuild{}, err
 	}
+	kind := ""
+	if params.Gate {
+		kind = "GATE"
+	}
 	details := []string{
 		"commitId=" + params.CommitID,
-		"version=" + params.Version,
-		"successful=" + strconv.FormatBool(params.Successful),
 	}
+	if kind != "" {
+		details = append(details, "kind="+kind)
+	}
+	details = append(details,
+		"version="+params.Version,
+		"successful="+strconv.FormatBool(params.Successful),
+	)
 	if strings.TrimSpace(params.FailureDetail) != "" {
 		details = append(details, "failureDetail="+params.FailureDetail)
 	}
@@ -310,9 +323,37 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	}
 	return client.CreateBuild(context.Background(), params.ReviewID, PlatformCreateBuildParams{
 		CommitID:      params.CommitID,
+		Kind:          kind,
 		Version:       params.Version,
 		Successful:    params.Successful,
 		FailureDetail: params.FailureDetail,
+	})
+}
+
+// RunReviewReportMerged reports a review MERGED after its promoted
+// environment has fetched, gate-built, and pushed the prospective merge
+// itself. buildId must name the GATE build the push actually produced;
+// remoteURL is the git remote the platform fetches to verify that build's
+// commit is really reachable from the target branch's tip. Any of the
+// platform's three verification conditions failing refuses with
+// MERGE_NOT_VERIFIED and leaves the review at MERGE — see AGENTS.md "Merge
+// Queue".
+func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
+	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(buildID) == "" || strings.TrimSpace(remoteURL) == "" {
+		return PlatformReview{}, fmt.Errorf("review id, build id, and remote url are required")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformReview{}, err
+	}
+	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=MERGED", "buildId="+buildID, "remoteUrl="+remoteURL)
+	if ctx.DryRun {
+		return PlatformReview{}, nil
+	}
+	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{
+		Status:    "MERGED",
+		BuildID:   buildID,
+		RemoteURL: remoteURL,
 	})
 }
 

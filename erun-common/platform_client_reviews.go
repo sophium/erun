@@ -141,9 +141,13 @@ func (c *PlatformClient) GetReview(ctx context.Context, reviewID string) (Platfo
 }
 
 // PlatformUpdateReviewStatusParams is the review status-transition input.
+// RemoteURL is required only for a MERGED report: the git remote the platform
+// fetches to verify buildId's commit is really reachable from the target
+// branch's tip with the parent this review was gated against.
 type PlatformUpdateReviewStatusParams struct {
-	Status  string `json:"status"`
-	BuildID string `json:"buildId,omitempty"`
+	Status    string `json:"status"`
+	BuildID   string `json:"buildId,omitempty"`
+	RemoteURL string `json:"remoteUrl,omitempty"`
 }
 
 // UpdateReviewStatus transitions a review's status (e.g. to CLOSED).
@@ -301,11 +305,14 @@ func (c *PlatformClient) ListBuilds(ctx context.Context, reviewID string) ([]Pla
 	return builds, err
 }
 
-// PlatformCreateBuildParams is the build-recording input. Kind is not
-// caller-settable: the backend always records a client-reported build as
-// RECORDED, never GATE (the merge queue's own build kind).
+// PlatformCreateBuildParams is the build-recording input. Kind is empty for
+// an ordinary client-reported build (the backend defaults it to RECORDED) or
+// "GATE" for a merge-queue gate build the caller ran itself against the
+// prospective merge — see AGENTS.md "Merge Queue". Only a successful GATE
+// build's commit can later be reported MERGED.
 type PlatformCreateBuildParams struct {
 	CommitID      string `json:"commitId"`
+	Kind          string `json:"kind,omitempty"`
 	Version       string `json:"version"`
 	Successful    bool   `json:"successful"`
 	FailureDetail string `json:"failureDetail,omitempty"`

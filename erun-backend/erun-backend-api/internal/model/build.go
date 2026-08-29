@@ -26,9 +26,10 @@ type Build struct {
 	ReviewID      string `json:"reviewId" bun:"review_id"`
 	// ReviewName is read-only display data populated by build read queries.
 	ReviewName string `json:"reviewName,omitempty" bun:"review_name,scanonly"`
-	// Kind is caller-writable only as BuildKindRecorded: the client-facing route
-	// forces it, the same as tenant ID and timestamps, so a client cannot assert
-	// its own build is the merge queue's GATE build.
+	// Kind defaults to BuildKindRecorded when the caller omits it, but the
+	// client-facing route also accepts BuildKindGate: the environment the merge
+	// queue promotes reports its own gate build this way (see AGENTS.md "Merge
+	// Queue"). Only a successful GATE build's commit can later reach MERGED.
 	Kind       BuildKind `json:"kind" bun:"kind"`
 	Successful bool      `json:"successful" bun:"successful"`
 	CommitID   string    `json:"commitId" bun:"commit_id"`

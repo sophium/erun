@@ -128,7 +128,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// the same flow) reports its own result back onto a review; no desktop
 	// surface lets an operator hand-author a build result, so this is
 	// agent-facing the same way the exec_* family is.
-	"review_record-build":           {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_record-build": {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	// Reporting MERGED is the other half of the same unattended flow: only the
+	// environment a review's merge queue promoted to MERGE ever calls this,
+	// after it has fetched, gate-built, and pushed the prospective merge
+	// itself — no desktop surface authors this report either.
+	"review_report-merged":          {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"review_reviewers_list":         {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_reviewers_add":          {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"review_reviewers_remove":       {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},

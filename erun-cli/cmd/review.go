@@ -29,6 +29,7 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 		newReviewUnresolveCmd(store, &alias, deps),
 		newReviewCloseCmd(store, &alias, deps),
 		newReviewRecordBuildCmd(store, &alias, deps),
+		newReviewReportMergedCmd(store, &alias, deps),
 		newReviewReviewersCmd(store, &alias, deps),
 		newReviewMergeQueueCmd(store, &alias, deps),
 	)
@@ -342,6 +343,7 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
 	var (
 		commitID      string
+		gate          bool
 		version       string
 		failed        bool
 		failureDetail string
@@ -356,9 +358,15 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"commit must be the full 40-character commit hash the build ran against (e.g. from `git rev-parse " +
 			"HEAD` after pushing), and version the version it minted (from `erun build --release --output " +
 			"json`), even for a failed build — release resolves the version before the build step runs.\n\n" +
+			"--gate records the merge queue's own GATE build kind instead of an ordinary build: the environment " +
+			"a review's merge queue promotes to MERGE runs `erun build` (never --release) against the " +
+			"prospective merge and reports the result this way. A GATE build carries no version, since the gate " +
+			"publishes nothing — omit --version when --gate is set. Only a successful GATE build can later be " +
+			"reported MERGED with `erun review report-merged`.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'",
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'\n" +
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -366,6 +374,7 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			build, err := common.RunReviewRecordBuild(ctx, store, *alias, common.ReviewRecordBuildParams{
 				ReviewID:      args[0],
 				CommitID:      commitID,
+				Gate:          gate,
 				Version:       version,
 				Successful:    !failed,
 				FailureDetail: failureDetail,
@@ -386,9 +395,53 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 		},
 	}
 	cmd.Flags().StringVar(&commitID, "commit", "", "Full commit hash the build ran against")
-	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --release)")
+	cmd.Flags().BoolVar(&gate, "gate", false, "Record the merge queue's own GATE build kind instead of an ordinary build")
+	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --release); omit with --gate")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var (
+		buildID   string
+		remoteURL string
+	)
+	cmd := &cobra.Command{
+		Use:   "report-merged REVIEW_ID",
+		Short: "Report a review MERGED after gate-building and pushing its prospective merge",
+		Long: "Report a review MERGED. This is for the environment a review's merge queue promoted to MERGE, " +
+			"once it has fetched the review's target and source, gate-built the prospective squash merge with " +
+			"`erun review record-build --gate`, and pushed the result — never before the push actually landed.\n\n" +
+			"The platform does not take this report on trust: it checks buildId names an already-recorded, " +
+			"successful GATE build for this review, then fetches remoteUrl to confirm that build's commit is " +
+			"really reachable from the target branch's tip with the parent this review was gated against. Any " +
+			"of those checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE.\n\n" +
+			"A real, immediate write. --dry-run traces the call without making it.",
+		Example:      "  erun review report-merged 018f... --build-id 018e... --remote-url https://github.com/org/repo.git",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			review, err := common.RunReviewReportMerged(ctx, store, *alias, args[0], buildID, remoteURL, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review report-merged planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewLine(ctx, review); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(review)
+		},
+	}
+	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id")
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge")
 	addDryRunFlag(cmd)
 	return cmd
 }
