@@ -50,6 +50,8 @@ Let you participate in ERun's processes — report problems, share improvements 
 | `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
 | `erun-build-env` | Extend ERun's published runtime image with your project's own toolchain and point the environment at the custom image. | "init build environment", "create a custom build environment", "customize the runtime image" |
 | `erun-pin-version` | Change or try the erun version an environment uses, re-pinning every place it is recorded in one verified, idempotent motion — and revert just as easily. | "change the erun version", "pin erun to 1.0.174", "revert the erun version" |
+| `erun-merge` | Take a finished branch to a review sitting at `READY` on the erun platform — merge in the target, push, open or reuse the review, build and record the result. | "merge this branch", "land this change", "merge onto main" |
+| `erun-review` | Review someone else's branch — read the diff, comment only on what should block the merge, and push a proposal branch where you have a concrete fix. | "review this branch", "review the change", "leave review comments" |
 
 You don't need to memorise the trigger phrases — the Agent matches against the skill's `description` field, which lists several variants. If you describe the work in plain language ("I want to add a Postgres database that's tenant-scoped"), the right skill usually fires on its own.
 
