@@ -14,100 +14,42 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// mergeQueueE2E is the opt-in environment for the live merge-queue gate: this
-// is the "MERGED means a merge actually happened and a build actually passed"
-// property from a real Kubernetes Job, gated against a real migrated
-// Postgres, running against a real checkout the operator pre-seeds. Unlike
-// the release gate there is no dry-run mode — the whole point is proving the
-// gate really pushes — so TargetBranch and the source branches MUST be
-// disposable branches in the configured checkout, never a real integration
-// branch.
+// The merge queue no longer runs anything itself (#1563): the environment
+// that promotes a review to MERGE does the fetch/merge/build/push locally,
+// with its own already-warm checkout and daemon, then reports the outcome.
+// This gate proves the platform's half of that contract — accepting a
+// verified MERGED report and refusing an unverified one — against a real
+// migrated Postgres and a real (local, file://) git remote. No cluster, no
+// DBOS workflow, and no Kubernetes Job are involved, because none exist
+// anymore for this to be a gate on.
 type mergeQueueE2E struct {
-	databaseURL       string
-	dbosURL           string
-	kubeconfig        string
-	registry          string
-	runtimeVersion    string
-	namespace         string
-	serviceAccount    string
-	homeClaim         string
-	workspaceClaim    string
-	repoPath          string
-	targetBranch      string
-	sourceBranchA     string
-	sourceBranchB     string
-	conflictingBranch string
+	databaseURL string
 }
 
 func mergeQueueE2EFromEnv(t *testing.T) mergeQueueE2E {
 	t.Helper()
-	if os.Getenv("ERUN_E2E_MERGE_QUEUE") != "1" {
-		t.Skip("opt-in: set ERUN_E2E_MERGE_QUEUE=1 (+ a Kubernetes cluster, a migrated Postgres, and a disposable checkout the gate can fetch/build/push against)")
+	databaseURL := os.Getenv("ERUN_E2E_MERGE_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("opt-in: set ERUN_E2E_MERGE_DATABASE_URL to a migrated PostgreSQL")
 	}
-	config := mergeQueueE2E{
-		databaseURL:       os.Getenv("ERUN_E2E_MERGE_DATABASE_URL"),
-		dbosURL:           os.Getenv("DBOS_SYSTEM_DATABASE_URL"),
-		kubeconfig:        os.Getenv("ERUN_E2E_MERGE_KUBECONFIG"),
-		registry:          os.Getenv("ERUN_E2E_MERGE_REGISTRY"),
-		runtimeVersion:    os.Getenv("ERUN_E2E_MERGE_RUNTIME_VERSION"),
-		namespace:         os.Getenv("ERUN_E2E_MERGE_NAMESPACE"),
-		serviceAccount:    os.Getenv("ERUN_E2E_MERGE_SERVICE_ACCOUNT"),
-		homeClaim:         os.Getenv("ERUN_E2E_MERGE_HOME_CLAIM"),
-		workspaceClaim:    os.Getenv("ERUN_E2E_MERGE_WORKSPACE_CLAIM"),
-		repoPath:          os.Getenv("ERUN_E2E_MERGE_REPO_PATH"),
-		targetBranch:      os.Getenv("ERUN_E2E_MERGE_TARGET_BRANCH"),
-		sourceBranchA:     os.Getenv("ERUN_E2E_MERGE_SOURCE_BRANCH_A"),
-		sourceBranchB:     os.Getenv("ERUN_E2E_MERGE_SOURCE_BRANCH_B"),
-		conflictingBranch: os.Getenv("ERUN_E2E_MERGE_CONFLICTING_SOURCE_BRANCH"),
-	}
-	for name, value := range map[string]string{
-		"ERUN_E2E_MERGE_DATABASE_URL":              config.databaseURL,
-		"DBOS_SYSTEM_DATABASE_URL":                 config.dbosURL,
-		"ERUN_E2E_MERGE_KUBECONFIG":                config.kubeconfig,
-		"ERUN_E2E_MERGE_REGISTRY":                  config.registry,
-		"ERUN_E2E_MERGE_RUNTIME_VERSION":           config.runtimeVersion,
-		"ERUN_E2E_MERGE_NAMESPACE":                 config.namespace,
-		"ERUN_E2E_MERGE_SERVICE_ACCOUNT":           config.serviceAccount,
-		"ERUN_E2E_MERGE_WORKSPACE_CLAIM":           config.workspaceClaim,
-		"ERUN_E2E_MERGE_REPO_PATH":                 config.repoPath,
-		"ERUN_E2E_MERGE_TARGET_BRANCH":             config.targetBranch,
-		"ERUN_E2E_MERGE_SOURCE_BRANCH_A":           config.sourceBranchA,
-		"ERUN_E2E_MERGE_SOURCE_BRANCH_B":           config.sourceBranchB,
-		"ERUN_E2E_MERGE_CONFLICTING_SOURCE_BRANCH": config.conflictingBranch,
-	} {
-		if value == "" {
-			t.Skipf("%s is required", name)
-		}
-	}
-	return config
+	return mergeQueueE2E{databaseURL: databaseURL}
 }
 
-// startMergeQueueAPI wires the API the way the control plane runs it — real
-// Kubernetes client, real Postgres, real durable workflow, real merge
-// executor — and hands back the pieces a scenario asserts against.
-func startMergeQueueAPI(t *testing.T, config mergeQueueE2E, appName string) (*httptest.Server, *sql.DB, kubernetes.Interface) {
+// startMergeQueueAPI wires the API the way the control plane runs it for
+// reviews/builds: real Postgres, real git verification. No KubeClient and no
+// DBOSContext — neither is needed once nothing here dispatches a Job.
+func startMergeQueueAPI(t *testing.T, config mergeQueueE2E) *httptest.Server {
 	t.Helper()
-
-	kubeConfig, err := clientcmd.BuildConfigFromFlags("", config.kubeconfig)
-	mustNoErr(t, err, "build kube config")
-	kube, err := kubernetes.NewForConfig(kubeConfig)
-	mustNoErr(t, err, "kube client")
 
 	db, err := sql.Open("pgx", config.databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
-	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{AppName: appName, DatabaseURL: config.dbosURL})
-	mustNoErr(t, err, "dbos context")
 
 	handler, err := NewHandler(HandlerOptions{
 		TokenVerifier: TokenVerifierFunc(func(_ context.Context, token string) (Claims, error) {
@@ -119,30 +61,108 @@ func startMergeQueueAPI(t *testing.T, config mergeQueueE2E, appName string) (*ht
 		IdentityCache: NewIdentityResolutionCache(IdentityCacheOptions{}),
 		DB:            db,
 		DBDialect:     repository.DialectPostgres,
-		DBOSContext:   dbosCtx,
-		KubeClient:    kube,
-		Merge: provision.MergeConfig{
-			Registry:       config.registry,
-			RuntimeVersion: config.runtimeVersion,
-			Namespace:      config.namespace,
-			ServiceAccount: config.serviceAccount,
-			HomeClaim:      config.homeClaim,
-			WorkspaceClaim: config.workspaceClaim,
-			RepoPath:       config.repoPath,
-		},
 	})
 	mustNoErr(t, err, "new handler")
-	mustNoErr(t, dbos.Launch(dbosCtx), "dbos launch")
-	t.Cleanup(func() { dbos.Shutdown(dbosCtx, 5*time.Second) })
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return srv, db, kube
+	return srv
+}
+
+// runGit runs a git command and fails the test on error — these are real
+// local git repositories with no network or cluster involved.
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append([]string{}, "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com", "HOME="+dir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// mergeQueueRemote is a bare local git repository standing in for the
+// tenant's real remote, reachable only over file:// — exactly what the
+// gitverify.RemoteVerifier fetches from, just without a real host.
+type mergeQueueRemote struct {
+	url string
+	// main is a unique branch name per remote, not the literal "main": the
+	// platform's "target tip it was gated against" bookkeeping is keyed by
+	// (tenant, targetBranch) alone, so two tests both targeting a branch
+	// literally named "main" — even in two different physical remotes —
+	// would otherwise be compared against each other, which is a testing
+	// artifact, not something that happens in reality (one tenant has one
+	// remote per target branch name).
+	main string
+}
+
+func newMergeQueueRemote(t *testing.T) mergeQueueRemote {
+	t.Helper()
+	main := uniqueBranchName(t, "main")
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare", "--initial-branch="+main)
+	seed := t.TempDir()
+	runGit(t, seed, "init", "--initial-branch="+main)
+	runGit(t, seed, "commit", "--allow-empty", "-m", "root")
+	runGit(t, seed, "remote", "add", "origin", "file://"+bare)
+	runGit(t, seed, "push", "origin", main)
+	return mergeQueueRemote{url: "file://" + bare, main: main}
+}
+
+// branch forks a new branch from main with one commit, pushes it, and
+// returns its commit hash.
+func (r mergeQueueRemote) branch(t *testing.T, name, filename string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", r.url, ".")
+	runGit(t, dir, "checkout", "-b", name)
+	mustNoErr(t, os.WriteFile(dir+"/"+filename, []byte(name), 0o644), "write "+filename)
+	runGit(t, dir, "add", filename)
+	runGit(t, dir, "commit", "-m", "add "+filename)
+	runGit(t, dir, "push", "origin", name)
+	return runGit(t, dir, "rev-parse", "HEAD")
+}
+
+// mainTip reads the remote's current main tip.
+func (r mergeQueueRemote) mainTip(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", r.url, ".")
+	return runGit(t, dir, "rev-parse", r.main)
+}
+
+// merge is exactly what an environment does on promotion to MERGE: fetch
+// target and source, squash-merge the source onto the current target, commit,
+// and push. Real git, against the real (local) remote.
+func (r mergeQueueRemote) merge(t *testing.T, targetBranch, sourceBranch, message string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", r.url, ".")
+	runGit(t, dir, "fetch", "origin", targetBranch, sourceBranch)
+	runGit(t, dir, "checkout", "-B", targetBranch, "origin/"+targetBranch)
+	runGit(t, dir, "merge", "--squash", "origin/"+sourceBranch)
+	runGit(t, dir, "commit", "-m", message)
+	commit := runGit(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "push", "origin", "HEAD:"+targetBranch)
+	return commit
+}
+
+// uniqueBranchName keeps a re-run against a persistent database from
+// colliding on the one-live-review-per-branch-pair uniqueness constraint, and
+// keeps two tests' target branches from being compared against each other by
+// the platform's own (tenant, targetBranch) gated-tip bookkeeping.
+func uniqueBranchName(t *testing.T, prefix string) string {
+	t.Helper()
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
 
 type mergeReviewResponse struct {
 	ReviewID          string             `json:"reviewId"`
 	Status            model.ReviewStatus `json:"status"`
+	TargetBranch      string             `json:"targetBranch"`
 	LastMergedBuildID string             `json:"lastMergedBuildId"`
 	LastFailedBuildID string             `json:"lastFailedBuildId"`
 }
@@ -164,18 +184,52 @@ func e2eOpenReview(t *testing.T, baseURL, name, targetBranch, sourceBranch strin
 
 // e2eReportGreenBuild is the CLIENT-reported build a real CI would post for
 // the source branch. A successful one moves the review OPEN -> READY and, if
-// nothing else is merging on that target, promotes it straight to MERGE —
-// which is what dispatches the merge-gate Job under test.
+// nothing else is merging on that target, promotes it straight to MERGE.
 func e2eReportGreenBuild(t *testing.T, baseURL, reviewID string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
 		"successful": true,
-		"commitId":   "ci-" + reviewID,
+		"commitId":   fmt.Sprintf("%040x", time.Now().UnixNano()),
 		"version":    "0.0.1",
 	})
 	if code != http.StatusCreated {
 		t.Fatalf("report green build for %s: HTTP %d: %s", reviewID, code, body)
 	}
+}
+
+// e2ePostGateBuild is the environment reporting its own gate outcome —
+// GATE builds are no longer written only by the platform (#1563).
+func e2ePostGateBuild(t *testing.T, baseURL, reviewID, commit string, successful bool, failureDetail string) string {
+	t.Helper()
+	body := map[string]any{"kind": "GATE", "commitId": commit, "successful": successful}
+	if failureDetail != "" {
+		body["failureDetail"] = failureDetail
+	}
+	code, respBody := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", body)
+	if code != http.StatusCreated {
+		t.Fatalf("report gate build for %s: HTTP %d: %s", reviewID, code, respBody)
+	}
+	var build struct {
+		BuildID string `json:"buildId"`
+	}
+	mustNoErr(t, json.Unmarshal([]byte(respBody), &build), "parse build response")
+	return build.BuildID
+}
+
+// e2eReportMerged is the environment's own claim that the merge landed —
+// accepted only once the platform can verify it against the real repository.
+func e2eReportMerged(t *testing.T, baseURL, reviewID, buildID, remoteURL string) (int, mergeReviewResponse) {
+	t.Helper()
+	code, body := e2eRequest(t, baseURL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{
+		"status":    "MERGED",
+		"buildId":   buildID,
+		"remoteUrl": remoteURL,
+	})
+	var review mergeReviewResponse
+	if code == http.StatusOK {
+		mustNoErr(t, json.Unmarshal([]byte(body), &review), "parse review response")
+	}
+	return code, review
 }
 
 func readMergeReview(t *testing.T, baseURL, reviewID string) mergeReviewResponse {
@@ -189,134 +243,93 @@ func readMergeReview(t *testing.T, baseURL, reviewID string) mergeReviewResponse
 	return review
 }
 
-// awaitReviewTerminal polls until the merge gate's durable workflow lands the
-// review on MERGED or FAILED.
-func awaitReviewTerminal(t *testing.T, baseURL, reviewID string) mergeReviewResponse {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Minute)
-	for time.Now().Before(deadline) {
-		review := readMergeReview(t, baseURL, reviewID)
-		if review.Status == model.ReviewStatusMerged || review.Status == model.ReviewStatusFailed {
-			return review
-		}
-		time.Sleep(3 * time.Second)
-	}
-	t.Fatalf("timed out waiting for review %s to reach a terminal status", reviewID)
-	return mergeReviewResponse{}
-}
-
-// currentTargetCommit reads the target branch's tip directly from the
-// checkout the merge Jobs push to, which is the ground truth for whether the
-// target branch actually moved.
-func currentTargetCommit(t *testing.T, repoPath, targetBranch string) string {
-	t.Helper()
-	fetch := exec.Command("git", "-C", repoPath, "fetch", "origin", targetBranch)
-	if out, err := fetch.CombinedOutput(); err != nil {
-		t.Fatalf("fetch origin %s: %v: %s", targetBranch, err, out)
-	}
-	rev := exec.Command("git", "-C", repoPath, "rev-parse", "FETCH_HEAD")
-	out, err := rev.CombinedOutput()
-	mustNoErr(t, err, "rev-parse FETCH_HEAD for "+targetBranch+": "+string(out))
-	return strings.TrimSpace(string(out))
-}
-
-// TestMergeQueueLandsAReviewEndToEnd is the gate: a promotion to MERGE has to
-// become a real Job in the cluster, run a real `erun build` against the real
-// prospective merge, push it, and land the review on MERGED naming the build
-// it merged with.
-func TestMergeQueueLandsAReviewEndToEnd(t *testing.T) {
+// TestMergeQueueAcceptsAVerifiedMergeEndToEnd is the environment-driven
+// happy path: promote to MERGE, do the real merge/push exactly as an
+// environment would, report the gate build, and have MERGED accepted because
+// it checks out against the real repository — not because of who reported it.
+func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
-	srv, _, _ := startMergeQueueAPI(t, config, "erun-merge-queue-e2e")
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	sourceBranch := uniqueBranchName(t, "feature-a")
+	remote.branch(t, sourceBranch, "a.txt")
 
-	reviewID := e2eOpenReview(t, srv.URL, "merge-queue-e2e", config.targetBranch, config.sourceBranchA)
+	reviewID := e2eOpenReview(t, srv.URL, "merge-queue-e2e", remote.main, sourceBranch)
 	e2eReportGreenBuild(t, srv.URL, reviewID)
-
-	review := awaitReviewTerminal(t, srv.URL, reviewID)
-	if review.Status != model.ReviewStatusMerged {
-		t.Fatalf("review did not merge: status=%q", review.Status)
-	}
-	if review.LastMergedBuildID == "" {
-		t.Fatal("review MERGED but named no gate build")
+	review := readMergeReview(t, srv.URL, reviewID)
+	if review.Status != model.ReviewStatusMerge {
+		t.Fatalf("review status = %s, want MERGE (queue was empty, so it should have promoted itself)", review.Status)
 	}
 
-	code, body := e2eRequest(t, srv.URL, http.MethodGet, "/v1/reviews/"+reviewID+"/builds/"+review.LastMergedBuildID, nil)
+	mergeCommit := remote.merge(t, remote.main, sourceBranch, "merge "+sourceBranch)
+	buildID := e2ePostGateBuild(t, srv.URL, reviewID, mergeCommit, true, "")
+
+	code, merged := e2eReportMerged(t, srv.URL, reviewID, buildID, remote.url)
 	if code != http.StatusOK {
-		t.Fatalf("get gate build: HTTP %d: %s", code, body)
+		t.Fatalf("report MERGED: HTTP %d", code)
 	}
-	var build struct {
-		Kind       model.BuildKind `json:"kind"`
-		Successful bool            `json:"successful"`
-		Version    string          `json:"version"`
+	if merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", merged.Status)
 	}
-	mustNoErr(t, json.Unmarshal([]byte(body), &build), "parse build response")
-	if build.Kind != model.BuildKindGate || !build.Successful {
-		t.Fatalf("gate build = %+v, want a successful GATE build", build)
-	}
-	if build.Version != "" {
-		t.Fatalf("gate build named version %q, want none — the gate publishes nothing", build.Version)
+	if merged.LastMergedBuildID != buildID {
+		t.Fatalf("lastMergedBuildId = %s, want %s", merged.LastMergedBuildID, buildID)
 	}
 }
 
-// TestMergeQueueCatchesTwoReviewsGreenAloneButBrokenTogether is the mandatory
-// proof #1196 calls out: two reviews, each of which merges cleanly onto the
-// target by itself, whose combination the target branch must never see. The
-// first lands for real; the second, gated against the target the first left
-// behind, fails for real, and the target branch never moves for it.
-func TestMergeQueueCatchesTwoReviewsGreenAloneButBrokenTogether(t *testing.T) {
+// TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget is the property the
+// merge queue exists for, re-homed to the new architecture: a merge built
+// against a target tip that is no longer current must never become MERGED,
+// even though the reported commit really is (now) on the branch. Producing
+// this without a second, well-behaved environment racing the first means
+// force-pushing a merge computed against a stale local fetch — standing in
+// for a buggy or malicious reporter, which is exactly who this check has to
+// hold up against once any caller may report MERGED (#1563).
+func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
-	if config.conflictingBranch == "" {
-		t.Skip("ERUN_E2E_MERGE_CONFLICTING_SOURCE_BRANCH is required for this scenario")
-	}
-	srv, _, _ := startMergeQueueAPI(t, config, "erun-merge-queue-conflict-e2e")
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	branchA := uniqueBranchName(t, "feature-a")
+	branchC := uniqueBranchName(t, "feature-c")
+	remote.branch(t, branchA, "a.txt")
+	remote.branch(t, branchC, "c.txt")
 
-	firstID := e2eOpenReview(t, srv.URL, "merge-queue-e2e-first", config.targetBranch, config.sourceBranchA)
-	e2eReportGreenBuild(t, srv.URL, firstID)
-	first := awaitReviewTerminal(t, srv.URL, firstID)
-	if first.Status != model.ReviewStatusMerged {
-		t.Fatalf("first review did not merge: status=%q", first.Status)
-	}
-	targetAfterFirst := currentTargetCommit(t, config.repoPath, config.targetBranch)
+	// feature-c's "environment" fetches main while it is still at the root
+	// commit — before feature-a lands.
+	staleClone := t.TempDir()
+	runGit(t, staleClone, "clone", remote.url, ".")
+	runGit(t, staleClone, "fetch", "origin", remote.main, branchC)
+	runGit(t, staleClone, "checkout", "-B", remote.main, "origin/"+remote.main)
+	runGit(t, staleClone, "merge", "--squash", "origin/"+branchC)
+	runGit(t, staleClone, "commit", "-m", "merge "+branchC)
+	staleMergeCommit := runGit(t, staleClone, "rev-parse", "HEAD")
 
-	// This branch was forked from the ORIGINAL target and independently is
-	// green — it is the counterpart the operator seeds specifically to conflict
-	// with sourceBranchA once A has already landed.
-	secondID := e2eOpenReview(t, srv.URL, "merge-queue-e2e-second", config.targetBranch, config.conflictingBranch)
-	e2eReportGreenBuild(t, srv.URL, secondID)
-	second := awaitReviewTerminal(t, srv.URL, secondID)
-	if second.Status != model.ReviewStatusFailed {
-		t.Fatalf("the conflicting second review was accepted: status=%q", second.Status)
-	}
-	if second.LastFailedBuildID == "" {
-		t.Fatal("the failed review named no gate build")
-	}
-
-	targetAfterSecond := currentTargetCommit(t, config.repoPath, config.targetBranch)
-	if targetAfterSecond != targetAfterFirst {
-		t.Fatalf("target branch moved after the rejected second merge: %s -> %s", targetAfterFirst, targetAfterSecond)
-	}
-}
-
-// TestMergeQueueLandsTwoNonConflictingReviewsSequentially is the companion
-// case: two reviews that do NOT conflict must both land for real, the second
-// gated against the real target the first left behind.
-func TestMergeQueueLandsTwoNonConflictingReviewsSequentially(t *testing.T) {
-	config := mergeQueueE2EFromEnv(t)
-	srv, _, _ := startMergeQueueAPI(t, config, "erun-merge-queue-sequential-e2e")
-
-	firstID := e2eOpenReview(t, srv.URL, "merge-queue-e2e-seq-first", config.targetBranch, config.sourceBranchA)
-	e2eReportGreenBuild(t, srv.URL, firstID)
-	first := awaitReviewTerminal(t, srv.URL, firstID)
-	if first.Status != model.ReviewStatusMerged {
-		t.Fatalf("first review did not merge: status=%q", first.Status)
+	// Meanwhile feature-a's review lands for real, moving the platform's own
+	// record of main's tip forward.
+	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-a", remote.main, branchA)
+	e2eReportGreenBuild(t, srv.URL, reviewA)
+	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
+	buildA := e2ePostGateBuild(t, srv.URL, reviewA, mergeCommitA, true, "")
+	if code, merged := e2eReportMerged(t, srv.URL, reviewA, buildA, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
 	}
 
-	secondID := e2eOpenReview(t, srv.URL, "merge-queue-e2e-seq-second", config.targetBranch, config.sourceBranchB)
-	e2eReportGreenBuild(t, srv.URL, secondID)
-	second := awaitReviewTerminal(t, srv.URL, secondID)
-	if second.Status != model.ReviewStatusMerged {
-		t.Fatalf("second review, which does not conflict with the first, did not merge: status=%q", second.Status)
+	// feature-c's stale merge still pushes — a fast-forward check alone does
+	// not catch this, since force-pushing (a buggy or malicious reporter,
+	// not a well-behaved one) can still land it on the branch.
+	runGit(t, staleClone, "push", "--force", "origin", "HEAD:"+remote.main)
+	if got := remote.mainTip(t); got != staleMergeCommit {
+		t.Fatalf("main tip = %s, want the force-pushed stale merge %s to have landed", got, staleMergeCommit)
 	}
-	if second.LastMergedBuildID == first.LastMergedBuildID {
-		t.Fatal("both reviews recorded the same gate build")
+
+	reviewC := e2eOpenReview(t, srv.URL, "merge-queue-e2e-c", remote.main, branchC)
+	e2eReportGreenBuild(t, srv.URL, reviewC)
+	buildC := e2ePostGateBuild(t, srv.URL, reviewC, staleMergeCommit, true, "")
+
+	code, _ := e2eReportMerged(t, srv.URL, reviewC, buildC, remote.url)
+	if code != http.StatusConflict {
+		t.Fatalf("report MERGED for a stale-target merge: HTTP %d, want 409 MERGE_NOT_VERIFIED", code)
+	}
+	if got := readMergeReview(t, srv.URL, reviewC).Status; got == model.ReviewStatusMerged {
+		t.Fatal("review C reached MERGED despite its merge being built against a target tip that was no longer current")
 	}
 }

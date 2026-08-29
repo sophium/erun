@@ -33,53 +33,6 @@ func TestMissingEnvProvisionerConfigReportsOnlyDBOSWhenEverythingElseSet(t *test
 	}
 }
 
-func TestMissingReleaseQueueConfigReportsAllPreconditionsWhenUnset(t *testing.T) {
-	reasons := missingReleaseQueueConfig(HandlerOptions{})
-	if len(reasons) != 6 {
-		t.Fatalf("expected all six preconditions to be reported missing, got %v", reasons)
-	}
-}
-
-func TestMissingReleaseQueueConfigReportsOnlyDBOSWhenEverythingElseSet(t *testing.T) {
-	options := HandlerOptions{
-		KubeClient: k8sfake.NewSimpleClientset(),
-		Release: provision.ReleaseConfig{
-			Registry:       "ghcr.io/sophium",
-			RuntimeVersion: "1.0.0",
-			Namespace:      "team-build",
-			ServiceAccount: "team-devops",
-		},
-	}
-	reasons := missingReleaseQueueConfig(options)
-	if len(reasons) != 1 || !strings.Contains(reasons[0], "DBOS_SYSTEM_DATABASE_URL") {
-		t.Fatalf("expected exactly one reason naming the missing DBOS config, got %v", reasons)
-	}
-}
-
-func TestMissingMergeQueueConfigReportsAllPreconditionsWhenUnset(t *testing.T) {
-	reasons := missingMergeQueueConfig(HandlerOptions{})
-	if len(reasons) != 8 {
-		t.Fatalf("expected all eight preconditions to be reported missing, got %v", reasons)
-	}
-}
-
-func TestMissingMergeQueueConfigReportsDBOSAndWorkspaceClaimWhenOnlyThoseAreUnset(t *testing.T) {
-	options := HandlerOptions{
-		KubeClient: k8sfake.NewSimpleClientset(),
-		Merge: provision.MergeConfig{
-			Registry:       "ghcr.io/sophium",
-			RuntimeVersion: "1.0.0",
-			Namespace:      "team-build",
-			ServiceAccount: "team-devops",
-			RepoPath:       "/home/erun/git/erun",
-		},
-	}
-	reasons := missingMergeQueueConfig(options)
-	if len(reasons) != 2 || !strings.Contains(reasons[0], "DBOS_SYSTEM_DATABASE_URL") || !strings.Contains(reasons[1], "Merge.WorkspaceClaim") {
-		t.Fatalf("expected reasons naming the missing DBOS config and workspace claim, got %v", reasons)
-	}
-}
-
 func TestHandlerRequiresBearerTokenForAPIEndpoint(t *testing.T) {
 	handler, err := NewHandler(HandlerOptions{
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
