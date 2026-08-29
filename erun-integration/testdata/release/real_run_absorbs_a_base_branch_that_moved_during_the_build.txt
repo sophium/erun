@@ -47,6 +47,10 @@ To <TMP>
  ! [rejected]        main -> main (fetch first)
 error: failed to push some refs to '<TMP>'
 release: push rejected; origin/main moved during the release, rebasing onto it and retrying (1/2)
+release: rebase moved the commit tag <VERSION> named; re-pointing it onto <HEX> and force-pushing
+Updated tag '<VERSION>' (was <SHORTSHA>)
+To <TMP>
+ + <SHORTSHA>...<SHORTSHA> <VERSION> -> <VERSION> (forced update)
 To <TMP>
    <SHORTSHA>..<SHORTSHA>  main -> main
 release version: <VERSION>

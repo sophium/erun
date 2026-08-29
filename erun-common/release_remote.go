@@ -1,8 +1,10 @@
 package eruncommon
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -128,16 +130,149 @@ func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandS
 			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %v\nversion %s is already published, so rebase the release's own commits onto origin/%s by hand and push them",
 				err, branch, rebaseErr, spec.Version, branch)
 		}
+		if repointErr := repointReleaseTagIfRebased(ctx, spec, command.Dir, runGit); repointErr != nil {
+			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-published release tag failed: %v\nversion %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it",
+				err, branch, repointErr, spec.Version, spec.Version)
+		}
 		err = runGit(command.Dir, ctx.Stdout, ctx.Stderr, releaseBranchPushArgs(spec, command)...)
 	}
 	return err
 }
 
-// releaseBranchPushArgs is the retried push. A rebase rewrites the commit the
-// release tag points at, so --follow-tags no longer considers the tag reachable
-// and would silently leave it behind. The tag object still names the version that
-// is already published, so the retry pushes it by name; a tag origin already has
-// makes that a no-op.
+// repointReleaseTagIfRebased brings the release's own annotated tag back onto
+// the branch's history after a rebase rewrote the commit it named. A rebase
+// replays every commit from the release's own fork point forward, including
+// the one push-release-tag already published the tag under, so an already-public
+// tag can end up naming a commit reachable from nothing once that commit is
+// replayed under a new sha. The remote already holds the tag at the old
+// commit, and an annotated tag update is never a fast-forward, so bringing it
+// back onto the branch always needs a force.
+func repointReleaseTagIfRebased(ctx Context, spec ReleaseSpec, projectRoot string, runGit GitCommandRunnerFunc) error {
+	version := strings.TrimSpace(spec.Version)
+	if version == "" {
+		return nil
+	}
+	tag := "v" + version
+
+	tagCommit, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{commit}")
+	if err != nil || !ok {
+		return nil
+	}
+	ancestor, err := gitIsAncestorOfHead(projectRoot, tagCommit)
+	if err != nil || ancestor {
+		return err
+	}
+
+	newCommit, err := findReplayedReleaseTagCommit(projectRoot, spec.Branch, tag, tagCommit)
+	if err != nil {
+		return err
+	}
+	return moveReleaseTagOnto(ctx, projectRoot, runGit, tag, newCommit)
+}
+
+// findReplayedReleaseTagCommit locates the commit a rebase gave the release's
+// own tagged commit under its new sha, by the message the two must share (see
+// findCommitsBySubjectInRange). The search is bounded to FETCH_HEAD..HEAD —
+// the commits the rebase moments earlier in rebaseReleaseOntoRemoteBranch
+// actually replayed onto the upstream it just fetched — rather than all of
+// history, so an unrelated older commit that happens to share the subject can
+// never be mistaken for the replayed one.
+func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (string, error) {
+	subject, err := gitCommitSubject(projectRoot, tagCommit)
+	if err != nil {
+		return "", err
+	}
+	matches, err := findCommitsBySubjectInRange(projectRoot, "FETCH_HEAD..HEAD", subject)
+	if err != nil {
+		return "", err
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("tag %q named a commit the rebase rewrote, but no commit with its original message %q could be found on %s; move the tag onto the right commit by hand and push it",
+			tag, subject, branch)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("tag %q named a commit the rebase rewrote, but %d commits with its original message %q were found on %s; move the tag onto the right commit by hand and push it",
+			tag, len(matches), subject, branch)
+	}
+}
+
+// moveReleaseTagOnto re-creates tag at newCommit, preserving its original
+// annotation message, and force-publishes it: the remote already has this
+// tag at the pre-rebase commit, and an annotated tag update is never a
+// fast-forward.
+func moveReleaseTagOnto(ctx Context, projectRoot string, runGit GitCommandRunnerFunc, tag, newCommit string) error {
+	message, err := gitTagAnnotationSubject(projectRoot, tag)
+	if err != nil {
+		return err
+	}
+	ctx.Info(fmt.Sprintf("release: rebase moved the commit tag %s named; re-pointing it onto %s and force-pushing", tag, newCommit))
+	ctx.TraceCommand(projectRoot, "git", "tag", "-f", "-a", tag, newCommit, "-m", message)
+	if err := runGit(projectRoot, ctx.Stdout, ctx.Stderr, "tag", "-f", "-a", tag, newCommit, "-m", message); err != nil {
+		return err
+	}
+	ctx.TraceCommand(projectRoot, "git", "push", "--force", "origin", "refs/tags/"+tag)
+	return runGit(projectRoot, ctx.Stdout, ctx.Stderr, "push", "--force", "origin", "refs/tags/"+tag)
+}
+
+// gitIsAncestorOfHead reports whether commit is already part of HEAD's own
+// history — true for a tag a rebase left untouched (it named a commit at or
+// before the merge-base, which every rebase leaves alone), false once the
+// commit it used to name was replayed under a new sha.
+func gitIsAncestorOfHead(projectRoot, commit string) (bool, error) {
+	err := Command("git", "-C", projectRoot, "merge-base", "--is-ancestor", commit, "HEAD").Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+func gitCommitSubject(projectRoot, commit string) (string, error) {
+	output, err := Command("git", "-C", projectRoot, "show", "-s", "--format=%s", commit).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// findCommitsBySubjectInRange returns every commit in revRange whose subject
+// is an exact match, newest first. A rebase replays commits in order without
+// changing their message, and the release's generated commit subjects always
+// carry the version being released, so the subject is normally unique within
+// the commits a rebase just replayed — but the caller decides what to do with
+// more than one match rather than this function silently picking one.
+func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]string, error) {
+	output, err := Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", revRange).Output()
+	if err != nil {
+		return nil, err
+	}
+	var matches []string
+	for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+		hash, lineSubject, ok := strings.Cut(line, "\x01")
+		if ok && lineSubject == subject {
+			matches = append(matches, hash)
+		}
+	}
+	return matches, nil
+}
+
+func gitTagAnnotationSubject(projectRoot, tag string) (string, error) {
+	output, err := Command("git", "-C", projectRoot, "for-each-ref", "--format=%(contents:subject)", "refs/tags/"+tag).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// releaseBranchPushArgs is the retried push. repointReleaseTagIfRebased has
+// already re-pointed and force-pushed the release tag by the time this runs
+// if the rebase moved it, so appending the tag by name here only matters when
+// the tag never needed to move — a no-op against what origin already has.
 func releaseBranchPushArgs(spec ReleaseSpec, command ReleaseCommandSpec) []string {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {

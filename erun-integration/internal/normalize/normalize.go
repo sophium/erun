@@ -131,6 +131,13 @@ var defaultRules = []Replacement{
 	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
 	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
 	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
+	// A forced ref update (`git push --force`/`--force-with-lease`, as the
+	// release tag's repoint-after-rebase does) prints a three-dot range, not
+	// the fast-forward push status line's two-dot range above, and
+	// `git tag -f` separately prints the commit it moved the tag away from.
+	// Both carry a commit the fixture repo happened to produce on this run.
+	{regexp.MustCompile(`(?m)^(\s*\+ )[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>...<SHORTSHA>"},
+	{regexp.MustCompile(`\(was [0-9a-f]{7,40}\)`), "(was <SHORTSHA>)"},
 	// Safety net for a real home path that leaks despite the test HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},
