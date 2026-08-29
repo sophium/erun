@@ -413,6 +413,8 @@ func jobStatusLine(job common.EnvironmentJob) string {
 		return jobExitedLine(job)
 	case common.EnvironmentJobStateAbandoned:
 		return jobAbandonedLine(job)
+	case common.EnvironmentJobStateGateIncomplete:
+		return jobGateIncompleteLine(job)
 	default:
 		return jobUnknownLine(job)
 	}
@@ -441,6 +443,20 @@ func jobExitedLine(job common.EnvironmentJob) string {
 // exited) -- the reason names the background work nothing will ever report on.
 func jobAbandonedLine(job common.EnvironmentJob) string {
 	line := fmt.Sprintf("abandoned %d: %s", jobExitCodeOrUnset(job), job.Name)
+	if strings.TrimSpace(job.Signal) != "" {
+		line += fmt.Sprintf(" (signal %s)", job.Signal)
+	}
+	if strings.TrimSpace(job.Reason) != "" {
+		line += " (" + job.Reason + ")"
+	}
+	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
+// work is a sibling job record this job started, not a process left behind in
+// its own process group.
+func jobGateIncompleteLine(job common.EnvironmentJob) string {
+	line := fmt.Sprintf("gate-incomplete %d: %s", jobExitCodeOrUnset(job), job.Name)
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
 	}
@@ -598,6 +614,8 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 		return nil
 	case result.Job.State == common.EnvironmentJobStateAbandoned:
 		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
+	case result.Job.State == common.EnvironmentJobStateGateIncomplete:
+		return fmt.Errorf("job %q ended while work it started was still running: %s", result.Job.ID, result.Job.Reason)
 	default:
 		return fmt.Errorf("job %q exited %d", result.Job.ID, jobExitCodeOrUnset(result.Job))
 	}

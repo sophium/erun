@@ -62,6 +62,31 @@ fi
 : "${ERUN_TENANT:?agent-gate.sh: ERUN_TENANT is not set (expected inside an agent pod)}"
 : "${ERUN_ENVIRONMENT:?agent-gate.sh: ERUN_ENVIRONMENT is not set (expected inside an agent pod)}"
 
+# warn_if_wrapped_in_timeout looks a few hops up the process tree for an
+# ancestor named `timeout`. An outer `timeout` around this script can only
+# ever truncate the bounded await below -- it has no way to extend it -- so
+# wrapping a call meant to protect a gate in a second, shorter deadline can
+# only defeat the protection, never help it. This is a warning, not a refusal:
+# the ancestor walk is a `ps` heuristic (best-effort if `ps` is unavailable),
+# and a caller who genuinely wants a hard outer bound has a real use for it
+# (e.g. bounding total wall-clock across several agent-gate.sh re-invocations).
+warn_if_wrapped_in_timeout() {
+	pid="$PPID"
+	hops=0
+	while [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ] && [ "$hops" -lt 8 ]; do
+		comm=$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' ') || return 0
+		case "$comm" in
+		timeout|*/timeout)
+			printf 'agent-gate: this invocation appears to run under an outer '\''timeout'\'' (pid %s) -- timeout can only truncate the bounded await below, never extend it, so it can end up killing the gate this script exists to protect. Run agent-gate.sh directly in the foreground and re-invoke it again if it reports "still running" instead.\n' "$pid" >&2
+			return 0
+			;;
+		esac
+		pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+		hops=$((hops + 1))
+	done
+}
+warn_if_wrapped_in_timeout
+
 # hash_stdin prints the sha256 of stdin. Prefers sha256sum (the Linux runtime
 # image); falls back to shasum so this runs on a macOS dev host too.
 hash_stdin() {

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -710,6 +711,59 @@ func TestJob(t *testing.T) {
 			t.Fatalf("expected an abandoned job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 		}
 		golden.Equal(t, "job/a_job_that_backgrounds_work_and_exits_reads_as_abandoned_not_success", normalize.Apply(status.Combined+await.Combined))
+	})
+
+	t.Run("a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", func(t *testing.T) {
+		// The reproduction this closes: an agent job runs a gate through its own
+		// `job start` (exactly what agent-gate.sh's detach-and-await does from
+		// inside an agent's Bash tool) and then ends -- by backgrounding itself,
+		// running out of turns, or an outer `timeout` killing the foreground
+		// wait -- while the gate has not reached a verdict. The gate is a
+		// separate, detached job on purpose, so it is never a member of the
+		// outer job's process group and the abandoned scenario above cannot see
+		// it; only the StartedByJobID record relationship can. The nested
+		// `job start` here runs through the real compiled binary rather than a
+		// seeded record, so this locks the whole wiring end to end: the outer
+		// job's supervisor has to actually propagate ERUN_JOB_ID to the "work"
+		// stub's process, and the stub's own nested erun call has to actually
+		// read it back onto the gate job it starts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		// The nested job start's own stdout (a "job started: ..." line naming its
+		// log path) is discarded rather than left to land in outer's captured
+		// output: the log path's length varies with the test's own tempdir name,
+		// which would make outer's recorded outputBytes -- and so the golden --
+		// flaky across runs.
+		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sleep 30 >/dev/null 2>&1\nexit 0\n", bin)
+		envVars := jobStubEnv(t, setup, script)
+
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "gate", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected a gate-incomplete job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		golden.Equal(t, "job/a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", normalize.Apply(status.Combined+await.Combined))
 	})
 
 	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {
