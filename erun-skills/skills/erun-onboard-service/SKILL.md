@@ -70,6 +70,20 @@ paths:
   k8s: <path>/k8s
   dockercontext: repo-root
   version: <path>/VERSION      # when the product versions itself, not the repo
+
+# Required. The BUILD registry is resolved from this file, not from the
+# environment's own config: resolveDockerBuildRegistryForEnvironment reads the
+# project registry list. Omit it and the build silently names its images for a
+# fallback registry the environment cannot push to -- with no error, because
+# nothing failed yet.
+containerregistries:
+  - cluster:                    # or: `registry: ghcr.io/<org>`
+      service: erun-registry
+      namespace: kube-system
+      port: 5000
+      insecure: true
+    roles: [build, deploy]
+
 environments:
   <env>:
     k8s:
@@ -131,6 +145,18 @@ fail rather than discovering it mid-build.
    order is: fix check 1, redeploy the runtime (`erun deploy <tenant> <env>
    --current`), then re-read this arg. Fixing them in the other order does
    nothing.
+
+   If the arg is *still* absent after that, erun did not derive the value on this
+   path (it passes the registry list through unconcretized, and the chart's
+   `clusterRegistryInsecure` stays empty). Patch the sidecar to exactly what the
+   chart would have rendered, and say that you did:
+   ```sh
+   kubectl -n <namespace> patch deploy <tenant>-devops --type=strategic -p \
+     '{"spec":{"template":{"spec":{"containers":[{"name":"erun-dind","args":["--insecure-registry","<clusterIP>:5000"]}]}}}}'
+   ```
+   The dind image store is a PVC, so this restart does not discard built images —
+   but it does restart the environment's pod, which is a heads-up, and it is a
+   deviation to report rather than absorb.
 3. **Every image the plan needs is pullable**, at the exact version — the ones
    the deploy references *and* the ones any edge module references:
    ```sh
@@ -158,10 +184,27 @@ fail rather than discovering it mid-build.
 
 ```sh
 erun push --build                       # in the pod; builds and publishes the component
-erun deploy <tenant> <env> --components <component> [-f <override>.yaml]
+erun deploy <tenant> <env> --components <component>
 ```
 
-The override from Step 3.5 goes in as a values file. Two rules learned the hard
+**`erun deploy` has no `-f`/`--values` flag.** The Step 3.5 override is a
+`values.<env>.yaml` written *beside the chart*, which erun picks up by name — and
+a missing one is a hard error (`values file not found for environment "<env>"`),
+not a fallback to defaults. That means onboarding necessarily adds a file to the
+repo being onboarded; say so, because it is the one repo change this skill cannot
+avoid.
+
+**Run the deploy where the repo is.** For a `remote-agent` environment the
+worktree lives in the pod, so the host cannot read the project config or the
+chart — a host-side deploy reports `configured repo path … is not present on this
+machine; no k8s.deployments plan could be read` and proceeds on defaults. Deploy
+the component from inside the pod. The environment's own *runtime* chart is the
+opposite case and stays a host-side operation.
+
+Expect the build to produce **both** `linux/amd64` and `linux/arm64` — that pair
+is hardcoded, with no flag or config to narrow it, so a single-architecture
+cluster pays for an emulated image it can never schedule. On a local cluster that
+emulated half is usually the whole wait. Two rules learned the hard
 way: an empty-stub secret is worse than no secret (an empty `DATABASE_URL`
 breaks a driver's connect at import time, so prefer an explicitly empty
 `env.secret: []` plus a real value), and a build gate inside the Dockerfile
@@ -243,6 +286,9 @@ cover the hostname actually being used.
 | Several candidate services found | Apply the ignore list, show what survived, and confirm the roll-out set. Never infer consent from a count of one. |
 | A candidate is `<root>/Dockerfile` + `<root>/chart/` | It cannot be wired by `paths`, which need `docker`/`k8s` directories of per-component subdirectories. Say so; arranging it is `erun-blueprint-service`'s job. |
 | `COPY` fails during build | Build context is wrong — set `paths.dockercontext: repo-root`. |
+| Build names images for an unexpected registry | The project config has no `containerregistries`; the build reads that list, not the env's. Add it. |
+| `values file not found for environment "<env>"` | There is no `-f` to pass. Write `values.<env>.yaml` beside the chart. |
+| `configured repo path … is not present on this machine` | A host-side deploy of a pod-side repo. Run the component deploy in the pod. |
 | `can-i create pods/portforward` says `no` | Re-check with `--subresource=portforward` before believing it; the slash form reports a false negative. |
 | `kubectl get svc kube-system/erun-registry: Forbidden` | The SA is not bound to the registry-access Role. Add it as a subject to the existing RoleBinding if one exists; do not switch registries to dodge it. |
 | dind still lacks `--insecure-registry` after fixing RBAC | The runtime has not been redeployed since. `erun deploy <tenant> <env> --current`, then re-read the arg. |
