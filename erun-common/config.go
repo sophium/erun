@@ -66,6 +66,13 @@ type RuntimeRegistryConfig struct {
 	BaseURL string `yaml:"baseurl,omitempty"`
 	// TokenURL is consulted only on the GHCR flow; defaults to https://ghcr.io.
 	TokenURL string `yaml:"tokenurl,omitempty"`
+	// Insecure marks Namespace as plain HTTP (a cluster registry marked
+	// `insecure: true`), so an unset BaseURL resolves to http:// instead of
+	// https:// for it. Never persisted -- only a caller that already knows the
+	// registry is insecure (e.g. probing a tenant's own published chart) sets
+	// it; the operator-configured mirror this struct otherwise describes is
+	// always addressed over HTTPS.
+	Insecure bool `yaml:"-"`
 }
 
 type SSHDConfig struct {

@@ -78,6 +78,7 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		Repository: strings.TrimSpace(c.Repository),
 		BaseURL:    strings.TrimSpace(c.BaseURL),
 		TokenURL:   strings.TrimSpace(c.TokenURL),
+		Insecure:   c.Insecure,
 	}
 	if resolved.Namespace == "" {
 		resolved.Namespace = DefaultContainerRegistry
@@ -92,8 +93,14 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		case isRegistryHost:
 			// A namespace that names its own registry host is served by that host,
 			// not by Docker Hub; defaulting to the Hub sent the listing to a
-			// repository named after the host and answered 404.
-			resolved.BaseURL = "https://" + host
+			// repository named after the host and answered 404. That host may speak
+			// plain HTTP only (an insecure in-cluster registry), so honor Insecure
+			// rather than always assuming TLS.
+			scheme := "https://"
+			if resolved.Insecure {
+				scheme = "http://"
+			}
+			resolved.BaseURL = scheme + host
 		default:
 			resolved.BaseURL = defaultDockerHubRegistryBaseURL
 		}

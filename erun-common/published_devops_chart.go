@@ -107,7 +107,7 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 	outcomes := make([]string, 0, len(probed))
 	inconclusive := false
 	for _, candidate := range probed {
-		found, err := probeChartVersion(context.Background(), candidate.registry, candidate.chart, version)
+		found, err := probeChartVersion(context.Background(), candidate.registry, candidate.chart, version, chartRegistryInsecure(target, candidate.registry))
 		if err != nil {
 			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " could not be confirmed in " + candidate.registry + " (" + candidate.why + "): " + err.Error())
 			outcomes = append(outcomes, candidate.describe()+": could not determine: "+err.Error())
@@ -220,7 +220,12 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 		ctx.Trace("deploy: no version resolved; cannot verify the tenant's charts are published")
 		return fmt.Errorf("version is required to deploy the tenant's charts: pass --version or persist runtimeversion in the env config")
 	}
-	registry := publishedDevopsChartRegistry(target)
+	// Components are published to the DEPLOY registry by `erun push`, never the
+	// platform-chart registry publishedDevopsChartRegistry resolves (an explicit
+	// runtimeregistry, or the runtime image's own registry for a
+	// cluster-registry env) -- a tenant's own artifacts are never published
+	// beside the platform image.
+	registry := publishedTenantComponentChartRegistry(target)
 
 	required := make([]string, 0, len(components)+1)
 	runtimeChart := RuntimeReleaseName(target.Tenant)
@@ -229,17 +234,64 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 	// coherent: the components run on the tenant's line, the runtime chart on the
 	// line the env named. Its components are still verified.
 	runtimeChartStated := strings.TrimSpace(target.EnvConfig.RuntimeChart) != ""
+	runtimeRegistry := registry
 	switch {
 	case runtimeSelected && runtimeChartStated:
 		ctx.Trace("deploy: the env states its runtime chart " + strings.TrimSpace(target.EnvConfig.RuntimeChart) + "; verifying only the tenant's component charts at " + version)
 	case runtimeSelected && runtimeChart != DevopsComponentName:
-		required = append(required, runtimeChart)
+		// The tenant's own runtime chart is normally published alongside its
+		// components by the same `erun push`, so it usually shares their
+		// registry and is verified together, below. When it doesn't -- an
+		// explicit runtimeregistry, or the cluster-registry env's platform-chart
+		// fallback -- it is verified separately, against the same registry
+		// resolvePublishedDevopsDeploySpecWithReason's own ladder actually
+		// installs it from.
+		runtimeRegistry = publishedDevopsChartRegistry(target)
+		if runtimeRegistry == registry {
+			required = append(required, runtimeChart)
+		}
 	}
 	required = append(required, components...)
 
 	ctx.Trace("deploy: deploying tenant artifacts; verifying charts published at " + version + " in " + registry + ": " + strings.Join(required, ", "))
+	if err := reportUnconfirmedTenantCharts(required, registry, chartRegistryInsecure(target, registry), version); err != nil {
+		return err
+	}
 
-	return reportUnconfirmedTenantCharts(required, registry, version)
+	if runtimeRegistry != registry {
+		ctx.Trace("deploy: deploying tenant artifacts; verifying the runtime chart " + runtimeChart + " published at " + version + " in " + runtimeRegistry)
+		return reportUnconfirmedTenantCharts([]string{runtimeChart}, runtimeRegistry, chartRegistryInsecure(target, runtimeRegistry), version)
+	}
+	return nil
+}
+
+// publishedTenantComponentChartRegistry answers where a tenant's own
+// component charts (and its own runtime chart, when it publishes one) are
+// published: `erun push` writes them to the DEPLOY registry -- concretized to
+// its in-cluster pull host for a cluster-registry env -- never the
+// runtimeregistry override or the runtime-image fallback
+// publishedDevopsChartRegistry applies for the shared platform chart. A
+// tenant's own artifacts are never published beside the platform image, so
+// following that registry here probed a registry the tenant's charts were
+// never going to be in.
+func publishedTenantComponentChartRegistry(target OpenResult) string {
+	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
+		return registry
+	}
+	if registry := resolveProjectContainerRegistry(target.RepoPath, target.Environment); registry != "" {
+		return registry
+	}
+	return DefaultContainerRegistry
+}
+
+// chartRegistryInsecure reports whether registry is the deploy target's own
+// concretized cluster registry, marked insecure (plain HTTP) on its cluster:
+// entry. It is the only registry a chart probe can ever need to address over
+// plain HTTP -- erun's own platform registries (ghcr.io, an ECR account, a
+// project's static `registry:` entry) are always TLS.
+func chartRegistryInsecure(target OpenResult, registry string) bool {
+	registry = strings.TrimSpace(registry)
+	return registry != "" && target.ClusterRegistryInsecure && registry == strings.TrimSpace(target.ClusterPullRegistry)
 }
 
 // reportUnconfirmedTenantCharts probes each chart in required and returns an
@@ -248,11 +300,11 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 // as "not published") from "confirmed absent" (missing). A probe that could not
 // answer takes priority: it is not evidence the chart is missing, so refusing on
 // it takes precedence over refusing on a genuine miss.
-func reportUnconfirmedTenantCharts(required []string, registry, version string) error {
+func reportUnconfirmedTenantCharts(required []string, registry string, insecure bool, version string) error {
 	missing := make([]string, 0, len(required))
 	unresolved := make([]string, 0, len(required))
 	for _, chart := range required {
-		found, err := probeChartVersion(context.Background(), registry, chart, version)
+		found, err := probeChartVersion(context.Background(), registry, chart, version, insecure)
 		switch {
 		case err != nil:
 			unresolved = append(unresolved, chart+": could not determine: "+err.Error())
@@ -274,11 +326,15 @@ func reportUnconfirmedTenantCharts(required []string, registry, version string) 
 // credentials, network, or an unreachable registry -- and must never be read as
 // "not found": a blind probe is not evidence of absence, only a definitive read
 // that excludes the version is.
-func probeChartVersion(ctx context.Context, containerRegistry, chartName, version string) (bool, error) {
+func probeChartVersion(ctx context.Context, containerRegistry, chartName, version string, insecure bool) (bool, error) {
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
 		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version), nil
 	}
-	versions, err := ResolveRuntimeImageRegistryVersions(ctx, containerRegistry, "charts/"+chartName)
+	versions, err := ResolveConfiguredRuntimeRegistryVersions(ctx, RuntimeRegistryConfig{
+		Namespace:  containerRegistry,
+		Repository: "charts/" + chartName,
+		Insecure:   insecure,
+	})
 	if err != nil {
 		return false, err
 	}
@@ -434,7 +490,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 // command() re-scopes them and the subchart's required tenant/environment are
 // satisfied. The release is named <tenant>-<component> so it is tenant-clear.
 func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
-	registry := publishedDevopsChartRegistry(target)
+	registry := publishedTenantComponentChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)

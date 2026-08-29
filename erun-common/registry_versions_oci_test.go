@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -83,20 +84,62 @@ func TestResolveOCIRegistryBasicAuthFallsBackToECRLogin(t *testing.T) {
 // A namespace that names its own registry host must resolve against that host.
 // Defaulting it to Docker Hub sent the tags request to hub.docker.com and 404ed,
 // which is what made a private image look unreachable.
+//
+// The insecure rows pin erun#1598: a cluster registry marked `insecure: true`
+// serves plain HTTP, so a chart-verification probe that always forced HTTPS
+// against it could never succeed (http: server gave HTTP response to HTTPS
+// client). ghcr.io and Docker Hub are never an insecure cluster registry, so
+// Insecure must not affect those two branches even if set.
 func TestResolvedBaseURLFollowsTheRegistryHost(t *testing.T) {
 	for _, tc := range []struct {
 		namespace string
+		insecure  bool
 		want      string
 	}{
-		{"020362606330.dkr.ecr.eu-west-2.amazonaws.com", "https://020362606330.dkr.ecr.eu-west-2.amazonaws.com"},
-		{"registry.example/team", "https://registry.example"},
-		{"localhost:5000", "https://localhost:5000"},
-		{"ghcr.io/sophium", "https://ghcr.io"},
-		{"sophium", "https://hub.docker.com"},
+		{"020362606330.dkr.ecr.eu-west-2.amazonaws.com", false, "https://020362606330.dkr.ecr.eu-west-2.amazonaws.com"},
+		{"registry.example/team", false, "https://registry.example"},
+		{"localhost:5000", false, "https://localhost:5000"},
+		{"ghcr.io/sophium", false, "https://ghcr.io"},
+		{"sophium", false, "https://hub.docker.com"},
+		{"10.43.0.100:5000", true, "http://10.43.0.100:5000"},
+		{"10.43.0.100:5000/charts", true, "http://10.43.0.100:5000"},
+		{"ghcr.io/sophium", true, "https://ghcr.io"},
 	} {
-		got := RuntimeRegistryConfig{Namespace: tc.namespace, Repository: "petios-devops"}.Resolved().BaseURL
+		got := RuntimeRegistryConfig{Namespace: tc.namespace, Insecure: tc.insecure, Repository: "petios-devops"}.Resolved().BaseURL
 		if got != tc.want {
-			t.Errorf("namespace %q resolved base %q, want %q", tc.namespace, got, tc.want)
+			t.Errorf("namespace %q insecure=%v resolved base %q, want %q", tc.namespace, tc.insecure, got, tc.want)
 		}
+	}
+}
+
+// TestResolveConfiguredRuntimeRegistryVersionsHonoursInsecure locks the live
+// half of erun#1598: an insecure cluster registry serves plain HTTP with no
+// TLS listener at all, so a probe that ignores Insecure and always dials
+// HTTPS cannot even complete a handshake against it, let alone read tags.
+// httptest.NewServer here speaks HTTP only, so this fails exactly the way the
+// bug did before the fix -- proving the probe now actually reaches the
+// registry rather than merely computing the right string.
+func TestResolveConfiguredRuntimeRegistryVersionsHonoursInsecure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"charts/team-backend-api","tags":["1.0.0"]}`))
+	}))
+	defer server.Close()
+
+	restore := dockerConfigDir
+	dockerConfigDir = func() string { return t.TempDir() }
+	defer func() { dockerConfigDir = restore }()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), RuntimeRegistryConfig{
+		Namespace:  host,
+		Repository: "charts/team-backend-api",
+		Insecure:   true,
+	})
+	if err != nil {
+		t.Fatalf("resolve versions over the registry's plain-HTTP listener: %v", err)
+	}
+	if !versions.HasVersion("1.0.0") {
+		t.Fatalf("versions %+v missing 1.0.0", versions)
 	}
 }
