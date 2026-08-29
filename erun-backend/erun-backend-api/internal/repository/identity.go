@@ -315,7 +315,8 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 		return model.Tenant{}, model.User{}, err
 	}
 
-	if err := insertBootstrapIssuer(ctx, tx, claims.Issuer); err != nil {
+	orgFieldKey, orgFieldValue := bootstrapOrgScope(claims)
+	if err := insertBootstrapIssuer(ctx, tx, claims.Issuer, orgFieldKey, orgFieldValue); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
 	user, err := r.insertUser(ctx, tx, bootstrapUsername(claims))
@@ -395,15 +396,43 @@ func (r *IdentityRepository) bindSecurityContext(ctx context.Context, tx bun.Tx,
 	return r.setPostgresSecurityContext(ctx, tx, securityContext)
 }
 
+// bootstrapOrgScopeClaims are the token claims that identify the caller's org
+// on an IdP erun itself ships. A platform's own IdP serves every tenant from
+// one issuer, so the bootstrap has to record which claim discriminates them —
+// otherwise the issuer is registered single-tenant and every later tenant on
+// it is permanently refused, with no API able to undo it (issue #1605).
+//
+// Only claims a shipped IdP is known to emit belong here. An unrecognised
+// issuer keeps the single-tenant registration, which is correct for a
+// dedicated per-tenant IdP and is what every existing deployment already has.
+var bootstrapOrgScopeClaims = []string{
+	// Zitadel, the IdP the erun-zitadel chart deploys. Requires the token to
+	// have been minted with the urn:zitadel:iam:user:resourceowner scope.
+	"urn:zitadel:iam:user:resourceowner:id",
+}
+
+// bootstrapOrgScope reports the org claim and value to register the bootstrap
+// issuer with, or empty strings to keep it single-tenant.
+func bootstrapOrgScope(claims security.Claims) (string, string) {
+	for _, key := range bootstrapOrgScopeClaims {
+		value, ok := claims.Raw[key].(string)
+		if ok && strings.TrimSpace(value) != "" {
+			return key, strings.TrimSpace(value)
+		}
+	}
+	return "", ""
+}
+
 // insertBootstrapIssuer registers the issuer before tenant_issuers references it
-// (tenant_issuers.issuer foreign-keys issuers.issuer). The bootstrap issuer is
-// single-tenant — org_field_key stays NULL — so the token's iss alone resolves
-// the tenant.
-func insertBootstrapIssuer(ctx context.Context, tx bun.Tx, issuer string) error {
-	if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, issuer).Exec(ctx); err != nil {
+// (tenant_issuers.issuer foreign-keys issuers.issuer). An orgFieldKey registers
+// the issuer as org-scoped, so later tenants can be added to the same IdP under
+// their own org; empty keeps it single-tenant, where the token's iss alone
+// resolves the tenant.
+func insertBootstrapIssuer(ctx context.Context, tx bun.Tx, issuer, orgFieldKey, orgFieldValue string) error {
+	if _, err := tx.NewRaw(`INSERT INTO issuers (issuer, org_field_key) VALUES (?, NULLIF(?, '')) ON CONFLICT (issuer) DO NOTHING`, issuer, orgFieldKey).Exec(ctx); err != nil {
 		return err
 	}
-	_, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, issuer, defaultTenantIssuerName(issuer)).Exec(ctx)
+	_, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name, org_field_value) VALUES (?, ?, NULLIF(?, ''))`, issuer, defaultTenantIssuerName(issuer), orgFieldValue).Exec(ctx)
 	return err
 }
 

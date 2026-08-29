@@ -57,7 +57,9 @@ For every authenticated request:
 5. Resolve the ERun user from `(tenant, iss, sub)` via `user_external_ids`. Unknown subject → `401` — **except** when the resolved tenant has **no users yet**, in which case the first valid token for it is enrolled as that tenant's first user with both `ReadAll` and `WriteAll` (per-tenant first-user bootstrap, below). Once a tenant has any user, unknown subjects for it stay unauthorized.
 6. Authorize the request against the user's roles/permissions; on success, allow and write the audit event.
 
-**First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant, registers its `iss` in `issuers` as single-tenant (`org_field_key` NULL), creates the first user, and grants it both `ReadAll` and `WriteAll`.
+**First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant, registers its `iss` in `issuers`, creates the first user, and grants it both `ReadAll` and `WriteAll`.
+
+How that issuer is registered decides whether the platform can ever host a second tenant on it, so it is not a fixed choice: when the bootstrap token carries an org claim an erun-shipped IdP is known to emit (today `urn:zitadel:iam:user:resourceowner:id`, which needs the token minted with the `urn:zitadel:iam:user:resourceowner` scope), the issuer is registered **org-scoped** on that claim and the bootstrap tenant's mapping records its own org value. Any other issuer keeps the single-tenant registration (`org_field_key` NULL), which is the right shape for a dedicated per-tenant IdP. Registering a *shared* IdP single-tenant is a one-way door — org-scoping mode lives on the shared `issuers` row, so every later tenant on that issuer is refused; see [`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers) for the conversion that recovers a platform already in that state.
 
 **Per-tenant first-user bootstrap.** Bootstrap is not limited to the empty-`tenants` case. Whenever a token resolves to a tenant (a registered issuer, the right org claim for org-scoped issuers) that has **zero** users, the first such valid token is enrolled as that tenant's first user with `ReadAll` + `WriteAll` — this is how a newly-provisioned tenant gets its first admin without a separate user-management call. **For an org-scoped issuer this means the first valid caller in a freshly-provisioned org becomes that tenant's admin**, so provisioning a tenant + registering its issuer/org is the act that authorizes its first caller. After a tenant has at least one user, unknown subjects for it — and unknown/unregistered issuers anywhere — stay unauthorized.
 
@@ -88,7 +90,7 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name, or convert a single-tenant issuer to org-scoped). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
 :::
 
 | Method | Path | Description | Required scope |
@@ -215,10 +217,10 @@ For how a client is expected to degrade from this set — a list the caller may 
 
 ### `PATCH /v1/tenant-issuers`
 
-Renames a trusted issuer's display `name` for the caller's tenant. The `(iss, org) → tenant` mapping itself is not editable here — only the human-readable label.
+Renames a trusted issuer's display `name` for the caller's tenant, **or** converts a single-tenant issuer to an org-scoped one.
 
 ```jsonc
-// PATCH /v1/tenant-issuers body
+// PATCH /v1/tenant-issuers body — rename
 {
   "issuer": "https://issuer.example.com/oauth2/default",
   "name": "Acme corporate SSO"
@@ -226,6 +228,23 @@ Renames a trusted issuer's display `name` for the caller's tenant. The `(iss, or
 ```
 
 Returns the updated tenant-issuer record (`200`). `400` if `issuer` or `name` is empty; `404` if the `(tenant, issuer)` pair is not trusted by the caller's tenant.
+
+**Converting to org-scoped.** Sending `orgFieldKey` + `orgFieldValue` instead switches the issuer's resolution mode and backfills the caller's own mapping in one transaction:
+
+```jsonc
+// PATCH /v1/tenant-issuers body — convert a shared IdP to org-scoped
+{
+  "issuer": "https://auth.example.com",
+  "orgFieldKey": "urn:zitadel:iam:user:resourceowner:id",  // the claim that selects a tenant
+  "orgFieldValue": "386994597030592700"                    // this mapping's own org
+}
+```
+
+This exists because an issuer registered single-tenant cannot otherwise be widened: org-scoping mode is a property of the shared `issuers` row, so the first tenant on a shared IdP would otherwise foreclose every later one with no way back short of editing the database.
+
+Both fields are required **together** — either alone leaves resolution broken, since a key with no value orphans the issuer's existing tenant and a value with no key is read by nothing. Unlike a rename, which touches only the caller's own mapping, this rewrites the shared registry row and therefore changes how every tenant's tokens on that issuer resolve, so it carries the same **operations-only** gate `POST /v1/tenants` applies to these root resolution tables.
+
+`400` if only one of the two is sent; `403` if the caller's tenant is not `OPERATIONS`; `404` if the `(tenant, issuer)` pair is not trusted by the caller's tenant. After converting, every token on that issuer must carry the named claim — a token minted without it resolves nothing, so confirm the client requests whatever scope the IdP needs (for Zitadel, `urn:zitadel:iam:user:resourceowner`; `erun cloud login --scope` requests it).
 
 ```jsonc
 // (Planned.) self-service trust-management API — add/remove trusted issuers.
