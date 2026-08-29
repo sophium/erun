@@ -24,16 +24,18 @@ func TestToolNameEqualsItsCLIPath(t *testing.T) {
 }
 
 // TestMCPOnlyToolsAreTheKnownSet pins the tools with no erun command behind
-// them: ten wire-level primitives the CLI deliberately expresses differently
-// for a human, exec_agent (whose capability the CLI already covers via `erun
-// exec job start --agent`), and job_start (a removed-tool stub with no
-// handler at all, see MCPRemovedTools). Pinning the set makes adding another
-// one a decision rather than an accident.
+// them: eleven wire-level primitives the CLI deliberately expresses
+// differently for a human (or, for ai_sessions, exposes only through a
+// Hidden internal command a hook invokes), exec_agent (whose capability the
+// CLI already covers via `erun exec job start --agent`), and job_start (a
+// removed-tool stub with no handler at all, see MCPRemovedTools). Pinning
+// the set makes adding another one a decision rather than an accident.
 func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 	want := map[string]struct{}{
 		"activity_lease_list":          {},
 		"activity_lease_take":          {},
 		"activity_lease_release":       {},
+		"ai_sessions":                  {},
 		"idle_stop_history":            {},
 		"idle_stop_record":             {},
 		"idle_stop_cancel":             {},

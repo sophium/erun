@@ -154,6 +154,7 @@ var wantRegisteredTools = []string{
 	// it keeps a registered stub that fails, naming both, rather than
 	// disappearing outright.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
+	"ai_sessions",
 	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
