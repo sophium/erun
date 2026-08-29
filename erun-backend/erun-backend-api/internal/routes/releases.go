@@ -2,7 +2,6 @@ package routes
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 
@@ -21,27 +20,16 @@ type ReleaseQueueService interface {
 	Enqueue(ctx context.Context, request service.ReleaseRequest) (service.EnqueueResult, error)
 }
 
-// ReleaseDispatcher starts whatever the queue may run right now. Optional: when
-// nil the trigger still records the request, but nothing runs it — a control
-// plane with no cluster access records the queue without pretending to drain it.
-type ReleaseDispatcher interface {
-	Dispatch(ctx context.Context, tenantName string) (int, error)
-}
-
 type ReleaseRoutes struct {
-	releases   ReleaseRepository
-	queue      ReleaseQueueService
-	dispatcher ReleaseDispatcher
-	// tenants resolves the caller's tenant name, which names the runtime image the
-	// release Job runs in.
-	tenants ConfigTenantRepository
+	releases ReleaseRepository
+	queue    ReleaseQueueService
 }
 
 // RegisterReleaseRoutes wires the release endpoints and returns the same routes
 // value as the review status route's release trigger, so an accepted review and
 // an explicit trigger enqueue through one path.
-func RegisterReleaseRoutes(register ProtectedRouteRegistrar, releases ReleaseRepository, queue ReleaseQueueService, dispatcher ReleaseDispatcher, tenants ConfigTenantRepository) ReleaseRoutes {
-	routes := ReleaseRoutes{releases: releases, queue: queue, dispatcher: dispatcher, tenants: tenants}
+func RegisterReleaseRoutes(register ProtectedRouteRegistrar, releases ReleaseRepository, queue ReleaseQueueService) ReleaseRoutes {
+	routes := ReleaseRoutes{releases: releases, queue: queue}
 	register(http.MethodGet, "/v1/releases", http.HandlerFunc(routes.listReleases))
 	register(http.MethodPost, "/v1/releases", http.HandlerFunc(routes.createRelease))
 	register(http.MethodGet, "/v1/releases/{release_id}", http.HandlerFunc(routes.getRelease))
@@ -75,7 +63,6 @@ func (r ReleaseRoutes) createRelease(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, err)
 		return
 	}
-	r.dispatch(req.Context())
 	if result.Created {
 		writeJSON(w, http.StatusCreated, result.Release)
 		return
@@ -83,32 +70,13 @@ func (r ReleaseRoutes) createRelease(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, result.Release)
 }
 
-// TriggerRelease enqueues the release an accepted review earns and starts the
-// queue draining. It is shared with the review status route, which is where the
-// "accepted, therefore release" policy lives.
+// TriggerRelease enqueues the release an accepted review earns. It is shared
+// with the review status route, which is where the "accepted, therefore
+// release" policy lives; running the release itself is the environment's own
+// job, not this control plane's — see AGENTS.md "Merge Queue".
 func (r ReleaseRoutes) TriggerRelease(ctx context.Context, request service.ReleaseRequest) error {
-	if _, err := r.queue.Enqueue(ctx, request); err != nil {
-		return err
-	}
-	r.dispatch(ctx)
-	return nil
-}
-
-// dispatch drains what the queue may start. A dispatch failure is not the
-// trigger's failure — the request is recorded and the next trigger or the next
-// finishing release picks it up — so it is logged rather than returned.
-func (r ReleaseRoutes) dispatch(ctx context.Context) {
-	if r.dispatcher == nil {
-		return
-	}
-	tenant, err := r.tenants.Current(ctx)
-	if err != nil {
-		log.Printf("erun api release: resolving the tenant to dispatch its release queue failed: %v", err)
-		return
-	}
-	if _, err := r.dispatcher.Dispatch(ctx, strings.TrimSpace(tenant.Name)); err != nil {
-		log.Printf("erun api release: dispatching the release queue failed: %v", err)
-	}
+	_, err := r.queue.Enqueue(ctx, request)
+	return err
 }
 
 func (r ReleaseRoutes) listReleases(w http.ResponseWriter, req *http.Request) {

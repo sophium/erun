@@ -68,6 +68,18 @@ func (f *fakeReviewRepo) FindActiveMergeReview(_ context.Context, targetBranch s
 	return model.Review{}, repository.ErrNotFound
 }
 
+// FindLastMergedReview picks any MERGED review on targetBranch: tests never
+// have more than one, so insertion order does not matter here the way it
+// does for the real query's ORDER BY.
+func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, targetBranch string) (model.Review, error) {
+	for _, review := range f.reviews {
+		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerged {
+			return *review, nil
+		}
+	}
+	return model.Review{}, repository.ErrNotFound
+}
+
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
 	f.nextID++
 	entry.ReviewMergeQueueID = f.nextID
@@ -125,12 +137,38 @@ func (f *fakeReviewAudit) LogAuditEvent(_ context.Context, event model.AuditEven
 	return nil
 }
 
+// fakeMergeVerifier is the narrow MergeVerifier dependency: a fixed answer
+// (or error) for whatever commit/branch acceptMerged asks about, so a test
+// can drive each of the three verification conditions independently.
+type fakeMergeVerifier struct {
+	onBranch bool
+	parent   string
+	err      error
+}
+
+func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, string, error) {
+	return f.onBranch, f.parent, f.err
+}
+
+// fakeReleaseTrigger records every release TriggerRelease was asked to start.
+type fakeReleaseTrigger struct {
+	requests []ReleaseRequest
+	err      error
+}
+
+func (f *fakeReleaseTrigger) TriggerRelease(_ context.Context, request ReleaseRequest) error {
+	f.requests = append(f.requests, request)
+	return f.err
+}
+
 // newTestReviewService wires a ReviewService with fakes sized for the common
 // case: no comments recorded anywhere (so no test accidentally trips the
-// unresolved-thread gate by omission) and a working audit logger.
+// unresolved-thread gate by omission), a working audit logger, and no merge
+// verifier or release trigger (nil is fine for every test that never reaches
+// a MERGED transition).
 func newTestReviewService(reviews ReviewRepository, builds ReviewBuildRepository) (*ReviewService, *fakeReviewAudit) {
 	audit := &fakeReviewAudit{}
-	return NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit), audit
+	return NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit, nil, nil), audit
 }
 
 // TestUpdateStatusRefusesMergeAndMerged is the API hole the issue reports:

@@ -31,23 +31,21 @@ type ReviewService interface {
 	// fails closed if audit logging is not configured, rather than promoting
 	// anyway.
 	OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (model.Review, error)
-	UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string) (model.Review, error)
+	// UpdateStatus applies a caller-reported status transition. remoteURL is
+	// used only when status is MERGED: the remote the caller pushed the merge
+	// to, fetched to verify the reported build's commit against the real
+	// repository — see AGENTS.md "Merge Queue".
+	UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string, remoteURL string) (model.Review, error)
 }
 
 type ReviewRoutes struct {
 	reviews   ReviewRepository
 	reviewers ReviewReviewerRepository
 	service   ReviewService
-	// dispatcher starts the merge queue's gate build for whichever review a
-	// manual /merge-queue/advance or /merge-queue/override-advance call
-	// promotes. Nil when the merge executor is not wired: the review still
-	// moves to MERGE, just with nothing to advance it further until an
-	// operator does so by hand.
-	dispatcher service.MergeQueueDispatcher
 }
 
-func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewRepository, reviewers ReviewReviewerRepository, reviewService ReviewService, dispatcher service.MergeQueueDispatcher) {
-	routes := ReviewRoutes{reviews: reviews, reviewers: reviewers, service: reviewService, dispatcher: dispatcher}
+func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewRepository, reviewers ReviewReviewerRepository, reviewService ReviewService) {
+	routes := ReviewRoutes{reviews: reviews, reviewers: reviewers, service: reviewService}
 	register(http.MethodGet, "/v1/reviews", http.HandlerFunc(routes.listReviews))
 	register(http.MethodPost, "/v1/reviews", http.HandlerFunc(routes.createReview))
 	register(http.MethodGet, "/v1/reviews/merge-queue", http.HandlerFunc(routes.listMergeQueue))
@@ -67,6 +65,10 @@ func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewReposi
 type updateReviewStatusRequest struct {
 	Status  model.ReviewStatus `json:"status"`
 	BuildID string             `json:"buildId"`
+	// RemoteURL is required only for a MERGED report: the git remote the
+	// caller pushed the merge to, which the platform fetches to verify the
+	// reported build's commit against the real repository.
+	RemoteURL string `json:"remoteUrl"`
 }
 
 type advanceMergeQueueRequest struct {
@@ -178,7 +180,6 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeAdvanceMergeQueueError(w, err)
 		return
 	}
-	r.dispatchMergeQueue(req.Context(), review)
 	writeJSON(w, http.StatusOK, review)
 }
 
@@ -193,14 +194,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeAdvanceMergeQueueError(w, err)
 		return
 	}
-	r.dispatchMergeQueue(req.Context(), review)
 	writeJSON(w, http.StatusOK, review)
-}
-
-func (r ReviewRoutes) dispatchMergeQueue(ctx context.Context, review model.Review) {
-	if r.dispatcher != nil {
-		r.dispatcher.Dispatch(ctx, review)
-	}
 }
 
 // writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
@@ -245,7 +239,7 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.UpdateStatus(req.Context(), req.PathValue("review_id"), input.Status, input.BuildID)
+	review, err := r.service.UpdateStatus(req.Context(), req.PathValue("review_id"), input.Status, input.BuildID, input.RemoteURL)
 	if err != nil {
 		writeUpdateStatusError(w, err)
 		return
@@ -253,9 +247,9 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 	writeJSON(w, http.StatusOK, review)
 }
 
-// writeUpdateStatusError gives PATCH .../status's two documented business
-// codes their exact machine code and details shape; every other failure
-// (not found, missing security context, ...) falls through to the generic
+// writeUpdateStatusError gives PATCH .../status's documented business codes
+// their exact machine code and details shape; every other failure (not
+// found, missing security context, ...) falls through to the generic
 // status-derived code.
 func writeUpdateStatusError(w http.ResponseWriter, err error) {
 	var invalidTransition *service.InvalidTransitionError
@@ -270,6 +264,11 @@ func writeUpdateStatusError(w http.ResponseWriter, err error) {
 	var missingBuildID *service.MissingBuildIDError
 	if errors.As(err, &missingBuildID) {
 		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", missingBuildID.Error(), map[string]any{"field": "buildId"})
+		return
+	}
+	var notVerified *service.MergeNotVerifiedError
+	if errors.As(err, &notVerified) {
+		writeErrorCode(w, http.StatusConflict, "MERGE_NOT_VERIFIED", notVerified.Error())
 		return
 	}
 	writeRepositoryError(w, err)

@@ -86,25 +86,6 @@ func run(args []string) error {
 			ACMEEmail:               cfg.ACMEEmail,
 			ACMEServer:              cfg.ACMEServer,
 		},
-		Release: provision.ReleaseConfig{
-			Registry:       cfg.EnvDeployRegistry,
-			RuntimeVersion: cfg.ReleaseRuntimeVersion,
-			Namespace:      cfg.ReleaseNamespace,
-			ServiceAccount: cfg.ReleaseServiceAccount,
-			HomeClaim:      cfg.ReleaseHomeClaim,
-			WorkspaceClaim: cfg.ReleaseWorkspaceClaim,
-			RepoPath:       cfg.ReleaseRepoPath,
-			DryRun:         cfg.ReleaseDryRun,
-		},
-		Merge: provision.MergeConfig{
-			Registry:       cfg.EnvDeployRegistry,
-			RuntimeVersion: cfg.MergeRuntimeVersion,
-			Namespace:      cfg.MergeNamespace,
-			ServiceAccount: cfg.MergeServiceAccount,
-			HomeClaim:      cfg.MergeHomeClaim,
-			WorkspaceClaim: cfg.MergeWorkspaceClaim,
-			RepoPath:       cfg.MergeRepoPath,
-		},
 		Platform: routes.PlatformInfo{
 			Issuer:          cfg.PlatformIssuer,
 			APIURL:          cfg.PlatformAPIURL,
@@ -316,34 +297,6 @@ type apiConfig struct {
 	// same credential; unset, the probe stays unauthenticated and can never
 	// confirm an image absent, so no deploy is diverted to the canonical image.
 	EnvDeployImagePullSecrets string
-	// Server-side release executor. The release runs as a Job in the agent
-	// environment's own namespace so it lands beside that environment's warm
-	// fingerprint cache and BuildKit state -- the thing an ephemeral runner cannot
-	// offer. ReleaseRuntimeVersion tags the runtime image the release runs IN, not
-	// the version it mints. The home/worktree claims and repo path are that
-	// environment's own volumes; leaving them blank runs against the image-baked
-	// project root instead. ReleaseDryRun resolves a release without publishing or
-	// moving any public ref, which is how the executor is exercised against a
-	// scoped target.
-	ReleaseNamespace      string
-	ReleaseServiceAccount string
-	ReleaseRuntimeVersion string
-	ReleaseHomeClaim      string
-	ReleaseWorkspaceClaim string
-	ReleaseRepoPath       string
-	ReleaseDryRun         bool
-	// Server-side merge-gate executor. Unlike the release executor, the merge
-	// Job fetches, commits, and pushes, so it needs a real writable checkout
-	// with push credentials -- MergeWorkspaceClaim and MergeRepoPath are
-	// required, not optional (provision.MergeConfig.Configured()).
-	// MergeRuntimeVersion tags the runtime image the gate build runs IN, not a
-	// version it mints -- the gate publishes nothing.
-	MergeNamespace      string
-	MergeServiceAccount string
-	MergeRuntimeVersion string
-	MergeHomeClaim      string
-	MergeWorkspaceClaim string
-	MergeRepoPath       string
 	// Platform is this instance's own self-describing config, served
 	// unauthenticated at GET /v1/platform so a client can discover it (issuer,
 	// API/console URLs, OIDC client ids, brand, and the white-label docs
@@ -404,21 +357,6 @@ func configFromEnv() apiConfig {
 		EnvExposeTargetIP:         strings.TrimSpace(os.Getenv("ERUN_ENV_EXPOSE_TARGET_IP")),
 		EnvDeployImagePullSecrets: strings.TrimSpace(os.Getenv("ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS")),
 
-		ReleaseNamespace:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_NAMESPACE")),
-		ReleaseServiceAccount: strings.TrimSpace(os.Getenv("ERUN_RELEASE_SERVICE_ACCOUNT")),
-		ReleaseRuntimeVersion: strings.TrimSpace(os.Getenv("ERUN_RELEASE_RUNTIME_VERSION")),
-		ReleaseHomeClaim:      strings.TrimSpace(os.Getenv("ERUN_RELEASE_HOME_CLAIM")),
-		ReleaseWorkspaceClaim: strings.TrimSpace(os.Getenv("ERUN_RELEASE_WORKSPACE_CLAIM")),
-		ReleaseRepoPath:       strings.TrimSpace(os.Getenv("ERUN_RELEASE_REPO_PATH")),
-		ReleaseDryRun:         strings.TrimSpace(os.Getenv("ERUN_RELEASE_DRY_RUN")) == "1",
-
-		MergeNamespace:      strings.TrimSpace(os.Getenv("ERUN_MERGE_NAMESPACE")),
-		MergeServiceAccount: strings.TrimSpace(os.Getenv("ERUN_MERGE_SERVICE_ACCOUNT")),
-		MergeRuntimeVersion: strings.TrimSpace(os.Getenv("ERUN_MERGE_RUNTIME_VERSION")),
-		MergeHomeClaim:      strings.TrimSpace(os.Getenv("ERUN_MERGE_HOME_CLAIM")),
-		MergeWorkspaceClaim: strings.TrimSpace(os.Getenv("ERUN_MERGE_WORKSPACE_CLAIM")),
-		MergeRepoPath:       strings.TrimSpace(os.Getenv("ERUN_MERGE_REPO_PATH")),
-
 		PlatformIssuer:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_ISSUER")),
 		PlatformAPIURL:          strings.TrimSpace(os.Getenv("ERUN_PLATFORM_API_URL")),
 		PlatformConsoleURL:      strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_URL")),
@@ -437,15 +375,13 @@ func configFromEnv() apiConfig {
 	}
 }
 
-// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy,
-// release, and merge executors share. A blank deployer/release/merge
-// ServiceAccount disables the corresponding executor (env creation only
-// registers the row, a release trigger only records, a review promoted to
-// MERGE has nothing to gate it); a set SA outside a cluster is a hard
+// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy
+// executor needs. A blank deployer ServiceAccount disables it (env creation
+// only registers the row); a set SA outside a cluster is a hard
 // misconfiguration (the SA is only ever set by the in-cluster deploy), so we
 // fail fast rather than silently disabling.
 func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
-	if cfg.EnvDeployerServiceAccount == "" && cfg.ReleaseServiceAccount == "" && cfg.MergeServiceAccount == "" {
+	if cfg.EnvDeployerServiceAccount == "" {
 		return nil, nil
 	}
 	restConfig, err := rest.InClusterConfig()
