@@ -295,14 +295,16 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 			"It is never a truncated or partial answer, so it is safe to act on: unknown is exactly as terminal as exited — never a reason to keep waiting, and never inferred as 'not finished yet' just because it is not a success. Finished jobs stay readable for 24 hours, so an orchestrator reconnecting after the work ended can still learn what happened. " +
 			"aliveAgeMs is the milliseconds since the supervisor's last ~1s beat, computed by erun in its own clock so a caller never subtracts a pod timestamp from its own — the two clocks are not the same clock. Once it exceeds 5000, treat the job as failed (an unknown outcome, never a success, never a tool error) even if state has not caught up to say so yet; a silent-but-healthy command never trips this, because the beat has nothing to do with the work's own output. " +
 			"An agent job also carries progress — current activity (the last tool and its target), turns, tools run, and the last thing the agent said — normalized by erun from the tool's own event stream, so the shape is the same across AI tools. Poll this to report an in-pod agent's progress; do not scrape the agent's private transcript. " +
-			"A job started as a background task (build, deploy, doctor, and the rest of the job-envelope tools called with wait: false) carries its typed result on this record's result field once exited, in the same shape the tool would have returned synchronously.",
+			"A job started as a background task (build, deploy, doctor, and the rest of the job-envelope tools called with wait: false) carries its typed result on this record's result field once exited, in the same shape the tool would have returned synchronously. " +
+			"command is collapsed to a short identifying prefix once it runs past 240 characters -- an agent job's command embeds its whole dispatch prompt, and a status poll is never where that is needed back, since you already have it.",
 	}, jobStatusTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "exec_job_await",
 		Description: "Wait a bounded time (default 30s, max 600s) for a job to finish. " +
 			"The call always returns inside the timeout — either the outcome or timedOut=true with the job still running — so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. " +
 			"timedOut is reported separately from every outcome, so 'not finished yet' can never be read as a failure — but it is not the only non-outcome case: a job whose supervisor died reads back as state=unknown with timedOut=false, its own third case, distinct from both success and 'still running'. Never re-await a job already reporting unknown expecting a different answer. Call it again only while the job is genuinely still running. " +
-			"The returned job's aliveAgeMs (see exec_job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile.",
+			"The returned job's aliveAgeMs (see exec_job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile. " +
+			"command is collapsed the same way exec_job_status collapses it (see there), so a bounded wait that times out on a long-running agent job never re-echoes its whole dispatch prompt.",
 	}, jobAwaitTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "exec_job_output",

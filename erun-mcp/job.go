@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -67,6 +68,32 @@ func jobAttachTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 	}
 }
 
+// jobCommandPreviewChars bounds how much of a job's command a status or await
+// response echoes back. A command job's argv is a few words; an agent job's
+// argv carries its entire dispatch prompt, so returning it unbounded turns
+// every poll and every bounded await into a multi-KB echo of text the caller
+// itself supplied moments earlier.
+const jobCommandPreviewChars = 240
+
+// previewJobForStatus returns job unchanged, or a copy with its command
+// collapsed to an identifying prefix when it exceeds the preview bound. It
+// never mutates the record a caller reads back from job_output or job_cancel.
+func previewJobForStatus(job eruncommon.EnvironmentJob) eruncommon.EnvironmentJob {
+	if preview, truncated := previewCommand(job.Command); truncated {
+		job.Command = preview
+	}
+	return job
+}
+
+func previewCommand(command []string) ([]string, bool) {
+	joined := strings.Join(command, " ")
+	if utf8.RuneCountInString(joined) <= jobCommandPreviewChars {
+		return command, false
+	}
+	runes := []rune(joined)
+	return []string{strings.TrimSpace(string(runes[:jobCommandPreviewChars])) + "…"}, true
+}
+
 // JobStatusInput selects one job or every retained job.
 type JobStatusInput struct {
 	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to query; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
@@ -76,7 +103,9 @@ type JobStatusInput struct {
 
 // JobStatusResult is always a definite answer. A job whose supervisor vanished
 // reports state unknown with a reason; it never reports an outcome nobody
-// recorded, and the list is never silently shortened.
+// recorded, and the list is never silently shortened. Jobs is empty when id
+// selected one job: Job already carries that record, and echoing it twice in
+// one payload buys nothing.
 type JobStatusResult struct {
 	Tenant      string                      `json:"tenant"`
 	Environment string                      `json:"environment"`
@@ -97,16 +126,16 @@ func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			if err != nil {
 				return nil, JobStatusResult{}, err
 			}
-			result.Job = &job
-			result.Jobs = append(result.Jobs, job)
+			preview := previewJobForStatus(job)
+			result.Job = &preview
 			return nil, result, nil
 		}
 		jobs, err := eruncommon.LoadEnvironmentJobs(tenant, environment, now)
 		if err != nil {
 			return nil, JobStatusResult{}, err
 		}
-		if jobs != nil {
-			result.Jobs = jobs
+		for _, job := range jobs {
+			result.Jobs = append(result.Jobs, previewJobForStatus(job))
 		}
 		return nil, result, nil
 	}
@@ -135,6 +164,7 @@ func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		if err != nil {
 			return nil, eruncommon.AwaitEnvironmentJobResult{}, err
 		}
+		result.Job = previewJobForStatus(result.Job)
 		return nil, result, nil
 	}
 }
