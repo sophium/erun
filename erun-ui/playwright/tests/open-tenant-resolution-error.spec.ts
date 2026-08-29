@@ -38,7 +38,7 @@ test.describe('open tenant-resolution error — actionable, no fake Copy action'
     const pill = page.getByRole('alert').filter({ hasText: 'no tenant given for open' });
     await expect(pill).toBeVisible();
     await expect(pill).toContainText('pass a tenant explicitly');
-    await expect(page.getByRole('button', { name: 'Copy output' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy output' })).toBeHidden();
 
     await page.screenshot({
       path: 'test-results/open-tenant-resolution-error-titlebar.png',

@@ -1,28 +1,41 @@
 import { defineConfig, devices } from '@playwright/test';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
-// The headless backend is a singleton (one process, one session-state set),
-// so specs must serialise rather than run in parallel.
-//
 // run.sh and this config share ERUN_PLAYWRIGHT_PORT so an overridden port
-// reaches both; the default stays clear of wails dev's 34115.
+// reaches both; the default stays clear of wails dev's 34115. Each worker in
+// the default mode claims BASE_PORT + its own parallelIndex (see
+// fixtures/workerBackend.ts) instead of every spec sharing this one port.
 const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
-// Resolve (and, without run.sh, create) the isolated config root at
-// config-load time, before workers fork, so every process in the run agrees
-// on one ERUN_PLAYWRIGHT_HOME. See fixtures/seedRoot.ts.
+const E2E_K3D = e2eK3dEnabled();
+
+// Resolve (and, without run.sh, create) the isolated root at config-load
+// time, before workers fork, so every process in the run agrees on the same
+// starting point. In the default parallel mode this is the PARENT directory
+// each worker mints its own subdirectory under (fixtures/workerBackend.ts —
+// one headless backend per worker, replacing the old shared singleton). In
+// the opt-in e2e-k3d mode (workers: 1, one real cluster for the whole run) it
+// stays the flat single root the one shared backend below boots against.
 isolatedRoot();
+
+// Each worker in the default mode is a full desktop backend plus a headless
+// Chromium instance. Measured on the reference agent pod (12 cores, 23GiB,
+// observed environment peak 7392Mi): pick from memory headroom, not core
+// count, which is why this stays well under `nproc`.
+const DEFAULT_WORKERS = 6;
 
 export default defineConfig({
   testDir: './tests',
   // The k3d e2e specs need a real cluster and the un-stubbed backend, so they
   // must never run in the default inert mode. Excluding the dir here (not
   // per-spec test.skip) keeps the default suite from ever collecting them.
-  testIgnore: e2eK3dEnabled() ? [] : ['**/tests/e2e/**'],
+  testIgnore: E2E_K3D ? [] : ['**/tests/e2e/**'],
   globalSetup: './global-setup',
   globalTeardown: './global-teardown',
-  fullyParallel: false,
-  workers: 1,
+  // The e2e-k3d mode drives one real cluster and one shared backend, so it
+  // stays serial exactly as before parallelism existed for the default mode.
+  fullyParallel: !E2E_K3D,
+  workers: E2E_K3D ? 1 : DEFAULT_WORKERS,
   forbidOnly: !!process.env.CI,
   // No retries: a spec that only passes on a retry is flaky, and flakiness is a
   // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
@@ -39,7 +52,9 @@ export default defineConfig({
     timeout: process.platform === 'win32' ? 20_000 : 10_000,
   },
   use: {
-    baseURL: `http://127.0.0.1:${HEADLESS_PORT}`,
+    // baseURL is not set here: fixtures/workerBackend.ts overrides the
+    // baseURL fixture per worker (each worker's own port in the default
+    // mode; the one shared HEADLESS_PORT below in e2e-k3d mode).
     headless: true,
     // The env-init and manage dialogs render all sections inline and can
     // be taller than a normal 900px viewport. Bump the height so footer
@@ -67,19 +82,25 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    // Windows produces bin/erun-app.exe; POSIX produces an extensionless
-    // bin/erun-app. cwd is erun-ui (one level up from this playwright dir).
-    command: `${process.platform === 'win32' ? '.\\bin\\erun-app.exe' : './bin/erun-app'} --headless --port ${HEADLESS_PORT}`,
-    url: `http://127.0.0.1:${HEADLESS_PORT}/`,
-    cwd: '..',
-    // The backend must boot against this run's isolated root. A leftover
-    // dev server on the same port would be pointed at a stale (or worse,
-    // the developer's real) config root, so never reuse one.
-    reuseExistingServer: false,
-    timeout: 30_000,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: backendEnv(),
-  },
+  // The default mode has no webServer block at all: fixtures/workerBackend.ts
+  // spawns one headless backend per worker instead of one shared singleton.
+  // Only the opt-in e2e-k3d mode (workers: 1, one real cluster + one shared
+  // backend for the whole run) still declares one here.
+  webServer: E2E_K3D
+    ? {
+        // Windows produces bin/erun-app.exe; POSIX produces an extensionless
+        // bin/erun-app. cwd is erun-ui (one level up from this playwright dir).
+        command: `${process.platform === 'win32' ? '.\\bin\\erun-app.exe' : './bin/erun-app'} --headless --port ${HEADLESS_PORT}`,
+        url: `http://127.0.0.1:${HEADLESS_PORT}/`,
+        cwd: '..',
+        // The backend must boot against this run's isolated root. A leftover
+        // dev server on the same port would be pointed at a stale (or worse,
+        // the developer's real) config root, so never reuse one.
+        reuseExistingServer: false,
+        timeout: 30_000,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: backendEnv(),
+      }
+    : undefined,
 });
