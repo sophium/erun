@@ -42,6 +42,20 @@ There is no way around supplying those values yourself — ERun cannot supply a 
 
 **To verify it worked:** once mail delivery is configured, enroll a throwaway test user (see above) — with mail configured, that enrollment emails a real sign-in link to the address you gave it, so receiving it is the proof. If nothing arrives, double check the host/port and credential with your mail provider; the error reported back is whatever your provider's server returned.
 
+## Registering tenants {#registering-tenants}
+
+Every other view in this console operates inside your own tenant. Registering a **new** tenant is different — it writes the platform's own root resolution data, the mapping that decides which OIDC issuer's tokens land in which tenant — so the console's **Tenants** view carries the same OPERATIONS-only restriction as Users/Org settings/Outbound mail above, and is the one console surface that only an OPERATIONS Operator can use at all.
+
+Signed in as an Operator on an OPERATIONS tenant, this view lets you:
+
+- **See every tenant this platform hosts** — name, type, and when it was registered.
+- **Register a new tenant.** Give it a **name** (lowercase letters and digits only, no hyphens — the console tells you this rule up front, since the `<tenant>-<env>` namespace needs it to stay unambiguous), a **type** (`COMPANY` or `OPERATIONS`), and the **issuer** whose tokens should resolve to it. A rejected name, issuer, or type renders next to the field it's actually about, not as a bare status code.
+- **Point a new tenant at a shared (org-scoped) issuer** — one identity provider serving several tenants — using the optional org field key/value pair. The view links to [the identity model's own explanation](/agent-reference/api-protocol#tenant-issuers) of how `(issuer, org)` resolves to a tenant, so those two values aren't guesswork.
+
+Registering a tenant creates **no first user**. The tenant's first admin is whoever presents the first valid token that resolves to it — the same per-tenant first-user bootstrap every tenant already relies on (see [Agent reference · erun API protocol](/agent-reference/api-protocol#tenant-issuers)). The console says this plainly right after registration, since it's easy to expect an enrollment step that doesn't exist here.
+
+For the full endpoint spec, see [Agent reference · erun API protocol](/agent-reference/api-protocol#post-v1tenants).
+
 ## Inviting people {#inviting-people}
 
 Unlike everything above (which is restricted to an **OPERATIONS** tenant), the console's **Invites** view is available to every tenant — a **COMPANY** tenant needs its own way to add members exactly as much as an OPERATIONS one does, now that self-registration is meant to be closed.
@@ -66,9 +80,13 @@ The credential that drives this is Zitadel's **org-owner** service-account token
 
 Because that credential is so privileged, the Users/Org settings/Outbound mail surface above is restricted to an **OPERATIONS** tenant. A **COMPANY** tenant's Operators do not see those views at all, and the backend refuses the underlying endpoints even if called directly. [Inviting people](#inviting-people) is the one exception — it never touches that credential (it drives erun's own database and, on acceptance, the same Zitadel identity-creation call enrollment already uses), so it is available to every tenant.
 
+[Registering tenants](#registering-tenants) is gated the same way but for a different reason: it never touches Zitadel at all — it writes directly to erun's own `tenants`/`issuers`/`tenant_issuers` tables. Those are shared root resolution data, not one tenant's own records, so the restriction is about blast radius rather than credential exposure — a bad edit there can misroute a *different* tenant's tokens, not just the caller's own.
+
 ## See also
 
 - [Agent reference · Identity administration](/agent-reference/identity-administration) — the full endpoint spec.
 - [Agent reference · Invites](/agent-reference/api-protocol#invites) — the invite endpoint spec.
+- [Agent reference · Register a tenant](/agent-reference/api-protocol#post-v1tenants) — the tenant-registration endpoint spec.
+- [Agent reference · Identity model](/agent-reference/api-protocol#tenant-issuers) — how `(issuer, org)` resolves to a tenant.
 - [Hosted platform](/concepts/hosted-platform) — the platform this identity provider belongs to.
 - [Operator in the loop](/collaboration/operator-in-the-loop) — the audit trail every mutation here writes to.

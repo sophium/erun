@@ -1,5 +1,6 @@
 import type { TenantConfigView } from 'erun-kit';
 import {
+  Building2,
   Cloud,
   KeyRound,
   LayoutDashboard,
@@ -21,6 +22,7 @@ export type ConsoleSectionId =
   | 'provisioning'
   | 'mcp-access'
   | 'invites'
+  | 'tenants'
   | 'users'
   | 'org-settings'
   | 'smtp-settings';
@@ -44,6 +46,9 @@ const BASE_SECTIONS: ConsoleSection[] = [
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [
+  // Tenants is the one action only an OPERATIONS tenant can take —
+  // registering a new tenant — so it leads the operations-only group.
+  { id: 'tenants', label: 'Tenants', icon: Building2 },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'org-settings', label: 'Org settings', icon: Settings },
   { id: 'smtp-settings', label: 'Outbound mail', icon: Mail },
