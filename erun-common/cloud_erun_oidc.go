@@ -48,6 +48,29 @@ type ERunTokens struct {
 // CLI/agent session needs to outlive one access token's short lifetime.
 const erunOAuthScope = "openid offline_access"
 
+// erunLoginScope appends any operator-requested scopes to the baseline. A
+// provider's reserved scopes are frequently absent from its discovery
+// document's scopes_supported (Zitadel's urn:zitadel:* family is), so there is
+// nothing to negotiate against — the caller has to be able to ask for them by
+// name. Duplicates and blanks are dropped so the request stays well-formed.
+func erunLoginScope(extra []string) string {
+	scopes := strings.Fields(erunOAuthScope)
+	seen := map[string]bool{}
+	for _, s := range scopes {
+		seen[s] = true
+	}
+	for _, candidate := range extra {
+		for _, s := range strings.Fields(candidate) {
+			if s == "" || seen[s] {
+				continue
+			}
+			seen[s] = true
+			scopes = append(scopes, s)
+		}
+	}
+	return strings.Join(scopes, " ")
+}
+
 var (
 	errERunAuthorizationPending = errors.New("authorization_pending")
 	errERunSlowDown             = errors.New("slow_down")
@@ -84,7 +107,7 @@ func defaultFetchOIDCDiscovery(ctx Context, issuer string) (OIDCDiscovery, error
 	return discovery, nil
 }
 
-func defaultStartERunDeviceAuthorization(ctx Context, discovery OIDCDiscovery, clientID string) (ERunDeviceAuthorization, error) {
+func defaultStartERunDeviceAuthorization(ctx Context, discovery OIDCDiscovery, clientID, scope string) (ERunDeviceAuthorization, error) {
 	if strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) == "" {
 		return ERunDeviceAuthorization{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint", discovery.Issuer)
 	}
@@ -100,7 +123,7 @@ func defaultStartERunDeviceAuthorization(ctx Context, discovery OIDCDiscovery, c
 		ExpiresIn               int    `json:"expires_in"`
 		Interval                int    `json:"interval"`
 	}
-	form := url.Values{"client_id": {clientID}, "scope": {erunOAuthScope}}
+	form := url.Values{"client_id": {clientID}, "scope": {scope}}
 	if err := postForm(discovery.DeviceAuthorizationEndpoint, form, &payload); err != nil {
 		return ERunDeviceAuthorization{}, fmt.Errorf("start device authorization: %w", err)
 	}
@@ -189,7 +212,7 @@ func defaultRefreshERunTokens(ctx Context, discovery OIDCDiscovery, clientID str
 // a loopback listener for the redirect (no browser is launched automatically;
 // the URL is printed for the operator to open) and exchanges the returned
 // code for tokens.
-func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientID string) (ERunTokens, error) {
+func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.AuthorizationEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise an authorization endpoint", discovery.Issuer)
 	}
@@ -216,7 +239,7 @@ func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientI
 	if err != nil {
 		return ERunTokens{}, err
 	}
-	authURL := erunAuthorizationCodeURL(discovery, clientID, redirectURI, state, erunPKCEChallenge(verifier))
+	authURL := erunAuthorizationCodeURL(discovery, clientID, redirectURI, state, erunPKCEChallenge(verifier), scope)
 
 	code, err := awaitERunOIDCCallback(ctx, listener, state, authURL)
 	if err != nil {
@@ -293,12 +316,12 @@ func exchangeERunAuthorizationCode(tokenEndpoint, clientID, redirectURI, verifie
 	return tokens, nil
 }
 
-func erunAuthorizationCodeURL(discovery OIDCDiscovery, clientID, redirectURI, state, codeChallenge string) string {
+func erunAuthorizationCodeURL(discovery OIDCDiscovery, clientID, redirectURI, state, codeChallenge, scope string) string {
 	values := url.Values{
 		"response_type":         {"code"},
 		"client_id":             {clientID},
 		"redirect_uri":          {redirectURI},
-		"scope":                 {erunOAuthScope},
+		"scope":                 {scope},
 		"state":                 {state},
 		"code_challenge":        {codeChallenge},
 		"code_challenge_method": {"S256"},

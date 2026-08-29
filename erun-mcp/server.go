@@ -366,7 +366,7 @@ func registerCloudTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, cloudInitERunTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "cloud_login",
-		Description: "Login to a configured cloud provider alias, with preview support",
+		Description: "Login to a configured cloud provider alias, with preview support. For an erun-hosted alias, flow selects the OIDC grant: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete.",
 	}, cloudLoginTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "cloud_oidc",

@@ -39,9 +39,11 @@ type CloudInitERunInput struct {
 }
 
 type CloudLoginInput struct {
-	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to login"`
-	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
-	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Alias     string   `json:"alias" jsonschema:"configured cloud provider alias to login"`
+	Scopes    []string `json:"scopes,omitempty" jsonschema:"extra OAuth scopes to request on top of openid offline_access; a provider\u0027s reserved scopes are often unadvertised and can only be asked for by name (e.g. urn:zitadel:iam:user:resourceowner, which makes a Zitadel token carry the org claim an org-scoped issuer resolves tenants by)"`
+	Flow      string   `json:"flow,omitempty" jsonschema:"OIDC grant for an erun-hosted alias: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete"`
+	Preview   bool     `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
+	Verbosity int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
 type CloudOIDCInput struct {
@@ -184,7 +186,7 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias}, cloudDependencies())
+		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, cloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
