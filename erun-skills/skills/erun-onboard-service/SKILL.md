@@ -1,6 +1,6 @@
 ---
 name: erun-onboard-service
-description: Adopt a repository that already has its own layout into erun — discover where its Dockerfiles and charts actually live, wire `.erun/config.yaml` to that layout without moving a single file, preflight the environment for the failures that surface far from their cause, then build, deploy, and expose one of its services at HTTPS with a valid certificate (public hostname or localhost). Use when the user says "start using erun in this repo", "onboard this service to erun", "this repo has its own structure", "expose this service with a valid cert", "make this service reachable over https", "serve it on localhost with a valid certificate", "wire this repo up to erun", "deploy a service from a custom repo layout", or any similar request to bring an existing, non-conventional repository under erun and get one of its services served over TLS.
+description: Adopt a repository that already has its own layout into erun — discover where its Dockerfiles and charts actually live (with an ignore list for the parts that are not yours), confirm which of them to roll out, wire `.erun/config.yaml` to that layout without moving a single file, preflight the environment for the failures that surface far from their cause, then build, deploy, and expose the chosen services at HTTPS with a valid certificate (public hostname or localhost). Use when the user says "start using erun in this repo", "onboard this service to erun", "this repo has its own structure", "expose this service with a valid cert", "make this service reachable over https", "serve it on localhost with a valid certificate", "wire this repo up to erun", "deploy a service from a custom repo layout", or any similar request to bring an existing, non-conventional repository under erun and get one of its services served over TLS.
 ---
 
 # Onboard an existing repo's service into erun
@@ -16,37 +16,60 @@ that order, and verifies the result by fetching it over HTTPS.
 direction — the artifacts exist, in the repo's own shape, and must stay where
 they are.
 
-## Step 1 — Discover, do not assume
+## Step 1 — Discover, filter, then confirm what to roll out
 
-Never guess the layout. Enumerate it, then say what was found:
+Never guess the layout. Enumerate it:
 
 ```sh
 find . -name Dockerfile -not -path '*/node_modules/*' -not -path '*/.git/*' | head -50
 find . -name Chart.yaml -not -path '*/node_modules/*' -not -path '*/.git/*' | head -50
 ```
 
-Group the hits into candidate services by their common parent. A repo with
-several independent products (`harnesses/<name>/{docker,k8s}/<component>`,
-`services/<name>/…`, `apps/<name>/…`) yields one candidate per product, each with
-its own components. Report the list and the one being onboarded; do not silently
-pick.
+**One repo can hold more than one layout shape.** Both of these are common, often
+side by side in the same tree, and only the first has a component directory to
+take a name from:
 
-For each candidate record: the component name (the directory under `docker/`),
-the chart path, whether a `values.yaml` exists, and what the Docker build context
-needs to be — a Dockerfile that copies from the repo root needs
-`paths.dockercontext: repo-root`, and getting this wrong fails as a missing file
-during `COPY`.
+| Shape | Component name comes from | Example |
+|---|---|---|
+| `<root>/docker/<component>/Dockerfile` + `<root>/k8s/<component>/Chart.yaml` | the directory under `docker/` | `harnesses/platform-validator/docker/validation-agent-backend-api` |
+| `<root>/Dockerfile` + `<root>/chart/Chart.yaml` | the product directory itself | `harnesses/migration-hub/Dockerfile` |
+
+The second shape does not fit `paths.docker`/`paths.k8s` (Step 2), which require
+directories literally named `docker` and `k8s` holding per-component
+subdirectories. Say so rather than half-wiring it: that repo root needs its
+artifacts arranged into the first shape before erun can build it, which is
+`erun-blueprint-service`'s job.
+
+**Apply an ignore list before showing anything.** Most repos carry directories
+that are nobody's deployable: vendored examples, template scaffolds, other
+teams' products. Ignore by path fragment, default to skipping the obvious ones
+(`_example`, `example/`, `template/`, `fixtures/`, `testdata/`), and add whatever
+the operator names ("ignore everything that isn't the validator"). Say which
+rules were applied and how many candidates they removed — a silent filter is how
+the one service that mattered goes missing.
+
+**Then confirm what to roll out.** Present the surviving candidates as a table —
+product, shape, components, chart path, whether a `values.yaml` exists — and ask
+which of them to roll out. Do not infer it from the count: one surviving
+candidate is not consent to deploy it, and a product with several components
+rarely wants all of them (a one-shot publisher Job next to a long-running API is
+the usual pair, and only the API is being asked for). Record the answer as the
+roll-out set and work only on it.
+
+For each item in that set, record the build context: a Dockerfile that copies
+from the repo root needs `paths.dockercontext: repo-root`, and getting this
+wrong fails as a missing file during `COPY`.
 
 ## Step 2 — Wire `.erun/config.yaml` to that layout
 
-The project config is what teaches erun a non-conventional layout. Write it in
-the environment's worktree; it is normally gitignored, so it does not commit:
+The project config is what teaches erun a non-conventional layout:
 
 ```yaml
 paths:
   docker: <path>/docker
   k8s: <path>/k8s
   dockercontext: repo-root
+  version: <path>/VERSION      # when the product versions itself, not the repo
 environments:
   <env>:
     k8s:
@@ -54,10 +77,21 @@ environments:
         - <component>
 ```
 
-**`paths.docker` and `paths.k8s` are single-valued.** A repo with several service
+`paths.docker` and `paths.k8s` must end in a segment literally named `docker` /
+`k8s` — erun's build and deploy machinery keys off the folder name, and the
+override relocates those folders rather than renaming them.
+
+**`paths` is project-global and single-valued.** A repo with several service
 roots is onboarded one root at a time, and the config is swapped between them.
 Say this out loud when the repo has more than one candidate — a half-configured
 tree that builds the wrong product is the failure this prevents.
+
+**Check whether the repo commits this file.** erun's own contract is that
+`.erun/config.yaml` is committed and applies to everyone who checks the repo out.
+Plenty of repos gitignore `.erun/` instead (`grep -n 'erun' .gitignore`). When it
+is ignored, the wiring is per-checkout: it must be rewritten in every environment
+that builds this repo, and it will not survive a fresh clone. State which case
+applies rather than leaving the next person to find out.
 
 ## Step 3 — Preflight before building anything
 
@@ -68,19 +102,37 @@ fail rather than discovering it mid-build.
 1. **Cluster-registry access.** When the env builds to an in-cluster registry,
    its ServiceAccount must be able to resolve it:
    ```sh
-   kubectl auth can-i get services -n kube-system \
-     --as="system:serviceaccount:<namespace>:<tenant>-devops"
+   sa="system:serviceaccount:<namespace>:<tenant>-devops"
+   kubectl auth can-i get services -n kube-system --as="$sa"
+   kubectl auth can-i get pods     -n kube-system --as="$sa"
+   kubectl auth can-i create pods --subresource=portforward -n kube-system --as="$sa"
    ```
-   `no` → every `erun build`/`erun push` dies at
-   `kubectl get svc kube-system/erun-registry: Forbidden`. Remedy: a Role +
-   RoleBinding in `kube-system` granting `get/list services`, `get/list pods`,
-   and `create pods/portforward` to that SA.
-2. **dind insecure registry.** An insecure in-cluster registry needs
-   `--insecure-registry` on the dind sidecar, which comes from the chart
-   (`clusterRegistryInsecure`) — `/etc/docker` is read-only, so it cannot be
-   hand-edited in the pod.
-3. **Every image the plan needs is pullable.** Check the ones the deploy
-   references *and* the ones any edge module references, at the exact version:
+   Use `--subresource=portforward`. The `create pods/portforward` spelling reports
+   a false `no` even when the permission is granted — `can-i` reads the slash form
+   as a resource name, not a subresource, so it answers about a resource nothing
+   grants. A preflight that trusts it condemns a working environment.
+
+   A real `no` → every `erun build`/`erun push` dies at
+   `kubectl get svc kube-system/erun-registry: Forbidden`. Remedy: a Role in
+   `kube-system` granting `get/list services`, `get/list pods` and
+   `create/get pods/portforward`, bound to that SA. **Look for an existing one
+   first** (`kubectl -n kube-system get role,rolebinding | grep -i registry`) — a
+   cluster that already runs one erun env usually has it, and the fix is adding a
+   subject to the existing RoleBinding rather than minting new RBAC.
+2. **dind insecure registry — downstream of check 1, not independent of it.**
+   ```sh
+   kubectl -n <namespace> get deploy <tenant>-devops \
+     -o jsonpath='{range .spec.template.spec.containers[?(@.name=="erun-dind")]}{.args}{end}'
+   ```
+   No `--insecure-registry` for an insecure in-cluster registry means pushes
+   fail. It is not hand-fixable (`/etc/docker` is read-only): the chart sets it
+   from `clusterRegistryInsecure`, which `erun deploy` only derives once it can
+   *resolve* the registry Service — which is exactly what check 1 grants. So the
+   order is: fix check 1, redeploy the runtime (`erun deploy <tenant> <env>
+   --current`), then re-read this arg. Fixing them in the other order does
+   nothing.
+3. **Every image the plan needs is pullable**, at the exact version — the ones
+   the deploy references *and* the ones any edge module references:
    ```sh
    tok=$(curl -s "https://ghcr.io/token?scope=repository:<repo>:pull&service=ghcr.io" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
    curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $tok" \
@@ -188,9 +240,12 @@ cover the hostname actually being used.
 
 | Failure | What to do |
 |---|---|
-| Several candidate services found | Report them all and onboard one; never pick silently. |
+| Several candidate services found | Apply the ignore list, show what survived, and confirm the roll-out set. Never infer consent from a count of one. |
+| A candidate is `<root>/Dockerfile` + `<root>/chart/` | It cannot be wired by `paths`, which need `docker`/`k8s` directories of per-component subdirectories. Say so; arranging it is `erun-blueprint-service`'s job. |
 | `COPY` fails during build | Build context is wrong — set `paths.dockercontext: repo-root`. |
-| `kubectl get svc kube-system/erun-registry: Forbidden` | The SA Role from Step 3.1 is missing. Add it; do not switch registries to dodge it. |
+| `can-i create pods/portforward` says `no` | Re-check with `--subresource=portforward` before believing it; the slash form reports a false negative. |
+| `kubectl get svc kube-system/erun-registry: Forbidden` | The SA is not bound to the registry-access Role. Add it as a subject to the existing RoleBinding if one exists; do not switch registries to dodge it. |
+| dind still lacks `--insecure-registry` after fixing RBAC | The runtime has not been redeployed since. `erun deploy <tenant> <env> --current`, then re-read the arg. |
 | Image manifest returns 403/404 at the pinned version | Stop. Mirror it into the in-cluster registry or make the package pullable — an unpullable image cannot be deployed around. |
 | Pod CrashLoopBackOff on first deploy | Almost always the production values from Step 3.5. Apply the non-prod override. |
 | Builder-stage test gate fails | The repo team's fix. Report it; do not bypass the gate to get a green deploy. |
