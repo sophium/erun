@@ -96,23 +96,24 @@ PATCH /v1/reviews/rev_abc/comments/cmt_01H.../status
 | `body` | UTF-8, byte length ≤ 8 KiB (8192 bytes). Empty or whitespace-only rejected. Immutable after creation — there is no edit endpoint. |
 | `commitId` | Exactly 40 lowercase hex characters: `^[0-9a-f]{40}$`. |
 | `filePath` | Non-empty string. Part of the comment's address alongside `commitId` and `line`; immutable after creation. |
-| `line` | Positive integer; must point at a line that exists in the file at `commitId` (validated lazily — out-of-range lines return `422 LINE_OUT_OF_RANGE`). Immutable after creation. |
-| `parentCommentId` | If set, must reference an existing root comment in the same review with the same `commitId`, `filePath`, and `line`. |
+| `line` | Positive integer. **Not checked against the file's actual length** — the API has no git access to confirm a line exists at `commitId`, so an out-of-range `line` is accepted as-is. `(Planned.)` A future revision may validate this against the commit if the API gains a way to read it. Immutable after creation. |
+| `parentCommentId` | If set, must reference an existing root comment in the same review with the same `commitId`, `filePath`, and `line` — enforced by a database trigger, refused as a generic `400` (see Errors below). |
 | `status` | Enum: `OPEN` or `CLOSED`. Only settable on a thread's root comment; a reply's status is not independently settable. |
 
 ## Errors
 
-Same status-code conventions as the [reviews API](/collaboration/reviews#errors). Comment-specific cases:
+Same envelope and status-code conventions as the [reviews API](/collaboration/reviews#errors). Comment-specific cases:
 
 | Status | `code` | When |
 |---|---|---|
-| `400` | `INVALID_BODY` | `body` missing or exceeds 8 KiB. |
+| `400` | `INVALID_BODY` | Malformed JSON, or `body` empty/whitespace-only/over 8 KiB. |
 | `400` | `INVALID_COMMIT_ID` | `commitId` is not 40 lowercase hex chars. |
-| `404` | — | The review or parent comment doesn't exist or isn't visible. |
+| `400` | — (generic) | `parentCommentId` points to a comment in a different review, commit, or file, or otherwise fails the database's thread-shape trigger. There is no distinct machine code for this today — it reads the same as any other malformed body. |
+| `404` | — (generic) | The review or parent comment doesn't exist or isn't visible to the caller's tenant. |
 | `409` | `ALREADY_CLOSED` | Closing a thread that's already closed. |
-| `422` | `MISMATCHED_PARENT` | `parentCommentId` points to a comment in a different review, commit, or file. |
-| `422` | `LINE_OUT_OF_RANGE` | `line` is beyond the file's length at `commitId`. |
+
+`422 Unprocessable Entity` does not appear above, and neither do `MISMATCHED_PARENT` or `LINE_OUT_OF_RANGE` from earlier drafts of this table: nothing in this API returns `422`, and the two removed codes described checks not implemented — see [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) for why this API drops rather than fakes codes for conditions it can't actually distinguish or detect.
 
 ## Pagination + rate limits
 
-`GET /comments` paginates at 100 items per response; see [API protocol · Pagination](/agent-reference/api-protocol#pagination). Comments share the write rate-limit bucket (60 req/min/token); see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits).
+Neither is implemented yet. `GET /comments` returns every comment on the review in one response — see [API protocol · Pagination](/agent-reference/api-protocol#pagination) — and no request is refused for rate; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits) for the target design.

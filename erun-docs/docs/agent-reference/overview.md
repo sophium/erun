@@ -41,7 +41,7 @@ Per the Operator/Agent split, an Agent is responsible for the following classes 
 - Following the [build-path resolution algorithm](/reference/configuration-build-paths) when explaining why a build resolved to a particular image tag.
 - Loading the [right skill](/concepts/skills) before writing a service, migration, or ingress — and writing conformant code by hand from the skill's guidance.
 - Recording [structured audit events](/agent-reference/audit-log#event-shape) so the Operator can replay the session.
-- Respecting the [rate limits](/agent-reference/api-protocol#rate-limits) — backing off when hit, not hammering the API.
+- Not hammering the API — rate limiting is [planned but not yet enforced](/agent-reference/api-protocol#rate-limits), so nothing stops a runaway loop except the Agent itself.
 
 ## What stays in the Operator's hands
 

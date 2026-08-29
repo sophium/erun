@@ -80,15 +80,26 @@ func (r *CommentRepository) Update(ctx context.Context, comment model.Comment) (
 	return updated, err
 }
 
-// classifyCommentError maps the comments table's CHECK constraints and the
-// erun_validate_comments trigger's RAISE EXCEPTIONs onto the repository's
-// sentinel errors so callers see a 4xx instead of a bare 500.
+// classifyCommentError maps the comments table's foreign keys and CHECK
+// constraints, and the erun_validate_comments trigger's RAISE EXCEPTIONs,
+// onto the repository's sentinel errors so callers see a 4xx instead of a
+// bare 500 — a reviewId/parentCommentId the caller's tenant cannot see fails
+// the same foreign key check whether the row genuinely doesn't exist or just
+// isn't this tenant's, matching the "doesn't exist or isn't visible" 404
+// documented in collaboration/comments.md.
 func classifyCommentError(err error) error {
 	code, ok := pgErrorCode(err)
 	if !ok {
 		return err
 	}
+	if code == pgerrcode.CheckViolation {
+		if name, ok := pgConstraintName(err); ok && name == "comments_body_check" {
+			return ErrCommentBodyInvalid
+		}
+	}
 	switch code {
+	case pgerrcode.ForeignKeyViolation:
+		return ErrNotFound
 	case pgerrcode.NotNullViolation, pgerrcode.CheckViolation:
 		return ErrInvalidInput
 	case pgerrcode.UniqueViolation:

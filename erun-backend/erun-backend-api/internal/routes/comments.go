@@ -2,10 +2,12 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type CommentRepository interface {
@@ -46,18 +48,18 @@ func (r CommentRoutes) listComments(w http.ResponseWriter, req *http.Request) {
 func (r CommentRoutes) createComment(w http.ResponseWriter, req *http.Request) {
 	var comment model.Comment
 	if err := decodeJSON(req, &comment); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	comment.ReviewID = req.PathValue("review_id")
 	comment, err := r.service.PrepareCreate(req.Context(), comment)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeCommentError(w, err)
 		return
 	}
 	comment, err = r.comments.Create(req.Context(), comment)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeCommentError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, comment)
@@ -66,13 +68,34 @@ func (r CommentRoutes) createComment(w http.ResponseWriter, req *http.Request) {
 func (r CommentRoutes) updateCommentStatus(w http.ResponseWriter, req *http.Request) {
 	var input updateCommentStatusRequest
 	if err := decodeJSON(req, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	comment, err := r.service.UpdateStatus(req.Context(), req.PathValue("comment_id"), input.Status)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeCommentError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, comment)
+}
+
+// writeCommentError gives comments.md's documented business codes their
+// exact machine code; every other failure falls through to the generic
+// status-derived code.
+func writeCommentError(w http.ResponseWriter, err error) {
+	var invalidCommitID *service.InvalidCommitIDError
+	if errors.As(err, &invalidCommitID) {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_COMMIT_ID", invalidCommitID.Error())
+		return
+	}
+	var alreadyClosed *service.AlreadyClosedError
+	if errors.As(err, &alreadyClosed) {
+		writeErrorCode(w, http.StatusConflict, "ALREADY_CLOSED", alreadyClosed.Error())
+		return
+	}
+	if errors.Is(err, apirepository.ErrCommentBodyInvalid) {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
+		return
+	}
+	writeRepositoryError(w, err)
 }

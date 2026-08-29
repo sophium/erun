@@ -311,3 +311,108 @@ func TestRemoveReviewerNotFoundReturns404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
+
+// TestGenericRepositoryErrorCarriesAStatusDerivedCode is the base case the
+// envelope exists for: a caller branching on `code` must never see it absent,
+// even on a route with no business-specific code of its own.
+func TestGenericRepositoryErrorCarriesAStatusDerivedCode(t *testing.T) {
+	reviewers := &stubReviewReviewerRepository{err: apirepository.ErrNotFound}
+	routes := ReviewRoutes{reviewers: reviewers}
+	req := httptest.NewRequest(http.MethodDelete, "/v1/reviews/review-1/reviewers/user-1", nil)
+	req.SetPathValue("review_id", "review-1")
+	req.SetPathValue("user_id", "user-1")
+	rec := httptest.NewRecorder()
+
+	routes.removeReviewer(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `"code":"NOT_FOUND"`) {
+		t.Fatalf("body = %q, want a NOT_FOUND code", rec.Body.String())
+	}
+}
+
+// TestAdvanceMergeQueueEmptyQueueReportsEmptyQueueCode: the queue-empty case
+// must be distinguishable from every other 404 this route can return, so a
+// caller can tell "nothing to promote" from "another review is merging".
+func TestAdvanceMergeQueueEmptyQueueReportsEmptyQueueCode(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{err: &service.EmptyMergeQueueError{TargetBranch: "main"}}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"EMPTY_QUEUE"`) {
+		t.Fatalf("body = %q, want code EMPTY_QUEUE", rec.Body.String())
+	}
+}
+
+// TestAdvanceMergeQueueInvalidTargetBranchReportsItsCode: an empty
+// targetBranch must not be confused with OverrideAdvanceMergeQueue's own
+// ErrInvalidInput (a blank reason) — both are 400 but only one is this code.
+func TestAdvanceMergeQueueInvalidTargetBranchReportsItsCode(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{err: service.ErrInvalidTargetBranch}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":""}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"INVALID_TARGET_BRANCH"`) {
+		t.Fatalf("body = %q, want code INVALID_TARGET_BRANCH", rec.Body.String())
+	}
+}
+
+// TestUpdateReviewStatusInvalidTransitionReportsCodeAndDetails: a caller
+// asserting MERGE/MERGED directly must get INVALID_TRANSITION with the
+// documented details shape (from/to/validTargets), not a bare status text.
+func TestUpdateReviewStatusInvalidTransitionReportsCodeAndDetails(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{err: &service.InvalidTransitionError{
+		From:         model.ReviewStatusOpen,
+		To:           model.ReviewStatusMerged,
+		ValidTargets: []model.ReviewStatus{model.ReviewStatusFailed, model.ReviewStatusReady, model.ReviewStatusClosed},
+	}}}
+	rec := patchReviewStatus(t, routes, `{"status":"MERGED"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"code":"INVALID_TRANSITION"`, `"from":"OPEN"`, `"to":"MERGED"`, `"validTargets":["FAILED","READY","CLOSED"]`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to contain %q", body, want)
+		}
+	}
+}
+
+// TestUpdateReviewStatusMissingBuildIDReportsInvalidBody: READY/FAILED
+// without a buildId is a missing required field, not a bare 400.
+func TestUpdateReviewStatusMissingBuildIDReportsInvalidBody(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{err: &service.MissingBuildIDError{Status: model.ReviewStatusFailed}}}
+	rec := patchReviewStatus(t, routes, `{"status":"FAILED"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"INVALID_BODY"`) || !strings.Contains(body, `"field":"buildId"`) {
+		t.Fatalf("body = %q, want code INVALID_BODY naming field buildId", body)
+	}
+}
+
+// TestUpdateReviewStatusMalformedJSONReportsInvalidBody: a decode failure is
+// the same INVALID_BODY code as a semantically missing field.
+func TestUpdateReviewStatusMalformedJSONReportsInvalidBody(t *testing.T) {
+	routes := ReviewRoutes{service: &stubReviewService{}}
+	rec := patchReviewStatus(t, routes, `{not json`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"INVALID_BODY"`) {
+		t.Fatalf("body = %q, want code INVALID_BODY", rec.Body.String())
+	}
+}

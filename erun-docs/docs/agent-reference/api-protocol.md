@@ -88,7 +88,7 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field — today the API returns bare HTTP status codes with a plain-text body (see [Errors](#errors) below).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
 :::
 
 | Method | Path | Description | Required scope |
@@ -319,7 +319,7 @@ The executor is **opt-in and off by default** — it requires the backend to run
 
 Registration deploys an environment **once**. To deploy it again — retrying a failure, or moving it to another published version — use [`POST /v1/environments/{id}/deploy`](#deploy-endpoint).
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -353,7 +353,7 @@ A body-less request (no body at all, or `{}`) deploys the environment's own `run
 
 **Resource quota, re-checked.** Before claiming, the endpoint re-runs the same two checks [`POST /v1/environments`](#post-v1environments) does at create — the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the runtime pod's minimum, and the aggregate `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` budget projection (using the environment's own existing runtime count, not +1, since a redeploy adds nothing new) — and rejects with `409` if either is now insufficient (see [Quotas](/concepts/hosted-platform#quotas)). This catches an operator lowering the tenant's quota (`PUT /v1/tenants/{tenant_id}/quota`) after the environment was already created: without the re-check, the next deploy would only discover the shortfall as a five-minute rollout timeout.
 
-**Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -423,7 +423,7 @@ The endpoint takes **no body**. On success it returns HTTP `200`:
 
 **Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend tracks a per-env provisioning `status` (see [`POST /v1/environments`](#post-v1environments)) but the mint endpoint does not yet gate on it reaching `running`; until it does, the endpoint mints whenever the signer is configured and the environment exists.
 
-**Error behaviour.** Bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -446,7 +446,7 @@ Mints a per-env **DNS-01 broker token** — the long-lived, backend-signed crede
 
 The operator lands this token as the Secret the per-tenant Issuer's webhook solver references (see the `erun-enable-hosting-edge` skill). Enabled by the same `ERUN_API_MCP_SIGNING_KEY_PATH` as the mcp-token endpoint; unset → `501`.
 
-**Error behaviour.** Bare HTTP status, plain-text body:
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -487,7 +487,7 @@ Mints the short-lived, scope-limited access token erun's hosted container regist
 
 Same signing key as the [mcp-token](#mcp-token-endpoint) and [dns01-token](#dns01-token-endpoint) endpoints, again with a **distinct audience**: the minted token's `aud` is the registry's own `service` value from the challenge (`registry.erunpaas.com`), never `erun-api` or an `erun-mcp:<tenant>/<env>` value, so it cannot be replayed against the platform API or an env's MCP edge. `iss` is the fixed `erun-registry-token-service` value. Enabled by the same `ERUN_API_MCP_SIGNING_KEY_PATH` as the other two; unset, or no tenant resolver configured (no database), leaves the route **unregistered** (`404`), matching the [DNS-01 broker](#dns01-broker)'s absent-when-unconfigured behaviour rather than the mcp-token endpoint's `501`.
 
-**Error behaviour.** Bare HTTP status, plain-text body:
+**Error behaviour.** This endpoint lives in its own `internal/registrytoken` package, outside `internal/routes` — bare HTTP status with a plain-text body, not the `{code, message}` envelope [Reviews · Errors](/collaboration/reviews#errors) documents for the rest of this API:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -553,7 +553,7 @@ Registers a **cloud context** (a managed cluster) for the caller's tenant and re
 
 **Prerequisites.** Live provisioning requires (1) a registered cloud-provider alias holding the tenant's encrypted BYO-cloud credentials (`PUT /v1/cloud-provider-aliases/{alias}`, below), and (2) the platform configured with a DBOS system database (`DBOS_SYSTEM_DATABASE_URL`) and a secrets key (`ERUN_SECRETS_KEY`). When provisioning is **not** configured, `POST /v1/contexts` registers the row and returns `201` with the plan only (no live bootstrap) — the pre-#676 behaviour.
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -673,7 +673,7 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
 
 **This endpoint itself only resolves and returns the plan — it never executes it or writes to the database.** But the discrete endpoints it composes are executing paths in their own right: [`POST /v1/environments`](#post-v1environments) (with `preview: false`, the default) really registers the row and, for a pinned `runtime` environment, really starts the deploy — which, per [Automatic exposure](/concepts/hosted-platform#automatic-exposure), also chains the expose line above when the platform is configured for it; [`POST /v1/environments/{id}/deploy`](#deploy-endpoint), [`.../stop`](#stop-endpoint), and [`DELETE`](#delete-endpoint) really run their Jobs (`deploy` and `DELETE` asynchronously, behind a durable workflow); [`POST /v1/contexts`](#post-v1contexts) (with `preview: false`) really bootstraps a cluster.
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -714,7 +714,7 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 }
 ```
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -772,7 +772,7 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 ]
 ```
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -831,7 +831,7 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 
 **The lockout guard.** `DELETE /v1/users/{user_id}/roles/{role_id}` refuses when the revoke would leave the tenant with **no user holding a role that can grant roles** (a permission matching `POST /v1/users/{user_id}/roles` itself) — the one failure this feature makes impossible rather than merely recoverable, since there would be no lever left inside the product to undo it. The check runs against every user in the tenant, not just the one being revoked, so revoking a role from one admin while another admin still holds a grant-capable role succeeds normally.
 
-**Error behaviour.** Bare HTTP status, plain-text body, same as `/v1/users`:
+**Error behaviour.** Same generic JSON `{code, message}` envelope as `/v1/users`:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -966,7 +966,7 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 
 **What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 8000`, `maxMemoryMb: 17832`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `8916Mi`, plus the `erun-dind` sidecar at the same limits) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 80000`, `maxTotalMemoryMb: 178320`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
 
-**Error behaviour.** Today the API returns a bare HTTP status with a plain-text body (no JSON envelope):
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
 | Status | Condition | Recovery |
 |---|---|---|
@@ -1065,9 +1065,9 @@ A future structured error envelope will return a machine-readable `code` (and, w
 | `422` | `DISCOVERY_FETCH_FAILED` | Self-service add with an issuer whose `<issuerUrl>/.well-known/openid-configuration` can't be fetched. | Verify the issuer is online and the URL is correct. |
 | `422` | `JWKS_INVALID` | Discovery document loads but `jwks_uri` returns no usable keys. | Verify the issuer's JWKS is published correctly. |
 
-## Rate limits
+## Rate limits `(Planned.)` {#rate-limits}
 
-The erun API enforces per-token and per-tenant limits to keep multi-agent traffic predictable.
+**Not implemented yet.** There is no request-rate limiter anywhere in `erun-backend-api` today — no per-token bucket, no per-tenant aggregate, and no `429` response on any path. A caller can call as fast as it wants; the only ceiling is ordinary HTTP concurrency and the database beneath it. The design below is the target shape, kept here so a client that wants to be a good citizen ahead of time can already structure its retry logic around `Retry-After`/`RateLimit-*` — but nothing enforces it, and no client should treat a `429` as a documented possibility today.
 
 | Bucket | Limit | Notes |
 |---|---|---|
@@ -1076,7 +1076,7 @@ The erun API enforces per-token and per-tenant limits to keep multi-agent traffi
 | Per-token, merge-queue advance | 10 req/min | `POST /v1/reviews/merge-queue/advance`. Tightened because each call mutates shared state. |
 | Per-tenant aggregate | 1500 req/min | Sum of all tokens belonging to the tenant. |
 
-Hitting a limit returns `429 Too Many Requests` with:
+Once implemented, hitting a limit would return `429 Too Many Requests` with:
 
 ```
 Retry-After: <seconds>
@@ -1085,11 +1085,9 @@ RateLimit-Remaining: 0
 RateLimit-Reset: <unix epoch>
 ```
 
-Clients should respect `Retry-After`. Persistent over-spend at the tenant aggregate level triggers an audit-trail event and an administrator notification — agents that hammer the API are visible.
+## Pagination `(Planned.)` {#pagination}
 
-## Pagination
-
-List endpoints (`GET /v1/reviews`, `GET /v1/reviews/{id}/comments`, `GET /v1/reviews/{id}/builds`) return at most **100 items per response**. When more exist, the response includes:
+**Not implemented yet.** List endpoints (`GET /v1/reviews`, `GET /v1/reviews/{id}/comments`, `GET /v1/reviews/{id}/builds`, and every other `GET` list route in [Endpoints](#endpoints)) return the **entire result set in one response** today — no page size cap, no `items`/`nextPageToken` envelope, and no `pageToken` query parameter accepted anywhere. A caller that sends `?pageToken=...` has it silently ignored (list routes read only the filter query params each one documents). The shape below is the target design:
 
 ```jsonc
 {
@@ -1098,7 +1096,7 @@ List endpoints (`GET /v1/reviews`, `GET /v1/reviews/{id}/comments`, `GET /v1/rev
 }
 ```
 
-Pass the token back as `?pageToken=<token>` on the next call. When `nextPageToken` is absent, you've reached the end of the list. Tokens are opaque and stable; passing a stale token returns `400 Bad Request` with code `EXPIRED_PAGE_TOKEN`.
+Once implemented, the token would be passed back as `?pageToken=<token>` on the next call, with a stale token refused as `400 Bad Request` (code `EXPIRED_PAGE_TOKEN`). Until then, a tenant with a very large number of reviews/comments/builds gets them all back in one call — there is no signal that more exist because there never is more than what came back.
 
 ## See also
 

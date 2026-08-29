@@ -60,6 +60,70 @@ func (e *UnresolvedThreadsError) Error() string {
 	return fmt.Sprintf("review %s has %d unresolved comment thread(s); resolve them before advancing the merge queue", e.ReviewID, e.UnresolvedThreads)
 }
 
+// ErrInvalidTargetBranch refuses an empty targetBranch on merge-queue
+// advance — distinguished from OverrideAdvanceMergeQueue's blank-reason
+// refusal (also ErrInvalidInput) so a caller can be told which field it was.
+var ErrInvalidTargetBranch = fmt.Errorf("targetBranch is required: %w", repository.ErrInvalidInput)
+
+// EmptyMergeQueueError distinguishes "nothing waiting to promote" from the
+// review-already-merging case headOfMergeQueue also refuses with the bare
+// ErrNotFound sentinel — both keep the same 404, but only this one is the
+// EMPTY_QUEUE machine code documented in collaboration/reviews.md.
+type EmptyMergeQueueError struct {
+	TargetBranch string
+}
+
+func (e *EmptyMergeQueueError) Error() string {
+	return fmt.Sprintf("no review waiting to merge for target branch %s", e.TargetBranch)
+}
+
+func (e *EmptyMergeQueueError) Unwrap() error { return repository.ErrNotFound }
+
+// InvalidTransitionError refuses a caller's PATCH .../status asserting MERGE
+// or MERGED directly — the merge queue's own gate is the only path to either.
+type InvalidTransitionError struct {
+	From         model.ReviewStatus
+	To           model.ReviewStatus
+	ValidTargets []model.ReviewStatus
+}
+
+func (e *InvalidTransitionError) Error() string {
+	return fmt.Sprintf("cannot transition review from %s directly to %s", e.From, e.To)
+}
+
+func (e *InvalidTransitionError) Unwrap() error { return repository.ErrInvalidInput }
+
+// MissingBuildIDError refuses a FAILED/READY status update with no buildId:
+// both statuses record which build produced them.
+type MissingBuildIDError struct {
+	Status model.ReviewStatus
+}
+
+func (e *MissingBuildIDError) Error() string {
+	return fmt.Sprintf("buildId is required when setting status to %s", e.Status)
+}
+
+func (e *MissingBuildIDError) Unwrap() error { return repository.ErrInvalidInput }
+
+// validTargetsFor lists the statuses a caller's PATCH .../status may set from
+// the review's current status, mirroring the Status lifecycle documented in
+// collaboration/reviews.md. MERGE and MERGED never appear: only the merge
+// queue's own gate result reaches either.
+func validTargetsFor(status model.ReviewStatus) []model.ReviewStatus {
+	switch status {
+	case model.ReviewStatusOpen:
+		return []model.ReviewStatus{model.ReviewStatusFailed, model.ReviewStatusReady, model.ReviewStatusClosed}
+	case model.ReviewStatusFailed:
+		return []model.ReviewStatus{model.ReviewStatusReady, model.ReviewStatusClosed}
+	case model.ReviewStatusReady:
+		return []model.ReviewStatus{model.ReviewStatusClosed}
+	case model.ReviewStatusMerge:
+		return []model.ReviewStatus{model.ReviewStatusReady}
+	default:
+		return nil
+	}
+}
+
 type ReviewService struct {
 	reviews  ReviewRepository
 	builds   ReviewBuildRepository
@@ -127,14 +191,18 @@ func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, targetBra
 // another review is already merging on that branch.
 func (s *ReviewService) headOfMergeQueue(ctx context.Context, targetBranch string) (model.Review, error) {
 	if targetBranch == "" {
-		return model.Review{}, repository.ErrInvalidInput
+		return model.Review{}, ErrInvalidTargetBranch
 	}
 	if _, err := s.reviews.FindActiveMergeReview(ctx, targetBranch); err == nil {
 		return model.Review{}, repository.ErrNotFound
 	} else if !errors.Is(err, repository.ErrNotFound) {
 		return model.Review{}, err
 	}
-	return s.reviews.FindNextMergeQueueReview(ctx, targetBranch)
+	review, err := s.reviews.FindNextMergeQueueReview(ctx, targetBranch)
+	if errors.Is(err, repository.ErrNotFound) {
+		return model.Review{}, &EmptyMergeQueueError{TargetBranch: targetBranch}
+	}
+	return review, err
 }
 
 // promoteToMerge moves review from the queue to MERGE. Both AdvanceMergeQueue
@@ -198,16 +266,17 @@ func (s *ReviewService) auditOverrideAdvance(ctx context.Context, review model.R
 }
 
 func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string) (model.Review, error) {
+	review, err := s.reviews.Get(ctx, reviewID)
+	if err != nil {
+		return model.Review{}, err
+	}
+
 	// MERGE is reached only by AdvanceMergeQueue promoting the queue head, and
 	// MERGED only by the merge queue's own gate build succeeding — a caller's
 	// PATCH asserting either is an assertion nothing verified, which is exactly
 	// what a merge queue exists to refuse.
 	if status == model.ReviewStatusMerge || status == model.ReviewStatusMerged {
-		return model.Review{}, repository.ErrInvalidInput
-	}
-	review, err := s.reviews.Get(ctx, reviewID)
-	if err != nil {
-		return model.Review{}, err
+		return model.Review{}, &InvalidTransitionError{From: review.Status, To: status, ValidTargets: validTargetsFor(review.Status)}
 	}
 
 	// READY without a build is the missed-merge-window path, not a build result.
@@ -217,7 +286,7 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 
 	if reviewLastBuildColumn(status) != "" {
 		if buildID == "" {
-			return model.Review{}, repository.ErrInvalidInput
+			return model.Review{}, &MissingBuildIDError{Status: status}
 		}
 		return s.updateBuildStatus(ctx, review, status, buildID)
 	}

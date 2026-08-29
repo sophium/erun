@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
 )
@@ -22,16 +23,37 @@ func NewBuildRepository(txs *TxManager) *BuildRepository {
 func (r *BuildRepository) Create(ctx context.Context, build model.Build) (model.Build, error) {
 	created := build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		if err := tx.NewInsert().
+		err := tx.NewInsert().
 			Model(&created).
 			Column("review_id", "kind", "successful", "commit_id", "version", "failure_detail").
 			Returning("*").
-			Scan(ctx); err != nil {
-			return err
-		}
-		return nil
+			Scan(ctx)
+		return classifyBuildError(err)
 	})
 	return created, err
+}
+
+// classifyBuildError maps the builds table's foreign key and CHECK
+// constraints onto the repository's sentinel errors so callers see a 4xx
+// instead of a bare 500 — a reviewId the caller's tenant cannot see fails the
+// same foreign key check whether the row genuinely doesn't exist or just
+// isn't this tenant's, matching the "doesn't exist or isn't visible" 404
+// documented in collaboration/builds.md.
+func classifyBuildError(err error) error {
+	code, ok := pgErrorCode(err)
+	if !ok {
+		return err
+	}
+	switch code {
+	case pgerrcode.ForeignKeyViolation:
+		return ErrNotFound
+	case pgerrcode.NotNullViolation, pgerrcode.CheckViolation:
+		return ErrInvalidInput
+	case pgerrcode.UniqueViolation:
+		return ErrConflict
+	default:
+		return err
+	}
 }
 
 func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build, error) {
