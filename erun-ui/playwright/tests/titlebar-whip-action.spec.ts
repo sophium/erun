@@ -126,10 +126,21 @@ test('an un-mocked pass names the seeded, never-opened environment and orchestra
   // skipped, named, with a reason -- never silently omitted. This is the
   // real backend call, unmocked, proving the button is actually wired to
   // erun-ui/whip.go's WhipNow rather than only rendering mocked data.
+  // A real pass does real work, and its two halves are not equally fast: the
+  // environment half lists configs, while the orchestrator half reconciles
+  // pacing for every row. The orchestrator rows are therefore the last thing
+  // to land, and on a machine busy running the rest of the suite in parallel
+  // the default expect budget is too tight for them -- observed as the report
+  // rendering with its environment row present and the orchestrator row not
+  // yet. These assertions are about a target being named at all, never about
+  // how quickly, so they get a budget that reflects that.
+  const whipReportTimeout = 30_000;
   await app.titlebar.whipButton().click();
-  await expect(app.titlebar.whipReportHeading()).toBeVisible();
+  await expect(app.titlebar.whipReportHeading()).toBeVisible({ timeout: whipReportTimeout });
   const body = app.titlebar.whipReportBody();
-  await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible();
-  await expect(body.getByText(SEED_ORCHESTRATOR)).toBeVisible();
-  await expect(body.getByText('Skipped').first()).toBeVisible();
+  await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible({
+    timeout: whipReportTimeout,
+  });
+  await expect(body.getByText(SEED_ORCHESTRATOR)).toBeVisible({ timeout: whipReportTimeout });
+  await expect(body.getByText('Skipped').first()).toBeVisible({ timeout: whipReportTimeout });
 });
