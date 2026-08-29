@@ -62,26 +62,62 @@ func UpsertKnownHost(path, alias, host string, port int) error {
 
 func scanHostKeys(host string, port int) ([]string, error) {
 	cmd := eruncommon.Command("ssh-keyscan", "-p", fmt.Sprintf("%d", port), host)
-	output := new(bytes.Buffer)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
+	return parseHostKeyScanOutput(stdout.String(), stderr.String(), err)
+}
 
+// parseHostKeyScanOutput extracts host key lines from an ssh-keyscan run. Only
+// stdout is a candidate for keys: ssh-keyscan writes diagnostics (KEX/negotiation
+// failures) to stderr, and a diagnostic has no "#" prefix, so it would otherwise
+// pass the blank/comment filter and be mistaken for a key. Each candidate line is
+// further required to name a known host key type, since a scan can also emit
+// non-key stdout noise.
+func parseHostKeyScanOutput(stdout, stderr string, cmdErr error) ([]string, error) {
 	lines := make([]string, 0, 3)
-	for _, line := range strings.Split(strings.ReplaceAll(output.String(), "\r\n", "\n"), "\n") {
+	for _, line := range strings.Split(strings.ReplaceAll(stdout, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || !isHostKeyLine(line) {
 			continue
 		}
 		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
-		if err != nil {
-			return nil, fmt.Errorf("scan ssh host key: %w: %s", err, strings.TrimSpace(output.String()))
+		detail := strings.TrimSpace(stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(stdout)
+		}
+		if cmdErr != nil {
+			return nil, fmt.Errorf("scan ssh host key: %w: %s", cmdErr, detail)
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("scan ssh host key: no host keys returned: %s", detail)
 		}
 		return nil, fmt.Errorf("scan ssh host key: no host keys returned")
 	}
 	return lines, nil
+}
+
+// isHostKeyLine reports whether line looks like a "host keytype base64key"
+// known_hosts entry rather than diagnostic text such as an unsupported-KEX
+// message, which has no key-type token to match against.
+func isHostKeyLine(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return false
+	}
+	return isKnownHostKeyType(fields[1])
+}
+
+func isKnownHostKeyType(keyType string) bool {
+	switch keyType {
+	case "ssh-rsa", "ssh-dss", "ssh-ed25519":
+		return true
+	}
+	return strings.HasPrefix(keyType, "ecdsa-sha2-") || strings.HasPrefix(keyType, "sk-")
 }
 
 func upsertKnownHostsContent(existing, alias, hostToken string, scannedLines []string) string {
