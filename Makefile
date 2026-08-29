@@ -33,6 +33,15 @@
 #
 # erun-backend-db has no Go module at all (Atlas migrations + SQL only), so
 # there is nothing here for golangci-lint to run against.
+# An outer bound on a single module's lint, passed explicitly because the
+# default is short enough that the largest module (erun-backend-api, which
+# carries the AWS SDK) exceeds it on a modest build host -- and golangci-lint
+# reports that as a failure *after* printing "0 issues", so a clean analysis
+# reads as a red gate and a release aborts for no finding at all. Modules with
+# their own .golangci.yml set a shorter run.timeout; this is the ceiling, not a
+# replacement for it.
+LINT_TIMEOUT ?= 15m
+
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
 # Run golangci-lint across the gated modules, each against its own
@@ -58,7 +67,7 @@ lint:
 	@failed=""; \
 	for m in $(LINT_MODULES); do \
 		echo ">> golangci-lint $$m"; \
-		if ! (cd $$m && golangci-lint run ./...); then \
+		if ! (cd $$m && golangci-lint run --timeout $(LINT_TIMEOUT) ./...); then \
 			failed="$$failed $$m"; \
 		fi; \
 	done; \
