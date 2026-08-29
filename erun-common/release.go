@@ -227,6 +227,12 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 	defer release()
 
+	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums, publisher)
+}
+
+// runClaimedReleaseSpec is the release's actual work, run only once
+// runReleaseSpec has claimed the version being released.
+func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleasePublishesResolvedImages(spec, publisher); err != nil {
 		return err
