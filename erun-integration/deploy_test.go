@@ -1517,6 +1517,63 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_tenant_component_charts_by_reference", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_tenant_component_verifies_against_the_cluster_registry", func(t *testing.T) {
+		// erun#1598: a `--cluster-registry` env with an explicit runtimeregistry
+		// (a realistic pairing -- runtimeregistry names where the shared
+		// platform chart lives, containerregistries names the in-cluster
+		// registry the tenant's own images and component charts publish to)
+		// could never confirm its own component chart, because verification
+		// probed the platform-chart registry (runtimeregistry) instead of the
+		// registry `erun push` actually publishes tenant charts to. The
+		// registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry below is
+		// published only at the concretized cluster pull address (the dry-run
+		// placeholder <cluster-ip>:5000), never at the runtimeregistry, so this
+		// only passes when resolution reaches the cluster registry -- exactly
+		// the registry the cluster entry is marked insecure for, which
+		// erun-common's registry-scheme unit tests cover directly (a live HTTPS
+		// probe against a plain-HTTP registry cannot be observed from this
+		// harness; see erun-integration/AGENTS.md's coverage-gaps section).
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\n"+
+				"repopath: /nonexistent-remote/team\n"+
+				"kubernetescontext: test-context\n"+
+				"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+				"runtimeregistry: ghcr.io/sophium\n"+
+				"runtimeversion: 1.0.0\n"+
+				"type: remote-agent\n"+
+				"containerregistries:\n"+
+				"    - cluster: {insecure: true}\n"+
+				"      roles:\n"+
+				"        - build\n"+
+				"        - deploy\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=<cluster-ip>:5000/team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "verifying charts published at 1.0.0 in <cluster-ip>:5000: team-backend-api") {
+			t.Fatalf("expected verification against the concretized cluster registry, not the platform runtimeregistry:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_tenant_component_verifies_against_the_cluster_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_component_threads_resolved_oidc_issuer", func(t *testing.T) {
 		// Regression: an empty computed api.oidcAllowedIssuers used
 		// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and

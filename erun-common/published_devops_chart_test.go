@@ -85,6 +85,64 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	})
 }
 
+// TestPublishedTenantComponentChartRegistry pins erun#1598 defect 1: a
+// tenant's own component charts are published by `erun push` to the DEPLOY
+// registry, never wherever publishedDevopsChartRegistry resolves the SHARED
+// platform chart to (an explicit runtimeregistry, or -- for a
+// cluster-registry env -- the runtime image's own registry). Before the fix,
+// a cluster-registry env with an explicit runtimeregistry (a realistic
+// pairing: runtimeregistry for the platform chart, containerregistries for
+// the tenant's own images) probed the platform-chart registry for the
+// tenant's component chart and could never find it there.
+func TestPublishedTenantComponentChartRegistry(t *testing.T) {
+	t.Run("cluster-registry env with an explicit runtimeregistry still resolves components from the deploy registry", func(t *testing.T) {
+		target := OpenResult{
+			ClusterPullRegistry: "10.43.0.100:5000",
+			EnvConfig: EnvConfig{
+				RuntimeRegistry:     "ghcr.io/sophium",
+				ContainerRegistries: ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []RegistryRole{RegistryRoleDeploy}}},
+			},
+		}
+		if got := publishedTenantComponentChartRegistry(target); got != "10.43.0.100:5000" {
+			t.Fatalf("component chart registry = %q, want the deploy registry 10.43.0.100:5000, not the platform runtimeregistry", got)
+		}
+		if got := publishedDevopsChartRegistry(target); got != "ghcr.io/sophium" {
+			t.Fatalf("platform chart registry = %q, want the explicit runtimeregistry ghcr.io/sophium (unchanged)", got)
+		}
+	})
+
+	t.Run("plain env resolves components from the same deploy registry as the platform chart", func(t *testing.T) {
+		target := OpenResult{EnvConfig: EnvConfig{
+			ContainerRegistries: ContainerRegistries{{Registry: "registry.example/test", Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}}},
+		}}
+		if got := publishedTenantComponentChartRegistry(target); got != "registry.example/test" {
+			t.Fatalf("component chart registry = %q, want registry.example/test", got)
+		}
+	})
+}
+
+// TestChartRegistryInsecure pins the other half of erun#1598: only the deploy
+// target's own concretized cluster registry can ever be insecure, and only
+// when the registry under test is that exact resolved host -- a platform
+// registry (ghcr.io) that merely happens to be probed in the same search must
+// never be treated as insecure just because the env also has an insecure
+// cluster entry.
+func TestChartRegistryInsecure(t *testing.T) {
+	target := OpenResult{
+		ClusterPullRegistry:     "10.43.0.100:5000",
+		ClusterRegistryInsecure: true,
+	}
+	if !chartRegistryInsecure(target, "10.43.0.100:5000") {
+		t.Fatal("the concretized insecure cluster registry must report insecure")
+	}
+	if chartRegistryInsecure(target, "ghcr.io/sophium") {
+		t.Fatal("a different registry (the platform chart's) must never be reported insecure")
+	}
+	if chartRegistryInsecure(OpenResult{}, "") {
+		t.Fatal("an empty registry must never be reported insecure")
+	}
+}
+
 // TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine pins #1265: a
 // tenant's own <tenant>-devops image is versioned on the tenant's own release
 // line, independent of the erun version the environment runs (as erun pin
