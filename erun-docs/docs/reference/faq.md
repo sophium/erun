@@ -6,7 +6,7 @@ title: FAQ
 
 ## Is ERun an AI-only tool? Can I use it without an Agent?
 
-Yes — the desktop app and CLI are equally useful as a clean development surface for human-driven work. Open as many isolated environments as your machine can host, attach an IDE, do your thing. The MCP endpoint exists but no Agent has to connect. See [Desktop · Works with or without an Agent](/desktop/overview#works-with-or-without-an-agent).
+Yes — the desktop app and CLI are equally useful as a clean development surface for human-driven work. Open as many isolated environments as your machine can host, attach an IDE, do your thing. The MCP endpoint exists but no Agent has to connect. See [Desktop · Works with or without an Agent](/desktop/working-with-an-agent#works-with-or-without-an-agent).
 
 ## Does ERun replace Kubernetes? Or CI/CD? Or my IDE?
 

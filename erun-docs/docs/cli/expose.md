@@ -6,7 +6,7 @@ title: erun expose
 
 Expose an in-namespace Service at a stable public hostname under the platform's services zone. `erun expose` is for [platform deployments](/concepts/networking#platform-service-exposure) — installations that run the PowerDNS singleton and declare a [`platform:` block](/reference/configuration#platform-block). It does two things: it ensures a **per-environment wildcard DNS record** points at the env's ingress IP, and it applies a **Host-routing Ingress** for the Service.
 
-A [hosted platform](/collaboration/hosted-environments) already runs this for you against its runtime environments' MCP edge as part of their server-side deploy — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). Run this command by hand — or use the [desktop app's Ports tab](/desktop/overview#control-panel) — for any other service you want to expose, or on a platform that predates automatic exposure.
+A [hosted platform](/collaboration/hosted-environments) already runs this for you against its runtime environments' MCP edge as part of their server-side deploy — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). Run this command by hand — or use the [desktop app's Ports tab](/desktop/settings-and-ports) — for any other service you want to expose, or on a platform that predates automatic exposure.
 
 ```bash
 erun expose team dev api --ip 203.0.113.10
@@ -31,7 +31,7 @@ HTTPS is requested by default, but it only takes effect when something will actu
 
 ## From the desktop
 
-The desktop app covers the same ground without a terminal: an environment's settings → **Ports** tab has a **Public access** section that lists every exposed service's hostname, exposes a new one, and removes public access for the whole environment (the same scope as `erun unexpose` above). See [Desktop app](/desktop/overview#control-panel).
+The desktop app covers the same ground without a terminal: an environment's settings → **Ports** tab has a **Public access** section that lists every exposed service's hostname, exposes a new one, and removes public access for the whole environment (the same scope as `erun unexpose` above). See [Desktop app · Settings and ports](/desktop/settings-and-ports).
 
 ## Flags
 

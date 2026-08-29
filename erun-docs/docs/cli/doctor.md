@@ -16,7 +16,7 @@ erun doctor [TENANT] [ENVIRONMENT] [flags]
 
 `erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root, and reports why a deploy may have failed: the helm release status and the runtime namespace's pods (read-only — it never touches the release). Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
 
-When the deploy diagnosis shows a stuck pending release or a failed image pull, the fix is to re-run `erun deploy --force` (rebuild and redeploy) or clear the pending release — the desktop app offers both as one-click buttons on the failed deploy in its [Activities panel](/desktop/overview#control-panel).
+When the deploy diagnosis shows a stuck pending release or a failed image pull, the fix is to re-run `erun deploy --force` (rebuild and redeploy) or clear the pending release — the desktop app offers both as one-click buttons on the failed deploy in its [Activities panel](/desktop/activities-and-recovery).
 
 For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 

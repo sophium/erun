@@ -8,7 +8,7 @@ Review code on a hosted erun platform from a terminal or an Agent — the client
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
-The [desktop app](/desktop/overview#control-panel)'s tenant dashboard has a **Reviews** tab that covers the same ground from the app: it lists reviews, their builds and their comment threads, opens a review with **New review** (committing and pushing the environment's branch first), closes one, advances a target branch's merge queue, and starts a new comment thread from a line in the review panel's diff.
+The [desktop app](/desktop/reviews)'s tenant dashboard has a **Reviews** tab that covers the same ground from the app: it lists reviews, their builds and their comment threads, opens a review with **New review** (committing and pushing the environment's branch first), closes one, advances a target branch's merge queue, and starts a new comment thread from a line in the review panel's diff.
 
 ## Synopsis
 

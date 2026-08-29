@@ -36,7 +36,7 @@ The full JSON shape and the exact unavailability/warning rules are specified in 
 
 ## From the desktop
 
-The same read is one click away without a terminal: the desktop app's Manage dialog → **Runtime** tab shows **This environment's usage** directly under the resource sliders, refreshed on demand. See [Desktop app overview](/desktop/overview) and [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures).
+The same read is one click away without a terminal: the desktop app's Manage dialog → **Runtime** tab shows **This environment's usage** directly under the resource sliders, refreshed on demand. See [Desktop app · Resources and usage](/desktop/resources-and-usage) and [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures).
 
 ## From an MCP-connected orchestrator
 

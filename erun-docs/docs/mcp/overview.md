@@ -21,7 +21,7 @@ silently run locally. Omit them to accept the server's own scope, or restate tha
 scope to assert it. To act on another environment, call that environment's own MCP
 edge.
 
-**Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app](/desktop/overview).
+**Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app · Working with an Agent](/desktop/working-with-an-agent).
 
 <figure className="erun-hero-figure">
   <img src="/img/mcp-flow.svg" alt="How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three labelled category rows. INSPECTION row holds five chips: idle, doctor, list, version, observe. ACTION row holds seven chips: build, push, deploy, release, expose, init, delete. ESCAPE row holds raw with a note that it's arbitrary argv, last-resort, every call audited. Below the MCP server, an audit-trail strip captures every call from every category. An Operator pill below the strip is connected by a dashed cyan arrow indicating the Operator can replay any session." />
