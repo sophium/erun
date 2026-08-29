@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -103,13 +105,14 @@ func readRelease(t *testing.T, baseURL, releaseID string) releaseResponse {
 func TestReleaseQueueTriggerIsIdempotentPerCommitEndToEnd(t *testing.T) {
 	databaseURL := releaseQueueE2EFromEnv(t)
 	srv := startReleaseQueueAPI(t, databaseURL)
+	commit := fmt.Sprintf("%040x", time.Now().UnixNano())
 
-	first := e2eTriggerRelease(t, srv.URL, "", "main", "commit-e2e-idempotent", http.StatusCreated)
+	first := e2eTriggerRelease(t, srv.URL, "", "main", commit, http.StatusCreated)
 	if first.Status != model.ReleaseStatusQueued {
 		t.Fatalf("status = %q, want queued", first.Status)
 	}
 
-	again := e2eTriggerRelease(t, srv.URL, "", "main", "commit-e2e-idempotent", http.StatusOK)
+	again := e2eTriggerRelease(t, srv.URL, "", "main", commit, http.StatusOK)
 	if again.ReleaseID != first.ReleaseID {
 		t.Fatalf("re-trigger created release %s, want the same row %s", again.ReleaseID, first.ReleaseID)
 	}

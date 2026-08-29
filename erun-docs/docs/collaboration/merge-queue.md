@@ -18,9 +18,17 @@ The queue is **shared per target branch**, not global. Every `READY` review for 
 
 ## The gate {#the-gate}
 
-Promoting the head of the queue does real work, not a status flip. The merge queue fetches the review's target and source branches, builds the prospective squash merge of the source onto the *current* target, runs a real build (`erun build`) against that merge, and pushes only if it passes. `MERGED` means that gate actually ran and actually passed — it is never a status a caller can assert directly (`PATCH .../status` refuses both `MERGE` and `MERGED`).
+Promoting the head of the queue does real work, not a status flip — but the platform is not the one doing that work. The environment that gets promoted to `MERGE` is expected to fetch its target and source branches itself, build the prospective squash merge of the source onto the *current* target, gate that build with a real build (`erun build`), and push only if it passes: the same workspace, daemon, and warm caches it already has, rather than a separate Job standing up a cold one. `MERGE` is still reached only by promotion (`PATCH .../status` asserting `MERGE` directly is always refused).
 
-The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merge-queue): it publishes nothing, so it carries no `version`, and a failed one carries `failureDetail` in the gate's own words. A successful gate's build becomes the review's `lastMergedBuildId`.
+`MERGED`, though, is not privileged to a particular caller — any caller may report it, because the platform verifies it rather than trusting who sent it. Before accepting a `PATCH .../status` with `{"status": "MERGED", "buildId": "...", "remoteUrl": "..."}`, it checks all three of:
+
+1. **The build is real.** `buildId` names a `GATE`-kind build already recorded against this exact review, and it succeeded — a caller cannot assert `MERGED` off a build that failed, belongs to a different review, or doesn't exist.
+2. **The commit is really there.** Fetching `remoteUrl`, the platform confirms the build's `commitId` is genuinely reachable from the tip of the review's target branch — not just a commit the caller says it made.
+3. **It was built on the right base.** The commit's own parent has to match the target tip this review was gated against — the merge commit of whichever review most recently reached `MERGED` on the same target branch (or, for the first merge through the queue on a branch, nothing to compare against yet). A merge computed against a target that had already moved on is refused even though the commit it produced is genuinely on the branch.
+
+All three have to hold, or the transition is refused with `409 Conflict` and code `MERGE_NOT_VERIFIED` (see [Reviews § Machine error codes](/collaboration/reviews#machine-error-codes)) — nothing about the review changes. This is a strictly stronger guarantee than trusting a privileged caller: it is a fact about the repository, checkable by fetching the same remote yourself, not a claim believed because of who reported it.
+
+The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merge-queue) via the ordinary `POST /builds` route: it publishes nothing, so it carries no `version`, and a failed one carries `failureDetail` in the gate's own words. A successful gate's build becomes the review's `lastMergedBuildId` once `MERGED` is accepted.
 
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
@@ -39,7 +47,7 @@ Clearing it takes one of two things: resolve the threads, or use [`override-adva
 
 ## Advancing it {#advancing-it}
 
-All three clients do the same thing: promote the queue's current head to `MERGE` and dispatch its gate build. The response in every case is the *promoted* review, not the merged one — poll for the terminal `MERGED` or `FAILED` outcome.
+All three clients do the same thing: promote the queue's current head to `MERGE`. The response in every case is the *promoted* review, not the merged one — the promoted environment is expected to build, push, and report the gate itself (see [The gate](#the-gate)); poll for the terminal `MERGED` or `FAILED` outcome.
 
 ### From the API
 
