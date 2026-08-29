@@ -1,0 +1,54 @@
+Configuration:
+  directory: <TMP>
+Defaults:
+  tenant: tenant-a
+  environment: dev
+Current Directory:
+  path: none
+  repo: none
+  configured tenant: none
+  effective target: tenant-a/dev
+  kubernetes context: cluster-dev
+  type: remote-agent
+  assigned local port range: 17000-17099
+  assigned mcp local port: 17000 (when MCP is running or forwarded)
+  assigned api local port: 17033 (when API is running or forwarded)
+  api url: http://<LOOPBACK>:17033
+  assigned ssh local port: 17022 (when SSH port-forward is active)
+  assigned contribute-app local port: 17050 (when contribute mode is active and `erun app --headless` is running)
+  sshd: on
+  ssh host: erun-tenant-a-dev (not in ~/.ssh/config — run `erun sshd init tenant-a dev` to fix)
+  ssh user: erun
+  ssh workspace: <HOME>/git/tenant-a
+  repo path: <TMP>
+Cloud Providers:
+  none
+Tenants:
+  tenant-a [default, effective]
+    default environment: dev
+    environments:
+      - dev [default, effective] context=cluster-dev
+          type: remote-agent
+          repo: <TMP>
+          ports: 17000-17099
+          mcp-port: 17000
+          api-port: 17033
+          api-url: http://<LOOPBACK>:17033
+          ssh-port: 17022
+          contribute-app-port: 17050
+          container-registries: ghcr.io/sophium[build,deploy]
+          runtime-version: none
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: on
+          ssh-host: erun-tenant-a-dev (not in ~/.ssh/config — run `erun sshd init tenant-a dev` to fix)
+          ssh-user: erun
+          ssh-local-port: 17022
+          ssh-workspace: <HOME>/git/tenant-a
+          ssh-public-key-path: <TMP>
+          ssh-workspace-sync: off
+          ssh-workspace-sync-local-path: none
+audit: erun list

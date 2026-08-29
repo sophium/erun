@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	sshconfig "github.com/sophium/erun/internal/sshconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -114,7 +115,7 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 		return err
 	}
 	if current.Effective.SSH.Enabled {
-		if err := writeEffectiveOpenSSH(ctx, current.Effective.SSH); err != nil {
+		if err := writeEffectiveOpenSSH(ctx, *current.Effective); err != nil {
 			return err
 		}
 	}
@@ -169,11 +170,12 @@ func writeEffectiveTargetPorts(ctx common.Context, effective common.ListEffectiv
 	return writeLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
-func writeEffectiveOpenSSH(ctx common.Context, ssh common.ListSSHResult) error {
+func writeEffectiveOpenSSH(ctx common.Context, effective common.ListEffectiveTargetResult) error {
+	ssh := effective.SSH
 	if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "ssh host", ssh.HostAlias); err != nil {
+	if err := writeLabeledValue(ctx, "ssh host", sshHostAliasLabel(effective.Tenant, effective.Environment, ssh.HostAlias)); err != nil {
 		return err
 	}
 	if err := writeLabeledValue(ctx, "ssh user", ssh.User); err != nil {
@@ -203,18 +205,18 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		return err
 	}
 	for _, env := range tenant.Environments {
-		if err := writeEnvironmentEntry(ctx, env); err != nil {
+		if err := writeEnvironmentEntry(ctx, tenant.Name, env); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeEnvironmentEntry(ctx common.Context, env common.ListEnvironmentResult) error {
+func writeEnvironmentEntry(ctx common.Context, tenantName string, env common.ListEnvironmentResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, environmentHeaderLine(env)); err != nil {
 		return err
 	}
-	for _, line := range environmentDetailLines(env) {
+	for _, line := range environmentDetailLines(tenantName, env) {
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
@@ -242,7 +244,7 @@ func environmentHeaderLine(env common.ListEnvironmentResult) string {
 	return envLine
 }
 
-func environmentDetailLines(env common.ListEnvironmentResult) []string {
+func environmentDetailLines(tenantName string, env common.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
 		indent + "type: " + valueOrNone(string(env.Type)),
@@ -271,17 +273,17 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		lines = append(lines, indent+"platform-account: enabled")
 	}
 	if env.SSH.Enabled {
-		lines = append(lines, environmentSSHDetailLines(env.SSH, indent)...)
+		lines = append(lines, environmentSSHDetailLines(tenantName, env.Name, env.SSH, indent)...)
 	} else {
 		lines = append(lines, indent+"sshd: off")
 	}
 	return lines
 }
 
-func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string {
+func environmentSSHDetailLines(tenantName, environmentName string, ssh common.ListSSHResult, indent string) []string {
 	return []string{
 		indent + "sshd: on",
-		indent + "ssh-host: " + valueOrNone(ssh.HostAlias),
+		indent + "ssh-host: " + sshHostAliasLabel(tenantName, environmentName, ssh.HostAlias),
 		indent + "ssh-user: " + valueOrNone(ssh.User),
 		indent + "ssh-local-port: " + fmt.Sprintf("%d", ssh.LocalPort),
 		indent + "ssh-workspace: " + valueOrNone(ssh.WorkspacePath),
@@ -289,6 +291,25 @@ func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string
 		indent + "ssh-workspace-sync: " + enabledDisabledLabel(ssh.WorkspaceSyncEnabled),
 		indent + "ssh-workspace-sync-local-path: " + valueOrNone(ssh.WorkspaceSyncLocalPath),
 	}
+}
+
+// sshHostAliasLabel reports the alias `erun list` derives for an env, plus the
+// fix when the alias is only a naming convention: SSHHostAlias is computed
+// from tenant/environment alone, so it prints the same whether or not
+// ~/.ssh/config actually has a matching Host block. Reporting it bare reads as
+// "this alias works" when nothing wrote the block or authorized a key for it.
+// A check that cannot run (home dir unresolvable) reports the alias bare
+// rather than a false alarm.
+func sshHostAliasLabel(tenantName, environmentName, alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return valueOrNone(alias)
+	}
+	configured, err := sshconfig.DefaultConfigHasAlias(alias)
+	if err != nil || configured {
+		return alias
+	}
+	return fmt.Sprintf("%s (not in ~/.ssh/config — run `erun sshd init %s %s` to fix)", alias, tenantName, environmentName)
 }
 
 // runtimeSizingLines render the standing recommendation under `runtime-pod:`,
