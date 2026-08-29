@@ -93,6 +93,20 @@ func (a *App) reconcileEnvironmentActivityOnce() {
 	}
 }
 
+// TriggerEnvironmentActivitySweep runs one sweep pass synchronously, the same
+// pass runEnvironmentActivityPoller's ticker runs on its own schedule. It
+// exists so a test can drive the sweep deterministically instead of waiting
+// on a tick it cannot see: emitEnvActivityIfChanged only emits on a
+// transition, so the very first observation of an environment this App has
+// never observed before always emits once regardless of what it finds, and a
+// test that later stages its own activity state for that environment must not
+// race that one-time emission. Calling this before staging any state consumes
+// it up front, so every later tick of the automatic ticker observes the same
+// unchanged environment and stays quiet for the rest of the test.
+func (a *App) TriggerEnvironmentActivitySweep() {
+	a.reconcileEnvironmentActivityOnce()
+}
+
 // configuredSelections lists every environment in the config store, not only the
 // ones with desktop tabs — an environment nobody opened here is exactly the case
 // this poller exists to make visible.

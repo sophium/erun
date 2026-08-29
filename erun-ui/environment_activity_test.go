@@ -204,3 +204,24 @@ func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 		t.Fatalf("expected LoadState to seed the busy observation, got %+v", activity)
 	}
 }
+
+// TestTriggerEnvironmentActivitySweepRunsSynchronously locks in the contract
+// a deterministic caller needs: the sweep must run to completion, and emit
+// for every configured selection, within the call itself rather than waiting
+// for the poller's own ticker.
+func TestTriggerEnvironmentActivitySweepRunsSynchronously(t *testing.T) {
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"acme": {Name: "acme"}},
+		envs:    map[string]eruncommon.EnvConfig{"acme/dev": {Name: "dev"}},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	app.TriggerEnvironmentActivitySweep()
+
+	if len(emits.events(envActivityEvent)) == 0 {
+		t.Fatal("triggering a sweep must observe and emit for every configured selection before returning")
+	}
+}
