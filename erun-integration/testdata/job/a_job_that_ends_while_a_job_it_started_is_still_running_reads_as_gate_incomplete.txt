@@ -1,0 +1,5 @@
+gate-incomplete 0: outer (this job ended while the job it started (gate) had not reached a verdict; await it directly for the real outcome instead of treating this job's own exit as the answer), 0 bytes of output
+audit: erun job status --environment dev --id outer --tenant team
+gate-incomplete 0: outer (this job ended while the job it started (gate) had not reached a verdict; await it directly for the real outcome instead of treating this job's own exit as the answer), 0 bytes of output
+audit: erun job await --environment dev --id outer --tenant team --timeout 1s
+job "outer" ended while work it started was still running: this job ended while the job it started (gate) had not reached a verdict; await it directly for the real outcome instead of treating this job's own exit as the answer

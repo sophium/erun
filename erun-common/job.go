@@ -51,6 +51,17 @@ const (
 	// something the job started continues unsupervised, and nothing further
 	// will ever be reported for it.
 	EnvironmentJobStateAbandoned = "abandoned"
+	// EnvironmentJobStateGateIncomplete means this job's own process ended while
+	// a job it started (StartedByJobID names this job as the parent) was still
+	// running — an agent job that ran a gate through its own `job start`, then
+	// exited before the gate reached a verdict, is the motivating case. Unlike
+	// EnvironmentJobStateAbandoned, the still-running work is not a process in
+	// this job's own process group (which a detached job deliberately escapes,
+	// by design, so it survives the caller that started it) — it is a sibling
+	// record in the same job store. Never success, whatever the captured exit
+	// code says: the child job's own outcome has not been observed yet, and
+	// nothing about this job's own exit reports it.
+	EnvironmentJobStateGateIncomplete = "gate-incomplete"
 
 	// UnknownReasonKind values are what an orchestrator branches on instead of
 	// pattern-matching the free-text Reason. Each names a distinct,
@@ -120,6 +131,14 @@ const (
 
 	environmentJobDirName     = "jobs"
 	environmentJobLeasePrefix = "job-"
+
+	// environmentJobIDEnvVar is the env var a job's own supervisor sets on the
+	// work's process, naming the job the work is running as. Anything the work
+	// spawns inherits it the same way it inherits any other environment
+	// variable, so a nested `job start` run from inside it (agent-gate.sh's
+	// detach-and-await, or an agent's own Bash tool) reads it back and records
+	// StartedByJobID without either side threading it through explicitly.
+	environmentJobIDEnvVar = "ERUN_JOB_ID"
 )
 
 // EnvironmentJob is one unit of long work and its outcome.
@@ -173,6 +192,12 @@ type EnvironmentJob struct {
 	// pod instance, so a later read from a different hostname is definitive
 	// proof the runtime pod was replaced — not a guess.
 	Hostname string `json:"hostname,omitempty"`
+	// StartedByJobID names the job whose own process was running when this job
+	// was started (the parent's ERUN_JOB_ID, inherited down whatever it
+	// spawned), empty when this job was started from outside any other job.
+	// It is what lets the parent's own finish check tell "a job I started" from
+	// "an unrelated job that happens to share this environment".
+	StartedByJobID string `json:"startedByJobId,omitempty"`
 
 	LogPath          string `json:"logPath,omitempty"`
 	OutputBytes      int64  `json:"outputBytes"`
@@ -215,14 +240,16 @@ type EnvironmentJob struct {
 
 // Finished reports whether the job reached a terminal state.
 func (j EnvironmentJob) Finished() bool {
-	return j.State == EnvironmentJobStateExited || j.State == EnvironmentJobStateUnknown || j.State == EnvironmentJobStateAbandoned
+	return j.State == EnvironmentJobStateExited || j.State == EnvironmentJobStateUnknown ||
+		j.State == EnvironmentJobStateAbandoned || j.State == EnvironmentJobStateGateIncomplete
 }
 
 // Succeeded is the only definition of success: an outcome was captured and it
 // was zero, with nothing left running behind it. An unknown job is never a
-// success, and neither is an abandoned one — a zero exit code from the
-// process that started background work it never waited for is not the same
-// claim as a zero exit code from a job that finished cleanly.
+// success, and neither is an abandoned or gate-incomplete one — a zero exit
+// code from the process that started work it never waited for, whether that
+// work is an unreaped process in its own group or a sibling job record, is
+// not the same claim as a zero exit code from a job that finished cleanly.
 func (j EnvironmentJob) Succeeded() bool {
 	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0
 }
@@ -327,6 +354,37 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
 	_ = writeEnvironmentJob(dir, job)
 	return job
+}
+
+// environmentJobRunningChildren returns the jobs in dir that name parentID as
+// their StartedByJobID and are still not finished, reconciled against current
+// process liveness the same way every other read is — so a child whose own
+// supervisor died without recording an outcome reads as unknown here too, not
+// as still running. This is what lets a job's own finish check tell "work I
+// started is still going" from a plain directory listing, without needing the
+// parent to have tracked its children itself.
+func environmentJobRunningChildren(dir, parentID string, now time.Time) []EnvironmentJob {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	hostname := currentJobHostname()
+	var running []EnvironmentJob
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		job, err := readEnvironmentJob(filepath.Join(dir, entry.Name()))
+		if err != nil || job.StartedByJobID != parentID {
+			continue
+		}
+		job = reconcileEnvironmentJob(dir, job, now, processAlive, hostname)
+		if !job.Finished() {
+			running = append(running, job)
+		}
+	}
+	sort.Slice(running, func(i, j int) bool { return running[i].ID < running[j].ID })
+	return running
 }
 
 // environmentJobAliveAgeMs is nil only when the job has never beaten, so a

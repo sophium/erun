@@ -225,6 +225,62 @@ stub_erun "${case_dir}/bin"
 	grep -q 'exec job output' "$STUB_ARGV_FILE" || fail "happy path: job output was never read back"
 )
 
+# --- an outer `timeout` wrapping this invocation is warned about: it can only
+# ever truncate the bounded await below, never extend it, so it risks killing
+# exactly the gate this script exists to protect. The warning must not change
+# the outcome -- the happy path underneath still runs and reports normally.
+case_dir="${work_root}/outer-timeout-warning"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+if ! command -v timeout >/dev/null 2>&1; then
+	echo "skip: outer-timeout-warning (no timeout(1) on this host)" >&2
+else
+	(
+		export PATH="${case_dir}/bin:$PATH"
+		export STUB_ARGV_FILE
+		export ERUN_ENV_TYPE=local-agent
+		export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+		export STUB_AWAIT_STATUS=0
+		export STUB_JOB_OUTPUT='job output line'
+		set +e
+		OUT=$(timeout 30 "$gate" check "make check" -- make check-gate 2>&1)
+		STATUS=$?
+		set -e
+		[ "$STATUS" -eq 0 ] || fail "outer timeout warning: expected exit 0, got $STATUS ($OUT)"
+		case "$OUT" in
+		*"appears to run under an outer"*) ;;
+		*) fail "outer timeout warning: expected the outer-timeout warning, got: $OUT" ;;
+		esac
+		case "$OUT" in
+		*"job output line"*) ;;
+		*) fail "outer timeout warning: expected the job's captured output despite the warning, got: $OUT" ;;
+		esac
+	)
+fi
+
+# --- no outer timeout: the warning must not fire for a plain foreground call.
+case_dir="${work_root}/no-outer-timeout-no-warning"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "no outer timeout: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"appears to run under an outer"*) fail "no outer timeout: warning fired with no outer timeout present: $OUT" ;;
+	*) ;;
+	esac
+)
+
 # --- a job already running from a prior invocation: start refuses, and the
 # script must fall through to await rather than treating that as fatal.
 case_dir="${work_root}/already-running"
