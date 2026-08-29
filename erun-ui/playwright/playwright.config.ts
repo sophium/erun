@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+
 import { defineConfig, devices } from '@playwright/test';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
@@ -19,10 +22,45 @@ const E2E_K3D = e2eK3dEnabled();
 isolatedRoot();
 
 // Each worker in the default mode is a full desktop backend plus a headless
-// Chromium instance. Measured on the reference agent pod (12 cores, 23GiB,
-// observed environment peak 7392Mi): pick from memory headroom, not core
-// count, which is why this stays well under `nproc`.
-const DEFAULT_WORKERS = 6;
+// Chromium instance, so the ceiling is memory, not cores. Measured ~550MiB of
+// growth per worker on the reference agent pod; WORKER_BUDGET_MIB leaves room
+// for Chromium alongside each backend.
+//
+// Derived rather than fixed: a constant tuned to one pod silently oversubscribes
+// a smaller one. os.availableParallelism() honours the cgroup CPU quota (unlike
+// os.cpus().length, which reports the host's cores), and the memory ceiling is
+// read from the cgroup when present so a container limit is respected rather
+// than the node's total RAM.
+const WORKER_BUDGET_MIB = 900;
+
+function cgroupMemoryLimitMib(): number | null {
+  for (const p of ['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes']) {
+    try {
+      const raw = fs.readFileSync(p, 'utf8').trim();
+      if (raw === 'max') continue;
+      const bytes = Number(raw);
+      if (Number.isFinite(bytes) && bytes > 0 && bytes < Number.MAX_SAFE_INTEGER) {
+        return Math.floor(bytes / (1024 * 1024));
+      }
+    } catch {
+      // Not a cgroup v2/v1 host (macOS, Windows); fall through to os.totalmem.
+    }
+  }
+  return null;
+}
+
+function defaultWorkers(): number {
+  const override = Number(process.env.ERUN_PLAYWRIGHT_WORKERS);
+  if (Number.isInteger(override) && override > 0) {
+    return override;
+  }
+  const byCpu = Math.max(1, os.availableParallelism() - 1);
+  const limitMib = cgroupMemoryLimitMib() ?? Math.floor(os.totalmem() / (1024 * 1024));
+  const byMemory = Math.max(1, Math.floor((limitMib * 0.6) / WORKER_BUDGET_MIB));
+  return Math.max(1, Math.min(byCpu, byMemory, 6));
+}
+
+const DEFAULT_WORKERS = defaultWorkers();
 
 export default defineConfig({
   testDir: './tests',
