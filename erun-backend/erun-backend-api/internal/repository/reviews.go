@@ -177,6 +177,26 @@ func (r *ReviewRepository) FindActiveMergeReview(ctx context.Context, targetBran
 	return review, err
 }
 
+// FindLastMergedReview returns the most recently merged review for
+// targetBranch — the platform's own record of what the branch's tip was the
+// last time a queue-driven merge landed on it. ErrNotFound means no review
+// has ever merged onto this branch through the queue yet.
+func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, targetBranch string) (model.Review, error) {
+	var review model.Review
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		err := tx.NewRaw(`
+		SELECT `+reviewColumns+`
+		  FROM reviews
+		 WHERE target_branch = ?
+		   AND status = 'MERGED'
+		 ORDER BY updated_at DESC, review_id DESC
+		 LIMIT 1
+	`, targetBranch).Scan(ctx, &review)
+		return normalizeNoRows(err)
+	})
+	return review, err
+}
+
 func (r *ReviewRepository) CreateMergeQueueEntry(ctx context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
 	created := entry
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

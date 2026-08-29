@@ -47,10 +47,16 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	build.ReviewID = req.PathValue("review_id")
-	// GATE is written only by the merge queue's own executor, which records it
-	// through the raw repository, never through this route — a client-supplied
-	// kind is always ignored, the same as tenant ID and timestamps.
-	build.Kind = model.BuildKindRecorded
+	// A caller may report either kind now: RECORDED for its own build, or GATE
+	// for a merge-queue gate it ran itself — see AGENTS.md "Merge Queue". An
+	// unrecognized kind is refused rather than silently coerced to RECORDED.
+	if build.Kind == "" {
+		build.Kind = model.BuildKindRecorded
+	}
+	if build.Kind != model.BuildKindRecorded && build.Kind != model.BuildKindGate {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", "kind must be RECORDED or GATE")
+		return
+	}
 	build, err := r.service.Create(req.Context(), build)
 	if err != nil {
 		writeBuildError(w, err)
@@ -59,8 +65,8 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, build)
 }
 
-// writeBuildError gives builds.md's two documented business codes their
-// exact machine code; every other failure falls through to the generic
+// writeBuildError gives builds.md's documented business codes their exact
+// machine code; every other failure falls through to the generic
 // status-derived code.
 func writeBuildError(w http.ResponseWriter, err error) {
 	var invalidCommitID *service.InvalidCommitIDError
@@ -71,6 +77,11 @@ func writeBuildError(w http.ResponseWriter, err error) {
 	var invalidVersion *service.InvalidVersionError
 	if errors.As(err, &invalidVersion) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_VERSION", invalidVersion.Error())
+		return
+	}
+	var missingFailureDetail *service.MissingFailureDetailError
+	if errors.As(err, &missingFailureDetail) {
+		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", missingFailureDetail.Error(), map[string]any{"field": "failureDetail"})
 		return
 	}
 	writeRepositoryError(w, err)
