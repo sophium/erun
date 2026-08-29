@@ -3,7 +3,7 @@ import type { Request, Route } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 
 // The diff panel's review-status chip and the single action derived from it
-// (erun#1514): the chip must never render "No review" (or any other
+// the chip must never render "No review" (or any other
 // confirmed answer) before DiffReviewStatus has actually resolved, and the
 // action must reuse the exact write paths the Reviews tab and merge queue
 // already use (openCreateReviewDialog, submitAdvanceMergeQueue,
@@ -78,7 +78,7 @@ async function openDiffPanel(
   await expect(app.page.getByText('package main')).toBeVisible();
 }
 
-test.describe('diff panel — review-status chip (#1514)', () => {
+test.describe('diff panel — review-status chip', () => {
   test('never claims "No review" before the platform read resolves, and reflects the confirmed answer once it does', async ({
     app,
     page,
