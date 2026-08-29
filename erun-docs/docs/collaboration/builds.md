@@ -10,8 +10,8 @@ A **build** records the outcome of building a specific commit on a specific revi
 
 There are two kinds, distinguished by `kind`, and they are against different commits:
 
-- **`RECORDED`** — a *reported* build: a client's `POST /builds` (typically `erun build --release` or your own CI, against the review's `sourceBranch` tip), or the [release queue](#release-queue)'s own build (against the merge commit, once it already landed). A `RECORDED` build always names the `version` it produced.
-- **`GATE`** — the [merge queue](#merge-queue)'s own build of the *prospective* merge — the review's source squashed onto its current target, before anything is pushed. A `GATE` build publishes nothing, so it never has a `version`; a failed one carries `failureDetail` in the gate's own words.
+- **`RECORDED`** — a *reported* build: a client's `POST /builds` (typically `erun build --release` or your own CI, against the review's `sourceBranch` tip), or a build recorded against the merge commit once a release has landed. A `RECORDED` build always names the `version` it produced.
+- **`GATE`** — a report of the [merge queue](#merge-queue)'s build of the *prospective* merge — the review's source squashed onto its current target, before anything is pushed. A `GATE` build publishes nothing, so it never has a `version`; a failed one carries `failureDetail` in the gate's own words.
 
 ## Resource shape
 
@@ -37,7 +37,7 @@ A failed build — `GATE` or `RECORDED` — may carry `failureDetail` (a string 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. |
-| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new `RECORDED` build. Body: `commitId`, `version`, `successful`, optional `failureDetail`. (`GATE` builds are written only by the merge queue itself, never by `POST`.) [`erun review record-build`](/cli/review#review-record-build) is the CLI client for this route. |
+| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build. Body: `commitId`, `successful`, optional `failureDetail`, and `kind` (`RECORDED` if omitted). A `RECORDED` build also requires `version`; a `GATE` build must not carry one and must carry `failureDetail` when `successful` is `false`. [`erun review record-build`](/cli/review#review-record-build) is the CLI client for the `RECORDED` case. |
 | `GET` | `/v1/reviews/{reviewId}/builds/{buildId}` | Fetch one build. |
 
 ## How builds connect to review status
@@ -66,11 +66,11 @@ Recording builds on the server (instead of treating them as ephemeral CI artifac
 
 Recording a build is decoupled from running one. Any Agent or pipeline that produced a build (often `erun build --release`, or build infrastructure you already have) can call `POST /builds` once it completes, and the outcome funnels into the same review/merge-queue model.
 
-ERun also ships its own trigger for two cases it owns end to end: gating a review's merge (the [merge queue](#merge-queue), directly below) and, once a review is `MERGED`, releasing what it merged (the [release queue](#release-queue), below).
+Two cases ERun's own clients drive end to end this same way: gating a review's merge (the [merge queue](#merge-queue), directly below) and, once a review is `MERGED`, releasing what it merged (the [release queue](#release-queue), below). Neither runs inside this API — the environment that was promoted to `MERGE`, or that earned the release, runs the real work itself (its own workspace, its own daemon) and reports the outcome through the same `POST /builds` route everything else uses.
 
 ## Merge queue
 
-A `GATE` build is never `POST`ed — it is written by the merge queue itself once a review reaches `MERGE` (see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for the promotion and dispatch workflow). Where a `RECORDED` build is against whatever commit its reporter names, a `GATE` build is always against the specific commit the merge queue built: the prospective squash merge of the review's `sourceBranch` onto its target branch as that target stood *at gate time* — not the source branch tip, and not a stale target.
+A `GATE` build is `POST`ed by whichever environment ran the merge queue's gate for a review sitting at `MERGE` (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)). Where a `RECORDED` build is against whatever commit its reporter names, a `GATE` build is always against the specific commit the gate built: the prospective squash merge of the review's `sourceBranch` onto its target branch as that target stood *at gate time* — not the source branch tip, and not a stale target.
 
 ```jsonc
 {
@@ -85,11 +85,11 @@ A `GATE` build is never `POST`ed — it is written by the merge queue itself onc
 }
 ```
 
-A successful `GATE` build has no `version` (the gate publishes nothing) and no `failureDetail`; its `commitId` is the merge commit that was actually pushed to the target branch, and the review's `lastMergedBuildId` points at it. There is no PATCH to follow: the merge queue applies the review's `MERGE` → `MERGED`/`FAILED` transition itself from the gate's own outcome.
+A successful `GATE` build has no `version` (the gate publishes nothing) and no `failureDetail`; its `commitId` is the merge commit the environment actually pushed to the target branch. Reporting it does not, by itself, move the review to `MERGED` — a failed `GATE` build does move the review straight to `FAILED` (the same as a failed `RECORDED` build would), but a successful one still needs the review moved to `MERGED` with a separate `PATCH /reviews/{id}/status`, because that is where the platform verifies the build against the real repository before accepting it (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)). Once accepted, the review's `lastMergedBuildId` points at this build.
 
 ## Release queue
 
-When a review reaches `MERGED`, the commit it merged on is enqueued for release. The queue runs `erun release` as a Kubernetes Job in an [agent env](/concepts/environment-types), records the version it minted as a build against the review, and moves the review with it.
+When a review reaches `MERGED`, the commit it merged on is enqueued for release: `POST /v1/releases` records the trigger and holds the idempotency contract below. Running `erun release` is the same environment-driven model as the merge queue's gate — whichever environment runs it records the version it minted as a `RECORDED` build against the review once it completes.
 
 The queue runs **one release at a time per tenant**, first in, first out. This is not a throughput choice: `release` bumps a semver, writes version-bearing files, tags, and pushes, so two concurrent releases on one version line corrupt it. Two reviews accepted seconds apart produce two sequential releases, never a race.
 
@@ -144,23 +144,14 @@ There is at most one release per `(tenant, commitId)`, so **minting a second ver
 
 ### Bounds
 
-| Bound | Value | Why |
-|---|---|---|
-| In flight per tenant | 1 | Two concurrent releases corrupt one version line. Enforced in the database, not just in the query. |
-| Cooldown between consecutive releases | 60s | A trigger stuck in a loop cannot spend a tenant's capacity on back-to-back runs; negligible against a real release's duration. |
-| Releases started per dispatch | 4 | Bounds fan-out across tenants. When the cap bites it is logged, never silently dropped. |
-| Job deadline | 3h | Past this a release is wedged, not slow. |
-
-A release whose control plane stops reporting for 4 hours is failed with a reason saying so, and the queue moves on — a crashed control plane never holds a tenant's slot permanently.
+The queue's serialisation rules — one running release per tenant, a cooldown between consecutive releases, and requeuing a failed attempt as a new one — are enforced as database contracts (a partial unique index on running rows, an idempotency key on `(tenant, commitId)`), so they hold regardless of what actually claims and runs a release. What claims a release and runs `erun release` for it is `(Planned.)`: releasing is environment-driven now, the same shift the merge queue's gate made (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)), and no dedicated Job stands in for it — but the environment-driven replacement is not wired up yet. Today, `POST /v1/releases` reliably records the trigger; nothing drains the queue behind it.
 
 ### Error behaviour
 
 | Failure mode | What happens | Recovery |
 |---|---|---|
-| The release Job fails | `status: failed`, `failureReason` carries the run's own output (read off the pod before it is reclaimed). The next queued release still runs. | Fix the cause, re-trigger the same commit — it re-queues as a new attempt. |
-| The Job exits 0 but names no version | `status: failed`. A release nothing can name is not recorded as a success. | Re-trigger the commit. |
-| The queue is not configured | The trigger is still recorded as `queued`; nothing runs. | Enable the queue on the control plane, then re-trigger. |
-| The review reaches `MERGED` but enqueuing its release fails | No HTTP caller to answer — the merge queue's own gate build already landed the merge asynchronously, so there is nothing left in flight to return a `500` to. The review stays `MERGED`; only the release trigger did not run. | `POST /v1/releases` with the merge commit. |
+| Nothing runs the queued release `(Planned.)` | `status: queued` indefinitely — recorded, not run. | Run `erun release` yourself against the commit and `POST /builds` the outcome (`kind: "RECORDED"`, the `version` it minted), or trigger it again once environment-driven release execution lands. |
+| The review reaches `MERGED` but enqueuing its release fails | No HTTP caller to answer — the review's own `MERGED` transition already completed, so there is nothing left in flight to return a `500` to. The review stays `MERGED`; only the release trigger did not run. | `POST /v1/releases` with the merge commit. |
 
 ## Validation rules
 
@@ -169,7 +160,7 @@ A release whose control plane stops reporting for 4 hours is failed with a reaso
 | `commitId` | Exactly 40 lowercase hex characters: `^[0-9a-f]{40}$`. |
 | `version` | Required and must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`) — for a `RECORDED` build. Absent for a `GATE` build, which publishes nothing. |
 | `successful` | Required. Boolean. |
-| `kind` | Ignored on `POST` — every client-reported build is `RECORDED`. `GATE` is written only by the merge queue. |
+| `kind` | `RECORDED` or `GATE`; defaults to `RECORDED` when omitted. |
 | `failureDetail` | Required, non-empty, on a failed `GATE` build. Optional on a `RECORDED` build's `POST` — a reporter may set it on a failed build to say why; omitted is fine. |
 
 ## Errors
@@ -180,10 +171,11 @@ Same envelope and status-code conventions as [Reviews · Errors](/collaboration/
 |---|---|---|
 | `400` | `INVALID_BODY` | Malformed JSON. |
 | `400` | `INVALID_COMMIT_ID` | `commitId` is not 40 lowercase hex chars. |
-| `400` | `INVALID_VERSION` | `version` fails the version grammar (a `RECORDED` build only — `GATE` builds never reach this route). |
+| `400` | `INVALID_VERSION` | `version` fails the version grammar. `RECORDED` only — a `GATE` build is never checked against it, since the gate publishes nothing. |
+| `400` | `INVALID_BODY` | `kind` is neither `RECORDED` nor `GATE`; or a failed `GATE` build (`successful: false`) with no `failureDetail`. |
 | `404` | — (generic) | The review id doesn't exist or isn't visible to the caller's tenant. |
 
-`422 Unprocessable Entity` and the `UNKNOWN_COMMIT` code from an earlier draft of this table do not appear above: nothing in this API returns `422`, and `UNKNOWN_COMMIT`'s original description — confirming `commitId` exists on the review's `sourceBranch` — is a check the API cannot perform (it has no git access to the repository). `PATCH /reviews/{id}/status` referencing a `buildId` that doesn't belong to the review, or whose `successful` flag disagrees with the target status, is a plain `404` — see [Reviews · Errors](/collaboration/reviews#errors).
+`422 Unprocessable Entity` and the `UNKNOWN_COMMIT` code from an earlier draft of this table do not appear above: nothing in this API returns `422`, and `UNKNOWN_COMMIT`'s original description — confirming `commitId` exists on the review's `sourceBranch` — is a check this route cannot perform (an ordinary `RECORDED` report carries no remote to fetch). A `MERGED` report is the one place the API does fetch the real repository to verify a commit — see [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes)'s `MERGE_NOT_VERIFIED`. `PATCH /reviews/{id}/status` referencing a `buildId` that doesn't belong to the review, or whose `successful` flag disagrees with the target status, is a plain `404` — see [Reviews · Errors](/collaboration/reviews#errors).
 
 Builds are append-only — there is no `PATCH /builds/{id}` and no DELETE. Re-running a build records a new build resource; the review's `lastReadyBuildId` / `lastFailedBuildId` are updated by the subsequent `PATCH /reviews/{id}/status` call.
 

@@ -18,7 +18,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// The release queue no longer runs `erun release` itself (#1563): running a
+// The release queue no longer runs `erun release` itself: running a
 // release is the environment's own job, the same shift the merge queue made.
 // What the platform still owns is the queue's idempotency — recording a
 // trigger exactly once per (tenant, commit) and never minting a second

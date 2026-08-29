@@ -39,7 +39,7 @@ func (s stubBuildRepository) List(context.Context, apirepository.BuildFilter) ([
 }
 
 // TestCreateBuildAcceptsAReportedGateKind: an environment now reports its own
-// merge-queue gate result (#1563), so kind=GATE is no longer forced to
+// merge-queue gate result, so kind=GATE is no longer forced to
 // RECORDED the way a client-supplied authorUserId is ignored.
 func TestCreateBuildAcceptsAReportedGateKind(t *testing.T) {
 	service := &stubBuildService{}

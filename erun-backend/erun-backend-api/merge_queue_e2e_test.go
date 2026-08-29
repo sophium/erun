@@ -20,7 +20,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// The merge queue no longer runs anything itself (#1563): the environment
+// The merge queue no longer runs anything itself: the environment
 // that promotes a review to MERGE does the fetch/merge/build/push locally,
 // with its own already-warm checkout and daemon, then reports the outcome.
 // This gate proves the platform's half of that contract — accepting a
@@ -198,7 +198,7 @@ func e2eReportGreenBuild(t *testing.T, baseURL, reviewID string) {
 }
 
 // e2ePostGateBuild is the environment reporting its own gate outcome —
-// GATE builds are no longer written only by the platform (#1563).
+// GATE builds are no longer written only by the platform.
 func e2ePostGateBuild(t *testing.T, baseURL, reviewID, commit string, successful bool, failureDetail string) string {
 	t.Helper()
 	body := map[string]any{"kind": "GATE", "commitId": commit, "successful": successful}
@@ -283,7 +283,7 @@ func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 // this without a second, well-behaved environment racing the first means
 // force-pushing a merge computed against a stale local fetch — standing in
 // for a buggy or malicious reporter, which is exactly who this check has to
-// hold up against once any caller may report MERGED (#1563).
+// hold up against once any caller may report MERGED.
 func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
