@@ -20,7 +20,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
 				// Release resolves the same execution `erun build --release` does, so
 				// it publishes the version's images and charts before it tags them.
-				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false)
+				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false, nil)
 				if err != nil {
 					return err
 				}

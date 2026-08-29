@@ -35,6 +35,7 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 | `--force` | Delete and recreate conflicting release tags when combined with `--release`. |
 | `--dry-run` | Resolve and print every `docker build` / `docker tag` / `docker push` command without executing. |
 | `--jobs`, `-j` | Build this many images at once. `0` (default) resolves a conservative degree from the machine; `1` builds strictly one at a time. |
+| `--platform` | Build only these Docker platforms (e.g. `linux/amd64`), repeatable. Overrides the project's configured `environments.<env>.docker.platforms`. Rejected together with `--release`, which always publishes every platform erun supports. See [Multi-architecture](#multi-architecture). |
 
 `--deploy` and `--release` are **convenience shortcuts for an Operator at the terminal** — they compose the pure primitives so you don't have to type three commands. Programmatic callers (the desktop app, scripts, an Agent driving MCP) don't use them; they run `build`, `push`, and `deploy` themselves and thread the version between the steps. See [Command primitives](/concepts/command-primitives).
 
@@ -72,13 +73,16 @@ erun build --output json # same, and print {version, baseVersion, images} for an
 erun build --dry-run    # see exactly what would run
 erun build --deploy     # operator shortcut: build → push → deploy in one shot
 erun build --release    # operator shortcut: pin a stable version, then push + tag it
+erun build --platform linux/amd64  # build only linux/amd64, for a single-arch cluster
 ```
 
 To get a built artifact into a runtime env, push the minted version and then deploy it: `erun push --version <version>` publishes the image and chart, and `erun deploy <env> --version <version>` rolls it out. See [`erun push`](/cli/push) and [`erun deploy`](/cli/deploy).
 
-## Multi-architecture
+## Multi-architecture {#multi-architecture}
 
-Every build produces both `linux/amd64` and `linux/arm64`. There is no single-platform code path — a single-arch artifact built locally cannot be deployed to a cluster of a different architecture, and arch-specific Dockerfile bugs should fail at build time on your machine, not at remote deploy time.
+Every build produces both `linux/amd64` and `linux/arm64` by default — a single-arch artifact built locally cannot be deployed to a cluster of a different architecture, and arch-specific Dockerfile bugs should fail at build time on your machine, not at remote deploy time.
+
+`erun build --release` (and `erun release`) always builds both, with no override: a released artifact is published for anyone and must run on any cluster. A non-release build/push may target only the platform(s) a cluster can actually run — pass `--platform linux/amd64` (repeatable) for one invocation, or set `environments.<env>.docker.platforms: [linux/amd64]` in the project's `.erun/config.yaml` to pin it permanently for an environment whose cluster is single-architecture, so it stops paying to build (and emulate) the platform it can never run. Combining `--platform` with `--release` is rejected. See [Agent reference · Conventions spec · Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract) for the exact precedence.
 
 The local Docker daemon must have binfmt installed for the foreign arch. The runtime chart's `binfmt` init container installs this automatically inside the cluster; for local builds you may need to run `docker run --privileged --rm tonistiigi/binfmt --install all` once on your host.
 
@@ -97,3 +101,4 @@ An image whose Dockerfile builds `FROM` another image the same build produces re
 | A dependent image's base is not published at the version. | Not a failure: a base this build produces is resolved from the local build, per architecture. Only a base that no build in scope produces has to exist in the registry. |
 | Registry rejects a `--release` push as unauthorised. | Retries with `docker login` (requires a TTY); see [`erun push`](/cli/push) authentication. |
 | `--version` combined with `--release`. | Rejected — `--release` resolves the version itself. |
+| `--platform` combined with `--release`. | Rejected — a release always publishes every platform erun supports. |

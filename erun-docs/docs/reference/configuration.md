@@ -118,6 +118,7 @@ Committed to the repo, applies to anyone who checks it out.
 | `environments` | map | per-env settings (below) | Map of `<env-name> → ProjectEnvironmentConfig`. |
 | `environments.<env>.containerregistries` | list | `erun build`, `erun push`, `erun deploy` | Per-env marked registry list override. Higher precedence than the top-level project list. |
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
+| `environments.<env>.docker.platforms` | list | `erun build`, `erun push` | Pins the `docker --platform` targets for a non-release build/push in this env (e.g. `[linux/amd64]`), for a cluster that can only ever run one architecture. `--platform` on the command line overrides it for one invocation. Never applies to `erun build --release` / `erun release`, which always build every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |

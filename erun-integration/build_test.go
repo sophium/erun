@@ -377,13 +377,14 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_fails_when_daemon_cannot_build_required_platform", func(t *testing.T) {
-		// The multi-arch daemon-capability preflight: erun always builds
-		// linux/amd64 + linux/arm64, so before shelling `docker build` per platform
-		// it runs `docker buildx inspect` and fails fast with a direct, actionable
-		// error when the daemon has no emulator for a required platform — instead
-		// of the opaque per-platform `docker build` failure. The stub reports only
-		// linux/amd64, so linux/arm64 is unbuildable regardless of host arch.
-		// Real-run, not dry-run, because the preflight guards the real executor.
+		// The multi-arch daemon-capability preflight: by default this build
+		// targets linux/amd64 + linux/arm64, so before shelling `docker build`
+		// per platform it runs `docker buildx inspect` and fails fast with a
+		// direct, actionable error when the daemon has no emulator for a
+		// required platform — instead of the opaque per-platform `docker build`
+		// failure. The stub reports only linux/amd64, so linux/arm64 is
+		// unbuildable regardless of host arch. Real-run, not dry-run, because the
+		// preflight guards the real executor.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -403,6 +404,80 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected build to fail when the daemon cannot build a required platform; got exit 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/real_run_fails_when_daemon_cannot_build_required_platform", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_platform_flag_narrows_build_to_one_architecture", func(t *testing.T) {
+		// --platform overrides the default multi-arch build to only the named
+		// platform(s), so an environment whose cluster can only ever run one
+		// architecture stops paying for an emulated build of the other.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--dry-run", "--platform", "linux/amd64"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected --platform linux/amd64 to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_platform_flag_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_platforms_narrows_build_to_one_architecture", func(t *testing.T) {
+		// environments.<env>.docker.platforms in .erun/config.yaml pins a build
+		// to one architecture permanently, without a --platform flag on every
+		// invocation — for an environment whose cluster can only ever run it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected configured docker.platforms to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_configured_platforms_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
+	})
+
+	t.Run("release_platform_flag_conflict_errors", func(t *testing.T) {
+		// --release always publishes every platform erun supports, so combining
+		// it with an explicit --platform override is refused rather than
+		// silently narrowing a released artifact.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--release", "--dry-run", "--platform", "linux/amd64"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --release combined with --platform, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/release_platform_flag_conflict_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_release_ignores_configured_platforms", func(t *testing.T) {
+		// Regression: a release build must publish every platform erun supports
+		// regardless of the environment's configured docker.platforms pin — a
+		// released artifact has to be deployable on any cluster, not just the
+		// one that happened to build it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--release", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/amd64") || !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected a release build to still target both platforms despite the configured single-arch pin:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_release_ignores_configured_platforms", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_default_verbosity_stays_quiet_when_the_build_succeeds", func(t *testing.T) {

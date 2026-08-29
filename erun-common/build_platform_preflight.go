@@ -23,7 +23,7 @@ func verifyDockerBuildPlatforms(required []string) error {
 	if len(missing) == 0 {
 		return nil
 	}
-	return newUnsupportedBuildPlatformError(missing)
+	return newUnsupportedBuildPlatformError(required, missing)
 }
 
 // dockerBuildxPlatforms probes the current builder; its platform list reflects
@@ -77,12 +77,12 @@ func missingBuildPlatforms(required []string, available map[string]bool) []strin
 	return missing
 }
 
-func newUnsupportedBuildPlatformError(missing []string) error {
+func newUnsupportedBuildPlatformError(required, missing []string) error {
 	return fmt.Errorf(
 		"the local Docker daemon cannot build %s: no emulator is registered for the foreign architecture. "+
-			"erun always builds %s, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:\n"+
+			"this build targets %s, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:\n"+
 			"  docker run --privileged --rm tonistiigi/binfmt --install all",
 		strings.Join(missing, ", "),
-		strings.Join(multiPlatformDockerBuilds, " + "),
+		strings.Join(required, " + "),
 	)
 }

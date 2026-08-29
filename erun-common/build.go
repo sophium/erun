@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -288,6 +289,9 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 	if target.VersionOverride != "" {
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
+	if len(target.Platforms) > 0 {
+		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports")
+	}
 
 	// Build callers don't surface a Context; the zero value is safe here because
 	// a zero-value Logger silently drops traces.
@@ -298,5 +302,8 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 
 	target.Release = false
 	target.VersionOverride = releaseSpec.Version
+	// A release publishes to any cluster, so it always builds every platform
+	// erun supports, regardless of any per-environment docker.platforms pin.
+	target.Platforms = slices.Clone(multiPlatformDockerBuilds)
 	return target, &releaseSpec, nil
 }

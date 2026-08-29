@@ -1623,7 +1623,7 @@ func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore,
 		return nil, nil
 	}
 
-	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride)
+	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride, nil)
 	if err != nil {
 		return nil, err
 	}
