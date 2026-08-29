@@ -13,10 +13,10 @@ import (
 // resolveDockerBuildRegistryForEnvironment errors when no registry is marked
 // for the build role; that message is the user-facing contract and must read
 // identically in dry-run and real runs.
-func resolveDockerBuildRegistryForEnvironment(ctx Context, projectRoot, environment string) (string, error) {
+func resolveDockerBuildRegistryForEnvironment(ctx Context, projectRoot, environment string) (string, bool, error) {
 	list, err := effectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	// A cluster registry resolves to its concrete push host: the ClusterIP
 	// directly for an in-pod build, or a host port-forward otherwise. Build uses
@@ -24,13 +24,13 @@ func resolveDockerBuildRegistryForEnvironment(ctx Context, projectRoot, environm
 	// kubectl's current-context on the host). Plain lists pass through unchanged.
 	list, err = concretizeRegistriesForContext(ctx, "", list)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	registry, ok := list.BuildRegistry()
 	if !ok {
-		return "", fmt.Errorf("environment %q has no build registry; mark a registry with the build role in .erun/config.yaml before building", strings.TrimSpace(environment))
+		return "", false, fmt.Errorf("environment %q has no build registry; mark a registry with the build role in .erun/config.yaml before building", strings.TrimSpace(environment))
 	}
-	return registry, nil
+	return registry, list.BuildRegistryInsecure(), nil
 }
 
 // dockerContextRepoRoot / dockerContextComponent are the accepted

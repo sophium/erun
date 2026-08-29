@@ -51,7 +51,7 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	if !buildInput.Push {
 		return nil
 	}
-	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -78,7 +78,7 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	if !buildInput.Push {
 		return nil
 	}
-	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
 // pushPlatformImage publishes one platform the moment it is built, instead of
@@ -110,13 +110,30 @@ func pushPlatformImage(buildInput DockerBuildSpec, platformTag string, stdout, s
 // runs the previous image while every step reports success. Removing the cached
 // list makes the published tag a function of this run alone. It is absent on a
 // first publish, so its failure is not one.
-func assembleMultiPlatformManifest(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
+func assembleMultiPlatformManifest(tag string, perPlatformTags []string, insecure bool, verbosity int, stdout, stderr io.Writer) error {
+	// `docker manifest rm` only touches the local manifest-list store, never the
+	// registry, so it needs no --insecure of its own.
 	_ = runDockerSimpleCommandWithVerbosity([]string{"manifest", "rm", tag}, verbosity, io.Discard, io.Discard)
-	createArgs := append([]string{"manifest", "create", tag}, perPlatformTags...)
+	createArgs := append(dockerManifestArgs("create", insecure), tag)
+	createArgs = append(createArgs, perPlatformTags...)
 	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
 	}
-	return runDockerSimpleCommandWithVerbosity([]string{"manifest", "push", tag}, verbosity, stdout, stderr)
+	pushArgs := append(dockerManifestArgs("push", insecure), tag)
+	return runDockerSimpleCommandWithVerbosity(pushArgs, verbosity, stdout, stderr)
+}
+
+// dockerManifestArgs builds a `docker manifest <sub>` argv, appending
+// --insecure when the registry is plain HTTP. Unlike the daemon (which reads
+// its own insecure-registry list), `docker manifest create/push/inspect` talk
+// to the registry directly over HTTPS by default and need the flag spelled
+// out on every invocation that touches an insecure registry.
+func dockerManifestArgs(sub string, insecure bool) []string {
+	args := []string{"manifest", sub}
+	if insecure {
+		args = append(args, "--insecure")
+	}
+	return args
 }
 
 func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
@@ -350,12 +367,13 @@ func DockerImageExists(tag string) (bool, error) {
 	return false, err
 }
 
-func DockerManifestExists(tag string) (bool, error) {
+func DockerManifestExists(tag string, insecure bool) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
 	}
-	cmd := Command("docker", "manifest", "inspect", tag)
+	args := append(dockerManifestArgs("inspect", insecure), tag)
+	cmd := Command("docker", args...)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil

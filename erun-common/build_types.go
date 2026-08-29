@@ -57,6 +57,11 @@ type DockerImageReference struct {
 	Tag                 string
 	VersionFilePath     string
 	VersionFromBuildDir bool
+	// Insecure marks Registry as plain HTTP (a cluster registry with
+	// `insecure: true`). `docker manifest` never consults the daemon's
+	// insecure-registry list, so anything that shells out to it for this
+	// image must pass its own `--insecure` explicitly.
+	Insecure bool
 }
 
 type DockerBuildSpec struct {

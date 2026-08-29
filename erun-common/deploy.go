@@ -1454,7 +1454,7 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 		return DeploySpec{}, err
 	}
 	for _, image := range images {
-		if err := verifyExistingDeployImage(ctx, image, deployInput.Version, deployInput.ContainerRegistry); err != nil {
+		if err := verifyExistingDeployImage(ctx, image, deployInput.Version, deployInput.ContainerRegistry, target.ClusterRegistryInsecure); err != nil {
 			return DeploySpec{}, err
 		}
 	}
@@ -1479,7 +1479,7 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 // the lookup and skips the network so the plan stays offline and deterministic;
 // a registry error that is not a definitive "absent" does not block the deploy
 // (the rollout would surface a real pull failure).
-func verifyExistingDeployImage(ctx Context, ref, version, registry string) error {
+func verifyExistingDeployImage(ctx Context, ref, version, registry string, insecure bool) error {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil
@@ -1502,19 +1502,19 @@ func verifyExistingDeployImage(ctx Context, ref, version, registry string) error
 		tag = strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + ref
 	}
 
-	ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+	ctx.TraceCommand("", "docker", append(dockerManifestArgs("inspect", insecure), tag)...)
 	if ctx.DryRun {
 		return nil
 	}
-	return confirmDeployImagePresent(ctx, tag, version)
+	return confirmDeployImagePresent(ctx, tag, version, insecure)
 }
 
 // confirmDeployImagePresent checks that the pinned tag exists locally or in the
 // registry, returning an error only when its absence is definitive. A registry
 // error that is not a "absent" verdict (network/auth) is traced and tolerated:
 // the rollout surfaces a real pull failure if the image is genuinely missing.
-func confirmDeployImagePresent(ctx Context, tag, version string) error {
-	remote, remoteErr := DockerManifestExists(tag)
+func confirmDeployImagePresent(ctx Context, tag, version string, insecure bool) error {
+	remote, remoteErr := DockerManifestExists(tag, insecure)
 	if remote {
 		return nil
 	}

@@ -1,0 +1,17 @@
+audit: erun push --dry-run --version <VERSION>
+kubectl -n kube-system get svc erun-registry -o 'jsonpath={.spec.clusterIP}'
+kubectl -n kube-system port-forward svc/erun-registry :5000
+docker image inspect localhost:5000/cwd:fp-<HEX16>-amd64
+fingerprint image not found locally: localhost:5000/cwd:fp-<HEX16>-amd64
+docker image inspect localhost:5000/cwd:fp-<HEX16>-arm64
+fingerprint image not found locally: localhost:5000/cwd:fp-<HEX16>-arm64
+rebuilding localhost:5000/cwd:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t localhost:5000/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag localhost:5000/cwd:<VERSION> localhost:5000/cwd:fp-<HEX16>-amd64
+cd <TMP> && docker push localhost:5000/cwd:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t localhost:5000/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag localhost:5000/cwd:<VERSION> localhost:5000/cwd:fp-<HEX16>-arm64
+cd <TMP> && docker push localhost:5000/cwd:<VERSION>
+cd <TMP> && docker manifest rm localhost:5000/cwd:<VERSION>
+cd <TMP> && docker manifest create --insecure localhost:5000/cwd:<VERSION> localhost:5000/cwd:<VERSION> localhost:5000/cwd:<VERSION>
+cd <TMP> && docker manifest push --insecure localhost:5000/cwd:<VERSION>

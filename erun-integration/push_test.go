@@ -169,6 +169,39 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/dry_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", func(t *testing.T) {
+		// `docker manifest` never consults the daemon's --insecure-registry
+		// list — it talks to the registry directly and defaults to HTTPS — so a
+		// BUILD-role cluster registry marked `insecure: true` must still see
+		// `--insecure` on every manifest subcommand that hits the network
+		// (create/push), or assembly fails "no such manifest" against a plain
+		// HTTP in-cluster registry even though both per-arch pushes succeeded.
+		// `manifest rm` never leaves the local store, so it must stay bare.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistries:\n    - cluster: {insecure: true}\n      roles:\n        - build\n        - deploy\n")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
 		// `erun push --build` is the operator shortcut that builds the current
 		// source first (minting a snapshot version) and pushes that exact

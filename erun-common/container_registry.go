@@ -33,6 +33,11 @@ type ContainerRegistryEntry struct {
 	Registry string           `yaml:"registry,omitempty" json:"registry,omitempty"`
 	Cluster  *ClusterRegistry `yaml:"cluster,omitempty" json:"cluster,omitempty"`
 	Roles    []RegistryRole   `yaml:"roles" json:"roles"`
+	// Insecure carries a cluster registry's plain-HTTP marker onto its
+	// concretized push/pull entries (expandClusterEntry). It is never set on a
+	// static `registry:` entry and never persisted — a raw config entry only
+	// ever carries insecurity under Cluster.Insecure.
+	Insecure bool `yaml:"-" json:"-"`
 }
 
 // ClusterRegistry describes an in-cluster image registry whose addresses are
@@ -105,15 +110,20 @@ func (r ContainerRegistries) IsZero() bool {
 	return len(r) == 0
 }
 
-func (r ContainerRegistries) registryWithRole(role RegistryRole) (string, bool) {
+func (r ContainerRegistries) registryEntryWithRole(role RegistryRole) (ContainerRegistryEntry, bool) {
 	for _, entry := range r {
 		if entry.hasRole(role) {
 			if registry := strings.TrimSpace(entry.Registry); registry != "" {
-				return registry, true
+				return entry, true
 			}
 		}
 	}
-	return "", false
+	return ContainerRegistryEntry{}, false
+}
+
+func (r ContainerRegistries) registryWithRole(role RegistryRole) (string, bool) {
+	entry, ok := r.registryEntryWithRole(role)
+	return strings.TrimSpace(entry.Registry), ok
 }
 
 // BuildRegistry returns the BUILD-marked registry. ok is false when no entry
@@ -121,6 +131,15 @@ func (r ContainerRegistries) registryWithRole(role RegistryRole) (string, bool) 
 // build".
 func (r ContainerRegistries) BuildRegistry() (string, bool) {
 	return r.registryWithRole(RegistryRoleBuild)
+}
+
+// BuildRegistryInsecure reports whether the BUILD-marked registry is plain
+// HTTP. `docker manifest` never consults the daemon's insecure-registry list
+// (it talks to the registry directly and defaults to HTTPS), so callers that
+// shell out to it need this alongside the registry host itself.
+func (r ContainerRegistries) BuildRegistryInsecure() bool {
+	entry, ok := r.registryEntryWithRole(RegistryRoleBuild)
+	return ok && entry.Insecure
 }
 
 // FromRegistry returns the FROM-marked copy source.
@@ -237,18 +256,19 @@ func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryRes
 			push = append(push, role)
 		}
 	}
+	insecure := entry.Cluster.Insecure
 	out := make(ContainerRegistries, 0, 2)
 	if len(push) > 0 {
 		if strings.TrimSpace(addrs.Push) == "" {
 			return nil, errors.New("cluster registry resolved an empty push address")
 		}
-		out = append(out, ContainerRegistryEntry{Registry: addrs.Push, Roles: push})
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Push, Roles: push, Insecure: insecure})
 	}
 	if len(pull) > 0 {
 		if strings.TrimSpace(addrs.Pull) == "" {
 			return nil, errors.New("cluster registry resolved an empty pull address")
 		}
-		out = append(out, ContainerRegistryEntry{Registry: addrs.Pull, Roles: pull})
+		out = append(out, ContainerRegistryEntry{Registry: addrs.Pull, Roles: pull, Insecure: insecure})
 	}
 	return out, nil
 }
