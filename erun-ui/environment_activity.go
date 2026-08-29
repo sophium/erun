@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -58,6 +59,14 @@ type environmentActivityState struct {
 	// other field here renders such an environment exactly like an idle one, or
 	// like one nobody ever opened.
 	outage bool
+	// checkFailed is outage's counterpart for the other channel this poller
+	// reads: an environment with no local forward is not left unasked just
+	// because this desktop never opened it, but the fallback check (over
+	// kubectl exec, see observeEnvironmentActivityViaPod) can itself fail to
+	// answer. That must not collapse into the same "nobody opened it" reading
+	// a never-checked environment gets — a real attempt that came back empty is
+	// its own condition, not silence.
+	checkFailed bool
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
@@ -108,23 +117,24 @@ func (a *App) configuredSelections() []uiSelection {
 	return out
 }
 
-// observeEnvironmentActivity is deliberately cheap for the common case. An
-// environment nobody opened costs one small file read and nothing else — no
-// config resolution, no dial, no HTTP — because most environments in a
-// configured store are not running at any given moment, and this sweep runs
-// forever beside the desktop's own work.
+// observeEnvironmentActivity is deliberately cheap for the common case of an
+// environment this desktop has open: one loopback dial, and an HTTP call only
+// for the ones that answer. An environment with no local forward is not the
+// common case's "leave it alone" anymore (see observeEnvironmentActivityViaPod)
+// — the activity lease this poller looks for is environment-side state, not
+// desktop-side, so a CLI- or agent-driven environment must be askable too.
 func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActivity {
 	observation := environmentActivity{selection: selection}
 	// Reachability is "a forward was established for this environment and its
 	// edge answers" — not "some process holds that port". The state file is what
 	// distinguishes the two, and `erun open` writes it whoever ran it, which is
-	// what makes a CLI-opened environment visible here at all. It is also the
-	// only record that this environment was ever open, so its absence is the
-	// line the sweep does not cross: an environment nobody opened is left alone.
+	// what makes a CLI-opened environment visible here at all. Its absence only
+	// means this desktop has no local forward; it does not mean nobody is using
+	// the environment, so the fallback below still asks.
 	forward, established, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
 	if err != nil || !established {
 		a.forgetForwardRepair(selection)
-		return observation
+		return a.observeEnvironmentActivityViaPod(selection, observation)
 	}
 	if a.deps.canConnectLocalPort == nil {
 		// Nothing was observed, so there is nothing to diagnose. An unanswerable
@@ -169,6 +179,60 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 		return observation
 	}
 	a.forgetForwardRepair(selection)
+	observation.state.observed = true
+	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	return observation
+}
+
+// environmentActivityPodProbeTimeout bounds the kubectl-exec fallback below.
+// It is looser than environmentActivityTimeout's loopback-dial budget because
+// a pod exec is a real round trip to the cluster's API server, not a dial to
+// this machine, but it still has to stay short enough that one wedged cluster
+// cannot stall the rest of the sweep for long.
+const environmentActivityPodProbeTimeout = 8 * time.Second
+
+// observeEnvironmentActivityViaPod is the fallback for an environment this
+// desktop has no local MCP forward for. An operator driving the environment
+// from a CLI, or an agent holding it from another machine entirely, is the
+// ordinary case erun is built for, not an error — so "no local forward" must
+// not read as "nobody is using this". The environment's own activity lease is
+// readable straight from its runtime pod, the same way runtime_activity.go
+// already reads pod state the MCP edge cannot: over kubectl exec, without
+// ever establishing a forward of its own. `erun idle --json` run inside the
+// pod answers from the pod's own local store (see erun-cli's
+// environmentTargetsItself), so this is one exec, not a repeat of the network
+// hop the desktop cannot make.
+func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observation environmentActivity) environmentActivity {
+	if a.deps.store == nil {
+		return observation
+	}
+	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil || strings.TrimSpace(envConfig.KubernetesContext) == "" {
+		// This environment has never named a cluster it could be running in, so
+		// there is nothing to ask — "not open here" already says everything
+		// there is to say about it.
+		return observation
+	}
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, environmentActivityPodProbeTimeout)
+	defer cancel()
+	script := fmt.Sprintf("erun idle %s %s --json", shellQuote(selection.Tenant), shellQuote(selection.Environment))
+	output, err := a.execInRuntimePod(ctx, selection, script)
+	if err != nil {
+		// A real attempt that did not come back is not the same silence as
+		// never asking — see checkFailed's own comment.
+		observation.state.checkFailed = true
+		return observation
+	}
+	var status eruncommon.EnvironmentIdleStatus
+	if err := json.Unmarshal([]byte(output), &status); err != nil {
+		observation.state.checkFailed = true
+		return observation
+	}
+	observation.state.reachable = true
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
 	return observation
@@ -241,11 +305,12 @@ func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
 				continue
 			}
 			env.Activity = &uiEnvironmentActivitySnapshot{
-				Reachable: observed.reachable,
-				Observed:  observed.observed,
-				Outage:    observed.outage,
-				Busy:      observed.busy,
-				Detail:    observed.detail,
+				Reachable:   observed.reachable,
+				Observed:    observed.observed,
+				Outage:      observed.outage,
+				CheckFailed: observed.checkFailed,
+				Busy:        observed.busy,
+				Detail:      observed.detail,
 			}
 		}
 	}
@@ -275,6 +340,7 @@ func (a *App) emitEnvActivity(observation environmentActivity) {
 		Reachable:   observation.state.reachable,
 		Observed:    observation.state.observed,
 		Outage:      observation.state.outage,
+		CheckFailed: observation.state.checkFailed,
 		Busy:        observation.state.busy,
 		Detail:      observation.state.detail,
 	})

@@ -11,6 +11,7 @@ export interface EnvActivityPayload {
   reachable: boolean;
   observed: boolean;
   outage?: boolean;
+  checkFailed?: boolean;
   busy: boolean;
   detail?: string;
 }

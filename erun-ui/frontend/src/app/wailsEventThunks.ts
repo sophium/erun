@@ -147,6 +147,7 @@ export const handleEnvActivity =
       reachable: payload.reachable,
       observed: payload.observed,
       outage: payload.outage === true,
+      checkFailed: payload.checkFailed === true,
       busy: payload.busy,
       detail: (payload.detail ?? '').trim(),
     };

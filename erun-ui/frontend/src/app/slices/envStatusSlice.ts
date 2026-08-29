@@ -33,6 +33,11 @@ export interface EnvObservedActivity {
   // it; note it can be true while reachable is false, which is the ordinary
   // shape after a pod replacement takes the forward with it.
   outage: boolean;
+  // checkFailed is outage's counterpart for an environment with no local
+  // forward: a real attempt to reach it over its own runtime pod that did not
+  // come back, as opposed to an environment nobody has asked about at all —
+  // see EnvActivityPayload for the full reasoning.
+  checkFailed: boolean;
   busy: boolean;
   detail: string;
 }
@@ -75,7 +80,7 @@ export const envStatusSlice = createSlice({
       // A quiet environment carries no entry, so a repeated "still quiet"
       // observation must leave the slice byte-identical rather than producing a
       // new state object every poll.
-      if (!activity.reachable && !activity.busy && !activity.outage) {
+      if (!activity.reachable && !activity.busy && !activity.outage && !activity.checkFailed) {
         if (key in state.activityByEnv) {
           Reflect.deleteProperty(state.activityByEnv, key);
         }
@@ -85,6 +90,7 @@ export const envStatusSlice = createSlice({
       if (
         current?.reachable === activity.reachable &&
         current.outage === activity.outage &&
+        current.checkFailed === activity.checkFailed &&
         current.busy === activity.busy &&
         current.detail === activity.detail
       ) {
