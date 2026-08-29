@@ -427,6 +427,11 @@ func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
 // tenant's own API token rather than a manually-run `docker login`.
 const HostedRegistryHost = "registry.erunpaas.com"
 
+// HostedRegistryLoginUsername is the fixed, documented Basic-auth username the
+// hosted registry's token endpoint never inspects (the tenant is resolved from
+// the password's verified issuer instead) — see DockerRegistryLoginWithHostedRegistry.
+const HostedRegistryLoginUsername = "erun"
+
 // HostedRegistryReference builds the tenant-namespaced reference under the
 // hosted registry, e.g. "registry.erunpaas.com/frs" for tenant "frs". Every
 // tenant pushes under its own namespace; the registry's token service clamps

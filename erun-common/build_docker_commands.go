@@ -546,6 +546,48 @@ func isGHCRRegistry(registry string) bool {
 	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
 }
 
+func isHostedRegistry(registry string) bool {
+	return strings.EqualFold(strings.TrimSpace(registry), HostedRegistryHost)
+}
+
+// DockerRegistryLoginWithHostedRegistry wraps DockerRegistryLogin with the one
+// branch it cannot resolve on its own: the hosted registry's password is the
+// operator's own erun-api bearer token (see the registry token endpoint in
+// api-protocol.md), minted from their configured erun cloud provider alias —
+// never a secret an operator could type by hand. Every other registry falls
+// through to DockerRegistryLogin unchanged.
+func DockerRegistryLoginWithHostedRegistry(store CloudReadStore, deps CloudDependencies) DockerRegistryLoginFunc {
+	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+		if isHostedRegistry(registry) {
+			return hostedRegistryDockerLogin(store, deps, stdout, stderr)
+		}
+		return DockerRegistryLogin(registry, stdin, stdout, stderr)
+	}
+}
+
+// hostedRegistryDockerLogin resolves the operator's sole configured erun
+// platform cloud provider alias, mints a fresh bearer token from it, and feeds
+// that token to `docker login` as the password over stdin — never argv, so it
+// never appears in a process listing.
+func hostedRegistryDockerLogin(store CloudReadStore, deps CloudDependencies, stdout, stderr io.Writer) error {
+	provider, err := ResolveERunPlatformAlias(store, "")
+	if err != nil {
+		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
+	}
+	token, err := CloudProviderBearerToken(Context{}, store, CloudBearerParams{Alias: provider.Alias}, deps)
+	if err != nil {
+		return fmt.Errorf("mint erun-api bearer token for hosted registry login: %w", err)
+	}
+	if strings.TrimSpace(token.Token) == "" {
+		return fmt.Errorf("erun cloud provider alias %q returned an empty bearer token", provider.Alias)
+	}
+	loginCmd := Command("docker", "login", HostedRegistryHost, "-u", HostedRegistryLoginUsername, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token.Token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	return loginCmd.Run()
+}
+
 func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return false, nil
