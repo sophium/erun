@@ -1,0 +1,114 @@
+---
+title: Merge queue
+---
+
+# Merge queue
+
+The merge queue is the only path to `MERGED` — it is what makes two independently-green reviews that break the target branch together impossible, and it carries the one audited escape hatch in the product. It also has a lot of surface: a shape, a gate, a comment-thread check, three clients that can advance it, and a wedge-recovery path. This page is the single account of all of it; [Reviews](/collaboration/reviews) stays the wire-level endpoint reference, [`erun review`](/cli/review) the CLI reference, and the [desktop reviews tab](/desktop/reviews) the app reference — each links here for the mechanics rather than repeating them.
+
+For the standing builder/reviewer roles that drive a review through this queue, see [Review loop topology](/collaboration/review-loop-topology).
+
+## Why it exists
+
+Two reviews can each be green on their own and still break the target branch when both land — the second one was only ever tested against a target branch snapshot that the first hadn't touched yet. The merge queue closes that gap by serialising `READY` reviews per target branch: the second review promoted onto a branch is always gated against whatever the first one just landed, never against a stale snapshot.
+
+## Shape of the queue
+
+The queue is **shared per target branch**, not global. Every `READY` review for a given `targetBranch` waits in a single FIFO — `GET /v1/reviews/merge-queue?targetBranch=main` lists it in order. A review that has been promoted (status `MERGE`) has already left that waiting line; only one review per target branch may be `MERGE` at a time, so the review currently being gated and the reviews still waiting are always disjoint sets.
+
+## The gate {#the-gate}
+
+Promoting the head of the queue does real work, not a status flip. The merge queue fetches the review's target and source branches, builds the prospective squash merge of the source onto the *current* target, runs a real build (`erun build`) against that merge, and pushes only if it passes. `MERGED` means that gate actually ran and actually passed — it is never a status a caller can assert directly (`PATCH .../status` refuses both `MERGE` and `MERGED`).
+
+The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merge-queue): it publishes nothing, so it carries no `version`, and a failed one carries `failureDetail` in the gate's own words. A successful gate's build becomes the review's `lastMergedBuildId`.
+
+## The unresolved-thread check {#the-unresolved-thread-check}
+
+Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that returns JSON rather than a plain-text error, naming the count and the review so a caller can act on it instead of parsing a sentence:
+
+```jsonc
+{
+  "error": "unresolved_threads",
+  "message": "review rev_01H... has 3 unresolved comment thread(s); resolve them before advancing the merge queue",
+  "reviewId": "rev_01H...",
+  "unresolvedThreads": 3
+}
+```
+
+Clearing it takes one of two things: resolve the threads, or use [`override-advance`](#overriding-the-gate). Resolving a thread is itself restricted — **only that thread's own root-comment author can close it** (see [Comments § Open / closed](/collaboration/comments#comment-status)). The builder that opened the review cannot resolve a reviewer's thread no matter how completely it addressed the point; if the reviewer never comes back, the review is stuck behind that thread short of an override. This is deliberate, not an oversight — see [Review loop topology § The reviewer must come back](/collaboration/review-loop-topology#the-reviewer-must-come-back) for why the loop is designed around it.
+
+## Advancing it {#advancing-it}
+
+All three clients do the same thing: promote the queue's current head to `MERGE` and dispatch its gate build. The response in every case is the *promoted* review, not the merged one — poll for the terminal `MERGED` or `FAILED` outcome.
+
+### From the API
+
+```
+POST /v1/reviews/merge-queue/advance
+Content-Type: application/json
+
+{ "targetBranch": "main" }
+```
+
+See [Reviews § Endpoints](/collaboration/reviews#endpoints) for the full request/response shape.
+
+### From the CLI
+
+```bash
+erun review queue advance --target-branch main
+```
+
+See [`erun review queue advance`](/cli/review#review-queue-list--review-queue-advance).
+
+### From the desktop
+
+Tenant dashboard → a review's detail → **Merge queue** tab → **Advance queue**, behind a confirm step. The action is replaced by the missing-access affordance when your account can't use it. See [Desktop reviews § Merge queue and comment threads](/desktop/reviews#merge-queue-and-comment-threads).
+
+## Overriding the gate {#overriding-the-gate}
+
+`override-advance` promotes the head exactly as `advance` does, but skips the unresolved-thread check:
+
+```
+POST /v1/reviews/merge-queue/override-advance
+Content-Type: application/json
+
+{ "targetBranch": "main", "reason": "hotfix, reviewers unavailable" }
+```
+
+`reason` is required — blank or missing is refused with `400 Bad Request` before anything is promoted — and is recorded in the [audit trail](/agent-reference/audit-log) alongside the caller's identity, as an `API`-type event whose `apiPath` is `/v1/reviews/merge-queue/override-advance`. This is the one legitimate escape from the thread gate: deliberate (a distinct call, not a flag on `advance`), accountable (reason + caller both durably recorded), and separately authorized — a tenant can grant `advance` without granting `override-advance`, since they're different API paths.
+
+- **CLI:** `erun review queue override-advance --target-branch main --reason "hotfix, reviewers unavailable"` — see [`erun review queue override-advance`](/cli/review#review-queue-override-advance).
+- **Desktop:** same **Advance queue** action, available only to an account with the separate override permission; it bypasses the thread-count refusal by asking for a reason inline.
+
+## When the gate wedges {#when-the-gate-wedges}
+
+If a `MERGE` review's gate never reaches a terminal state — an operator-diagnosed stuck run — requeuing it needs a direct API call today:
+
+```
+PATCH /v1/reviews/{reviewId}/status
+Content-Type: application/json
+
+{ "status": "READY" }
+```
+
+Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. There is no CLI flag or desktop button for this yet; until one exists, an operator (or an Agent with API access) makes this call directly.
+
+## Failure table {#failure-table}
+
+| Refusal | HTTP status | Body | How to unblock |
+|---|---|---|---|
+| No `READY` review waiting for that target branch (queue empty) | `404 Not Found` | plain text | Wait for a review to reach `READY` — its build succeeded — then advance again. |
+| Another review is already `MERGE` for that target branch | `404 Not Found` | plain text | Wait for it to reach `MERGED`/`FAILED`, or see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
+| The head review has an unresolved comment thread | `409 Conflict` | structured — `{error, message, reviewId, unresolvedThreads}`, shown [above](#the-unresolved-thread-check) | Resolve the thread (its root author only), or [`override-advance`](#overriding-the-gate). |
+
+The first two rows are both cases where nothing was waiting to be promoted, so they currently share one plain `404 Not Found` — indistinguishable from each other or from any other missing-resource 404. [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` as the intended code for the first case, defined against the `READY` reviews actually waiting in the line (a review already `MERGE` has left it) — that code isn't wired into the response yet, and the second row has no code proposed for it either.
+
+## See also
+
+- [Reviews](/collaboration/reviews) — the review resource, its status lifecycle, and the merge-queue endpoints' wire contract.
+- [Comments](/collaboration/comments) — thread status and the root-author-only close rule the unresolved-thread check depends on.
+- [Builds](/collaboration/builds) — the `GATE` build kind the gate writes.
+- [`erun review`](/cli/review) — the CLI client.
+- [Desktop reviews](/desktop/reviews) — the desktop client.
+- [Review loop topology](/collaboration/review-loop-topology) — the builder/reviewer roles that drive a review through this queue.
+- [Workflow](/collaboration/workflow) — where `MERGE`/`MERGED` sit in the larger `PR`/`QA`/`DONE` mapping.

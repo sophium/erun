@@ -71,7 +71,7 @@ Three interfaces, one engine. See the anatomy diagram on the [introduction](/int
 
 **Review** — a unit of work-to-be-merged. Source branch, target branch, status, and references to its latest builds. See [Reviews](/collaboration/reviews).
 
-**Merge queue** — shared per target branch. FIFO; `POST /v1/reviews/merge-queue/advance` promotes the head to `MERGED`.
+**Merge queue** — shared per target branch. FIFO; `POST /v1/reviews/merge-queue/advance` promotes the head to `MERGE`, which the gate then lands as `MERGED` or `FAILED`. See [Merge queue](/collaboration/merge-queue).
 
 ## Non-canonical terms
 

@@ -72,7 +72,7 @@ ERun also ships its own trigger for two cases it owns end to end: gating a revie
 
 ## Merge queue
 
-A `GATE` build is never `POST`ed — it is written by the merge queue itself once a review reaches `MERGE` (see [Reviews · Merge queue](/collaboration/reviews#merge-queue) for the promotion and dispatch workflow). Where a `RECORDED` build is against whatever commit its reporter names, a `GATE` build is always against the specific commit the merge queue built: the prospective squash merge of the review's `sourceBranch` onto its target branch as that target stood *at gate time* — not the source branch tip, and not a stale target.
+A `GATE` build is never `POST`ed — it is written by the merge queue itself once a review reaches `MERGE` (see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for the promotion and dispatch workflow). Where a `RECORDED` build is against whatever commit its reporter names, a `GATE` build is always against the specific commit the merge queue built: the prospective squash merge of the review's `sourceBranch` onto its target branch as that target stood *at gate time* — not the source branch tip, and not a stale target.
 
 ```jsonc
 {

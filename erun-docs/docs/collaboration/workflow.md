@@ -73,7 +73,7 @@ ERun isn't tied to a specific workflow tool or a fixed set of states. It slots u
 | **DONE** | Merged via the queue. |
 | **REJECTED** | Abandoned at any stage. |
 
-`PR / QA / DONE` map cleanly to the ERun review lifecycle (`OPEN → READY → MERGE → MERGED`). `TRIAGE / TODO / IN PROGRESS` sit above ERun as project-management states the team owns. Rename any of them; ERun's behaviour doesn't change underneath.
+`PR / QA / DONE` map cleanly to the ERun review lifecycle (`OPEN → READY → MERGE → MERGED`). `TRIAGE / TODO / IN PROGRESS` sit above ERun as project-management states the team owns. Rename any of them; ERun's behaviour doesn't change underneath. `READY` becomes `MERGE` and then `MERGED` through the [merge queue](/collaboration/merge-queue), never by a caller asserting either status directly.
 
 ## What flows through — Stories, Epics, Tasks
 
@@ -161,5 +161,6 @@ The state machine the team uses is orthogonal to this: an Agent at Supervised ma
 ## See also
 
 - [Agent collaboration overview](/collaboration/overview) — the erun API that backs reviews, comments, builds, and the merge queue.
+- [Merge queue](/collaboration/merge-queue) — how a `READY` review becomes `MERGED`, from every client, plus recovering a wedged gate.
 - [Operator in the loop](/collaboration/operator-in-the-loop) — what the Operator's control surfaces look like over a Level-3 fleet.
 - [Reviews](/collaboration/reviews), [Comments](/collaboration/comments), [Builds](/collaboration/builds) — the API resources the workflow operates over.

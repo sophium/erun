@@ -18,7 +18,7 @@ One review moves between two environments as it goes from a proposed change to a
 | `READY`, threads open | **builder** | Reads the threads, judges each proposal on merit, merges the ones it accepts, pushes, rebuilds. It is not obliged to take a proposal, and says why when it declines, in that thread. |
 | `READY`, threads open | **reviewer** | Returns to its own threads, reads the builder's replies, and resolves the ones the builder addressed. |
 | `READY`, all resolved | **builder** | Advances the merge queue (`erun review queue advance`). |
-| `MERGE` → `MERGED` | platform | The merge queue's gate builds the prospective merge and pushes only on green — see [Reviews § Merge queue](/collaboration/reviews#merge-queue). |
+| `MERGE` → `MERGED` | platform | The merge queue's gate builds the prospective merge and pushes only on green — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
 
 ## Why two environments, not two agents in one
 
@@ -35,7 +35,7 @@ Both are ordinary agent environments. Neither is a dedicated build environment: 
 
 **Only a thread's root comment author can close it.** `PATCH /v1/reviews/{id}/comments/{commentId}/status` acts on the thread as a whole through its root, and only the root's own author may call it — see [Comments](/collaboration/comments#comment-status). This means the builder cannot resolve a reviewer's thread no matter how completely it addressed the point; the reviewer agent watching for "the author replied to my thread" and resolving it is not a nicety, it is the only thing that unblocks the merge short of an audited override.
 
-`erun review queue advance` refuses to promote a review with any thread still `OPEN` (its root comment unresolved), naming the unresolved count in its `409` response. The one deliberate escape is `erun review queue override-advance`: a distinct, separately-authorized call that records its `reason` in the audit trail alongside the caller's identity — see [Reviews § Overriding the gate](/collaboration/reviews#overriding-the-gate). It exists for exactly the case a reviewer never comes back; it is not a substitute for a reviewer agent that does.
+`erun review queue advance` refuses to promote a review with any thread still `OPEN` (its root comment unresolved), naming the unresolved count in its `409` response. The one deliberate escape is `erun review queue override-advance`: a distinct, separately-authorized call that records its `reason` in the audit trail alongside the caller's identity — see [Merge queue § Overriding the gate](/collaboration/merge-queue#overriding-the-gate). It exists for exactly the case a reviewer never comes back; it is not a substitute for a reviewer agent that does.
 
 A reviewer agent that opens threads and never returns to resolve them blocks the merge permanently short of that override. Opening threads sparingly is part of the same discipline — every open thread blocks a merge.
 
@@ -47,6 +47,7 @@ A reviewer agent that opens threads and never returns to resolve them blocks the
 
 - [Agent patterns](/collaboration/agent-patterns) — the underlying MCP/API call sequence this topology composes.
 - [Workflow](/collaboration/workflow) — where the Build Agent / Review Agent pattern sits in the larger Operator-Agent maturity model.
+- [Merge queue](/collaboration/merge-queue) — the queue this topology's `advance`/`override-advance` step drives, including recovering a wedged gate.
 - [Reviews](/collaboration/reviews), [Comments](/collaboration/comments) — the API resources this topology operates over.
 - [Environment types](/concepts/environment-types) — why `runtime` and `host` sit outside the builder/reviewer choice.
 - [Reusable-agent spec](/agent-reference/agents-spec) — the `erun-builder` / `erun-reviewer` catalogue entries.

@@ -12,7 +12,7 @@ The tenant dashboard's **Reviews** tab lists every review for the signed-in tena
 
 ### Merge queue and comment threads
 
-A review's own detail adds **Close review**, and the **Merge queue** tab an **Advance queue** action — each behind a confirm step, and each replaced by the access you are missing when your account may not use it. If the queue head still has unresolved comment threads, advancing is refused and names the count and the review, with **View discussion** to open it directly; an account with the separate override permission can instead bypass the check by stating a reason, which is recorded against your identity. To start a *new* comment thread rather than reply to one, hover a line in the review panel's diff and use the comment affordance that appears; the thread is anchored to that file and line. See [`erun review`](/cli/review) for the same actions from the CLI.
+A review's own detail adds **Close review**, and the **Merge queue** tab an **Advance queue** action — each behind a confirm step, and each replaced by the access you are missing when your account may not use it. If the queue head still has unresolved comment threads, advancing is refused and names the count and the review, with **View discussion** to open it directly; an account with the separate override permission can instead bypass the check by stating a reason, which is recorded against your identity. Only a thread's own root-comment author can resolve or reopen it — this dashboard included — so if that refusal names a thread you didn't open, ask its author or use the override rather than trying to close it yourself. To start a *new* comment thread rather than reply to one, hover a line in the review panel's diff and use the comment affordance that appears; the thread is anchored to that file and line. See [`erun review`](/cli/review) for the same actions from the CLI, and [Merge queue](/collaboration/merge-queue) for the full mechanics — including recovering a merge whose gate build gets stuck, which has no button here yet.
 
 ### Keyboard shortcuts in the review surface
 
@@ -28,6 +28,7 @@ The tenant dashboard's **Registration** tab is where a tenant/environment you cr
 
 ## Where next
 
+- [Merge queue](/collaboration/merge-queue) — why the queue exists, what the gate does, and recovering a wedged gate.
 - [Activities and recovery](/desktop/activities-and-recovery) — the operations queue, failed-deploy recovery, and closing the window while work runs.
 - [`erun review`](/cli/review) — the same review actions from the CLI.
 - [Managing hosted environments](/collaboration/hosted-environments) — the Registration tab's actions from the CLI.
