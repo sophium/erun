@@ -76,7 +76,9 @@ ERun resolves the entry into two concrete hosts, matching the `build`/`deploy` s
 
 ## Hosted registry {#hosted-registry}
 
-**(Planned.)** ERun also offers its own hosted registry, `registry.erunpaas.com`, as a build+deploy registry with no setup: authenticate with your tenant's own API token instead of managing a separate registry account, and push/pull under your own tenant namespace.
+ERun also offers its own hosted registry, `registry.erunpaas.com`, as a build+deploy registry with no setup: authenticate with your tenant's own API token instead of managing a separate registry account, and push/pull under your own tenant namespace.
+
+`erun build`/`erun push` log in for you automatically: once you're signed in to the platform (`erun cloud login <alias>`, after `erun cloud init erun --api-url <url>`), the same bearer token `erun platform whoami` uses becomes the registry password behind the scenes — nothing to type. This needs exactly one `erun`-type cloud provider alias configured; with zero or more than one, the login fails with a clear error naming what to fix instead of hanging on a prompt nobody can answer. A manual login works the same way if you'd rather drive it by hand:
 
 ```
 docker login registry.erunpaas.com
@@ -90,7 +92,7 @@ docker push registry.erunpaas.com/<tenant>/hello:1
 
 **Images older than a retention window are deleted automatically.** The default window is **30 days** since an image was last pulled; the platform operator can configure it per deployment. There is no separate "list what's about to expire" step today — if an image you rely on has not been pulled in that window, it is gone. Re-push it (or pull it periodically) to keep it alive.
 
-The DNS, TLS certificate, and the platform's registry deployment for `registry.erunpaas.com` are not live yet, so this is aspirational until then — `erun init --erun-registry` records the config today, but pushing to the host will not work until the platform side is stood up. For the token protocol and its security model, see the [Agent reference](/agent-reference/api-protocol#registry-token-endpoint).
+Until the platform side (DNS, TLS certificate, and the registry deployment itself) is stood up on your instance, `erun init --erun-registry` still records the config and `erun build`/`erun push` still resolve a login the way described above, but the push itself has nowhere real to land. For the token protocol and its security model, see the [Agent reference](/agent-reference/api-protocol#registry-token-endpoint).
 
 ## Discovering versions to deploy
 
