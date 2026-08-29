@@ -98,6 +98,21 @@ export class Titlebar {
       .click();
   }
 
+  // Scoped to the titlebar's own alert banner (see TITLEBAR_BANNER_SELECTOR's
+  // header-scoping comment) so this never resolves to an unrelated alert
+  // elsewhere on the page (a dialog's InlineAlert, a panel's own role="alert").
+  errorAlert(): Locator {
+    return this.page.locator('header [role="alert"]');
+  }
+
+  reportBugButton(): Locator {
+    return this.errorAlert().getByRole('button', { name: /^Report a bug/ });
+  }
+
+  deployActionButton(): Locator {
+    return this.errorAlert().getByRole('button', { name: 'Deploy', exact: true });
+  }
+
   async dismissStatus(): Promise<void> {
     const dismiss = this.page.getByRole('button', { name: 'Dismiss status' });
     if (await dismiss.isVisible().catch(() => false)) {
