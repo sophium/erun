@@ -50,6 +50,11 @@ func resolveHostGHCRCredentials(registries []string) map[string]registryBasicAut
 	return credentials
 }
 
+// dockerConfigJSONSecretKey is the auths-document key kubectl itself uses in a
+// dockerconfigjson Secret (`kubectl create secret docker-registry`), shared by
+// every Secret this package renders or reads back in that shape.
+const dockerConfigJSONSecretKey = ".dockerconfigjson"
+
 type dockerConfigJSONAuthEntry struct {
 	Auth string `json:"auth"`
 }
@@ -58,19 +63,32 @@ type dockerConfigJSONFile struct {
 	Auths map[string]dockerConfigJSONAuthEntry `json:"auths"`
 }
 
-// dockerConfigJSONForCredentials renders the .dockerconfigjson payload a
-// dockerconfigjson Secret carries, in the same shape docker itself writes.
-func dockerConfigJSONForCredentials(credentials map[string]registryBasicAuth) (string, error) {
-	file := dockerConfigJSONFile{Auths: make(map[string]dockerConfigJSONAuthEntry, len(credentials))}
+// dockerConfigJSONAuthEntriesForCredentials encodes each resolved credential
+// into the auth entry a dockerconfigjson Secret stores it as.
+func dockerConfigJSONAuthEntriesForCredentials(credentials map[string]registryBasicAuth) map[string]dockerConfigJSONAuthEntry {
+	entries := make(map[string]dockerConfigJSONAuthEntry, len(credentials))
 	for host, auth := range credentials {
-		encoded := base64.StdEncoding.EncodeToString([]byte(auth.username + ":" + auth.secret))
-		file.Auths[host] = dockerConfigJSONAuthEntry{Auth: encoded}
+		entries[host] = dockerConfigJSONAuthEntry{Auth: base64.StdEncoding.EncodeToString([]byte(auth.username + ":" + auth.secret))}
 	}
-	data, err := json.Marshal(file)
+	return entries
+}
+
+// dockerConfigJSONForAuthEntries renders a .dockerconfigjson payload from
+// already-encoded auth entries, the shape a caller merging in an existing
+// Secret's entries holds (those decode with their encoding already applied,
+// unlike a freshly resolved registryBasicAuth).
+func dockerConfigJSONForAuthEntries(entries map[string]dockerConfigJSONAuthEntry) (string, error) {
+	data, err := json.Marshal(dockerConfigJSONFile{Auths: entries})
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// dockerConfigJSONForCredentials renders the .dockerconfigjson payload a
+// dockerconfigjson Secret carries, in the same shape docker itself writes.
+func dockerConfigJSONForCredentials(credentials map[string]registryBasicAuth) (string, error) {
+	return dockerConfigJSONForAuthEntries(dockerConfigJSONAuthEntriesForCredentials(credentials))
 }
 
 // registryCredentialSecretApplyArgs mirrors cloudflareSecretApplyArgs /

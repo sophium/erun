@@ -525,7 +525,16 @@ func TestDeploy(t *testing.T) {
 		}
 
 		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "kubectl", "")
+		// The refresh reads the Secret back before applying (to merge rather
+		// than replace its auths), so the generic empty-output kubectl stub
+		// every other kubectl call here still uses must answer "get secret"
+		// specifically: NotFound, since ecr-pull has never been created in
+		// this fixture.
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", `case "$*" in
+  *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+`)
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
@@ -538,6 +547,134 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_refreshes_image_pull_secret_via_stubbed_kubectl", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_image_pull_secret_merge_preserves_unresolved_host", func(t *testing.T) {
+		// The core of the merge fix: a Secret already covering two hosts,
+		// redeployed on a host that can only resolve one of them, must refresh
+		// the resolvable host and leave the other byte-for-byte untouched --
+		// not lose it to a full-document rewrite. A third host that is in play
+		// this run (via runtimeimage) but has never had an entry and does not
+		// resolve must get no placeholder auth. The applied manifest is
+		// captured to a file (a side effect outside erun.Run's captured
+		// streams) so the test can assert on the actual merged
+		// .dockerconfigjson rather than the trace alone.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - regcred\nruntimeimage: neverresolves.example/team-devops\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		existingSecretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"registry.example":{"auth":"stale-value"},"legacy-other.example":{"auth":"preserved-value"}}}`)))
+		appliedManifestPath := filepath.Join(setup.Cwd, "applied-regcred.yaml")
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret regcred -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *"apply -f -"*) cat > %q ;;
+  *) exit 0 ;;
+esac
+`, existingSecretJSON, appliedManifestPath))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+
+		applied, err := os.ReadFile(appliedManifestPath)
+		if err != nil {
+			t.Fatalf("read applied manifest: %v", err)
+		}
+		manifest := string(applied)
+		if !strings.Contains(manifest, freshEncoded) {
+			t.Fatalf("manifest missing the refreshed registry.example credential:\n%s", manifest)
+		}
+		if strings.Contains(manifest, "stale-value") {
+			t.Fatalf("manifest still carries the stale registry.example credential it should have refreshed:\n%s", manifest)
+		}
+		if !strings.Contains(manifest, "preserved-value") {
+			t.Fatalf("manifest lost the unresolved legacy-other.example host's existing credential:\n%s", manifest)
+		}
+		if strings.Contains(manifest, "neverresolves.example") {
+			t.Fatalf("manifest carries a placeholder entry for a host that never resolved and never had one:\n%s", manifest)
+		}
+		golden.Equal(t, "deploy/real_run_image_pull_secret_merge_preserves_unresolved_host", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_image_pull_secret_refuses_malformed_existing_secret", func(t *testing.T) {
+		// The other design decision the merge fix makes explicit: an existing
+		// Secret that cannot be decoded is refused rather than silently
+		// rebuilt from the resolved subset alone, since guessing wrong there
+		// would destroy exactly the coverage the merge exists to protect.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - regcred\n")
+
+		// A host must actually resolve this run, or refreshImagePullSecrets
+		// never reaches the Secret read at all (nothing to overlay).
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		malformedSecretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte("not valid json")))
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret regcred -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *"apply -f -"*) echo "apply must not run against an undecodable secret" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+`, malformedSecretJSON))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an undecodable existing secret, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_image_pull_secret_refuses_malformed_existing_secret", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_new_worktree_volume_announces_the_adoption", func(t *testing.T) {
