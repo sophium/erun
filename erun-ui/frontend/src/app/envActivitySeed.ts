@@ -22,7 +22,11 @@ export function planEnvActivitySeed(
       }
       seed.push({
         key: selectionKey({ tenant: tenant.name, environment: environment.name }),
-        activity: { ...environment.activity, detail: environment.activity.detail ?? '' },
+        activity: {
+          ...environment.activity,
+          detail: environment.activity.detail ?? '',
+          checkFailed: environment.activity.checkFailed === true,
+        },
       });
     }
   }

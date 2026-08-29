@@ -29,7 +29,14 @@ test('an env with a busy observation seeds its activity from the snapshot alone'
   assert.deepEqual(seed, [
     {
       key: selectionKey({ tenant: 'acme', environment: 'dev' }),
-      activity: { reachable: true, observed: true, outage: false, busy: true, detail: 'ai' },
+      activity: {
+        reachable: true,
+        observed: true,
+        outage: false,
+        checkFailed: false,
+        busy: true,
+        detail: 'ai',
+      },
     },
   ]);
 });
@@ -51,11 +58,25 @@ test('mixed observed and unobserved envs across tenants seed only the observed o
   assert.deepEqual(seed, [
     {
       key: selectionKey({ tenant: 'acme', environment: 'dev' }),
-      activity: { reachable: true, observed: true, outage: false, busy: false, detail: '' },
+      activity: {
+        reachable: true,
+        observed: true,
+        outage: false,
+        checkFailed: false,
+        busy: false,
+        detail: '',
+      },
     },
     {
       key: selectionKey({ tenant: 'other', environment: 'main' }),
-      activity: { reachable: false, observed: false, outage: true, busy: false, detail: '' },
+      activity: {
+        reachable: false,
+        observed: false,
+        outage: true,
+        checkFailed: false,
+        busy: false,
+        detail: '',
+      },
     },
   ]);
 });

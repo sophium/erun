@@ -52,11 +52,17 @@ type uiEnvironment struct {
 // for the event stream — here that identity is already the enclosing
 // uiEnvironment.
 type uiEnvironmentActivitySnapshot struct {
-	Reachable bool   `json:"reachable"`
-	Observed  bool   `json:"observed"`
-	Outage    bool   `json:"outage"`
-	Busy      bool   `json:"busy"`
-	Detail    string `json:"detail,omitempty"`
+	Reachable bool `json:"reachable"`
+	Observed  bool `json:"observed"`
+	Outage    bool `json:"outage"`
+	// CheckFailed mirrors environmentActivityState's own field: a real attempt
+	// to reach an environment with no local forward (over kubectl exec) that
+	// did not come back, as opposed to an environment nobody has asked about at
+	// all. Kept apart from Outage for the same reason Outage is kept apart from
+	// Reachable — the two failures name different remedies.
+	CheckFailed bool   `json:"checkFailed,omitempty"`
+	Busy        bool   `json:"busy"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // uiEnvironmentUsageSnapshot is the environment-usage poller's last cached
@@ -123,9 +129,12 @@ type envActivityPayload struct {
 	// like a quiet environment or an unopened one, which is how one stayed dead
 	// for hours. It is deliberately independent of Reachable: the dropped shape
 	// is unreachable *and* diagnosed, and only the second of those is news.
-	Outage bool   `json:"outage"`
-	Busy   bool   `json:"busy"`
-	Detail string `json:"detail,omitempty"`
+	Outage bool `json:"outage"`
+	// CheckFailed mirrors uiEnvironmentActivitySnapshot's own field; see there
+	// for why it is kept apart from both Reachable and Outage.
+	CheckFailed bool   `json:"checkFailed,omitempty"`
+	Busy        bool   `json:"busy"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // envUsagePayload is the usage-sweep counterpart to envActivityPayload: a

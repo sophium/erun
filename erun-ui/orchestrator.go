@@ -986,11 +986,12 @@ func envInfos(envs []eruncommon.OrchestratorEnvConfig, envActivity map[string]en
 		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})
 		if state, ok := envActivity[key]; ok {
 			info.Activity = &uiEnvironmentActivitySnapshot{
-				Reachable: state.reachable,
-				Observed:  state.observed,
-				Outage:    state.outage,
-				Busy:      state.busy,
-				Detail:    state.detail,
+				Reachable:   state.reachable,
+				Observed:    state.observed,
+				Outage:      state.outage,
+				CheckFailed: state.checkFailed,
+				Busy:        state.busy,
+				Detail:      state.detail,
 			}
 		}
 		if reading, ok := envUsage[key]; ok {

@@ -10,6 +10,11 @@ export interface UIEnvironmentActivity {
   reachable: boolean;
   observed: boolean;
   outage: boolean;
+  // checkFailed is outage's counterpart for an environment with no local
+  // forward: a real attempt to ask it (over the environment's own runtime
+  // pod, not this desktop's connection) that did not come back, as opposed to
+  // an environment nobody has asked about at all.
+  checkFailed?: boolean;
   busy: boolean;
   detail?: string;
 }

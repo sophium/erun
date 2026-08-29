@@ -70,6 +70,57 @@ test('never observed (no activity at all) reads unreachable, not idle', () => {
   assert.notEqual(line.state, 'idle');
 });
 
+// An environment held busy by an agent driving it from elsewhere (a CLI
+// orchestrator, another machine over MCP) must not read as "not open here"
+// just because this desktop never opened a local forward to it. The poller
+// now asks such an environment directly and can still find it busy.
+test('a lease held by a session driving the environment from elsewhere still reads busy', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      activity: {
+        reachable: true,
+        observed: true,
+        outage: false,
+        busy: true,
+        detail: 'holding: job-fix-1570',
+      },
+    }),
+  );
+  assert.equal(line.state, 'busy');
+  assert.equal(line.status, 'Busy — holding: job-fix-1570');
+  assert.notEqual(line.status, 'Not open here');
+});
+
+test('a failed attempt to reach an unopened environment reads distinctly from never asking', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      activity: {
+        reachable: false,
+        observed: false,
+        outage: false,
+        checkFailed: true,
+        busy: false,
+      },
+    }),
+  );
+  assert.equal(line.state, 'check-failed');
+  assert.notEqual(line.state, 'unreachable');
+  assert.notEqual(line.state, 'idle');
+  assert.ok(
+    line.status.toLowerCase().includes('open it'),
+    'the message should name the recovery action',
+  );
+});
+
+test('an outage still wins over a failed check, the same way it wins over busy', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      activity: { reachable: false, observed: false, outage: true, checkFailed: true, busy: false },
+    }),
+  );
+  assert.equal(line.state, 'outage');
+});
+
 test('a joined usage reading renders its compact headline on the line', () => {
   const line = orchestratorEnvironmentLine(
     env({

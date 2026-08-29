@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -121,6 +122,21 @@ func forwardRepairTestApp(
 			return probe.reconnect()
 		},
 		readRuntimeRunState: readRunState,
+		// Only "erun/fresh" (no seeded forward) ever reaches this: every other
+		// selection in this file has a forward state file seeded above, so it
+		// resolves through the reachable/outage branches this file exists to
+		// test and never falls back to a pod probe. Idle-and-not-busy is a
+		// neutral default so that fallback answering does not itself look like
+		// a failure in tests that do not care about it.
+		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+			data, err := json.Marshal(eruncommon.EnvironmentIdleStatus{
+				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+			})
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		},
 	})
 	// A non-nil ctx un-gates the rebind (it no-ops while ctx is nil); the
 	// emitter must be stubbed alongside it or emits reach the real Wails
@@ -226,27 +242,35 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	}
 }
 
-// TestUnopenedEnvironmentIsUntouched is the guard the dropped case makes
-// load-bearing. "No forward is bound" describes an environment nobody opened
-// and an environment whose forward just died equally well, and only the second
-// may be acted on. The recorded forward is the entire difference, so an
-// environment without one gets no rebind, no episode and no outage.
-func TestUnopenedEnvironmentIsUntouched(t *testing.T) {
+// TestUnopenedEnvironmentIsProbedButNeverRebound is the guard the dropped case
+// makes load-bearing: "no forward is bound" describes an environment nobody
+// opened here and an environment whose forward just died equally well, and
+// only the second may trigger the rebind/reconnect machinery this file exists
+// to test. It no longer describes "reports nothing" — an environment nobody
+// opened here can still be busy right now (a CLI orchestrator, an agent
+// driving it over MCP from another machine), so the sweep asks it directly
+// over its runtime pod instead of leaving it silent. What must stay true is
+// that this read-only ask never feeds the forward-repair episode: no rebind,
+// no outage, because there was never a forward here to repair.
+func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 	unopened := uiSelection{Tenant: "erun", Environment: "fresh"}
 
 	for range forwardRepairAttempts + 2 {
 		state := sweepEnvUntilRebindSettles(t, app, unopened)
-		if state.reachable || state.observed || state.outage {
-			t.Fatalf("an environment nobody opened reports nothing, got %+v", state)
+		if state.outage || state.checkFailed {
+			t.Fatalf("a successful pod probe is neither an outage nor a failed check, got %+v", state)
+		}
+		if !state.reachable || !state.observed || state.busy {
+			t.Fatalf("an idle pod probe reports the environment idle, got %+v", state)
 		}
 	}
 	if got := probe.count(); got != 0 {
-		t.Fatalf("an environment nobody opened was opened by %d rebinds, want 0", got)
+		t.Fatalf("an environment with no recorded forward was rebound %d times, want 0", got)
 	}
 	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
-		t.Fatalf("an environment nobody opened reported %d outages, want 0", len(got))
+		t.Fatalf("an environment with no recorded forward reported %d outages, want 0", len(got))
 	}
 }
 
