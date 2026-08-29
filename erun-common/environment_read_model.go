@@ -57,22 +57,41 @@ type EnvironmentLifecycleInputs struct {
 // never used to distinguish Stopped or Idle from Unknown.
 func ResolveEnvironmentLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLifecycleState {
 	if in.ManagedCloud {
-		if !in.CloudContextObserved {
-			return EnvironmentLifecycleUnknown
+		if state, resolved := resolveManagedCloudLifecycleState(in); resolved {
+			return state
 		}
-		switch in.CloudContextStatus {
-		case CloudContextStatusStopped:
-			return EnvironmentLifecycleStopped
-		case CloudContextStatusRunning:
-			// A running instance can still be deploy-failed or idle-eligible;
-			// fall through to the shared checks below.
-		default:
-			// Pending, unknown, or any unrecognized value: the power state is
-			// mid-transition or was never resolved past a guess.
-			return EnvironmentLifecycleUnknown
-		}
+		// Confirmed running: fall through to the shared workload checks
+		// below, since a running instance can still be deploy-failed or
+		// idle-eligible.
 	}
+	return resolveWorkloadLifecycleState(in)
+}
 
+// resolveManagedCloudLifecycleState resolves a managed-cloud environment's
+// power state. resolved is false only when the instance is confirmed
+// running, the one case the caller must still apply the shared workload
+// checks for.
+func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state EnvironmentLifecycleState, resolved bool) {
+	if !in.CloudContextObserved {
+		return EnvironmentLifecycleUnknown, true
+	}
+	switch in.CloudContextStatus {
+	case CloudContextStatusStopped:
+		return EnvironmentLifecycleStopped, true
+	case CloudContextStatusRunning:
+		return "", false
+	default:
+		// Pending, unknown, or any unrecognized value: the power state is
+		// mid-transition or was never resolved past a guess.
+		return EnvironmentLifecycleUnknown, true
+	}
+}
+
+// resolveWorkloadLifecycleState resolves everything a cloud-managed
+// environment's power state does not answer on its own: deploy health and
+// idle-policy eligibility. It is also the whole answer for a non-managed
+// environment, which has no separate power state to check first.
+func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLifecycleState {
 	switch {
 	case in.DeployHealthObserved && !in.DeployHealthy:
 		return EnvironmentLifecycleDeployFailed
