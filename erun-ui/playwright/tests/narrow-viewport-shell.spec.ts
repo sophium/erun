@@ -1,7 +1,7 @@
 import type { Locator, Page, Route, Request } from '@playwright/test';
 
 import { boundingBoxOf } from '../fixtures/boundingBox.js';
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
 import {
   SEED_TENANT,
@@ -108,10 +108,7 @@ async function openReviewsTab(app: AppShell, page: Page, environment: string): P
     await route.continue();
   });
 
-  await app.reloadEnvironments();
-  await app.sidebar
-    .envRowButton(SEED_TENANT, environment)
-    .waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForSeededRow(app, SEED_TENANT, environment);
 
   // A narrow enough boot needs the sidebar reopened before any sidebar-housed
   // navigation, exactly like an operator would have to reopen it themselves

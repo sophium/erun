@@ -1,7 +1,7 @@
 import type { Request, Route } from '@playwright/test';
 
 import { boundingBoxOf } from '../fixtures/boundingBox.js';
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -84,10 +84,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -154,10 +151,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -231,10 +225,7 @@ test.describe('tenant dashboard reviews — long values render bounded, not over
       // the shell actually supports and asserts real reachability there.
       await page.setViewportSize({ width: 1000, height: 900 });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');

@@ -1,7 +1,7 @@
 import type { Page, Route, Request } from '@playwright/test';
 
 import { boundingBoxOf } from '../fixtures/boundingBox.js';
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
 import {
   SEED_TENANT,
@@ -138,10 +138,7 @@ async function openReviewsTabWithOneReview(
     await route.continue();
   });
 
-  await app.reloadEnvironments();
-  await app.sidebar
-    .envRowButton(SEED_TENANT, environment)
-    .waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForSeededRow(app, SEED_TENANT, environment);
   await app.sidebar.openTenantDashboard(SEED_TENANT);
   await app.tenantDashboard.waitForOpen();
   await app.tenantDashboard.selectTab('Reviews');
@@ -194,10 +191,7 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -286,10 +280,7 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -339,10 +330,7 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -412,10 +400,7 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -481,10 +466,7 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
@@ -558,10 +540,7 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
