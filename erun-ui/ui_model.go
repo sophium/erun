@@ -1045,6 +1045,19 @@ type uiClusterRegistryStatus struct {
 	Message           string `json:"message,omitempty"`
 }
 
+// uiHostedRegistryStatus reports whether erun's hosted container registry
+// (registry.erunpaas.com) is currently reachable, so the new-environment
+// dialog can gate offering it the same way uiClusterRegistryStatus gates the
+// in-cluster registry. Reason and Recovery are only set when Available is
+// false, and name the specific cause the probe observed and the action that
+// resolves it.
+type uiHostedRegistryStatus struct {
+	Host      string `json:"host"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	Recovery  string `json:"recovery,omitempty"`
+}
+
 type uiRuntimeResourceNode struct {
 	Name   string                  `json:"name"`
 	CPU    uiRuntimeResourceMetric `json:"cpu"`

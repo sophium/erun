@@ -18,7 +18,11 @@ import type {
   UIVersionSuggestion,
   UIVersionSuggestionNotice,
 } from '@/types';
-import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
+import type {
+  UIClusterRegistryStatus,
+  UIEnvironmentHealth,
+  UIHostedRegistryStatus,
+} from '@/uiDiagnosticsTypes';
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
 import type { ReachabilityKind } from './reconnectCopy';
@@ -179,6 +183,11 @@ export interface EnvironmentDialogState {
   // useErunRegistry selects erun's hosted registry (registry.erunpaas.com/<tenant>),
   // authenticated by the tenant's own API token. Exclusive with the other two.
   useErunRegistry: boolean;
+  // hostedRegistry is the reachability probe result for erun's hosted
+  // registry, checked once when the dialog opens (the host is fixed, not
+  // context-dependent like clusterRegistry). Null while the check is still in
+  // flight; useErunRegistry only takes effect once it resolves available.
+  hostedRegistry: UIHostedRegistryStatus | null;
   envType: EnvironmentType;
   localRepoPath: string;
   noGit: boolean;
@@ -448,6 +457,7 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   clusterRegistry: null,
   useClusterRegistry: false,
   useErunRegistry: false,
+  hostedRegistry: null,
   envType: 'remote-agent',
   localRepoPath: '',
   noGit: false,

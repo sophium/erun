@@ -8,7 +8,11 @@ import type {
   UIUnexposeResult,
   UIVersionSuggestions,
 } from '@/types';
-import type { UIClusterRegistryStatus, UIEnvironmentHealth } from '@/uiDiagnosticsTypes';
+import type {
+  UIClusterRegistryStatus,
+  UIEnvironmentHealth,
+  UIHostedRegistryStatus,
+} from '@/uiDiagnosticsTypes';
 import type { UIEnvironmentStopResult } from '@/uiLifecycleTypes';
 import type {
   UIRuntimeActivity,
@@ -27,6 +31,7 @@ import {
   ListEnvironmentExposures,
   LoadClusterRegistry,
   LoadEnvironmentConfig,
+  LoadHostedRegistry,
   LoadRuntimeActivity,
   LoadRuntimeResourceStatus,
   LoadRuntimeSizing,
@@ -40,7 +45,7 @@ import {
 } from '../../../wailsjs/go/main/App';
 import type { EnvironmentApiBuilder } from './wailsApi';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 interface SaveEnvArgs {
   selection: UISelection;
@@ -176,6 +181,12 @@ export const environmentApi = wailsApi.injectEndpoints({
         LoadVersionSuggestions(selection),
       ),
       providesTags: ['VersionSuggestions'],
+    }),
+    // Probes erun's hosted container registry (registry.erunpaas.com), so the
+    // new-environment dialog can gate "Use erun's hosted registry" on a real
+    // check instead of offering it unconditionally.
+    getHostedRegistry: builder.query<UIHostedRegistryStatus, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIHostedRegistryStatus>(() => LoadHostedRegistry()),
     }),
     // Stopping frees the env's runtime and dind limits, so the node capacity
     // the Runtime tab offers every other env changes the moment it lands —

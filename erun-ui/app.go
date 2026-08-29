@@ -58,6 +58,7 @@ type erunUIDeps struct {
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
 	stopEnvironmentRuntime func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
 	readRuntimeRunState    func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
@@ -347,6 +348,9 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadClusterRegistry == nil {
 		deps.loadClusterRegistry = loadClusterRegistry
+	}
+	if deps.loadHostedRegistry == nil {
+		deps.loadHostedRegistry = loadHostedRegistry
 	}
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
