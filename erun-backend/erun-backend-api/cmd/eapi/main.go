@@ -55,6 +55,7 @@ func run(args []string) error {
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewBearerTokenVerifier(backendapi.BearerTokenVerifierOptions{
 			AllowedIssuers:       splitCSV(cfg.AllowedIssuers),
+			AllowedAudiences:     splitCSV(cfg.AllowedAudiences),
 			DesktopPublicKeyPath: cfg.DesktopPublicKeyPath,
 		}),
 		IdentityCache: backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
@@ -118,7 +119,7 @@ func run(args []string) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("erun api listening on %s; database=postgres audit=postgres oidc allowed issuers=%d", server.Addr, len(splitCSV(cfg.AllowedIssuers)))
+	log.Printf("erun api listening on %s; database=postgres audit=postgres oidc allowed issuers=%d %s", server.Addr, len(splitCSV(cfg.AllowedIssuers)), oidcAudiencePolicy(splitCSV(cfg.AllowedAudiences)))
 	log.Print(identityBootstrapStatus(context.Background(), db))
 	return server.ListenAndServe()
 }
@@ -131,6 +132,7 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
 	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
 	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
+	flags.StringVar(&cfg.AllowedAudiences, "oidc-allowed-audiences", cfg.AllowedAudiences, "Comma-separated allow-list of token audiences (aud) accepted on the OIDC issuer path, typically the IdP client ids permitted to call this API; empty accepts any audience an allowed issuer minted")
 	flags.StringVar(&cfg.DesktopPublicKeyPath, "desktop-public-key-path", cfg.DesktopPublicKeyPath, "Path to the desktop Ed25519 public key; when set, the API trusts file://<path> desktop-signed tokens (issue #674), the same auth the MCP edge uses")
 	flags.StringVar(&cfg.MCPSigningKeyPath, "mcp-signing-key-path", cfg.MCPSigningKeyPath, "Path to the backend's Ed25519 MCP signing private key; when set, the mcp-token endpoint mints per-env MCP bearer tokens for the console (unset disables it: the endpoint reports 501)")
 	flags.StringVar(&cfg.PlatformIssuer, "platform-issuer", cfg.PlatformIssuer, "This instance's OIDC issuer URL, served unauthenticated at GET /v1/platform")
@@ -213,6 +215,17 @@ func optionalIdentityAdmin(cfg apiConfig) (*zitadel.Client, error) {
 	})
 }
 
+// oidcAudiencePolicy states the audience boundary in the startup log instead of
+// leaving an operator to read it out of a count of zero: an unenforced boundary
+// and one that happens to be passing look identical in the logs otherwise, and
+// which of the two a deployment is in is exactly what an operator needs to know.
+func oidcAudiencePolicy(audiences []string) string {
+	if len(audiences) == 0 {
+		return "oidc audience enforcement=off (any audience from an allowed issuer is accepted)"
+	}
+	return fmt.Sprintf("oidc audience enforcement=on (allowed: %s)", strings.Join(audiences, ", "))
+}
+
 func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {
 	tenants, tenantErr := countRows(ctx, db, "tenants")
 	users, userErr := countRows(ctx, db, "users")
@@ -245,10 +258,16 @@ func countStatus(count int, err error) string {
 }
 
 type apiConfig struct {
-	Host                 string
-	Port                 int
-	DatabaseURL          string
-	AllowedIssuers       string
+	Host           string
+	Port           int
+	DatabaseURL    string
+	AllowedIssuers string
+	// AllowedAudiences narrows the OIDC path to tokens minted for named
+	// audiences — the boundary between clients of one shared IdP, which the
+	// issuer allow-list cannot draw. Empty accepts any audience, so a deployment
+	// that has not established which client ids its IdP mints behaves as it
+	// always did; the startup log reports which of the two applies.
+	AllowedAudiences     string
 	DesktopPublicKeyPath string
 	MCPSigningKeyPath    string
 	// DNS-01 broker write path, injected at deploy from the platform env's
@@ -337,6 +356,7 @@ func configFromEnv() apiConfig {
 		Port:                  intEnvOrDefault("ERUN_API_PORT", 17033),
 		DatabaseURL:           strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
 		AllowedIssuers:        strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
+		AllowedAudiences:      strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_AUDIENCES")),
 		DesktopPublicKeyPath:  strings.TrimSpace(os.Getenv("ERUN_API_DESKTOP_PUBLIC_KEY_PATH")),
 		MCPSigningKeyPath:     strings.TrimSpace(os.Getenv("ERUN_API_MCP_SIGNING_KEY_PATH")),
 		SecretsKey:            strings.TrimSpace(os.Getenv("ERUN_SECRETS_KEY")),

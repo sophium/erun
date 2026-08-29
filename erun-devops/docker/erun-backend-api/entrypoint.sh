@@ -13,6 +13,9 @@ fi
 if [ -n "${ERUN_OIDC_ALLOWED_ISSUERS:-}" ]; then
     set -- --oidc-allowed-issuers "${ERUN_OIDC_ALLOWED_ISSUERS}" "$@"
 fi
+if [ -n "${ERUN_OIDC_ALLOWED_AUDIENCES:-}" ]; then
+    set -- --oidc-allowed-audiences "${ERUN_OIDC_ALLOWED_AUDIENCES}" "$@"
+fi
 
 echo "starting erun API on ${ERUN_API_HOST:-0.0.0.0}:${ERUN_API_PORT:-17033}"
 

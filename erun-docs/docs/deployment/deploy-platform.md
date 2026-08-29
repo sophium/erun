@@ -55,6 +55,8 @@ Name it to the component as `zitadel.masterkeySecretName` in the env's `<tenant>
 
 The API side needs nothing: a platform deploy already trusts its own auth host, threading `https://<auth-host>` into the API's `ERUN_OIDC_ALLOWED_ISSUERS` from the [`platform:` block](/reference/configuration#platform-block) alongside any cloud issuers. The first sign-in bootstraps the `OPERATIONS` tenant.
 
+Trusting an issuer trusts every client registered against it. To narrow that to named clients, set `api.oidcAllowedAudiences` on the `erun-backend-api` component to the client ids allowed to call the API. It is empty by default — every deployment's client ids differ, and a wrong list refuses every caller — so read the ids off the IdP and confirm them against a real token before setting it. The API's startup line says which state it is in (`oidc audience enforcement=on`/`=off`); see [the audience allow-list](/agent-reference/api-protocol#oidc-audience-allow-list) for the resolution rules and error behaviour.
+
 ### Error behaviour
 
 | Failure mode | What happens | Recovery |

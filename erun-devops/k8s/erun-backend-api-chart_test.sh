@@ -467,4 +467,22 @@ grep -A1 'name: ERUN_PLATFORM_TAGLINE' "${core}" | grep -q 'value: "Example ship
 grep -A1 'name: ERUN_PLATFORM_LOGO_URL' "${core}" | grep -q 'value: "https://cdn.example.com/logo.svg"' ||
     fail "platform.logoUrl must render as ERUN_PLATFORM_LOGO_URL"
 
-echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + platform white-label discovery"
+# --- 19. The OIDC audience allow-list, the sibling of the issuer allow-list
+#         beside it. It must always render, so an unset value reaches the API
+#         as "" (its documented accept-any default) rather than a missing key,
+#         and it must default to empty: which client ids a deployment's IdP
+#         mints is an infrastructure fact, and a guessed default here would
+#         refuse every caller at once. ---
+rendered=$(render)
+container "${rendered}" >"${core}"
+grep -q 'name: ERUN_OIDC_ALLOWED_AUDIENCES' "${core}" ||
+    fail "ERUN_OIDC_ALLOWED_AUDIENCES must always render, mirroring ERUN_OIDC_ALLOWED_ISSUERS beside it"
+grep -A1 'name: ERUN_OIDC_ALLOWED_AUDIENCES' "${core}" | grep -q 'value: ""' ||
+    fail "the audience allow-list must default to empty -- enforcing a guessed client id would lock out every caller"
+
+rendered=$(render --set-string 'api.oidcAllowedAudiences=console-client\,cli-client')
+container "${rendered}" >"${core}"
+grep -A1 'name: ERUN_OIDC_ALLOWED_AUDIENCES' "${core}" | grep -q 'value: "console-client,cli-client"' ||
+    fail "api.oidcAllowedAudiences must render as ERUN_OIDC_ALLOWED_AUDIENCES, or the boundary can never be turned on"
+
+echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + platform white-label discovery + oidc audience allow-list"
