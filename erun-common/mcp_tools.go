@@ -69,12 +69,13 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// (raw commands, file writes, git commit/push, job control) -- a human
 	// operator does this from their own IDE and shell, never by clicking
 	// through the desktop app, so every entry here declares AgentFacing.
-	"exec_diff":   {Family: "exec", CLIPath: []string{"exec", "diff"}, Title: "Show repository diff", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"exec_raw":    {Family: "exec", CLIPath: []string{"exec", "raw"}, Title: "Run a raw command in the environment", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	"exec_write":  {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"exec_commit": {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"exec_push":   {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
-	"exec_merge":  {Family: "exec", CLIPath: []string{"exec", "merge"}, Title: "Merge a branch into the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_diff":       {Family: "exec", CLIPath: []string{"exec", "diff"}, Title: "Show repository diff", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_raw":        {Family: "exec", CLIPath: []string{"exec", "raw"}, Title: "Run a raw command in the environment", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"exec_write":      {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_commit":     {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_push":       {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
+	"exec_merge":      {Family: "exec", CLIPath: []string{"exec", "merge"}, Title: "Merge a branch into the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_gate-merge": {Family: "exec", CLIPath: []string{"exec", "gate-merge"}, Title: "Build the prospective squash merge a merge queue promotion gates", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	// exec_agent has no CLI path: the CLI already offers this exact
 	// capability as `erun exec job start --agent`, one command covering both
 	// modes via a flag. MCP cannot do the same because each tool has one
@@ -128,7 +129,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// the same flow) reports its own result back onto a review; no desktop
 	// surface lets an operator hand-author a build result, so this is
 	// agent-facing the same way the exec_* family is.
-	"review_record-build":           {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_record-build": {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	// Reporting MERGED is the other half of the same unattended flow: only the
+	// environment a review's merge queue promoted to MERGE ever calls this,
+	// after it has fetched, gate-built, and pushed the prospective merge
+	// itself — no desktop surface authors this report either.
+	"review_report-merged":          {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"review_reviewers_list":         {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_reviewers_add":          {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"review_reviewers_remove":       {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},

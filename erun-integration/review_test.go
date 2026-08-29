@@ -684,6 +684,57 @@ func TestReview(t *testing.T) {
 		}
 	})
 
+	t.Run("record_build_gate_dry_run_traces_resolved_call", func(t *testing.T) {
+		// --gate reports the merge queue's own GATE build kind and carries no
+		// version, since the gate publishes nothing.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"review", "record-build", "review-1",
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--gate", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/record_build_gate_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_merged_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"review", "report-merged", "review-1",
+			"--build-id", "build-1", "--remote-url", "https://github.com/org/repo.git", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/report_merged_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_merged_real_run_moves_review_to_merged", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		created := createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		args := []string{
+			"review", "report-merged", created.ReviewID,
+			"--build-id", "build-1", "--remote-url", "https://github.com/org/repo.git",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("report-merged exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		show := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if show.ExitCode != 0 || !strings.Contains(show.Combined, "status=MERGED") {
+			t.Fatalf("expected the review to be MERGED after report-merged, got exit %d:\n%s", show.ExitCode, show.Combined)
+		}
+	})
+
 	t.Run("merge_queue_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"review", "queue", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

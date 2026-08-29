@@ -159,7 +159,7 @@ var wantRegisteredTools = []string{
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
 	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_agent", "exec_commit",
-	"exec_diff", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
+	"exec_diff", "exec_gate-merge", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_merge", "exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
 	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
@@ -170,7 +170,8 @@ var wantRegisteredTools = []string{
 	"platform_tenant_create", "platform_tenant_list", "platform_user_enroll",
 	"platform_user_list", "platform_whoami", "publish", "push", "raw",
 	"release", "resize", "review_close", "review_comment", "review_create", "review_list",
-	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build", "review_resolve",
+	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build",
+	"review_report-merged", "review_resolve",
 	"review_reviewers_add", "review_reviewers_list", "review_reviewers_remove", "review_show",
 	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }

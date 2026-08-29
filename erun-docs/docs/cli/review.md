@@ -4,7 +4,7 @@ title: erun review
 
 # `erun review`
 
-Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, record a build against a review, close a review, assign or remove reviewers, and inspect or advance a target branch's [merge queue](/collaboration/merge-queue).
+Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, record a build against a review (or report one MERGED once its promoted environment has gate-built and pushed it), close a review, assign or remove reviewers, and inspect or advance a target branch's [merge queue](/collaboration/merge-queue).
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
@@ -21,6 +21,7 @@ erun review resolve REVIEW_ID COMMENT_ID [flags]
 erun review unresolve REVIEW_ID COMMENT_ID [flags]
 erun review close REVIEW_ID [flags]
 erun review record-build REVIEW_ID --commit <hash> --version <version> [flags]
+erun review report-merged REVIEW_ID --build-id <id> --remote-url <url> [flags]
 erun review reviewers list REVIEW_ID [flags]
 erun review reviewers add REVIEW_ID --user-id <id> [flags]
 erun review reviewers remove REVIEW_ID --user-id <id> [flags]
@@ -79,9 +80,21 @@ Records a build against a review — the only way an erun client transitions a r
 | Flag | Description |
 |---|---|
 | `--commit` | Full 40-character commit hash the build ran against. |
-| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. |
+| `--gate` | Record the merge queue's own `GATE` build kind instead of an ordinary build — set by the environment a review's merge queue promoted to `MERGE`, reporting its own build of the prospective merge. Omit `--version` when this is set: the gate publishes nothing. |
+| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. Omit with `--gate`. |
 | `--failed` | Record the build as failed instead of successful. |
 | `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
+
+### `review report-merged` {#review-report-merged}
+
+Reports a review `MERGED`. This is for the environment a review's merge queue promoted to `MERGE`, once it has fetched the review's target and source (see [`exec gate-merge`](/cli/exec#exec-gate-merge)), gate-built the prospective squash merge, recorded that as a successful `GATE` build (`review record-build --gate`), and pushed the result — never before the push actually landed.
+
+The platform does not take this on trust: it checks `--build-id` names an already-recorded, successful `GATE` build for this review, then fetches `--remote-url` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with `409 Conflict` (`MERGE_NOT_VERIFIED`) and leaves the review at `MERGE`. See [Merge queue](/collaboration/merge-queue) for the full mechanics.
+
+| Flag | Description |
+|---|---|
+| `--build-id` | The successful `GATE` build's id. |
+| `--remote-url` | The git remote the platform fetches to verify the merge. |
 
 ### `review reviewers list` / `review reviewers add` / `review reviewers remove` {#review-reviewers}
 
@@ -117,6 +130,8 @@ erun review close 018f...
 
 erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3
 erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail "image build failed"
+erun review record-build 018f... --commit $(git rev-parse HEAD) --gate
+erun review report-merged 018f... --build-id 018j... --remote-url https://github.com/org/repo.git
 
 erun review reviewers add 018f... --user-id 018i...
 erun review reviewers list 018f...
@@ -141,6 +156,8 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `record-build` with a `--commit` that is not 40 lowercase hex characters. | `400 Bad Request` (`INVALID_COMMIT_ID`). |
 | `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
 | `record-build` on an unknown review id. | `404 Not Found`. |
+| `report-merged` whose `--build-id` does not name a recorded, successful `GATE` build for this review. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |
 | `reviewers add --user-id` already assigned to the review. | `409 Conflict`. |
 | `reviewers remove --user-id` not currently assigned. | `404 Not Found`. |

@@ -1,0 +1,25 @@
+Fetch --target and SOURCE_BRANCH from the remote, check out a fresh local branch named --target at its own current remote tip, and squash-merge SOURCE_BRANCH onto it as one commit — the commit message read verbatim from stdin, never a shell, so nothing in it is reinterpreted. This is for the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
+
+The working tree must already be clean: this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge.
+
+A conflicted squash is reported as a distinct, named outcome. The worktree is left exactly as git left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else.
+
+--dry-run traces the fetch, checkout, squash merge, and commit without running them.
+
+Usage:
+  erun exec gate-merge SOURCE_BRANCH [flags]
+
+Examples:
+  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
+  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main --remote upstream
+
+Flags:
+      --dry-run         Resolve and trace mutating actions without executing them.
+  -h, --help            help for gate-merge
+      --remote string   Git remote to fetch and merge from (defaults to origin)
+      --target string   Target branch the squash merge lands onto (required)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

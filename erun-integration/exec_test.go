@@ -1114,4 +1114,125 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected the worktree to be left mid-merge, got status: %q", status)
 		}
 	})
+
+	t.Run("gate_merge_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "gate-merge", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_refuses_missing_target", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit without --target, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_missing_target", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_dry_run_must_not_reach_the_network", func(t *testing.T) {
+		// A dry run against a bogus remote must still succeed: --dry-run never
+		// fetches, checks out, squash-merges, or commits, mirroring merge's own
+		// network-free dry-run contract.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget", "--target", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_dry_run_must_not_reach_the_network", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_dry_run_refuses_dirty_worktree", func(t *testing.T) {
+		// The clean-worktree check runs even during --dry-run, the same
+		// discipline exec commit/push apply to their own branch-mismatch check:
+		// it is a read, not a mutation, so a dry run refuses exactly what a real
+		// run would refuse. It checks only tracked-file changes (mirroring the
+		// release flow's own worktree-clean check), so this dirties a tracked
+		// file rather than adding an untracked one.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "uncommitted change\n")
+		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget", "--target", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit against a dirty worktree, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_dry_run_refuses_dirty_worktree", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_real_run_squash_merges_onto_target", func(t *testing.T) {
+		// A real bare remote and a real divergent source branch, so "the squash
+		// merge actually landed on target" is an observable fact rather than a
+		// stubbed git call.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.TargetBranch != "main" || parsed.SourceBranch != "feature" || parsed.Remote != "origin" || parsed.Commit == "" || parsed.SourceCommit == "" {
+			t.Fatalf("unexpected result: %+v", parsed)
+		}
+		if branch := strings.TrimSpace(captureGit(t, setup.Cwd, "rev-parse", "--abbrev-ref", "HEAD")); branch != "main" {
+			t.Fatalf("expected the worktree to land on main, got %q", branch)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+		parentCount := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%P"))
+		if strings.Contains(parentCount, " ") {
+			t.Fatalf("expected a single-parent squash commit, got parents: %q", parentCount)
+		}
+		message := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s"))
+		if message != "Add widget" {
+			t.Fatalf("expected the squash commit message to be the given message, got %q", message)
+		}
+	})
+
+	t.Run("gate_merge_conflict_real_run_leaves_the_worktree_mid_conflict", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "feature change\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature edits readme")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "main change\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "main edits readme")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "feature", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a conflicted squash merge, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "README.md") || !strings.Contains(result.Combined, "conflicted") {
+			t.Fatalf("expected the conflicted file named in the error, got:\n%s", result.Combined)
+		}
+		status := captureGit(t, setup.Cwd, "status", "--porcelain")
+		if !strings.Contains(status, "UU README.md") {
+			t.Fatalf("expected the worktree to be left mid-conflict, got status: %q", status)
+		}
+	})
 }

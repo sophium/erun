@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Six subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), and `merge` (merge a branch into the current one).
+Repository helpers that run from the project root. Seven subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), and `gate-merge` (build the prospective squash merge a merge queue promotion gates).
 
 ## Synopsis
 
@@ -15,6 +15,7 @@ erun exec write PATH [flags]
 erun exec commit BRANCH [PATH...] [flags]
 erun exec push BRANCH [flags]
 erun exec merge TARGET_BRANCH [flags]
+erun exec gate-merge SOURCE_BRANCH --target TARGET_BRANCH [flags]
 ```
 
 ## Subcommands
@@ -59,6 +60,18 @@ A conflicted merge is reported as a distinct, named outcome rather than a generi
 
 `--dry-run` traces the fetch and merge without running them. Reports the branch, target branch, remote, and merged commit id; add `--output json` for a structured result.
 
+### `exec gate-merge` {#exec-gate-merge}
+
+Fetches `--target` and SOURCE_BRANCH from a remote (`origin` by default; override with `--remote`), checks out a fresh local branch named `--target` at its own current remote tip, and squash-merges SOURCE_BRANCH onto it as one commit — the message read verbatim from stdin, same shell-avoidance property as `write`/`commit`.
+
+This is the git half of gating a [merge queue](/collaboration/merge-queue) promotion: the environment a review's merge queue promotes to `MERGE` runs `gate-merge`, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
+
+The working tree must already be clean: unlike `merge`, this checks out a **different** local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge or lost.
+
+A conflicted squash is reported as a distinct, named outcome, the same as `merge`. The worktree is left exactly as git left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back out.
+
+`--dry-run` traces the fetch, checkout, squash merge, and commit without running them. Reports the target branch, source branch, remote, source commit, and squash merge commit id; add `--output json` for a structured result.
+
 ## Examples
 
 ```bash
@@ -70,6 +83,7 @@ echo 'fix the values typo' | erun exec commit main
 echo 'fix the values typo' | erun exec commit main values.yaml
 erun exec push feature/add-widget
 erun exec merge main
+echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
 ```
 
 ## Error behaviour
@@ -89,3 +103,7 @@ erun exec merge main
 | The remote rejects the push (`push`), e.g. a non-fast-forward. | Git's own stderr surfaces verbatim; nothing about the local branch changes. |
 | The merge conflicts (`merge`). | Refuses naming every conflicted file and pointing at `git merge --abort`; the worktree is left mid-merge for the caller to resolve. |
 | The fetch or merge fails for another reason (`merge`), e.g. an unknown branch. | Git's own stderr surfaces verbatim; the worktree is unchanged. |
+| `--target` is missing (`gate-merge`). | Errors with `--target is required` before touching git. |
+| The working tree has uncommitted changes (`gate-merge`). | Refuses with `refusing to gate-merge: the working tree has uncommitted changes`; nothing is fetched or checked out. |
+| The squash merge conflicts (`gate-merge`). | Refuses naming every conflicted file and pointing at `git merge --abort`; the worktree is left mid-conflict for the caller to resolve. |
+| The fetch, checkout, squash merge, or commit fails for another reason (`gate-merge`), e.g. an unknown branch. | Git's own stderr surfaces verbatim; the worktree is left in whatever state that step produced. |

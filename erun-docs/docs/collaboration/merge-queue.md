@@ -30,6 +30,8 @@ All three have to hold, or the transition is refused with `409 Conflict` and cod
 
 The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merge-queue) via the ordinary `POST /builds` route: it publishes nothing, so it carries no `version`, and a failed one carries `failureDetail` in the gate's own words. A successful gate's build becomes the review's `lastMergedBuildId` once `MERGED` is accepted.
 
+The client tooling for this side is [`erun exec gate-merge`](/cli/exec#exec-gate-merge) (fetch and squash-merge onto a fresh checkout of the target), [`erun review record-build --gate`](/cli/review#review-record-build) (record the `GATE` build, successful or failed), and [`erun review report-merged`](/cli/review#review-report-merged) (report `MERGED` once the push actually lands — refused with `MERGE_NOT_VERIFIED` otherwise). The `erun-merge-queue-drive` skill chains all three for a review a promotion already targeted; nothing polls for a promotion and runs it automatically today, so it is invoked explicitly, the same way `advance`/`override-advance` below are.
+
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
 Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that uses its own bespoke shape instead of the standard `{code, message, details}` envelope, naming the count and the review so a caller can act on it instead of parsing a sentence:
