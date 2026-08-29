@@ -13,12 +13,12 @@ import (
 )
 
 // exec_job_status and exec_job_await both echo back a job's command, and for
-// an agent job that command embeds the entire dispatch prompt (#1561): a
-// caller polling a lane, or re-awaiting one that keeps timing out, pays for
-// that prompt's tokens on every single call for a field it supplied itself.
-// These tests pin the two size/shape properties that fix relies on: the
-// command a status/await response carries never grows past the preview bound,
-// and asking for one job never smuggles a second copy of it into the list.
+// an agent job that command embeds the entire dispatch prompt: a caller
+// polling a lane, or re-awaiting one that keeps timing out, pays for that
+// prompt's tokens on every single call for a field it supplied itself. These
+// tests pin the two size/shape properties the fix relies on: the command a
+// status/await response carries never grows past the preview bound, and
+// asking for one job never smuggles a second copy of it into the list.
 
 // writeJobFixture plants a job record directly on disk in the shape
 // LoadEnvironmentJob/LoadEnvironmentJobs read back, without needing a real
