@@ -169,14 +169,44 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/cwd_overrides_default_tenant", normalize.Apply(result.Combined))
 	})
 
-	t.Run("sshd_configured", func(t *testing.T) {
+	t.Run("sshd_enabled_but_host_alias_missing", func(t *testing.T) {
+		// The env config says sshd is enabled, but nothing ever wrote a matching
+		// Host block to ~/.ssh/config (e.g. workspace sync flipped the flag
+		// without running `sshd init`). list must not report the derived alias
+		// as usable — every consumer of it (ssh, VS Code Remote-SSH) would fail
+		// to resolve the hostname.
 		setup := env.New(t)
 		seedListSSHDTenant(t, setup)
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "list/sshd_configured", normalize.Apply(result.Combined))
+		// The golden below is the negative assertion: both `ssh host:` lines
+		// must carry the "not in ~/.ssh/config" repair note, not a bare alias.
+		golden.Equal(t, "list/sshd_enabled_but_host_alias_missing", normalize.Apply(result.Combined))
+	})
+
+	t.Run("sshd_enabled_and_host_alias_configured", func(t *testing.T) {
+		// The counterpart to the scenario above: once ~/.ssh/config actually
+		// carries the Host block (what `sshd init` writes), list reports the
+		// alias plainly again, with no repair note.
+		setup := env.New(t)
+		seedListSSHDTenant(t, setup)
+		sshDir := filepath.Join(setup.Home, ".ssh")
+		if err := os.MkdirAll(sshDir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", sshDir, err)
+		}
+		mustWrite(t, filepath.Join(sshDir, "config"),
+			"Host erun-tenant-a-dev\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17022\n"+
+				"  User erun\n",
+		)
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/sshd_enabled_and_host_alias_configured", normalize.Apply(result.Combined))
 	})
 
 	t.Run("with_cloud_providers_and_runtime_details", func(t *testing.T) {
