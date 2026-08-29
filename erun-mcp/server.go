@@ -624,6 +624,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_merge",
 		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
 	}, execMergeTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_gate-merge",
+		Description: "Build the prospective squash merge a merge queue promotion gates: fetch targetBranch and sourceBranch, check out a fresh local branch named targetBranch at its own current remote tip, and squash-merge sourceBranch onto it as one commit carrying message. For the environment a review's merge queue promotes to MERGE: gate-merge, then build against the result, then review_record-build with gate set and, only on success, exec_push and review_report-merged. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A conflicted squash is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-conflict, for the caller to resolve or abort. A real, immediate mutation of the working tree. Set preview to trace the fetch, checkout, squash merge, and commit without running them.",
+	}, execGateMergeTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools

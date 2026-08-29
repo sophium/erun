@@ -61,6 +61,8 @@ type CommandOutput struct {
 	Push *eruncommon.PushWorkingTreeBranchResult `json:"push,omitempty"`
 	// Merge carries what an `exec_merge` call actually merged.
 	Merge *eruncommon.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
+	// GateMerge carries what an `exec_gate-merge` call actually squash-merged.
+	GateMerge *eruncommon.GateMergeWorkingTreeResult `json:"gateMerge,omitempty"`
 	// Spec carries the resolved release plan `release` publishes.
 	Spec *eruncommon.ReleaseSpec `json:"spec,omitempty"`
 	// Interaction carries a structured question `init` needs answered in a

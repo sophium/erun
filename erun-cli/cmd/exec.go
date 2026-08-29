@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -26,6 +27,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot),
 		newExecMergeCmd(findProjectRoot),
+		newExecGateMergeCmd(findProjectRoot),
 		jobCmd,
 	)
 }
@@ -313,6 +315,72 @@ func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinde
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Merged %s/%s into %s (%s).", result.Remote, result.TargetBranch, result.Branch, result.Commit))
+	return ctx.WriteResult(result)
+}
+
+func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	var (
+		target string
+		remote string
+	)
+	cmd := &cobra.Command{
+		Use:   "gate-merge SOURCE_BRANCH",
+		Short: "Build the prospective squash merge a merge queue promotion gates",
+		Long: "Fetch --target and SOURCE_BRANCH from the remote, check out a fresh local branch named --target at " +
+			"its own current remote tip, and squash-merge SOURCE_BRANCH onto it as one commit — the commit message " +
+			"read verbatim from stdin, never a shell, so nothing in it is reinterpreted. This is for the " +
+			"environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against the " +
+			"result, then `erun review record-build --gate` and, only on success, `erun exec push` and " +
+			"`erun review report-merged`.\n\n" +
+			"The working tree must already be clean: this checks out a different local branch than whatever the " +
+			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
+			"prospective merge.\n\n" +
+			"A conflicted squash is reported as a distinct, named outcome. The worktree is left exactly as git " +
+			"left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back " +
+			"out, before doing anything else.\n\n" +
+			"--dry-run traces the fetch, checkout, squash merge, and commit without running them.",
+		Example: "  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main\n" +
+			"  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main --remote upstream",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, args[0], target, remote)
+		},
+	}
+	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge lands onto (required)")
+	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranch, targetBranch, remote string) error {
+	if strings.TrimSpace(targetBranch) == "" {
+		return fmt.Errorf("--target is required")
+	}
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return err
+	}
+	message, err := io.ReadAll(ctx.Stdin)
+	if err != nil {
+		return fmt.Errorf("read commit message from stdin: %w", err)
+	}
+	result, err := common.GateMergeWorkingTree(ctx, projectRoot, common.GateMergeWorkingTreeParams{
+		SourceBranch: sourceBranch,
+		TargetBranch: targetBranch,
+		Message:      string(message),
+		Remote:       remote,
+	}, common.GateMergeWorkingTreeDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, result.SourceBranch, result.TargetBranch, result.Commit))
 	return ctx.WriteResult(result)
 }
 

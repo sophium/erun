@@ -310,10 +310,10 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	if kind != "" {
 		details = append(details, "kind="+kind)
 	}
-	details = append(details,
-		"version="+params.Version,
-		"successful="+strconv.FormatBool(params.Successful),
-	)
+	if params.Version != "" {
+		details = append(details, "version="+params.Version)
+	}
+	details = append(details, "successful="+strconv.FormatBool(params.Successful))
 	if strings.TrimSpace(params.FailureDetail) != "" {
 		details = append(details, "failureDetail="+params.FailureDetail)
 	}
