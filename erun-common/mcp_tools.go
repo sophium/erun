@@ -170,17 +170,22 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"contribute_clone": {Family: "contribute", CLIPath: []string{"contribute", "clone"}, Title: "Clone the erun source into the environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"version":          {Family: "", CLIPath: []string{"version"}, Title: "Report erun build metadata", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"list":             {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"init":             {Family: "", CLIPath: []string{"init"}, Title: "Initialise an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
-	"build":            {Family: "", CLIPath: []string{"build"}, Title: "Build the environment's images", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"push":             {Family: "", CLIPath: []string{"push"}, Title: "Push built images to the registry", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"deploy":           {Family: "", CLIPath: []string{"deploy"}, Title: "Deploy a version into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"publish":          {Family: "", CLIPath: []string{"publish"}, Title: "Publish charts to the registry", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"upgrade":          {Family: "", CLIPath: []string{"upgrade"}, Title: "Upgrade opted-in environments to the latest version", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"release":          {Family: "", CLIPath: []string{"release"}, Title: "Cut a release and publish its artefacts", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"pin":              {Family: "", CLIPath: []string{"pin"}, Title: "Pin an environment to a version", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
-	"expose":           {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"unexpose":         {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
-	"terraform":        {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
+	// The environment read model composes list/idle/doctor into one resolved
+	// lifecycle state for an orchestrator or a future mobile client polling
+	// this environment -- there is no desktop UI over this specific tool call
+	// to reference, the same shape as ai_sessions above.
+	"environment": {Family: "", CLIPath: nil, Title: "Report the environment read model: list-style summary, resolved lifecycle state, idle status, cloud-context config, and doctor health", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"init":        {Family: "", CLIPath: []string{"init"}, Title: "Initialise an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
+	"build":       {Family: "", CLIPath: []string{"build"}, Title: "Build the environment's images", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"push":        {Family: "", CLIPath: []string{"push"}, Title: "Push built images to the registry", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"deploy":      {Family: "", CLIPath: []string{"deploy"}, Title: "Deploy a version into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"publish":     {Family: "", CLIPath: []string{"publish"}, Title: "Publish charts to the registry", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"upgrade":     {Family: "", CLIPath: []string{"upgrade"}, Title: "Upgrade opted-in environments to the latest version", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"release":     {Family: "", CLIPath: []string{"release"}, Title: "Cut a release and publish its artefacts", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"pin":         {Family: "", CLIPath: []string{"pin"}, Title: "Pin an environment to a version", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
+	"expose":      {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"unexpose":    {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	"terraform":   {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
 	// job_start has no working handler: it is a removed-tool stub (see
 	// mcpRemovedTools) whose only behavior is to name the tool that took over
 	// its capability.

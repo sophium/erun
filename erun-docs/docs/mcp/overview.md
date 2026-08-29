@@ -140,6 +140,7 @@ MCP groups every tool into a family, carried on the wire as `_meta.family` so a 
 | `usage` | The env's live CPU, memory, and disk usage, read from the runtime container's own cgroup v2 accounting and a statfs of its workspace mount — no metrics-server required, so it works on clusters where `kubectl top` reports unavailable. Memory is reported against the container's own limit with a real OOM-kill count; CPU against its quota over a sample window. A named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. |
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
+| `environment` | The environment read model: this environment's `list`-style summary, a resolved lifecycle state (`running`/`idle`/`deploy-failed`/`stopped`/`unknown`), its `idle` status, its cloud-context config, and a `doctor` deploy diagnosis — one call composing what `list`/`idle`/`doctor` already report, rather than three. |
 | `version` | Build version and commit of the MCP server. |
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
 | `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. On a macOS host an arriving macOS binary carrying no code signature is signed first — the system kills an unsigned one on exec without printing anything — with the host's stable local identity when it has one and ad-hoc otherwise, and the optional `signing: {path, signed, identity, note}` field reports it (`identity` is empty for an ad-hoc signature); a signing failure is reported in `note` and never fails the call. `preview` returns name/type/size without the bytes. |
@@ -372,6 +373,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 |---|---|---|---|
 | *(top-level)* | `version` | `erun version` | Read |
 | *(top-level)* | `list` | `erun list` | Read |
+| *(top-level)* | `environment` | *(MCP-only)* | Read |
 | *(top-level)* | `init` | `erun init` | Work |
 | *(top-level)* | `build` | `erun build` | Work |
 | *(top-level)* | `push` | `erun push` | Work |
@@ -460,7 +462,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-76 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+77 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 
@@ -690,6 +692,35 @@ Same data as the CLI `erun list`, structured. Returns the caller's tenants, envs
       ]
     }
   ]
+}
+```
+
+### `environment`
+
+The environment read model: one call composing what `list`, `idle`, and `doctor` already report into a single resolved answer. `state` is the field the other three cannot give you on their own — `running`, `idle`, `deploy-failed`, `stopped`, or `unknown` — derived from the environment's cloud-context power state (when observed), its deploy health, and its idle-policy eligibility.
+
+`state` is `unknown` whenever a signal it depends on was never observed, rather than a guessed `stopped` or `idle`. This matters most for a managed-cloud environment: its cloud-context power state is a live AWS reading this package never persists to disk, and no AWS credential reaches inside this pod to refresh it — so unless something else already refreshed it in the same process, `cloudContext` carries the environment's cloud-context config with no `status`, and `state` reads `unknown`. Pass `preview: true` to skip the live `helm`/`kubectl` deploy diagnosis (the only part of this call that touches the cluster) and get `health: null` back instead of running it.
+
+```jsonc
+{
+  "tenant": "myapp",
+  "environment": {
+    "name": "local",
+    "type": "local-agent",
+    "runtimeVersion": "1.0.308",
+    "managedCloud": false,
+    "isDefault": true,
+    "isEffective": true
+  },
+  "state": "running",
+  "idle": {
+    "policy": { "timeout": "5m0s", "workingHours": "09:00-19:00" },
+    "stopEligible": false
+  },
+  "health": {
+    "rootConfig": { "configStatus": "ok" },
+    "deploy": { "helmStatus": "STATUS: deployed" }
+  }
 }
 ```
 

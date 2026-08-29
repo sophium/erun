@@ -227,6 +227,12 @@ func registerReadModelTools(reg toolRegistrar, info eruncommon.BuildInfo, runtim
 		Name:        "list",
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
 	}, listTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name: "environment",
+		Description: "Return this environment's read model: its list-style summary (name, type, RuntimeVersion, default/effective markers), a resolved lifecycle state (running, idle, deploy-failed, stopped, or unknown), its idle policy + activity snapshot, its cloud-context config, and a doctor deploy diagnosis -- one call composing list/idle/doctor instead of three. " +
+			"Cloud-context power state is never refreshed live (no AWS credentials reach inside this pod), so a managed-cloud environment's state reads unknown rather than a guess unless something else already refreshed it. " +
+			"Pass preview=true to skip the live helm/kubectl deploy diagnosis.",
+	}, environmentTool(runtime))
 }
 
 func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
