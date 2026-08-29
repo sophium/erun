@@ -21,7 +21,7 @@ import (
 // class #1138 exists to surface without three more hand-built kubectl calls.
 func observeStubResponses() map[string]string {
 	return map[string]string{
-		"pods": `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
+		"pods":                                `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
 		"resourcequota":                       `{"items":[{"metadata":{"name":"erun-quota"},"status":{"hard":{"limits.cpu":"4"},"used":{"limits.cpu":"1"}}}]}`,
 		"limitrange":                          `{"items":[{"metadata":{"name":"erun-limits"},"spec":{"limits":[{"type":"Container","default":{"cpu":"1"},"defaultRequest":{"cpu":"100m"}}]}}]}`,
 		"ingress":                             `{"items":[{"metadata":{"name":"web"},"spec":{"rules":[{"host":"dev.example.test"}],"tls":[{"hosts":["dev.example.test"],"secretName":"web-tls"}]}}]}`,
