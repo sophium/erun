@@ -315,7 +315,7 @@ func TestERunCloudProviderTokenStatusReflectsResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown rather than expired when the secret store is absent (#1109)", func(t *testing.T) {
+	t.Run("unknown rather than expired when the secret store is absent", func(t *testing.T) {
 		provider := erunTestProvider()
 		provider.ERun.RefreshTokenRef = erunRefreshTokenRef(provider.Alias)
 		status := erunCloudProviderTokenStatus(provider, CloudDependencies{})
@@ -528,7 +528,7 @@ func TestNormalizeERunLoginFlow(t *testing.T) {
 // (Zitadel's urn:zitadel:* family is), so the operator must be able to ask for
 // one by name and have it actually reach the authorization request. Without
 // the org claim such a scope carries, an org-scoped issuer resolves nobody
-// (issue #1605).
+// .
 func TestERunCloudProviderLoginRequestsExtraScopes(t *testing.T) {
 	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()

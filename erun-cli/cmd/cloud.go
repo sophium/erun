@@ -587,7 +587,15 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	if status.Status == common.CloudTokenStatusActive && !params.Force {
 		return finishCloudLogin(ctx, store, status, deps)
 	}
-	login, err := confirmPrompt(promptRunner, fmt.Sprintf("Login to %s", provider.Alias))
+	return confirmAndLoginCloudProvider(ctx, store, promptRunner, alias, provider.Alias, status, params, deps)
+}
+
+// confirmAndLoginCloudProvider asks before starting an interactive login, and
+// reports the status unchanged when the operator declines — a refusal is the
+// current state, not a failure. Split out of runCloudLoginCommand so that
+// function stays under the cyclop threshold; the sequence is unchanged.
+func confirmAndLoginCloudProvider(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, alias, providerAlias string, status common.CloudProviderStatus, params common.CloudLoginParams, deps common.CloudDependencies) error {
+	login, err := confirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
 	if err != nil {
 		return err
 	}
