@@ -29,8 +29,18 @@
 # start unconditionally would discard the outcome the caller came back to
 # collect and start a fresh run in its place, so before starting anything
 # this checks whether the job already finished and, if so, reports that
-# outcome instead. Set AGENT_GATE_RERUN=1 to skip the check and force a new
-# run once the underlying work has genuinely changed.
+# outcome instead.
+#
+# That replay is only safe when the tree being gated hasn't moved since the
+# recorded run. A job id that is stable across invocations (`check`,
+# `ui-playwright`, `integration-test`) would otherwise replay a finished
+# outcome over code changed after that run -- greening work nobody tested.
+# So the id actually used against the job store folds in a hash of the tree
+# state (HEAD, working-tree status, and diff content) alongside the caller's
+# id: an unchanged tree keeps hitting the same id and replays as before: a
+# changed tree resolves to a new id, finds no finished record under it, and
+# runs fresh. AGENT_GATE_RERUN=1 still skips the check and forces a new run
+# regardless of tree state.
 
 set -eu
 
@@ -52,13 +62,43 @@ fi
 : "${ERUN_TENANT:?agent-gate.sh: ERUN_TENANT is not set (expected inside an agent pod)}"
 : "${ERUN_ENVIRONMENT:?agent-gate.sh: ERUN_ENVIRONMENT is not set (expected inside an agent pod)}"
 
+# hash_stdin prints the sha256 of stdin. Prefers sha256sum (the Linux runtime
+# image); falls back to shasum so this runs on a macOS dev host too.
+hash_stdin() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum | cut -d' ' -f1
+	else
+		shasum -a 256 | cut -d' ' -f1
+	fi
+}
+
+# tree_state_key prints a key that changes whenever the working tree does:
+# the commit, the status of every tracked/untracked path, and the actual
+# diff content against HEAD (status alone can't tell two different edits to
+# the same path apart, since both show as the same "M <path>" line). Falls
+# back to a fixed marker outside a git worktree, which keeps replay keyed on
+# job id alone there -- the same as before this existed.
+tree_state_key() {
+	if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
+		printf 'no-git'
+		return
+	fi
+	{
+		git rev-parse HEAD
+		git status --porcelain
+		git diff HEAD
+	} 2>/dev/null | hash_stdin | cut -c1-16
+}
+
+resolved_job_id="${job_id}-$(tree_state_key)"
+
 await_timeout="${ERUN_AGENT_GATE_AWAIT_TIMEOUT:-8m}"
 
 if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 	status_status=0
 	status_line=$(erun exec job status \
 		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-		--id "$job_id" 2>/dev/null) || status_status=$?
+		--id "$resolved_job_id" 2>/dev/null) || status_status=$?
 
 	if [ "$status_status" -eq 0 ]; then
 		case "$status_line" in
@@ -72,10 +112,10 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 			replay_status=0
 			erun exec job await \
 				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$job_id" --timeout 1s >&2 || replay_status=$?
+				--id "$resolved_job_id" --timeout 1s >&2 || replay_status=$?
 			erun exec job output \
 				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$job_id" --max-bytes 16777216
+				--id "$resolved_job_id" --max-bytes 16777216
 			exit "$replay_status"
 			;;
 		esac
@@ -85,7 +125,7 @@ fi
 start_status=0
 start_output=$(erun exec job start \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$job_id" --name "$job_name" \
+	--id "$resolved_job_id" --name "$job_name" \
 	--env AGENT_GATE_DETACHED=1 \
 	-- "$@" 2>&1) || start_status=$?
 
@@ -107,7 +147,7 @@ fi
 await_status=0
 erun exec job await \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$job_id" --timeout "$await_timeout" >&2 || await_status=$?
+	--id "$resolved_job_id" --timeout "$await_timeout" >&2 || await_status=$?
 
 if [ "$await_status" -eq 124 ]; then
 	printf 'agent-gate: %s is still running after %s; run this command again to keep waiting\n' "$job_name" "$await_timeout" >&2
@@ -116,6 +156,6 @@ fi
 
 erun exec job output \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$job_id" --max-bytes 16777216
+	--id "$resolved_job_id" --max-bytes 16777216
 
 exit "$await_status"

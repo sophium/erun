@@ -66,6 +66,81 @@ EOF
 	chmod +x "${bin_dir}/erun"
 }
 
+# stub_erun_stateful writes a fake `erun` that behaves like a minimal real job
+# store, keyed by the exact --id value it receives: `exec job start` actually
+# runs the trailing command synchronously and records its output/exit code
+# under that id; `exec job status`/`await`/`output` answer from whatever is
+# recorded under the id they're asked about, and report "no such job" (status
+# 1) for an id nothing was ever recorded under. Unlike stub_erun above (which
+# answers every call the same way regardless of id, for testing argv shape),
+# this is what lets a test prove the *replay-vs-rerun* decision actually
+# tracks the id agent-gate.sh computes, not just that some erun call happened.
+stub_erun_stateful() {
+	bin_dir="$1"
+	mkdir -p "$bin_dir"
+	cat >"${bin_dir}/erun" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
+mkdir -p "$STUB_STORE_DIR"
+
+job_id=""
+prev=""
+for a in "$@"; do
+	if [ "$prev" = "--id" ]; then
+		job_id="$a"
+	fi
+	prev="$a"
+done
+
+verb="$1 $2 $3"
+
+if [ "$verb" = "exec job status" ]; then
+	if [ -f "${STUB_STORE_DIR}/${job_id}.status" ]; then
+		cat "${STUB_STORE_DIR}/${job_id}.status"
+		exit 0
+	fi
+	exit 1
+fi
+
+if [ "$verb" = "exec job start" ]; then
+	# Drop everything up to and including the literal "--" separator, leaving
+	# only the real command's own argv (untouched, so quoting survives).
+	while [ $# -gt 0 ]; do
+		cur="$1"
+		shift
+		if [ "$cur" = "--" ]; then
+			break
+		fi
+	done
+	set +e
+	out=$("$@" 2>&1)
+	code=$?
+	set -e
+	printf '%s' "$out" >"${STUB_STORE_DIR}/${job_id}.output"
+	printf '%s' "$code" >"${STUB_STORE_DIR}/${job_id}.exitcode"
+	printf 'exited %s: stateful job' "$code" >"${STUB_STORE_DIR}/${job_id}.status"
+	exit 0
+fi
+
+if [ "$verb" = "exec job await" ]; then
+	if [ -f "${STUB_STORE_DIR}/${job_id}.exitcode" ]; then
+		exit "$(cat "${STUB_STORE_DIR}/${job_id}.exitcode")"
+	fi
+	exit 0
+fi
+
+if [ "$verb" = "exec job output" ]; then
+	if [ -f "${STUB_STORE_DIR}/${job_id}.output" ]; then
+		cat "${STUB_STORE_DIR}/${job_id}.output"
+	fi
+	exit 0
+fi
+
+exit 0
+EOF
+	chmod +x "${bin_dir}/erun"
+}
+
 # run_gate invokes agent-gate.sh with a clean environment plus whatever the
 # caller exported, capturing stdout+stderr and the exit code without letting
 # `set -e` end the test on a nonzero (expected in several cases).
@@ -293,6 +368,119 @@ stub_erun "${case_dir}/bin"
 	if grep -q 'exec job status' "$STUB_ARGV_FILE"; then
 		fail "forced rerun: must not even probe status when a fresh run was explicitly requested"
 	fi
+)
+
+# --- the id used against the job store stays identical across two
+# invocations of an unchanged tree, but changes the moment a tracked file is
+# edited in between. This is what makes replay safe: same id -> same
+# finished record found -> replay; different id -> no record found -> fresh
+# run. Runs against a real scratch git repo (not the actual checkout) so the
+# tree state is fully controlled.
+case_dir="${work_root}/tree-state-id"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+
+repo_dir="${case_dir}/repo"
+mkdir -p "$repo_dir"
+(
+	cd "$repo_dir"
+	git init -q
+	git config user.email test@example.com
+	git config user.name test
+	echo v1 >tracked.txt
+	git add tracked.txt
+	git commit -q -m initial
+)
+(
+	cd "$repo_dir"
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT=out
+
+	run_gate check "make check" -- make check-gate >/dev/null
+	first_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+
+	: >"$STUB_ARGV_FILE"
+	run_gate check "make check" -- make check-gate >/dev/null
+	second_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+	[ "$first_id" = "$second_id" ] || fail "tree state id: unchanged tree must resolve to the same id, got $first_id then $second_id"
+
+	echo v2 >tracked.txt
+	: >"$STUB_ARGV_FILE"
+	run_gate check "make check" -- make check-gate >/dev/null
+	third_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+	[ "$third_id" != "$first_id" ] || fail "tree state id: editing a tracked file must resolve to a different id, stayed $first_id"
+)
+
+# --- the id change actually changes replay behavior end to end: a job store
+# that only knows the tree's ORIGINAL id must be treated as no record found
+# once the tree changes, so the wrapper runs the real command again instead
+# of replaying the stale result. Uses stub_erun_stateful so the command
+# genuinely does or doesn't execute, rather than asserting on argv alone.
+case_dir="${work_root}/tree-state-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+
+repo_dir="${case_dir}/repo"
+mkdir -p "$repo_dir"
+(
+	cd "$repo_dir"
+	git init -q
+	git config user.email test@example.com
+	git config user.name test
+	echo v1 >tracked.txt
+	git add tracked.txt
+	git commit -q -m initial
+)
+
+counter_file="${case_dir}/counter"
+: >"$counter_file"
+(
+	cd "$repo_dir"
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	run_gate check "make check" -- sh -c "echo run >>'${counter_file}'; cat tracked.txt"
+	[ "$STATUS" -eq 0 ] || fail "tree state replay: first run expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*v1*) ;;
+	*) fail "tree state replay: first run expected to read v1, got: $OUT" ;;
+	esac
+	runs=$(wc -l <"$counter_file" | tr -d ' ')
+	[ "$runs" -eq 1 ] || fail "tree state replay: first run must actually execute the command, ran $runs times"
+
+	# Same tree, same command: must replay the recorded outcome rather than
+	# executing the command again.
+	run_gate check "make check" -- sh -c "echo run >>'${counter_file}'; cat tracked.txt"
+	[ "$STATUS" -eq 0 ] || fail "tree state replay: replay expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*v1*) ;;
+	*) fail "tree state replay: replay expected the recorded v1 output, got: $OUT" ;;
+	esac
+	runs=$(wc -l <"$counter_file" | tr -d ' ')
+	[ "$runs" -eq 1 ] || fail "tree state replay: unchanged tree must replay, not re-execute, ran $runs times"
+
+	# Edit the tracked file: the same job name must now resolve to a fresh id,
+	# find no record under it, and actually re-run and pick up v2.
+	echo v2 >tracked.txt
+	run_gate check "make check" -- sh -c "echo run >>'${counter_file}'; cat tracked.txt"
+	[ "$STATUS" -eq 0 ] || fail "tree state replay: rerun after edit expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*v2*) ;;
+	*) fail "tree state replay: changed tree must re-run and read v2, got: $OUT" ;;
+	esac
+	runs=$(wc -l <"$counter_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "tree state replay: changed tree must actually re-execute the command instead of replaying the stale v1 result, ran $runs times"
 )
 
 # --- an unrelated start failure must be fatal: never silently await a job
