@@ -161,6 +161,42 @@ func TestResize(t *testing.T) {
 		golden.Equal(t, "resize/dry_run_apply_recommendation_traces_the_evidence", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_apply_recommendation_holds_cpu_at_live_limit", func(t *testing.T) {
+		// Regression for the bug where the apply plan was built from the
+		// configured runtimepod (silent in-pod, so it normalizes to the
+		// package defaults cpu=4/8916Mi) instead of the live cgroup limits
+		// the verdict itself is scored against. Fixture mirrors a real
+		// environment running at 12 CPUs / 23552Mi with a silent config: the
+		// verdict says "cpu hold from 12" and "memory lower ... from
+		// 23552Mi", so the resolved plan must carry cpu=12 through unchanged
+		// and read memory's "from" as 23552Mi, never fall back to cpu=4 or
+		// memory 8916Mi.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 48, samples: 240,
+			peakMemoryBytes: 7751073792, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 900598, throttled: 13, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--apply-recommendation", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "cpu hold from 12") {
+			t.Fatalf("expected the verdict to hold cpu at the live 12, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "memory 23552Mi -> 11264Mi") {
+			t.Fatalf("expected the plan to read memory's live 23552Mi as its from value, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "cpu=12") {
+			t.Fatalf("expected the resolved command to carry cpu=12 (the live value) through unchanged, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "cpu=4") || strings.Contains(result.Combined, "8916Mi") {
+			t.Fatalf("expected the plan to never fall back to the package defaults cpu=4/8916Mi, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_apply_recommendation_holds_cpu_at_live_limit", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_apply_recommendation_no_op_still_traces_why", func(t *testing.T) {
 		// The exact case the recommendation's evidence has to answer: a
 		// no-op that reports "already sized" must not go silent about why --
