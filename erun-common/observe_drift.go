@@ -30,36 +30,52 @@ func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, po
 	// they can.
 	switch {
 	case !release.Found && release.Error != "":
-		if recordedVersion != "" {
-			findings = append(findings, fmt.Sprintf(
-				"env config records runtimeversion %s but the runtime helm release %q in namespace %q could not be read: %s",
-				recordedVersion, release.Name, req.Namespace, release.Error))
-		}
+		findings = append(findings, unreadableReleaseDrift(req, release, recordedVersion)...)
 	case !release.Found:
-		if recordedVersion != "" {
-			findings = append(findings, fmt.Sprintf(
-				"env config records runtimeversion %s but no runtime helm release %q was found in namespace %q",
-				recordedVersion, release.Name, req.Namespace))
-		}
+		findings = append(findings, missingReleaseDrift(req, release, recordedVersion)...)
 	default:
-		if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
-			findings = append(findings, fmt.Sprintf(
-				"env config runtimeversion (%s) does not match the release's app version (%s)",
-				recordedVersion, release.AppVersion))
-		}
-
-		if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
-			if recorded, ok := release.ImageOverrides[DevopsComponentName]; ok && recorded != runtimeImage {
-				findings = append(findings, fmt.Sprintf(
-					"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
-					runtimeImage, DevopsComponentName, recorded))
-			}
-		}
+		findings = append(findings, foundReleaseDrift(req, release, recordedVersion)...)
 	}
 
 	findings = append(findings, runningImageDrift(release, pods)...)
 	findings = append(findings, runtimePodDrift(req, release)...)
 
+	return findings
+}
+
+func unreadableReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	if recordedVersion == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"env config records runtimeversion %s but the runtime helm release %q in namespace %q could not be read: %s",
+		recordedVersion, release.Name, req.Namespace, release.Error)}
+}
+
+func missingReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	if recordedVersion == "" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"env config records runtimeversion %s but no runtime helm release %q was found in namespace %q",
+		recordedVersion, release.Name, req.Namespace)}
+}
+
+func foundReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+	var findings []string
+	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
+		findings = append(findings, fmt.Sprintf(
+			"env config runtimeversion (%s) does not match the release's app version (%s)",
+			recordedVersion, release.AppVersion))
+	}
+
+	if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
+		if recorded, ok := release.ImageOverrides[DevopsComponentName]; ok && recorded != runtimeImage {
+			findings = append(findings, fmt.Sprintf(
+				"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
+				runtimeImage, DevopsComponentName, recorded))
+		}
+	}
 	return findings
 }
 
