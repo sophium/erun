@@ -647,35 +647,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
-	code := -1
-	var signal, reason string
-	switch {
-	case state != nil:
-		code = state.ExitCode()
-		if signal = environmentJobExitSignal(state); signal != "" {
-			reason = "terminated by signal " + signal
-		}
-	case waitErr != nil:
-		reason = "failed to start: " + waitErr.Error()
-	}
-	jobState := EnvironmentJobStateExited
-	if state != nil && environmentJobProcessGroupSurvivors(childPID) {
-		jobState = EnvironmentJobStateAbandoned
-		reason = "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work"
-	}
-	// A gate a job started through its own `job start` (agent-gate.sh's
-	// detach-and-await, or an agent driving it directly) runs as its own
-	// detached, unrelated-process-group job, so it never shows up in the
-	// process-group check above -- this is the second, independent way a job
-	// can end while work it started has not: a sibling job record, not a
-	// process. It takes priority over a plain abandoned verdict because a
-	// still-running job record is something a caller can actually await for a
-	// real outcome, unlike an orphaned process group member.
-	self := recorder.snapshot()
-	if running := environmentJobRunningChildren(recorder.dir, self.ID, time.Now()); len(running) > 0 {
-		jobState = EnvironmentJobStateGateIncomplete
-		reason = environmentJobGateIncompleteReason(running)
-	}
+	code, signal, reason, jobState := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
 	recorder.update(func(job *EnvironmentJob) {
 		job.State = jobState
 		job.EndedAt = time.Now()
@@ -689,6 +661,37 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.ExitCode = &code
 	})
 	return nil
+}
+
+// resolveEnvironmentJobOutcome decides the exit code, signal, reason, and
+// terminal state finishEnvironmentJob records. State and reason can be
+// overridden twice, independently, by work the job left behind that it never
+// waited for: a process still alive in its own process group (abandoned), or
+// a sibling job record naming this job as its StartedByJobID (gate-incomplete,
+// which takes priority — a still-running job record is something a caller can
+// actually await for a real outcome, unlike an orphaned process group member).
+func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error) (code int, signal, reason, jobState string) {
+	code = -1
+	switch {
+	case state != nil:
+		code = state.ExitCode()
+		if signal = environmentJobExitSignal(state); signal != "" {
+			reason = "terminated by signal " + signal
+		}
+	case waitErr != nil:
+		reason = "failed to start: " + waitErr.Error()
+	}
+	jobState = EnvironmentJobStateExited
+	if state != nil && environmentJobProcessGroupSurvivors(childPID) {
+		jobState = EnvironmentJobStateAbandoned
+		reason = "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work"
+	}
+	self := recorder.snapshot()
+	if running := environmentJobRunningChildren(recorder.dir, self.ID, time.Now()); len(running) > 0 {
+		jobState = EnvironmentJobStateGateIncomplete
+		reason = environmentJobGateIncompleteReason(running)
+	}
+	return code, signal, reason, jobState
 }
 
 // environmentJobGateIncompleteReason names the still-running job(s) a caller
