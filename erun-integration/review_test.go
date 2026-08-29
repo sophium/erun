@@ -31,6 +31,7 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		comments    = map[string][]map[string]any{}
 		nextReview  = 1
 		nextComment = 1
+		nextBuild   = 1
 	)
 
 	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
@@ -266,6 +267,43 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 			return
 		}
 		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	})
+
+	// POST /builds mirrors the real backend's auto-transition: recording a
+	// build moves the review straight to READY or FAILED, with no separate
+	// PATCH /status call — see erun-docs/docs/collaboration/builds.md.
+	mux.HandleFunc("POST /v1/reviews/{review_id}/builds", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		reviewID := r.PathValue("review_id")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		defer mu.Unlock()
+		review, ok := reviews[reviewID]
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		id := "build-" + strconv.Itoa(nextBuild)
+		nextBuild++
+		successful, _ := body["successful"].(bool)
+		build := map[string]any{
+			"buildId": id, "tenantId": "tenant-1", "reviewId": reviewID,
+			"successful": successful, "commitId": body["commitId"], "version": body["version"],
+			"createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		}
+		if detail, ok := body["failureDetail"].(string); ok && detail != "" {
+			build["failureDetail"] = detail
+		}
+		if successful {
+			review["status"] = "READY"
+		} else {
+			review["status"] = "FAILED"
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(build)
 	})
 
 	server := httptest.NewServer(mux)
@@ -562,6 +600,87 @@ func TestReview(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "not found") {
 			t.Fatalf("expected a not-found error, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("record_build_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"review", "record-build", "review-1",
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/record_build_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("record_build_failed_dry_run_traces_failure_detail", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"review", "record-build", "review-1",
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3",
+			"--failed", "--failure-detail", "image build failed", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/record_build_failed_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("record_build_real_run_moves_review_to_ready", func(t *testing.T) {
+		// create -> record-build (successful) -> show (status=READY), covering
+		// PlatformClient.CreateBuild's request/response handling and the
+		// backend's build-drives-status contract end to end.
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		created := createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		args := []string{
+			"review", "record-build", created.ReviewID,
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("record-build exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "successful=true") {
+			t.Fatalf("expected the recorded build to report successful=true, got:\n%s", result.Combined)
+		}
+
+		show := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if show.ExitCode != 0 || !strings.Contains(show.Combined, "status=READY") {
+			t.Fatalf("expected the review to be READY after a successful build, got exit %d:\n%s", show.ExitCode, show.Combined)
+		}
+	})
+
+	t.Run("record_build_failed_real_run_moves_review_to_failed", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		created := createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		args := []string{
+			"review", "record-build", created.ReviewID,
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3",
+			"--failed", "--failure-detail", "image build failed",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("record-build exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "successful=false") {
+			t.Fatalf("expected the recorded build to report successful=false, got:\n%s", result.Combined)
+		}
+
+		show := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if show.ExitCode != 0 || !strings.Contains(show.Combined, "status=FAILED") {
+			t.Fatalf("expected the review to be FAILED after a failed build, got exit %d:\n%s", show.ExitCode, show.Combined)
 		}
 	})
 

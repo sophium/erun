@@ -52,15 +52,18 @@ type PlatformComment struct {
 
 // PlatformBuild mirrors model.Build's JSON shape.
 type PlatformBuild struct {
-	BuildID    string    `json:"buildId"`
-	TenantID   string    `json:"tenantId"`
-	ReviewID   string    `json:"reviewId"`
-	ReviewName string    `json:"reviewName,omitempty"`
-	Successful bool      `json:"successful"`
-	CommitID   string    `json:"commitId"`
-	Version    string    `json:"version"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	BuildID    string `json:"buildId"`
+	TenantID   string `json:"tenantId"`
+	ReviewID   string `json:"reviewId"`
+	ReviewName string `json:"reviewName,omitempty"`
+	Successful bool   `json:"successful"`
+	CommitID   string `json:"commitId"`
+	Version    string `json:"version"`
+	// FailureDetail is the caller's own account of why a RECORDED build
+	// failed; empty for a successful build.
+	FailureDetail string    `json:"failureDetail,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // PlatformReviewFilter mirrors the discovery filters GET /v1/reviews accepts.
@@ -261,6 +264,26 @@ func (c *PlatformClient) ListBuilds(ctx context.Context, reviewID string) ([]Pla
 	var builds []PlatformBuild
 	err := c.do(ctx, http.MethodGet, "/v1/reviews/"+url.PathEscape(reviewID)+"/builds", nil, true, &builds)
 	return builds, err
+}
+
+// PlatformCreateBuildParams is the build-recording input. Kind is not
+// caller-settable: the backend always records a client-reported build as
+// RECORDED, never GATE (the merge queue's own build kind).
+type PlatformCreateBuildParams struct {
+	CommitID      string `json:"commitId"`
+	Version       string `json:"version"`
+	Successful    bool   `json:"successful"`
+	FailureDetail string `json:"failureDetail,omitempty"`
+}
+
+// CreateBuild records a build against a review. Recording one is the sole way
+// an erun client advances a review off OPEN: the backend transitions the
+// review to READY (successful) or FAILED (not) as part of the same write, and
+// promotes it to MERGE if it was already the merge queue's head.
+func (c *PlatformClient) CreateBuild(ctx context.Context, reviewID string, params PlatformCreateBuildParams) (PlatformBuild, error) {
+	var build PlatformBuild
+	err := c.do(ctx, http.MethodPost, "/v1/reviews/"+url.PathEscape(reviewID)+"/builds", params, true, &build)
+	return build, err
 }
 
 // reviewStatusQueryDetail renders a filter's set fields as tracePlatformCall

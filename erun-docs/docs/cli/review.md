@@ -4,7 +4,7 @@ title: erun review
 
 # `erun review`
 
-Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, close a review, and inspect or advance a target branch's [merge queue](/collaboration/merge-queue).
+Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, record a build against a review, close a review, and inspect or advance a target branch's [merge queue](/collaboration/merge-queue).
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
@@ -20,6 +20,7 @@ erun review comment REVIEW_ID --commit <hash> --file <path> --line <n> [flags]
 erun review resolve REVIEW_ID COMMENT_ID [flags]
 erun review unresolve REVIEW_ID COMMENT_ID [flags]
 erun review close REVIEW_ID [flags]
+erun review record-build REVIEW_ID --commit <hash> --version <version> [flags]
 erun review queue list --target-branch <branch> [flags]
 erun review queue advance --target-branch <branch> [flags]
 erun review queue override-advance --target-branch <branch> --reason <text> [flags]
@@ -68,6 +69,17 @@ Resolve a comment thread by closing its root comment, or reopen one by marking i
 
 Closes a review without merging it.
 
+### `review record-build` {#review-record-build}
+
+Records a build against a review — the only way an erun client transitions a review off `OPEN`. Recording a successful build moves it to `READY` (and, if it was already the merge queue's head, on to `MERGE`); recording a failed one moves it to `FAILED`. There is no separate command to set a review's status directly to `READY` or `FAILED` — only a recorded build result does that. See [Builds](/collaboration/builds) for the resource shape and validation rules.
+
+| Flag | Description |
+|---|---|
+| `--commit` | Full 40-character commit hash the build ran against. |
+| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. |
+| `--failed` | Record the build as failed instead of successful. |
+| `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
+
 ### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
 Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build (no CLI flag for that yet; see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
@@ -96,6 +108,9 @@ erun review resolve 018f... 018h...
 erun review unresolve 018f... 018h...
 erun review close 018f...
 
+erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3
+erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail "image build failed"
+
 erun review queue list --target-branch main
 erun review queue advance --target-branch main
 erun review queue override-advance --target-branch main --reason "hotfix, reviewers unavailable"
@@ -112,6 +127,9 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
 | `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |
+| `record-build` with a `--commit` that is not 40 lowercase hex characters. | `400 Bad Request` (`INVALID_COMMIT_ID`). |
+| `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
+| `record-build` on an unknown review id. | `404 Not Found`. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |

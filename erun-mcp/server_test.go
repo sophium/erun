@@ -160,7 +160,7 @@ var wantRegisteredTools = []string{
 	"context_init", "context_list", "context_start", "context_stop",
 	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_agent", "exec_commit",
 	"exec_diff", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
-	"exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
+	"exec_merge", "exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
 	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
@@ -170,7 +170,7 @@ var wantRegisteredTools = []string{
 	"platform_tenant_create", "platform_tenant_list", "platform_user_enroll",
 	"platform_user_list", "platform_whoami", "publish", "push", "raw",
 	"release", "resize", "review_close", "review_comment", "review_create", "review_list",
-	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_resolve", "review_show",
+	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build", "review_resolve", "review_show",
 	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
 
