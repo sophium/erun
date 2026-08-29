@@ -116,10 +116,13 @@ func erunTestProvider() CloudProviderConfig {
 	})
 }
 
-func startDeviceAuthorizationExpecting(t *testing.T, wantClientID string, auth ERunDeviceAuthorization) func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
-	return func(_ Context, _ OIDCDiscovery, clientID string) (ERunDeviceAuthorization, error) {
+func startDeviceAuthorizationExpecting(t *testing.T, wantClientID string, auth ERunDeviceAuthorization) func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
+	return func(_ Context, _ OIDCDiscovery, clientID, scope string) (ERunDeviceAuthorization, error) {
 		if clientID != wantClientID {
 			t.Fatalf("clientID = %q, want %q", clientID, wantClientID)
+		}
+		if scope == "" {
+			t.Fatal("device authorization must request a scope")
 		}
 		return auth, nil
 	}
@@ -185,11 +188,11 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testi
 			// device grant, so login must fall back to the PKCE path.
 			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
 		},
-		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
+		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
 			t.Fatal("device authorization must not be started when the issuer advertises no device endpoint")
 			return ERunDeviceAuthorization{}, nil
 		},
-		RunERunAuthCodeLogin: func(_ Context, discovery OIDCDiscovery, clientID string) (ERunTokens, error) {
+		RunERunAuthCodeLogin: func(_ Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
 			called = true
 			if clientID != "cli-client-1" {
 				t.Fatalf("clientID = %q", clientID)
@@ -390,7 +393,7 @@ func TestERunCloudProviderBearerTokenRequiresConfiguration(t *testing.T) {
 func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 	store := erunTestCloudStore{}
 	provider := NormalizeCloudProviderConfig(CloudProviderConfig{Alias: "erun+x@erun", Provider: CloudProviderERun})
-	if _, err := erunCloudProviderLogin(Context{}, &store, provider, "", CloudDependencies{}); err == nil {
+	if _, err := erunCloudProviderLogin(Context{}, &store, provider, "", nil, CloudDependencies{}); err == nil {
 		t.Fatal("expected an error for a provider with no ERun config")
 	} else if !strings.Contains(err.Error(), "cloud init erun") {
 		t.Fatalf("error %q does not point at `erun cloud init erun`", err.Error())
@@ -412,14 +415,14 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing
 		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
 			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
 		},
-		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
+		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
 			deviceStarted = true
 			return ERunDeviceAuthorization{DeviceCode: "device-code-3", UserCode: "WXYZ-1234"}, nil
 		},
 		PollERunDeviceToken: func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error) {
 			return ERunTokens{}, fmt.Errorf("device authorization expired before sign-in completed")
 		},
-		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string, string) (ERunTokens, error) {
 			authCodeCalled = true
 			return ERunTokens{AccessToken: "access-3", RefreshToken: "refresh-3", ExpiresIn: time.Hour}, nil
 		},
@@ -455,11 +458,11 @@ func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
 		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
 			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
 		},
-		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
+		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
 			t.Fatal("an explicit authcode flow must not start the device grant")
 			return ERunDeviceAuthorization{}, nil
 		},
-		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string, string) (ERunTokens, error) {
 			return ERunTokens{AccessToken: "access-4", RefreshToken: "refresh-4", ExpiresIn: time.Hour}, nil
 		},
 	}
@@ -481,7 +484,7 @@ func TestERunCloudProviderLoginExplicitDeviceFlowWithoutEndpointErrors(t *testin
 		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
 			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
 		},
-		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string, string) (ERunTokens, error) {
 			t.Fatal("an explicit device flow must not silently use authorization code")
 			return ERunTokens{}, nil
 		},
@@ -518,5 +521,52 @@ func TestNormalizeERunLoginFlow(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("NormalizeERunLoginFlow(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
 		}
+	}
+}
+
+// Reserved scopes are frequently absent from a provider's discovery document
+// (Zitadel's urn:zitadel:* family is), so the operator must be able to ask for
+// one by name and have it actually reach the authorization request. Without
+// the org claim such a scope carries, an org-scoped issuer resolves nobody
+// (issue #1605).
+func TestERunCloudProviderLoginRequestsExtraScopes(t *testing.T) {
+	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
+	provider := erunTestProvider()
+
+	var gotScope string
+	deps := CloudDependencies{
+		CloudSecretStore: NewFileCloudSecretStore(t.TempDir()),
+		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
+		},
+		RunERunAuthCodeLogin: func(_ Context, _ OIDCDiscovery, _ string, scope string) (ERunTokens, error) {
+			gotScope = scope
+			return ERunTokens{AccessToken: "access-5", RefreshToken: "refresh-5", ExpiresIn: time.Hour}, nil
+		},
+	}
+
+	params := CloudLoginParams{Alias: provider.Alias, Scopes: []string{"urn:zitadel:iam:user:resourceowner"}}
+	if _, err := LoginCloudProviderAlias(Context{}, &store, params, deps); err != nil {
+		t.Fatalf("LoginCloudProviderAlias: %v", err)
+	}
+	if !strings.Contains(gotScope, "urn:zitadel:iam:user:resourceowner") {
+		t.Fatalf("scope = %q, want the requested reserved scope to reach the request", gotScope)
+	}
+	for _, baseline := range []string{"openid", "offline_access"} {
+		if !strings.Contains(gotScope, baseline) {
+			t.Fatalf("scope = %q, want the %q baseline kept", gotScope, baseline)
+		}
+	}
+}
+
+func TestERunLoginScope(t *testing.T) {
+	if got := erunLoginScope(nil); got != erunOAuthScope {
+		t.Fatalf("erunLoginScope(nil) = %q, want the baseline %q", got, erunOAuthScope)
+	}
+	// A duplicate of the baseline must not be repeated, and a multi-scope
+	// string must be split rather than sent as one opaque value.
+	got := erunLoginScope([]string{"openid", "a b", "", "a"})
+	if got != "openid offline_access a b" {
+		t.Fatalf("erunLoginScope = %q, want deduped and split", got)
 	}
 }

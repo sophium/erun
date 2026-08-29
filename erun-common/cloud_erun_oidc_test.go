@@ -99,7 +99,7 @@ func TestDefaultStartERunDeviceAuthorization(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	auth, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{DeviceAuthorizationEndpoint: srv.URL}, "cli-1")
+	auth, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{DeviceAuthorizationEndpoint: srv.URL}, "cli-1", erunOAuthScope)
 	if err != nil {
 		t.Fatalf("defaultStartERunDeviceAuthorization: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestDefaultStartERunDeviceAuthorization(t *testing.T) {
 }
 
 func TestDefaultStartERunDeviceAuthorizationRequiresEndpoint(t *testing.T) {
-	if _, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{Issuer: "https://auth.example.test"}, "cli-1"); err == nil {
+	if _, err := defaultStartERunDeviceAuthorization(Context{}, OIDCDiscovery{Issuer: "https://auth.example.test"}, "cli-1", erunOAuthScope); err == nil {
 		t.Fatal("expected an error when no device authorization endpoint is advertised")
 	}
 }
@@ -290,7 +290,7 @@ func TestPKCEVerifierAndStateAreUnpredictable(t *testing.T) {
 
 func TestERunAuthorizationCodeURLIncludesPKCEParams(t *testing.T) {
 	discovery := OIDCDiscovery{AuthorizationEndpoint: "https://auth.example.test/authorize"}
-	authURL := erunAuthorizationCodeURL(discovery, "cli-1", "http://127.0.0.1:9999/callback", "state-1", "challenge-1")
+	authURL := erunAuthorizationCodeURL(discovery, "cli-1", "http://127.0.0.1:9999/callback", "state-1", "challenge-1", erunOAuthScope)
 	for _, want := range []string{
 		"https://auth.example.test/authorize?",
 		"client_id=cli-1",
@@ -336,7 +336,7 @@ func startERunAuthorizationCodeLogin(discovery OIDCDiscovery, clientID string, s
 	resultCh := make(chan ERunTokens, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		tokens, err := runERunAuthorizationCodeLogin(Context{Stdout: stdout}, discovery, clientID)
+		tokens, err := runERunAuthorizationCodeLogin(Context{Stdout: stdout}, discovery, clientID, erunOAuthScope)
 		if err != nil {
 			errCh <- err
 			return

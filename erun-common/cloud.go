@@ -101,6 +101,12 @@ type InitAWSCloudProviderParams struct {
 type CloudLoginParams struct {
 	Alias string
 	Force bool
+	// Scopes are extra OAuth scopes to request on top of the baseline
+	// "openid offline_access". A provider's reserved scopes are often not
+	// advertised in discovery, so they can only be asked for by name — e.g.
+	// urn:zitadel:iam:user:resourceowner, which is what makes a Zitadel token
+	// carry the org claim an org-scoped issuer resolves tenants by.
+	Scopes []string
 	// Flow selects the OIDC grant used for an erun-hosted alias:
 	// ERunLoginFlowDevice, ERunLoginFlowAuthCode, or empty/ERunLoginFlowAuto.
 	// Ignored by every other provider, which has only one login path.
@@ -173,9 +179,9 @@ type CloudDependencies struct {
 	// grant. See cloud_erun.go / cloud_erun_oidc.go.
 	FetchPlatformInfo            func(Context, string) (PlatformInfo, error)
 	FetchOIDCDiscovery           func(Context, string) (OIDCDiscovery, error)
-	StartERunDeviceAuthorization func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error)
+	StartERunDeviceAuthorization func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error)
 	PollERunDeviceToken          func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
-	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string) (ERunTokens, error)
+	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 }
 
@@ -424,7 +430,7 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 		// erunCloudProviderLogin resolves its own final status (it may have
 		// just persisted a new refresh token ref onto provider), so it returns
 		// directly rather than falling through to the stale pre-login value.
-		return erunCloudProviderLogin(ctx, store, provider, params.Flow, deps)
+		return erunCloudProviderLogin(ctx, store, provider, params.Flow, params.Scopes, deps)
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
