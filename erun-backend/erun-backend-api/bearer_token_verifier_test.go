@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,6 +179,88 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 	})
 }
 
+// mustRejectWith fails unless the verifier rejects the token with an error
+// mentioning every want. The rejection has to name the audience the token
+// carried and the ones configured, or an operator is left guessing at a
+// one-line config problem.
+func mustRejectWith(t *testing.T, verifier *BearerTokenVerifier, token string, wants ...string) {
+	t.Helper()
+	_, err := verifier.VerifyBearerToken(context.Background(), token)
+	if err == nil {
+		t.Fatal("expected the token to be rejected")
+	}
+	for _, want := range wants {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("rejection %q does not name %q", err.Error(), want)
+		}
+	}
+}
+
+// TestVerifyBearerTokenOIDCAudience exercises the audience policy on the OIDC
+// path. The issuer allow-list cannot tell two clients of one IdP apart, so
+// without this a token that issuer minted for any of its clients authenticates
+// against the API.
+func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
+	provider := newMockOIDCProvider(t)
+	now := time.Now()
+	token := func(audience any) string {
+		claims := map[string]any{
+			"iss": provider.issuer(),
+			"sub": "user-1",
+			"iat": now.Unix(),
+			"exp": now.Add(time.Hour).Unix(),
+		}
+		if audience != nil {
+			claims["aud"] = audience
+		}
+		return provider.sign(t, claims)
+	}
+
+	t.Run("a configured audience accepts a token minted for it", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
+			AllowedIssuers:   []string{provider.issuer()},
+			AllowedAudiences: []string{"console-client", "cli-client"},
+		})
+		if claims := mustVerify(t, verifier, token("cli-client")); claims.Subject != "user-1" {
+			t.Fatalf("claims = %+v", claims)
+		}
+	})
+
+	t.Run("an OIDC aud listing several audiences passes on any one of them", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
+			AllowedIssuers:   []string{provider.issuer()},
+			AllowedAudiences: []string{"console-client"},
+		})
+		mustVerify(t, verifier, token([]string{"some-other-client", "console-client"}))
+	})
+
+	t.Run("the same trusted issuer's token for another audience is rejected, naming both", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
+			AllowedIssuers:   []string{provider.issuer()},
+			AllowedAudiences: []string{"console-client", "cli-client"},
+		})
+		mustRejectWith(t, verifier, token("some-other-client"), "some-other-client", "console-client", "cli-client")
+	})
+
+	// Fail closed: an explicit allow-list is a statement about which audiences
+	// may call, and a token naming none cannot satisfy it.
+	t.Run("a token with no aud claim is rejected once an allow-list is configured", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
+			AllowedIssuers:   []string{provider.issuer()},
+			AllowedAudiences: []string{"console-client"},
+		})
+		mustRejectWith(t, verifier, token(nil), "carries no audience", "console-client")
+	})
+
+	// Empty means any, matching the issuer allow-list beside it, so a deployment
+	// that has not established its client ids keeps working exactly as before.
+	t.Run("an unconfigured allow-list accepts any audience", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{AllowedIssuers: []string{provider.issuer()}})
+		mustVerify(t, verifier, token("some-other-client"))
+		mustVerify(t, verifier, token(nil))
+	})
+}
+
 // TestVerifyBearerTokenFileIssuer exercises the file:// desktop path: a
 // desktop-signed EdDSA token authenticates to the API with no live IdP,
 // the same auth the MCP edge uses, with the API audience enforced.
@@ -229,6 +312,35 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 			ExpiresAt: now.Add(-time.Minute).Unix(),
 		})
 		mustReject(t, verifier, token, "expected an expired token to be rejected")
+	})
+
+	// The OIDC audience allow-list is policy for the hosted IdP's clients only.
+	// The desktop signs its own tokens and keeps being held to erun's own API
+	// audience, whatever that allow-list says.
+	t.Run("an OIDC audience allow-list leaves the desktop path's own audience check alone", func(t *testing.T) {
+		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
+			DesktopPublicKeyPath: keyPath,
+			AllowedAudiences:     []string{"console-client"},
+		})
+		accepted := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+			Issuer:    issuer,
+			Subject:   "dev-user",
+			Audience:  eruncommon.APITokenAudience,
+			ExpiresAt: now.Add(time.Hour).Unix(),
+		})
+		mustVerify(t, verifier, accepted)
+
+		// Neither the desktop's own MCP audience nor the OIDC allow-list's
+		// entry is an API audience for a desktop-signed token.
+		for _, audience := range []string{eruncommon.MCPTokenAudience("acme", "prod"), "console-client"} {
+			rejected := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+				Issuer:    issuer,
+				Subject:   "dev-user",
+				Audience:  audience,
+				ExpiresAt: now.Add(time.Hour).Unix(),
+			})
+			mustReject(t, verifier, rejected, "expected the desktop path to keep enforcing the API audience: "+audience)
+		}
 	})
 
 	t.Run("a desktop token from an untrusted file issuer is rejected", func(t *testing.T) {

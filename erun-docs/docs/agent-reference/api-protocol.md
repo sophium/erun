@@ -49,13 +49,46 @@ For every authenticated request:
 2. Extract `iss` from the JWT payload. The API trusts two kinds of issuer (issue #674), dispatched on scheme — the same multi-issuer model as the [MCP edge](#mcp-edge), so the API and every edge authenticate identically:
    - **`file://` desktop key** — when `iss` equals the configured trusted `file://<path>` desktop issuer (`ERUN_API_DESKTOP_PUBLIC_KEY_PATH`): verify the EdDSA signature against the injected public key (`alg` hard-locked to `EdDSA`, closing the alg-confusion class), and enforce `exp` and the `erun-api` audience. This is the desktop / e2e path — a desktop-signed token authenticates with **no live IdP**, exactly as for the MCP edge.
    - **`https://` OIDC issuer** — otherwise: if an allowed-issuers allow-list is configured and `iss` is not on it → `401`.
-3. (OIDC path) Fetch (or read from cache) the issuer's `<iss>/.well-known/openid-configuration` and its `jwks_uri` JWKS, and verify the JWT signature and registered claims (`exp`, `nbf`, `iat`). Failure → `401`. (For OIDC tokens, audience/`aud` is **not** currently enforced — the verifier skips the client-ID check; `aud` validation for OIDC is `(Planned.)`. The `file://` desktop path **does** enforce the `erun-api` audience, so a token minted for an MCP env — audience `erun-mcp:<tenant>/<env>` — cannot be replayed against the API.)
+3. (OIDC path) Fetch (or read from cache) the issuer's `<iss>/.well-known/openid-configuration` and its `jwks_uri` JWKS, and verify the JWT signature and registered claims (`exp`, `nbf`, `iat`). Failure → `401`. Then apply the **audience allow-list** below. (The `file://` desktop path enforces its own fixed `erun-api` audience instead, so a token minted for an MCP env — audience `erun-mcp:<tenant>/<env>` — cannot be replayed against the API. That check is independent of the allow-list and unaffected by it.)
 4. Look up `issuers.org_field_key` for `iss`.
    - If `iss` is **not registered**: unauthorized (`401`) — **unless** the `tenants` table is empty, which triggers first-identity bootstrap (below).
    - If `org_field_key` is **NULL**: resolve `tenant_issuers` where `issuer = iss` and `org_field_value IS NULL` → tenant.
    - If `org_field_key` is **set**: read that claim's value (`org`) from the token. Empty/absent → `401`. Otherwise resolve `tenant_issuers` where `issuer = iss` and `org_field_value = org` → tenant.
 5. Resolve the ERun user from `(tenant, iss, sub)` via `user_external_ids`. Unknown subject → `401` — **except** when the resolved tenant has **no users yet**, in which case the first valid token for it is enrolled as that tenant's first user with both `ReadAll` and `WriteAll` (per-tenant first-user bootstrap, below). Once a tenant has any user, unknown subjects for it stay unauthorized.
 6. Authorize the request against the user's roles/permissions; on success, allow and write the audit event.
+
+#### The OIDC audience allow-list {#oidc-audience-allow-list}
+
+The issuer allow-list in step 2 answers "which IdP minted this?", not "which of that IdP's clients is calling?". A hosted IdP puts the registered **client id** in `aud`, so every client of a trusted issuer clears the issuer check — the `aud` claim is what separates them. The API applies that policy as a configured allow-list:
+
+| Setting | Where |
+|---|---|
+| `--oidc-allowed-audiences <csv>` | `eapi` flag |
+| `ERUN_OIDC_ALLOWED_AUDIENCES` | env var; the API image's entrypoint translates it into the flag |
+| `api.oidcAllowedAudiences` | `erun-backend-api` chart value; **empty by default** |
+
+Resolution:
+
+1. **Empty (the default)** → no audience check on the OIDC path. Any audience an allowed issuer minted is accepted, matching the issuer allow-list's own empty-means-any rule.
+2. **Non-empty** → the token's `aud` must contain at least one listed value. An OIDC `aud` may list several audiences; intersecting on any one of them passes.
+3. **A token with no `aud` claim** is rejected whenever the allow-list is non-empty — an explicit statement of which audiences may call cannot be satisfied by a token that names none.
+
+Which state is in force is reported on the API's own startup line, so it is readable from the logs rather than inferred:
+
+```
+oidc audience enforcement=off (any audience from an allowed issuer is accepted)
+oidc audience enforcement=on (allowed: console-client, cli-client)
+```
+
+**Error behaviour**
+
+| Failure mode | What happens | Recovery |
+|---|---|---|
+| Allow-list set; token's `aud` matches none of it | `401`; the rejection names the audiences the token carried and the ones configured (never any other token content) | Add the client id to `api.oidcAllowedAudiences`, or call with a token minted for a listed client |
+| Allow-list set; token carries no `aud` | `401` naming the expected audiences | Configure the IdP client to mint an `aud`, or clear the allow-list |
+| Allow-list unset | Request proceeds; no audience check | Set `api.oidcAllowedAudiences` to turn the boundary on |
+
+Turning it on is a **configuration change**, not a code change: the client ids a given deployment's IdP mints are a fact about that deployment, so a wrong list refuses every caller at once. Read the ids off the IdP first (for an erun-shipped Zitadel, the console and CLI client ids the `erun-zitadel` bootstrap publishes — the same values [`GET /v1/platform`](#platform-endpoint) serves as `consoleClientId`/`cliClientId`), confirm them against a real token's `aud`, then set the value.
 
 **First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant, registers its `iss` in `issuers`, creates the first user, and grants it both `ReadAll` and `WriteAll`.
 
@@ -73,7 +106,7 @@ The runtime chart configures each edge with a set of trusted issuers mapping eac
 
 1. `Authorization: Bearer <jwt>` is present — missing → `401`.
 2. The token's `iss` is a trusted issuer for this edge — untrusted → `401`; the mapped value is the resolved tenant.
-3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API (whose `file://` path enforces its own `erun-api` audience — issue #674). The REST API's OIDC path does not yet enforce `aud` (see the [verification algorithm](#token-verification-algorithm) above).
+3. The signature verifies against that issuer's key, and `exp` and the audience (`aud`) match — the per-env audience (`erun-mcp:<tenant>/<environment>`) means a token minted for one environment cannot be replayed against another, or against the REST API (whose `file://` path enforces its own `erun-api` audience — issue #674). The REST API's OIDC path applies a configured allow-list instead of a fixed audience, since the audiences a hosted IdP mints are per-deployment — see [the audience allow-list](#oidc-audience-allow-list) above.
 4. The resolved tenant matches **this** environment's tenant (a per-env edge serves exactly one tenant) — a token resolving to another tenant → `401`. Tenant-scoped tools are likewise pinned to the edge's own environment: a `tenant`/`environment` argument that differs from the pod's identity is refused, so a caller can never drive one env's MCP to act on another (issue #657).
 
 An edge can trust **multiple issuers at once**, of two kinds, dispatched by the *configured* issuer's scheme (not the token's claimed `iss`, so the verification path can't be attacker-chosen):

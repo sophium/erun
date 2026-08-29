@@ -2,6 +2,13 @@
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- /* Which token audiences the API accepts on its OIDC path — the boundary
+       between clients of one shared IdP, which the issuer allow-list above
+       cannot draw. Empty by default and deliberately so: the client ids a
+       deployment's IdP actually mints are an infrastructure fact, and guessing
+       them here would lock out every caller. Set it per env once those ids are
+       established; the API's startup log reports whether it is enforcing. */ -}}
+{{- $oidcAllowedAudiences := default "" $api.oidcAllowedAudiences -}}
 {{- /* GET /v1/platform discovery: served unauthenticated so a client can
        discover this instance before it has a token. issuer derives from the
        env's platform.authHost (the hosted IdP host every platform deploy
@@ -516,6 +523,8 @@ spec:
             {{- end }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_OIDC_ALLOWED_AUDIENCES
+              value: {{ $oidcAllowedAudiences | quote }}
             - name: ERUN_PLATFORM_ISSUER
               value: {{ $platformIssuer | quote }}
             - name: ERUN_PLATFORM_API_URL
