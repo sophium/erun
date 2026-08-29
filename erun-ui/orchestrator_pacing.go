@@ -367,7 +367,13 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	if ok && report.at.After(lastActiveAt) {
 		lastActiveAt = report.at
 	}
-	if ok && report.activity.Busy && report.at.Unix() > row.lastNudgeAtUnix {
+	// A report written after the last nudge is the turn boundary itself,
+	// whether that turn ended busy or idle: the session did something in
+	// response to being asked. Requiring Busy here missed exactly the
+	// compliant case — a short reply that returns to idle before the next
+	// tick samples it — so a session answering every nudge still climbed
+	// toward the cap.
+	if ok && report.at.Unix() > row.lastNudgeAtUnix {
 		a.rearmOrchestratorPacing(row.id)
 		row.nudgeCount = 0
 		row.capped = false
@@ -418,9 +424,10 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 }
 
 // rearmOrchestratorPacing clears the nudge count and the cap, so the next
-// staleness period starts counting from zero. Called both for a fresh busy
-// report (this reconciler) and for real operator input into the pane
-// (SendSessionInput) — the two rearm paths the cap bound names.
+// staleness period starts counting from zero. Called both for a fresh
+// activity report written after the last nudge (this reconciler) and for
+// real operator input into the pane (SendSessionInput) — the two rearm
+// paths the cap bound names.
 func (a *App) rearmOrchestratorPacing(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

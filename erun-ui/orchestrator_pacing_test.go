@@ -266,6 +266,112 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	}
 }
 
+// TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles pins the bug: a
+// session that answers every pacing nudge with a short reply — one that ends
+// back at idle before the next reconciler tick samples it — must never accrue
+// toward the cap. Driving reconcileOrchestratorPacingOne directly with a
+// synthetic, always-advancing clock lets the test push the session through
+// many more stale-then-reply cycles than orchestratorPacingMaxNudges without
+// waiting on the real 10-minute staleness window between them.
+func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{})
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	session := newCallRecordingSession()
+	key := orchestratorSessionKey("agent")
+	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	base := time.Unix(1_700_000_000, 0)
+	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: base}
+
+	cycles := orchestratorPacingMaxNudges + 2
+	tick := base
+	for i := 0; i < cycles; i++ {
+		// Advance well past the staleness window so this cycle's first tick
+		// is due a nudge, exactly as an orchestrator that replies and then
+		// falls quiet again for the next stretch would look.
+		tick = tick.Add(orchestratorPacingStaleAfter + time.Minute)
+
+		rows := app.orchestratorPacingRows()
+		if len(rows) != 1 {
+			t.Fatalf("expected one pacing row, got %d", len(rows))
+		}
+		decision, _ := app.reconcileOrchestratorPacingOne(rows[0], tick, false)
+		if decision != orchestratorPacingNudge {
+			t.Fatalf("cycle %d: expected a nudge, got decision=%v", i, decision)
+		}
+
+		app.mu.Lock()
+		lastNudgeAtUnix := app.orchestrators["agent"].pacingLastNudgeAtUnix
+		app.mu.Unlock()
+
+		// The session answers in one line and returns to idle well before
+		// the next tick — the compliant case the bug missed.
+		replyAt := time.Unix(lastNudgeAtUnix, 0).Add(time.Second)
+		writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: replyAt.Unix()})
+
+		// The next tick, shortly after the reply, must observe the fresh
+		// report and rearm rather than letting the count carry forward.
+		tick = replyAt.Add(10 * time.Second)
+		rows = app.orchestratorPacingRows()
+		app.reconcileOrchestratorPacingOne(rows[0], tick, false)
+
+		app.mu.Lock()
+		count := app.orchestrators["agent"].pacingNudgeCount
+		capped := app.orchestrators["agent"].pacingCapped
+		app.mu.Unlock()
+		if capped {
+			t.Fatalf("cycle %d: a session that answered its nudge must not be capped", i)
+		}
+		if count != 0 {
+			t.Fatalf("cycle %d: expected the reply to rearm the nudge count, got count=%d", i, count)
+		}
+	}
+
+	if notices := emits.events(appNotificationEvent); len(notices) != 0 {
+		t.Fatalf("expected no capped notification for a session that answered every nudge, got %d", len(notices))
+	}
+}
+
+// TestOrchestratorPacingStillCapsWithoutAFreshReply is the control for
+// TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles: a session that
+// never writes an activity report newer than its last nudge still caps, so
+// the rearm fix does not turn the cap into a no-op for a genuinely silent
+// session.
+func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{})
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	session := newCallRecordingSession()
+	key := orchestratorSessionKey("agent")
+	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 5, kind: sessionKindOrchestrator}
+	longAgo := time.Now().Add(-24 * time.Hour)
+	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 5, name: "agent", startedAt: longAgo}
+
+	for i := 0; i < orchestratorPacingMaxNudges+1; i++ {
+		app.reconcileOrchestratorPacing()
+	}
+
+	app.mu.Lock()
+	capped := app.orchestrators["agent"].pacingCapped
+	app.mu.Unlock()
+	if !capped {
+		t.Fatal("expected a session that never replies to still cap")
+	}
+	if notices := emits.events(appNotificationEvent); len(notices) != 1 {
+		t.Fatalf("expected exactly one capped notification, got %d", len(notices))
+	}
+}
+
 // TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto pins the third
 // place #1330's hazard applies: the pacing nudge writes its text, then a bare
 // carriage return 150ms later, the same shape as the AI repaint resize that
