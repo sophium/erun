@@ -1247,19 +1247,11 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 	// half-apply before a mid-rollout chart pull aborts the deploy. An erun-only /
 	// bootstrap deploy (no tenant components) keeps the published-fallback path.
 	if len(tenantComponents) > 0 {
-		// Tenant component charts (and the tenant's own runtime chart) resolve
-		// from the DEPLOY registry, which for a `--cluster-registry` env is a
-		// cluster: entry that only concretizes to a real host/insecure marker
-		// here -- the runtime-chart-only path never needed this, since its own
-		// candidate ladder already tolerates an unconcretized entry.
-		var err error
-		resolvedTarget, err = concretizeDeployTargetRegistries(ctx, resolvedTarget)
+		concretized, err := ensureTenantChartsPublishedFromDeployRegistry(ctx, resolvedTarget, target.VersionOverride, runtimeSelected, tenantComponents)
 		if err != nil {
 			return nil, err
 		}
-		if err := ensureTenantChartsPublished(ctx, resolvedTarget, target.VersionOverride, runtimeSelected, tenantComponents); err != nil {
-			return nil, err
-		}
+		resolvedTarget = concretized
 	}
 
 	specs := make([]DeploySpec, 0, len(tenantComponents)+1)
@@ -1285,6 +1277,24 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a publishable component, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
 	}
 	return specs, nil
+}
+
+// ensureTenantChartsPublishedFromDeployRegistry concretizes target's registries
+// (a cluster: entry only resolves to a real host/insecure marker here — the
+// runtime-chart-only path never needed this, since its own candidate ladder
+// already tolerates an unconcretized entry) so tenant component charts (and
+// the tenant's own runtime chart) verify against the DEPLOY registry `erun
+// push` actually publishes them to, then runs that verification. Returns the
+// concretized target so the caller's subsequent chart resolution reuses it.
+func ensureTenantChartsPublishedFromDeployRegistry(ctx Context, target OpenResult, versionOverride string, runtimeSelected bool, tenantComponents []string) (OpenResult, error) {
+	target, err := concretizeDeployTargetRegistries(ctx, target)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if err := ensureTenantChartsPublished(ctx, target, versionOverride, runtimeSelected, tenantComponents); err != nil {
+		return OpenResult{}, err
+	}
+	return target, nil
 }
 
 // appendRuntimeFallbackSpecs appends the published erun-devops runtime spec when
