@@ -46,6 +46,18 @@ Read what you control from erun's config store — never infer it from what happ
 4. **To run something here, have the env cross-build it for this host's OS/arch** into the outputs dir. How it reaches you depends on the env: a mirrored env delivers it into the mirror's artifacts subdirectory, an env without a mirror needs an explicit download. The pod is Linux and cannot execute a foreign-OS binary, so the host run is the only true end-to-end check. Be explicit about the target: the pod cannot see the host. Cross-building in the env is the default even when the host could compile it — a host build is the exception, and it needs a reason.
 5. **Iterate per environment**, keeping each review scoped to its own directory.
 
+## Claiming issues
+
+Every lane authenticates as the same GitHub user, so assignee cannot distinguish one orchestrator from another — the identity that matters is `$ERUN_ORCHESTRATOR_ID`, which GitHub has no native field for. A `wip:<id>` label stands in for it: one atomic edit carries both "taken" and "by whom", visible in a plain issue listing with no comment to parse. This is the same shape as the exclusive worktree lease above — visible, attributable, refusable, reclaimable only from a holder that is genuinely gone — applied before a lane is dispatched instead of before a tree is touched.
+
+- **Claim before you dispatch.** Add `wip:$ERUN_ORCHESTRATOR_ID` to an issue (`gh issue edit <n> --add-label wip:$ERUN_ORCHESTRATOR_ID`) before tasking a lane onto it. Key on the id, not the display name — id `erun-issues` presents as `erun-admin`, and the id is the only identity a session can resolve about itself.
+- **Never start an issue already carrying any `wip:` label.** That is another lane's claim. Report the holder and take different work — do not retry-loop, and do not go looking for evidence the holder "isn't really working on it". Refused the same way the exclusive worktree lease is refused.
+- **Selection is one query:** `gh issue list --state open --json number,title,labels`. Drop every issue whose `labels` include any `wip:`-prefixed name; pick from what's left.
+- **Read after write — labels are not compare-and-swap.** Two lanes can both see the same unclaimed issue and both add their own `wip:` label before either sees the other's. After adding yours, re-read (`gh issue view <n> --json labels`). If another orchestrator's `wip:` is also present, the **lower-sorting orchestrator id yields**: it removes its own label (`gh issue edit <n> --remove-label wip:<id>`) and picks different work. Both sides backing off leaves the issue unclaimed and both lanes idle — the tie-break has to be deterministic, not polite.
+- **Release the claim when the work ends** — merged, abandoned, or handed back — not before. An unreleased claim is as harmful as no claim: it parks the issue for every later lane, permanently, the same as a worktree lease that never released.
+- **Reclaim only a dead holder**, the same way the worktree lease reclaims a lapsed one: if the labeling orchestrator id is not running, take the claim by replacing the label. Never take a claim from a live lane.
+- The `wip:<id>` labels already exist on the repo for every running orchestrator id. The one setup step is a new id with no matching label yet — create `wip:<id>` for it before it can claim anything.
+
 ## Operating mode
 
 - **Carry the task to a verified end state, in one PR.** Do not split it, defer part of it, or hand back something half-finished. Reporting progress as you go is fine; ending a turn to wait is not.
