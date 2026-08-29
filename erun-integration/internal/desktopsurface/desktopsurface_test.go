@@ -243,6 +243,55 @@ func TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint(t *testing.
 	}
 }
 
+// TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding
+// locks the mechanism that unblocked #1497's Wails-mediated routes: a route
+// whose literal path never appears in TypeScript because erun-ui/frontend/src
+// calls the Wails-bound Go method by name instead is still found, through
+// WailsBinding, as long as that method name is what actually appears.
+func TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding(t *testing.T) {
+	capabilities := []Capability{
+		{
+			Name:         "POST /v1/reviews/{review_id}/reviewers",
+			Source:       "API route",
+			Pattern:      APIRoutePattern("/v1/reviews/{review_id}/reviewers"),
+			WailsBinding: "AddReviewer",
+		},
+	}
+	// No literal "/v1/reviews/.../reviewers" path anywhere -- only the Wails
+	// method name the frontend actually calls.
+	frontend := FrontendSource("useAddReviewerMutation(AddReviewer)")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want the route cleared by its WailsBinding match, got %+v", missing)
+	}
+}
+
+// TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference
+// is the negative case: a WailsBinding entry that is wrong (or a route that
+// gains one without ever actually being called from the frontend) must not
+// silently clear the gate. WailsBinding is only ever correct because it was
+// hand-verified against real source on both ends -- the mechanism itself does
+// no verification, so an absent reference must still fail exactly like today.
+func TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference(t *testing.T) {
+	capabilities := []Capability{
+		{
+			Name:         "POST /v1/reviews/{review_id}/reviewers",
+			Source:       "API route",
+			Pattern:      APIRoutePattern("/v1/reviews/{review_id}/reviewers"),
+			WailsBinding: "AddReviewer",
+		},
+	}
+	frontend := FrontendSource("export function UnrelatedComponent() { return null }")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 1 {
+		t.Fatalf("want the route still flagged when neither Pattern nor WailsBinding actually appears, got %+v", missing)
+	}
+}
+
 func TestFindUnboundAppMethodsFlagsAnUnexportedMethodWithNoOtherCaller(t *testing.T) {
 	decls := []AppMethodDecl{
 		{Name: "whipOrchestratorNow", Exported: false, File: "orchestrator_pacing.go", Line: 289, IdentUses: 0},

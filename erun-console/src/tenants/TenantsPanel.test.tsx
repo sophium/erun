@@ -198,6 +198,57 @@ describe('TenantsPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('sets a tenant quota through the per-row dialog', async () => {
+    let putBody: unknown;
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants' && req.method === 'GET') {
+        return jsonResponse([
+          {
+            tenantId: 'tn-1',
+            name: 'acme',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+          },
+        ]);
+      }
+      if (req.url === '/v1/tenants/tn-1/quota' && req.method === 'PUT') {
+        putBody = req.body;
+        return jsonResponse({ tenantId: 'tn-1', ...(req.body as object) });
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<TenantsPanel token="dev-token" docsUrl={undefined} />);
+    await screen.findByText('acme');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set quota' }));
+    expect(screen.getByText('Set quota for acme')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^Environments/), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText(/^Per-environment CPU/), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText(/^Per-environment memory/), {
+      target: { value: '512' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Per-environment storage/), {
+      target: { value: '10' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Total CPU/), { target: { value: '2000' } });
+    fireEvent.change(screen.getByLabelText(/^Total memory/), { target: { value: '4096' } });
+    fireEvent.change(screen.getByLabelText(/^Total storage/), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save quota' }));
+
+    expect(await screen.findByText('Quota updated.')).toBeInTheDocument();
+    expect(putBody).toEqual({
+      maxEnvironments: 5,
+      maxCpuMillicores: 500,
+      maxMemoryMb: 512,
+      maxStorageGb: 10,
+      maxTotalCpuMillicores: 2000,
+      maxTotalMemoryMb: 4096,
+      maxTotalStorageGb: 100,
+    });
+  });
+
   it('links the org-scoped-issuer explanation using the instance docs URL when provided', async () => {
     mockFetch(() => jsonResponse([]));
     renderWithStore(<TenantsPanel token="dev-token" docsUrl="https://docs.acme.example" />);

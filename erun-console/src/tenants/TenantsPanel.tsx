@@ -22,6 +22,7 @@ import type { CreateTenantInput, PlatformTenant } from '../app/api/tenantsApi';
 import { PUBLIC_DOCS_URL } from '../shell/landingContent';
 import type { CreateTenantState, TenantFieldError, TenantsState } from './controller';
 import { useTenantsController } from './controller';
+import { TenantQuotaDialog } from './TenantQuotaDialog';
 
 // The identity model's own explanation of org-scoped (shared) issuers — see
 // erun-docs/docs/agent-reference/api-protocol.md#tenant-issuers — so
@@ -274,17 +275,41 @@ function formatCreatedAt(createdAt: string): string {
   return Number.isNaN(parsed.getTime()) ? createdAt : parsed.toLocaleDateString();
 }
 
-function TenantRow({ tenant }: { tenant: PlatformTenant }): React.ReactElement {
+function TenantRow({
+  tenant,
+  onManageQuota,
+}: {
+  tenant: PlatformTenant;
+  onManageQuota: (tenant: PlatformTenant) => void;
+}): React.ReactElement {
   return (
     <TableRow>
       <TableCell className="font-medium text-foreground">{tenant.name}</TableCell>
       <TableCell>{tenant.type}</TableCell>
       <TableCell>{formatCreatedAt(tenant.createdAt)}</TableCell>
+      <TableCell>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            onManageQuota(tenant);
+          }}
+        >
+          Set quota
+        </Button>
+      </TableCell>
     </TableRow>
   );
 }
 
-function TenantsTable({ tenants }: { tenants: PlatformTenant[] }): React.ReactElement {
+function TenantsTable({
+  tenants,
+  onManageQuota,
+}: {
+  tenants: PlatformTenant[];
+  onManageQuota: (tenant: PlatformTenant) => void;
+}): React.ReactElement {
   if (tenants.length === 0) {
     return <EmptyState icon={<Building2 />} heading="No tenants registered yet." />;
   }
@@ -295,18 +320,25 @@ function TenantsTable({ tenants }: { tenants: PlatformTenant[] }): React.ReactEl
           <TableHead>Name</TableHead>
           <TableHead>Type</TableHead>
           <TableHead>Created</TableHead>
+          <TableHead>Quota</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {tenants.map((tenant) => (
-          <TenantRow key={tenant.tenantId} tenant={tenant} />
+          <TenantRow key={tenant.tenantId} tenant={tenant} onManageQuota={onManageQuota} />
         ))}
       </TableBody>
     </Table>
   );
 }
 
-function TenantsBody({ tenantsState }: { tenantsState: TenantsState }): React.ReactElement {
+function TenantsBody({
+  tenantsState,
+  onManageQuota,
+}: {
+  tenantsState: TenantsState;
+  onManageQuota: (tenant: PlatformTenant) => void;
+}): React.ReactElement {
   if (tenantsState.status === 'loading') {
     return (
       <p className="text-sm text-muted-foreground" role="status">
@@ -321,7 +353,7 @@ function TenantsBody({ tenantsState }: { tenantsState: TenantsState }): React.Re
       </p>
     );
   }
-  return <TenantsTable tenants={tenantsState.tenants} />;
+  return <TenantsTable tenants={tenantsState.tenants} onManageQuota={onManageQuota} />;
 }
 
 // TenantsPanel is the console's tenant-registration surface: the one action
@@ -335,15 +367,28 @@ export function TenantsPanel({
   docsUrl: string | undefined;
 }): React.ReactElement {
   const { tenantsState, createState, create } = useTenantsController(token);
+  const [managingQuotaFor, setManagingQuotaFor] = React.useState<PlatformTenant | undefined>(
+    undefined,
+  );
   return (
     <Card aria-labelledby="tenants-heading">
       <CardHeader>
         <CardTitle id="tenants-heading">Tenants</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-6">
-        <TenantsBody tenantsState={tenantsState} />
+        <TenantsBody tenantsState={tenantsState} onManageQuota={setManagingQuotaFor} />
         <CreateTenantForm createState={createState} docsUrl={docsUrl} onCreate={create} />
       </CardContent>
+      {managingQuotaFor !== undefined && (
+        <TenantQuotaDialog
+          tenantId={managingQuotaFor.tenantId}
+          tenantName={managingQuotaFor.name}
+          token={token}
+          onClose={() => {
+            setManagingQuotaFor(undefined);
+          }}
+        />
+      )}
     </Card>
   );
 }

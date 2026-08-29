@@ -16,44 +16,45 @@ var InternalAPIRoutes = map[string]bool{
 	// erun-backend-api/AGENTS.md's Authentication section already carves out
 	// for `/healthz`.
 	"GET /v1/platform": true,
+	// Reports a build result (RECORDED, an environment's own `erun build`, or
+	// GATE, merge-queue verification) that the environment running the build
+	// already ran on its own -- never something an operator clicks to
+	// trigger. The environment promoted to MERGE reports its own gate build
+	// through this same route as part of the merge-queue mechanics (see
+	// erun-backend-api/AGENTS.md's "Merge Queue"); an operator's part of that
+	// flow (advancing the queue, closing a review) already has a real
+	// desktop surface, which is what actually needs one.
+	"POST /v1/reviews/{review_id}/builds": true,
 }
 
 // KnownUnsurfacedRoutes is a record of known gaps, not a design decision: it
-// holds exactly the routes that had no operator entry point in either
+// started as the 33 routes that had no operator entry point in either
 // erun-ui/frontend/src or erun-console/src the day the desktop-surface gate
 // was taught to see API-only capabilities, kept here so that day's already-red
-// gate could still be adopted without either declaring 33 routes permanently
-// internal (most need a real surface, not an exemption) or weakening the gate
-// itself. It is the opposite claim from InternalAPIRoutes above: an entry here
-// asserts nothing about whether the route deserves a surface, only that it
-// does not have one yet. See erun-integration/AGENTS.md § "Desktop-surface
-// gate" § "Baseline for pre-existing gaps" for the tracking issue and the
-// shrink-only enforcement (desktopsurface.FindStaleBaselineEntries): a route
-// that gains a real reference in either tree must be removed from this map in
-// the same change, or the gate fails.
+// gate could still be adopted without either declaring most of them
+// permanently internal (most need a real surface, not an exemption) or
+// weakening the gate itself. It is the opposite claim from InternalAPIRoutes
+// above: an entry here asserts nothing about whether the route deserves a
+// surface, only that it does not have one yet. See erun-integration/AGENTS.md
+// § "Desktop-surface gate" § "Baseline for pre-existing gaps" for the
+// tracking issue and the shrink-only enforcement
+// (desktopsurface.FindStaleBaselineEntries): a route that gains a real
+// reference in either tree must be removed from this map in the same change,
+// or the gate fails. What remains today needs a surface too large for a
+// single change: erun's own hosted release view (the four "GET /v1/releases"
+// family entries -- no console/desktop UI exists anywhere for the release
+// system itself, unlike reviews/builds/merge-queue which already have one),
+// tenant-issuer administration and the usage-event log (both need a new
+// admin surface designed, not just a fetch wired up), and the DNS-01 token
+// mint (needs `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
-	"DELETE /v1/reviews/{review_id}/reviewers/{user_id}": true,
-	"GET /v1/quota":                                              true,
-	"GET /v1/releases":                                           true,
-	"GET /v1/releases/{release_id}":                              true,
-	"GET /v1/reviews/{review_id}/builds":                         true,
-	"GET /v1/reviews/{review_id}/builds/{build_id}":              true,
-	"GET /v1/reviews/{review_id}/comments":                       true,
-	"GET /v1/reviews/{review_id}/releases":                       true,
-	"GET /v1/reviews/{review_id}/reviewers":                      true,
-	"GET /v1/tenant-issuers":                                     true,
-	"GET /v1/usage-events":                                       true,
-	"PATCH /v1/reviews/{review_id}/comments/{comment_id}/status": true,
-	"PATCH /v1/reviews/{review_id}/status":                       true,
-	"PATCH /v1/tenant-issuers":                                   true,
-	"POST /v1/environments/{environment_id}/dns01-token":         true,
-	"POST /v1/environments/{environment_id}/stop":                true,
-	"POST /v1/provision":                                         true,
-	"POST /v1/releases":                                          true,
-	"POST /v1/reviews/merge-queue/advance":                       true,
-	"POST /v1/reviews/merge-queue/override-advance":              true,
-	"POST /v1/reviews/{review_id}/builds":                        true,
-	"POST /v1/reviews/{review_id}/comments":                      true,
-	"POST /v1/reviews/{review_id}/reviewers":                     true,
-	"PUT /v1/tenants/{tenant_id}/quota":                          true,
+	"GET /v1/releases":                                   true,
+	"GET /v1/releases/{release_id}":                      true,
+	"GET /v1/reviews/{review_id}/builds/{build_id}":      true,
+	"GET /v1/reviews/{review_id}/releases":               true,
+	"GET /v1/tenant-issuers":                             true,
+	"GET /v1/usage-events":                               true,
+	"PATCH /v1/tenant-issuers":                           true,
+	"POST /v1/environments/{environment_id}/dns01-token": true,
+	"POST /v1/releases":                                  true,
 }

@@ -26,6 +26,7 @@ export const platformApi = createApi({
     'Roles',
     'UserRoles',
     'Tenants',
+    'Quota',
   ],
   endpoints: () => ({}),
 });
