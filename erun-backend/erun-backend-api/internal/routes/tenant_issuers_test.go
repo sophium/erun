@@ -108,7 +108,7 @@ func TestTenantIssuerRoutesUpdateTenantIssuerName(t *testing.T) {
 // changes how every tenant's tokens on that issuer resolve — not just the
 // caller's own mapping the way a rename does. It carries the same
 // operations-only gate POST /v1/tenants applies to these root resolution
-// tables (issue #1605).
+// tables.
 func TestTenantIssuerRoutesOrgScopeRequiresOperationsTenant(t *testing.T) {
 	repo := &stubTenantIssuerRepository{}
 	rec := httptest.NewRecorder()

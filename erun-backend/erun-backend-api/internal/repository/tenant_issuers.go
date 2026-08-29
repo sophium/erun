@@ -46,7 +46,7 @@ func (r *TenantIssuerRepository) List(ctx context.Context) ([]model.TenantIssuer
 //
 // This exists because first-identity bootstrap registers a platform's own IdP
 // single-tenant, which permanently blocks every later tenant on that issuer
-// and cannot otherwise be undone through the API (issue #1605). Org-scoping
+// and cannot otherwise be undone through the API. Org-scoping
 // mode lives on the shared issuers row, so this is an operations-only
 // operation — the route enforces that.
 func (r *TenantIssuerRepository) UpdateOrgScope(ctx context.Context, issuer, orgFieldKey, orgFieldValue string) (model.TenantIssuer, error) {

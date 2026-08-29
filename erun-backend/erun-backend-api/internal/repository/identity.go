@@ -400,7 +400,7 @@ func (r *IdentityRepository) bindSecurityContext(ctx context.Context, tx bun.Tx,
 // on an IdP erun itself ships. A platform's own IdP serves every tenant from
 // one issuer, so the bootstrap has to record which claim discriminates them —
 // otherwise the issuer is registered single-tenant and every later tenant on
-// it is permanently refused, with no API able to undo it (issue #1605).
+// it is permanently refused, with no API able to undo it.
 //
 // Only claims a shipped IdP is known to emit belong here. An unrecognised
 // issuer keeps the single-tenant registration, which is correct for a

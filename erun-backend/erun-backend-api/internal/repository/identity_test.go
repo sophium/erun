@@ -63,7 +63,7 @@ func TestDefaultTenantIssuerNameFallsBackForEmptyIssuer(t *testing.T) {
 // A platform's own IdP serves every tenant from one issuer, so bootstrap has
 // to record the claim that discriminates them. Registering it single-tenant
 // permanently refuses every later tenant on that issuer, and no API can undo
-// it (issue #1605).
+// it.
 func TestBootstrapOrgScopeReadsTheShippedIdPOrgClaim(t *testing.T) {
 	claims := security.Claims{Issuer: "https://auth.example.com", Raw: map[string]any{
 		"urn:zitadel:iam:user:resourceowner:id":   " 386994597030592700 ",

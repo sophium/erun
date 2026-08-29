@@ -4,9 +4,12 @@ Usage:
   erun cloud login [flags]
 
 Flags:
-      --alias string   Cloud provider alias to login
-      --dry-run        Resolve and trace mutating actions without executing them.
-  -h, --help           help for login
+      --alias string        Cloud provider alias to login
+      --dry-run             Resolve and trace mutating actions without executing them.
+      --flow string         OIDC grant for an erun-hosted alias: "device", "authcode", or "auto" (default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete. Use "authcode" when the device page's authentication method fails — its loopback redirect reuses a browser session you already hold
+      --force               Re-authenticate even when the stored session is still active. Needed to change the requested scopes or flow on an alias that is already signed in, since an active session otherwise short-circuits the login
+  -h, --help                help for login
+      --scope stringArray   Extra OAuth scope to request on top of "openid offline_access" (repeatable). A provider's reserved scopes are often absent from its discovery document, so they can only be asked for by name — e.g. urn:zitadel:iam:user:resourceowner, which makes a Zitadel token carry the org claim an org-scoped issuer resolves tenants by
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

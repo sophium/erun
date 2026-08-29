@@ -117,7 +117,7 @@ type CloudLoginParams struct {
 // it prefers the device grant when the issuer advertises one, and falls back to
 // authorization code + PKCE when that grant cannot complete — a single
 // unusable authentication method must not lock the CLI out when a second,
-// working flow exists (issue #1603).
+// working flow exists.
 const (
 	ERunLoginFlowAuto     = "auto"
 	ERunLoginFlowDevice   = "device"
