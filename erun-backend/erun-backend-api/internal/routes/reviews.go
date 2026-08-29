@@ -121,7 +121,7 @@ func (r ReviewRoutes) listReviewers(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) addReviewer(w http.ResponseWriter, req *http.Request) {
 	var input addReviewerRequest
 	if err := decodeJSON(req, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	reviewer, err := r.reviewers.Create(req.Context(), model.ReviewReviewer{
@@ -146,7 +146,7 @@ func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 	var review model.Review
 	if err := decodeJSON(req, &review); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	review = r.service.PrepareCreate(review)
@@ -170,7 +170,7 @@ func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request) {
 	var input advanceMergeQueueRequest
 	if err := decodeJSON(req, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	review, err := r.service.AdvanceMergeQueue(req.Context(), input.TargetBranch)
@@ -185,7 +185,7 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http.Request) {
 	var input overrideAdvanceMergeQueueRequest
 	if err := decodeJSON(req, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.TargetBranch, input.Reason)
@@ -205,7 +205,8 @@ func (r ReviewRoutes) dispatchMergeQueue(ctx context.Context, review model.Revie
 
 // writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
 // the count and the review to route the operator to, rather than the bare
-// status text writeRepositoryError gives every other conflict.
+// status text writeRepositoryError gives every other conflict, and gives the
+// merge-queue-specific machine codes documented in collaboration/reviews.md.
 func writeAdvanceMergeQueueError(w http.ResponseWriter, err error) {
 	var blocked *service.UnresolvedThreadsError
 	if errors.As(err, &blocked) {
@@ -215,6 +216,15 @@ func writeAdvanceMergeQueueError(w http.ResponseWriter, err error) {
 			ReviewID:          blocked.ReviewID,
 			UnresolvedThreads: blocked.UnresolvedThreads,
 		})
+		return
+	}
+	if errors.Is(err, service.ErrInvalidTargetBranch) {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_TARGET_BRANCH", err.Error())
+		return
+	}
+	var empty *service.EmptyMergeQueueError
+	if errors.As(err, &empty) {
+		writeErrorCode(w, http.StatusNotFound, "EMPTY_QUEUE", empty.Error())
 		return
 	}
 	writeRepositoryError(w, err)
@@ -232,13 +242,35 @@ func (r ReviewRoutes) getReview(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Request) {
 	var input updateReviewStatusRequest
 	if err := decodeJSON(req, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
 	review, err := r.service.UpdateStatus(req.Context(), req.PathValue("review_id"), input.Status, input.BuildID)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeUpdateStatusError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, review)
+}
+
+// writeUpdateStatusError gives PATCH .../status's two documented business
+// codes their exact machine code and details shape; every other failure
+// (not found, missing security context, ...) falls through to the generic
+// status-derived code.
+func writeUpdateStatusError(w http.ResponseWriter, err error) {
+	var invalidTransition *service.InvalidTransitionError
+	if errors.As(err, &invalidTransition) {
+		writeErrorDetails(w, http.StatusBadRequest, "INVALID_TRANSITION", invalidTransition.Error(), map[string]any{
+			"from":         invalidTransition.From,
+			"to":           invalidTransition.To,
+			"validTargets": invalidTransition.ValidTargets,
+		})
+		return
+	}
+	var missingBuildID *service.MissingBuildIDError
+	if errors.As(err, &missingBuildID) {
+		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", missingBuildID.Error(), map[string]any{"field": "buildId"})
+		return
+	}
+	writeRepositoryError(w, err)
 }

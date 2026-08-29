@@ -24,7 +24,7 @@ The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merg
 
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
-Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that returns JSON rather than a plain-text error, naming the count and the review so a caller can act on it instead of parsing a sentence:
+Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that uses its own bespoke shape instead of the standard `{code, message, details}` envelope, naming the count and the review so a caller can act on it instead of parsing a sentence:
 
 ```jsonc
 {
@@ -97,11 +97,11 @@ Omitting `buildId` on a `READY` transition is what marks this as the missed-merg
 
 | Refusal | HTTP status | Body | How to unblock |
 |---|---|---|---|
-| No `READY` review waiting for that target branch (queue empty) | `404 Not Found` | plain text | Wait for a review to reach `READY` — its build succeeded — then advance again. |
-| Another review is already `MERGE` for that target branch | `404 Not Found` | plain text | Wait for it to reach `MERGED`/`FAILED`, or see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
+| No `READY` review waiting for that target branch (queue empty) | `404 Not Found` | `{code: "EMPTY_QUEUE", message}` (no `details`) | Wait for a review to reach `READY` — its build succeeded — then advance again. |
+| Another review is already `MERGE` for that target branch | `404 Not Found` | `{code: "NOT_FOUND", message}` (no `details`) | Wait for it to reach `MERGED`/`FAILED`, or see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
 | The head review has an unresolved comment thread | `409 Conflict` | structured — `{error, message, reviewId, unresolvedThreads}`, shown [above](#the-unresolved-thread-check) | Resolve the thread (its root author only), or [`override-advance`](#overriding-the-gate). |
 
-The first two rows are both cases where nothing was waiting to be promoted, so they currently share one plain `404 Not Found` — indistinguishable from each other or from any other missing-resource 404. [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` as the intended code for the first case, defined against the `READY` reviews actually waiting in the line (a review already `MERGE` has left it) — that code isn't wired into the response yet, and the second row has no code proposed for it either.
+The first two rows both 404, but are distinguishable now: [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` for the first case (nothing `READY` waiting), while the second — another review already merging — falls through to the generic `NOT_FOUND` code every 404 gets by default, since that case has no business-specific code of its own.
 
 ## See also
 

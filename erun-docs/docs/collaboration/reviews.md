@@ -117,38 +117,39 @@ See [Merge queue § Overriding the gate](/collaboration/merge-queue#overriding-t
 
 ## Errors
 
-Endpoints return a plain-text error body by default (the HTTP status text). The one structured exception today is the merge queue's unresolved-thread refusal — see [Merge queue § The unresolved-thread check](/collaboration/merge-queue#the-unresolved-thread-check) for its JSON shape. *Machine error codes* below is this API's target `code`/`details` contract for the rest of these cases — it is not yet wired into any response, the one exception above aside.
+Every endpoint returns a JSON body `{code, message, details}` — `code` is always present, even where no business-specific value applies (a route with no documented code below gets a generic status-derived one, such as `NOT_FOUND` or `BAD_REQUEST`). The one exception is the merge queue's unresolved-thread refusal, which keeps its own bespoke `{error, message, reviewId, unresolvedThreads}` shape instead — see [Merge queue § The unresolved-thread check](/collaboration/merge-queue#the-unresolved-thread-check).
 
 ```jsonc
 {
   "code": "INVALID_TRANSITION",
-  "message": "Cannot transition review from OPEN directly to MERGED",
+  "message": "cannot transition review from OPEN directly to MERGED",
   "details": { "from": "OPEN", "to": "MERGED", "validTargets": ["FAILED", "READY", "CLOSED"] }
 }
 ```
 
 | Status | When | Example |
 |---|---|---|
-| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly; `override-advance` with a blank or missing `reason`. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result; `override-advance` with `reason` omitted. |
+| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly; `override-advance` with a blank or missing `reason`; an empty `targetBranch` on merge-queue advance. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result; `override-advance` with `reason` omitted. |
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
-| `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller; `merge-queue/advance` against a target branch with nothing waiting to promote — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table). | `GET /v1/reviews/rev_unknown`; `POST /v1/reviews/merge-queue/advance` on an empty queue, or while another review is already `MERGE` for that target branch. |
-| `409 Conflict` | Invalid state transition; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body. |
-| `422 Unprocessable Entity` | Structurally valid but semantically invalid. | `PATCH status` to `READY` without a successful build. |
-| `429 Too Many Requests` | Rate limit exceeded. | Burst of `POST /comments`. |
+| `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller; a `buildId` on `PATCH .../status` that doesn't belong to the review or whose `successful` flag doesn't match the target status; `merge-queue/advance` against a target branch with nothing waiting to promote, or while another review is already `MERGE` for that target branch — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table). | `GET /v1/reviews/rev_unknown`; `POST /v1/reviews/merge-queue/advance` on an empty queue. |
+| `409 Conflict` | A second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body. |
+| `429 Too Many Requests` `(Planned.)` | Not implemented — no request ever gets this today. Kept here as the target shape; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits). | n/a |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |
+
+`422 Unprocessable Entity` does not appear above because nothing in this API returns it — earlier drafts of this page and the machine-code table below described a `422` for a semantically-invalid-but-structurally-valid request, but no route ever produced one; every condition that reads that way in practice is either a `400` (malformed input) or a `404` (a referenced id/state that isn't there).
 
 ### Machine error codes
 
+The codes below are the ones this API's review/merge-queue routes can actually distinguish and emit. Two codes sketched in earlier drafts of this table described checks the API does not perform — `UNKNOWN_COMMIT` as "does this commit exist on the source branch" (the API has no git access to check that; a build/review mismatch on `PATCH /status` is a plain `404` instead, above) and `EXPIRED_PAGE_TOKEN` (depends on pagination, which is [not implemented](/agent-reference/api-protocol#pagination)) — both are dropped rather than left describing behavior that doesn't exist.
+
 | `code` | When | HTTP status |
 |---|---|---|
-| `INVALID_TRANSITION` | `PATCH /status` with a transition not allowed by the [Status lifecycle](#status-lifecycle). `details.validTargets` lists the allowed next statuses. | `409` |
-| `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `READY` reviews waiting — a review already `MERGE` has left that waiting line, so its presence is the separate "another review already merging" case, not this one. | `404` |
-| `UNKNOWN_COMMIT` | `PATCH /status` (or `POST /builds`) referencing a `buildId` whose `commitId` doesn't exist on the review's `sourceBranch`. | `422` |
-| `INVALID_BODY` | Request body missing required field or fails type validation. `details.field` names the offender. | `400` |
-| `INVALID_TARGET_BRANCH` | `targetBranch` is not a valid branch name. | `400` |
-| `EXPIRED_PAGE_TOKEN` | `pageToken` is stale or malformed. | `400` |
+| `INVALID_TRANSITION` | `PATCH /status` asserting `MERGE` or `MERGED` directly. `details.from`/`details.to`/`details.validTargets` name the review's current status, the rejected target, and the statuses actually reachable from `from` per the [Status lifecycle](#status-lifecycle). | `400` |
+| `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `READY` reviews waiting — a review already `MERGE` has left that waiting line, so its presence is the separate "another review already merging" case, not this one (that case is a plain `404` with no code above). | `404` |
+| `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
+| `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
 
 ### Pagination + rate limits
 
-List endpoints page at 100 items max; see [API protocol · Pagination](/agent-reference/api-protocol#pagination). Rate-limit buckets per token: read 600 req/min, write 60 req/min, merge-queue-advance 10 req/min. Full table: [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits).
+Neither is implemented yet. List endpoints return every matching row in one response — see [API protocol · Pagination](/agent-reference/api-protocol#pagination) — and no request is ever refused for rate; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits) for the target design.

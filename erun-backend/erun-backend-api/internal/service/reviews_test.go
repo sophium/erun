@@ -141,8 +141,16 @@ func TestUpdateStatusRefusesMergeAndMerged(t *testing.T) {
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
 	for _, status := range []model.ReviewStatus{model.ReviewStatusMerge, model.ReviewStatusMerged} {
-		if _, err := svc.UpdateStatus(context.Background(), "review-1", status, "build-1"); err != repository.ErrInvalidInput {
-			t.Fatalf("UpdateStatus(%s) error = %v, want ErrInvalidInput", status, err)
+		_, err := svc.UpdateStatus(context.Background(), "review-1", status, "build-1")
+		var invalidTransition *InvalidTransitionError
+		if !errors.As(err, &invalidTransition) {
+			t.Fatalf("UpdateStatus(%s) error = %v, want *InvalidTransitionError", status, err)
+		}
+		if !errors.Is(err, repository.ErrInvalidInput) {
+			t.Fatalf("UpdateStatus(%s) error = %v, want it to unwrap to ErrInvalidInput", status, err)
+		}
+		if invalidTransition.From != model.ReviewStatusReady || invalidTransition.To != status {
+			t.Fatalf("InvalidTransitionError = %+v, want from READY to %s", invalidTransition, status)
 		}
 		if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusReady {
 			t.Fatalf("UpdateStatus(%s) changed the review to %s despite being refused", status, got)

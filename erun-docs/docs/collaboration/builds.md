@@ -176,17 +176,19 @@ A release whose control plane stops reporting for 4 hours is failed with a reaso
 
 ## Errors
 
-Standard HTTP semantics (see [Reviews · Errors](/collaboration/reviews#errors)). Build-specific cases:
+Same envelope and status-code conventions as [Reviews · Errors](/collaboration/reviews#errors). Build-specific cases:
 
 | Status | `code` | When |
 |---|---|---|
+| `400` | `INVALID_BODY` | Malformed JSON. |
 | `400` | `INVALID_COMMIT_ID` | `commitId` is not 40 lowercase hex chars. |
-| `400` | `INVALID_VERSION` | `version` fails the version grammar. |
-| `404` | — | The review id doesn't exist or isn't visible. |
-| `422` | `UNKNOWN_COMMIT` | `commitId` doesn't exist on the review's `sourceBranch`. |
+| `400` | `INVALID_VERSION` | `version` fails the version grammar (a `RECORDED` build only — `GATE` builds never reach this route). |
+| `404` | — (generic) | The review id doesn't exist or isn't visible to the caller's tenant. |
+
+`422 Unprocessable Entity` and the `UNKNOWN_COMMIT` code from an earlier draft of this table do not appear above: nothing in this API returns `422`, and `UNKNOWN_COMMIT`'s original description — confirming `commitId` exists on the review's `sourceBranch` — is a check the API cannot perform (it has no git access to the repository). `PATCH /reviews/{id}/status` referencing a `buildId` that doesn't belong to the review, or whose `successful` flag disagrees with the target status, is a plain `404` — see [Reviews · Errors](/collaboration/reviews#errors).
 
 Builds are append-only — there is no `PATCH /builds/{id}` and no DELETE. Re-running a build records a new build resource; the review's `lastReadyBuildId` / `lastFailedBuildId` are updated by the subsequent `PATCH /reviews/{id}/status` call.
 
 ## Pagination + rate limits
 
-`GET /builds` paginates at 100 items per response; see [API protocol · Pagination](/agent-reference/api-protocol#pagination). Builds share the write rate-limit bucket (60 req/min/token); see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits).
+Neither is implemented yet. `GET /builds` returns every build on the review in one response — see [API protocol · Pagination](/agent-reference/api-protocol#pagination) — and no request is refused for rate; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits) for the target design.

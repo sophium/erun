@@ -93,7 +93,7 @@ The Agent's natural fit for peer review is a tight loop:
 # 6. Merge queue advances (POST /v1/reviews/merge-queue/advance)
 ```
 
-Avoid spamming — rate-limit your own comments to one per discussion thread until the other side replies. The API itself rate-limits you anyway (see [Rate limits](/agent-reference/api-protocol#rate-limits)).
+Avoid spamming — rate-limit your own comments to one per discussion thread until the other side replies. The API does not enforce this for you today (rate limiting is [planned, not shipped](/agent-reference/api-protocol#rate-limits)), so a well-behaved Agent is the only thing keeping the thread readable.
 
 For the concrete, non-abstract version of this loop — which environment runs each side, why they're separate environments, and the two reusable agents that implement it — see [Review loop topology](/collaboration/review-loop-topology).
 

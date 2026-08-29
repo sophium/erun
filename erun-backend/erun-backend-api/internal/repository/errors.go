@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -18,6 +19,11 @@ var (
 	// own role management: revoking it would leave no user able to grant roles,
 	// and there would be no recovery lever left inside the product.
 	ErrLastGrantCapableRole = errors.New("revoking this role would leave the tenant with no user able to grant roles")
+	// ErrCommentBodyInvalid signals the comments.body CHECK constraint
+	// specifically (empty/whitespace-only or over 8 KiB), distinguished from
+	// other check_violations so a caller can be given the documented
+	// INVALID_BODY machine code instead of a generic one.
+	ErrCommentBodyInvalid = fmt.Errorf("comment body is empty or exceeds 8 KiB: %w", ErrInvalidInput)
 )
 
 func normalizeNoRows(err error) error {
@@ -52,4 +58,16 @@ func pgErrorCode(err error) (string, bool) {
 		return "", false
 	}
 	return pgErr.Code, true
+}
+
+// pgConstraintName returns the name of the table CHECK/UNIQUE/FK constraint
+// err violated, if any. Trigger RAISE EXCEPTIONs (used for cross-row
+// invariants Postgres constraints can't express) carry no constraint name —
+// this only identifies violations of a real named constraint on the table.
+func pgConstraintName(err error) (string, bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName == "" {
+		return "", false
+	}
+	return pgErr.ConstraintName, true
 }

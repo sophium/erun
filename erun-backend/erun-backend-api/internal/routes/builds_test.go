@@ -5,10 +5,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type stubBuildService struct {
@@ -54,6 +56,46 @@ func TestCreateBuildForcesKindRecorded(t *testing.T) {
 	}
 	if service.created.Kind != model.BuildKindRecorded {
 		t.Fatalf("kind persisted = %q, want %q despite the client asserting GATE", service.created.Kind, model.BuildKindRecorded)
+	}
+}
+
+// TestCreateBuildInvalidCommitIDReportsItsCode: builds.md documents
+// INVALID_COMMIT_ID as 400 for a commitId that is not 40 lowercase hex chars.
+func TestCreateBuildInvalidCommitIDReportsItsCode(t *testing.T) {
+	service := &stubBuildService{err: &service.InvalidCommitIDError{CommitID: "bad"}}
+	routes := BuildRoutes{service: service}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
+		bytes.NewBufferString(`{"successful":true,"commitId":"bad","version":"1.0.0"}`))
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	routes.createBuild(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"INVALID_COMMIT_ID"`) {
+		t.Fatalf("body = %q, want code INVALID_COMMIT_ID", rec.Body.String())
+	}
+}
+
+// TestCreateBuildInvalidVersionReportsItsCode: builds.md documents
+// INVALID_VERSION as 400 for a version failing the version grammar.
+func TestCreateBuildInvalidVersionReportsItsCode(t *testing.T) {
+	service := &stubBuildService{err: &service.InvalidVersionError{Version: "bad"}}
+	routes := BuildRoutes{service: service}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
+		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"bad"}`))
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	routes.createBuild(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"INVALID_VERSION"`) {
+		t.Fatalf("body = %q, want code INVALID_VERSION", rec.Body.String())
 	}
 }
 
