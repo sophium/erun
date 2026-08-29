@@ -42,7 +42,6 @@ var KnownUnsurfacedRoutes = map[string]bool{
 	"GET /v1/reviews/{review_id}/releases":                       true,
 	"GET /v1/reviews/{review_id}/reviewers":                      true,
 	"GET /v1/tenant-issuers":                                     true,
-	"GET /v1/tenants":                                            true,
 	"GET /v1/usage-events":                                       true,
 	"PATCH /v1/reviews/{review_id}/comments/{comment_id}/status": true,
 	"PATCH /v1/reviews/{review_id}/status":                       true,
@@ -56,6 +55,5 @@ var KnownUnsurfacedRoutes = map[string]bool{
 	"POST /v1/reviews/{review_id}/builds":                        true,
 	"POST /v1/reviews/{review_id}/comments":                      true,
 	"POST /v1/reviews/{review_id}/reviewers":                     true,
-	"POST /v1/tenants":                                           true,
 	"PUT /v1/tenants/{tenant_id}/quota":                          true,
 }
