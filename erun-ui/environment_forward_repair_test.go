@@ -243,16 +243,15 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 }
 
 // TestUnopenedEnvironmentIsProbedButNeverRebound is the guard the dropped case
-// makes load-bearing, updated for erun#1572: "no forward is bound" describes
-// an environment nobody opened here and an environment whose forward just
-// died equally well, and only the second may trigger the rebind/reconnect
-// machinery this file exists to test. It no longer describes "reports
-// nothing" — an environment nobody opened here can still be busy right now
-// (a CLI orchestrator, an agent driving it over MCP from another machine), so
-// the sweep asks it directly over its runtime pod instead of leaving it
-// silent. What must stay true is that this read-only ask never feeds the
-// forward-repair episode: no rebind, no outage, because there was never a
-// forward here to repair.
+// makes load-bearing: "no forward is bound" describes an environment nobody
+// opened here and an environment whose forward just died equally well, and
+// only the second may trigger the rebind/reconnect machinery this file exists
+// to test. It no longer describes "reports nothing" — an environment nobody
+// opened here can still be busy right now (a CLI orchestrator, an agent
+// driving it over MCP from another machine), so the sweep asks it directly
+// over its runtime pod instead of leaving it silent. What must stay true is
+// that this read-only ask never feeds the forward-repair episode: no rebind,
+// no outage, because there was never a forward here to repair.
 func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)

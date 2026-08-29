@@ -14,7 +14,7 @@ import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 // its own runtime pod), so a failed attempt to answer is its own state, not a
 // re-use of "unreachable" — an environment nobody opened here can be busy
 // right now, so "unreachable" must stay reserved for one nothing has ever
-// asked (erun#1572).
+// asked.
 export type OrchestratorEnvironmentState =
   | 'outage'
   | 'unreachable'

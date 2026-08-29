@@ -131,8 +131,8 @@ func TestEnvActivityStateComparesTheVerdict(t *testing.T) {
 	}
 }
 
-// erun#1572: an environment not open in this desktop is not the same as an
-// environment nobody is using. The activity lease this poller looks for is
+// An environment not open in this desktop is not the same as an environment
+// nobody is using. The activity lease this poller looks for is
 // environment-side state, held by whatever is driving the environment — a CLI
 // orchestrator, an agent over MCP from another machine — not by whoever
 // happened to open a local forward to it. These tests lock in the fallback

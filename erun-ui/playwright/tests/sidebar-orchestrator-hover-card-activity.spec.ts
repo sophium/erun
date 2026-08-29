@@ -217,6 +217,96 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     });
   });
 
+  // The regression this locks in: an environment not open in this desktop —
+  // driven instead by a CLI orchestrator or an agent over MCP from another
+  // machine — used to read as "Not open here" even while genuinely busy,
+  // because the desktop never asked it anything without a local forward. The
+  // Go poller (environment_activity.go's observeEnvironmentActivityViaPod)
+  // now asks such an environment directly over its own runtime pod, so the
+  // activity this card renders can say "busy" for an environment this
+  // desktop never opened. Against the un-fixed reduction this env would
+  // carry no activity at all (undefined, the "never opened" shape above) and
+  // render "Not open here" instead.
+  test('an environment busy from elsewhere reads busy, not "Not open here"', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(
+      page,
+      snapshot({
+        environments: [
+          {
+            tenant: 'acme',
+            environment: 'ux',
+            directory: '/tmp/a',
+            activity: {
+              reachable: true,
+              observed: true,
+              outage: false,
+              busy: true,
+              detail: 'holding: full-test-suite',
+            },
+          },
+        ],
+      }),
+    );
+    await app.reboot();
+
+    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+
+    const dialog = card(page);
+    await expect(dialog).toBeVisible();
+    const environmentRow = dialog.locator('dd').filter({ hasText: 'acme / ux' });
+    await expect(environmentRow).toContainText('Busy — holding: full-test-suite');
+    await expect(environmentRow).not.toContainText('Not open here');
+
+    await dialog.screenshot({
+      path: '/home/erun/.erun/outputs/1383-visual/busy-from-elsewhere.png',
+    });
+  });
+
+  // The other half of the fix: a real attempt to reach an unopened environment
+  // that did not come back (a pod exec that errored, or the environment
+  // genuinely not running) must read distinctly from "nobody has ever asked",
+  // and must name the recovery action rather than leaving a dead end.
+  test('a failed attempt to confirm an unopened environment names the recovery action', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(
+      page,
+      snapshot({
+        environments: [
+          {
+            tenant: 'acme',
+            environment: 'stale',
+            directory: '/tmp/a',
+            activity: {
+              reachable: false,
+              observed: false,
+              outage: false,
+              checkFailed: true,
+              busy: false,
+            },
+          },
+        ],
+      }),
+    );
+    await app.reboot();
+
+    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+
+    const dialog = card(page);
+    await expect(dialog).toBeVisible();
+    const environmentRow = dialog.locator('dd').filter({ hasText: 'acme / stale' });
+    await expect(environmentRow).toContainText('open it to check directly');
+    await expect(environmentRow).not.toContainText('Not open here');
+
+    await dialog.screenshot({
+      path: '/home/erun/.erun/outputs/1383-visual/check-failed-environment.png',
+    });
+  });
+
   test('an environment in outage reads distinctly from idle and unreachable', async ({
     app,
     page,
