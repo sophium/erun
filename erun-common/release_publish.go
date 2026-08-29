@@ -10,20 +10,28 @@ import (
 // release runs it between its local stages and its outward-facing ones, so the
 // tag that announces a version is only ever pushed for a version that is
 // already deployable.
+// releasePublishTag is one image the publish step will push, alongside
+// whether its registry is plain HTTP — `docker manifest` needs that spelled
+// out on every invocation, unlike the daemon.
+type releasePublishTag struct {
+	Tag      string
+	Insecure bool
+}
+
 type ReleasePublisher struct {
 	// Tags names the image references the publish step will push. It is
 	// checked against the release's own resolved images before anything is
 	// mutated: a release whose images nothing publishes must fail while it is
 	// still private, not after it has announced them.
-	Tags    []string
+	Tags    []releasePublishTag
 	Publish func(Context) error
 	Verify  func(Context) error
 }
 
 func newReleasePublisher(execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) ReleasePublisher {
-	tags := make([]string, 0, len(execution.dockerPushes))
+	tags := make([]releasePublishTag, 0, len(execution.dockerPushes))
 	for _, pushInput := range execution.dockerPushes {
-		tags = append(tags, strings.TrimSpace(pushInput.Image.Tag))
+		tags = append(tags, releasePublishTag{Tag: strings.TrimSpace(pushInput.Image.Tag), Insecure: pushInput.Image.Insecure})
 	}
 	return ReleasePublisher{
 		Tags: tags,
@@ -48,8 +56,8 @@ func ensureReleasePublishesResolvedImages(spec ReleaseSpec, publisher ReleasePub
 
 	publishable := make(map[string]struct{}, len(publisher.Tags))
 	if publisher.Publish != nil && publisher.Verify != nil {
-		for _, tag := range publisher.Tags {
-			publishable[strings.TrimSpace(tag)] = struct{}{}
+		for _, t := range publisher.Tags {
+			publishable[strings.TrimSpace(t.Tag)] = struct{}{}
 		}
 	}
 
@@ -102,17 +110,17 @@ func runReleasePublication(ctx Context, publisher ReleasePublisher) error {
 // tag existence. A probe here cannot tell "already published with exactly
 // this content" from "a tag with this name exists for some other reason", so
 // it is not trusted to skip work, only to report.
-func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []string) {
-	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
+func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []releasePublishTag) {
+	for _, t := range tags {
+		tag := strings.TrimSpace(t.Tag)
 		if tag == "" {
 			continue
 		}
-		ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+		ctx.TraceCommand("", "docker", append(dockerManifestArgs("inspect", t.Insecure), tag)...)
 		if ctx.DryRun {
 			continue
 		}
-		if dockerImageManifestResolves(ctx, tag) {
+		if dockerImageManifestResolves(ctx, tag, t.Insecure) {
 			ctx.Info("==> Already published: " + tag)
 		}
 	}
@@ -123,8 +131,8 @@ func reportAlreadyPublishedReleaseArtifacts(ctx Context, tags []string) {
 // a 404 is a transient read-after-write race worth retrying), a tag probed
 // before anything is published is expected to 404 on a first release, and
 // retrying that would slow down every release for the common case.
-func dockerImageManifestResolves(ctx Context, tag string) bool {
-	spec := commandSpec{Name: "docker", Args: []string{"manifest", "inspect", tag}}
+func dockerImageManifestResolves(ctx Context, tag string, insecure bool) bool {
+	spec := commandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
 	_, err := runCommandCapturingOutput(ctx, spec)
 	return err == nil
 }
@@ -137,7 +145,7 @@ func dockerImageManifestResolves(ctx Context, tag string) bool {
 // how a tag gets announced for an image no deploy can pull.
 func verifyPublishedReleaseArtifacts(ctx Context, execution BuildExecutionSpec) error {
 	for _, pushInput := range execution.dockerPushes {
-		if err := VerifyPublishedDockerImage(ctx, pushInput.Image.Tag); err != nil {
+		if err := VerifyPublishedDockerImage(ctx, pushInput.Image.Tag, pushInput.Image.Insecure); err != nil {
 			return err
 		}
 	}

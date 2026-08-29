@@ -1097,7 +1097,7 @@ func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionF
 		return nil, nil
 	}
 
-	registry, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, "")
+	registry, _, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, "")
 	if err != nil {
 		return nil, err
 	}

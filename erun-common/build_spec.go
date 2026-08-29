@@ -108,7 +108,7 @@ func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot Proj
 }
 
 func resolveDockerImageReferenceForProject(ctx Context, now NowFunc, projectRoot, environment, buildDir, versionOverride string) (DockerImageReference, error) {
-	registry, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
+	registry, insecure, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
 		return DockerImageReference{}, err
 	}
@@ -132,6 +132,7 @@ func resolveDockerImageReferenceForProject(ctx Context, now NowFunc, projectRoot
 		Tag:                 fmt.Sprintf("%s/%s:%s", strings.TrimRight(registry, "/"), imageName, version),
 		VersionFilePath:     versionFilePath,
 		VersionFromBuildDir: versionFromBuildDir,
+		Insecure:            insecure,
 	}
 	if baseVersion != version {
 		ref.BaseVersion = baseVersion
@@ -228,7 +229,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 	if !b.Push {
 		return commands
 	}
-	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags)...)
+	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags, b.Image.Insecure)...)
 	return commands
 }
 
@@ -268,19 +269,23 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 	if !b.Push {
 		return commands
 	}
-	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags)...)
+	commands = append(commands, multiPlatformManifestTraceCommands(b.ContextDir, b.Image.Tag, perPlatformTags, b.Image.Insecure)...)
 	return commands
 }
 
 // multiPlatformManifestTraceCommands mirrors assembleMultiPlatformManifest so the
 // dry-run trace stays an honest preview, including the discard of the cached
 // manifest list that keeps a re-published version from resolving to the previous
-// one.
-func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string) []commandSpec {
+// one, and the --insecure flag a plain-HTTP registry needs on every subcommand
+// but rm (which never leaves the local manifest-list store).
+func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string, insecure bool) []commandSpec {
+	createArgs := append(dockerManifestArgs("create", insecure), tag)
+	createArgs = append(createArgs, perPlatformTags...)
+	pushArgs := append(dockerManifestArgs("push", insecure), tag)
 	return []commandSpec{
 		{Dir: dir, Name: "docker", Args: []string{"manifest", "rm", tag}},
-		{Dir: dir, Name: "docker", Args: append([]string{"manifest", "create", tag}, perPlatformTags...)},
-		{Dir: dir, Name: "docker", Args: []string{"manifest", "push", tag}},
+		{Dir: dir, Name: "docker", Args: createArgs},
+		{Dir: dir, Name: "docker", Args: pushArgs},
 	}
 }
 

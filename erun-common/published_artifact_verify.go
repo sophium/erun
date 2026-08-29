@@ -56,12 +56,12 @@ func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) e
 // a tag. Nothing else proves the image half of a version exists, and a release
 // that assumed it does is how a tag gets announced for an image no deploy can
 // pull.
-func VerifyPublishedDockerImage(ctx Context, tag string) error {
+func VerifyPublishedDockerImage(ctx Context, tag string, insecure bool) error {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return nil
 	}
-	spec := commandSpec{Name: "docker", Args: []string{"manifest", "inspect", tag}}
+	spec := commandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
 	ctx.TraceCommand(spec.Dir, spec.Name, spec.Args...)
 	if ctx.DryRun {
 		return nil
