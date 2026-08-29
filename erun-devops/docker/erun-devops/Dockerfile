@@ -293,6 +293,7 @@ COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --from=builder --chmod=0755 /out/golangci-lint /usr/local/bin/golangci-lint
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/skills-install.sh /usr/local/bin/erun-install-skills
+COPY --chmod=0755 erun-devops/docker/erun-devops/agents-install.sh /usr/local/bin/erun-install-agents
 # erun-link-release symlinks a sourceless runtime env's git folder at
 # /opt/erun/release so a tenant devops image can surface baked artifacts there
 # (outside the /home/erun PVC, which would otherwise shadow them).
@@ -316,6 +317,9 @@ COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_p
 # ~/.codex/skills (re-chmodding the destination files to 0644). 0644 here would
 # leave the dirs un-searchable and the install would silently copy nothing.
 COPY --chmod=0755 erun-skills/skills /etc/erun/skills
+# Reusable agents are flat <name>.md files (no subdirectory to need the
+# execute bit for), so 0644 is enough here.
+COPY --chmod=0644 erun-skills/agents /etc/erun/agents
 
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun
