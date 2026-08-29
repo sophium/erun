@@ -344,7 +344,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-ui/host_open_path.go":                           1,
 	"erun-ui/host_open_path_test.go":                      1,
 	"erun-ui/mcp_errors.go":                               1,
-	"erun-ui/orchestrator.go":                             4,
+	"erun-ui/orchestrator.go":                             3,
 	"erun-ui/orchestrator_guidance_test.go":               1,
 	"erun-ui/orchestrator_mcp.go":                         2,
 	"erun-ui/orchestrator_mcp_test.go":                    2,
