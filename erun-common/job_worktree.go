@@ -10,10 +10,10 @@ import (
 // An agent job's working tree is the one thing its own exit status says
 // nothing about: a clean exit and a tree with 1,200 uncommitted lines look
 // identical to a caller reading only State and ExitCode. This is that gap,
-// closed the same way #1568 closed gate-incomplete — a check the supervisor
-// makes on every agent job's own finish, folded into the record it already
-// writes, rather than a prompt instruction the agent has to remember under
-// turn pressure.
+// closed the same way gate-incomplete was — a check the supervisor makes on
+// every agent job's own finish, folded into the record it already writes,
+// rather than a prompt instruction the agent has to remember under turn
+// pressure.
 //
 // The supervisor does not just observe. Where it is safe to, it also makes a
 // machine-authored checkpoint commit and pushes it, because the agent that
