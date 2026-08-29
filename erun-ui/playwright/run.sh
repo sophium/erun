@@ -7,12 +7,21 @@
 #
 # Flags:
 #   --build               Force a desktop-binary rebuild even when
-#                         ../bin/erun-app already exists. By default the
-#                         script only builds when the binary is missing, so
-#                         packaging pipelines that produced the binary in
-#                         an earlier step don't pay the build cost twice.
-#   --skip-build          (Deprecated alias for the default behaviour. Kept
-#                         so older invocations still work.)
+#                         ../bin/erun-app already exists and is current.
+#   --skip-build          Never rebuild, even when ../bin/erun-app is missing
+#                         or stale against its sources. Use only when you
+#                         know the existing binary is the one you want to
+#                         test; a stale-but-present binary still prints a
+#                         loud warning naming its age so the run is never
+#                         silently wrong. A missing binary is always built
+#                         regardless of this flag — there is nothing to run
+#                         otherwise.
+#
+#   By default the script builds when ../bin/erun-app is missing OR older
+#   than the Go/frontend sources that feed it (see build.sh), so packaging
+#   pipelines that produced a current binary in an earlier step don't pay
+#   the build cost twice, but a stale binary from before a rebase never gets
+#   silently reused.
 #   --skip-lint           Skip typecheck/lint/format:check for this invocation
 #                         only (and forward the same skip to build.sh when a
 #                         rebuild runs). Use only when iterating locally;
@@ -45,6 +54,7 @@ if [ -z "${AGENT_GATE_DETACHED:-}" ] && [ "${RUN_SH_AGENT_GATED:-0}" != "1" ]; t
 fi
 
 FORCE_BUILD=0
+EXPLICIT_SKIP_BUILD=0
 HEADED=0
 PORT=34123
 PLAYWRIGHT_ARGS=""
@@ -69,8 +79,10 @@ while [ $# -gt 0 ]; do
 			shift
 			;;
 		--skip-build)
-			# Default behaviour now skips the build unless --build is set;
-			# keep the flag as a no-op so older callers don't break.
+			# Explicit opt-out: never rebuild a present-but-stale binary
+			# (see the staleness check below). A missing binary still gets
+			# built regardless, since there would be nothing to run.
+			EXPLICIT_SKIP_BUILD=1
 			shift
 			;;
 		--headed)
@@ -137,12 +149,75 @@ export PATH="$NODE_BIN_DIR:$(dirname "$YARN_BIN"):$PATH"
 
 cd "$SCRIPT_DIR"
 
+# Portable file-mtime-in-epoch-seconds: GNU stat (Linux) and BSD stat
+# (macOS) disagree on flags, so try both and use whichever works.
+mtime_epoch() {
+	stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null
+}
+
+# Coarse human-readable age for the "still ran the stale binary" warning
+# below. Doesn't need to be precise, just enough to show the binary isn't
+# new.
+binary_age() {
+	then_epoch=$(mtime_epoch "$1")
+	if [ -z "$then_epoch" ]; then
+		printf 'unknown'
+		return
+	fi
+	secs=$(($(date +%s) - then_epoch))
+	if [ "$secs" -lt 60 ]; then
+		printf '%ss' "$secs"
+	elif [ "$secs" -lt 3600 ]; then
+		printf '%sm' "$((secs / 60))"
+	else
+		printf '%sh%sm' "$((secs / 3600))" "$(((secs % 3600) / 60))"
+	fi
+}
+
+# Mirrors what build.sh actually reads to produce $BIN_PATH: this module's
+# own Go sources (top-level + headlessserver), erun-common (unioned in via
+# go.work and imported directly, including the assets it go:embeds), and
+# the frontend project's source plus the build config `wails generate
+# module` / `yarn build` consume. Each find is guarded so a missing
+# directory can't trip `set -e` and abort the whole script.
+find_stale_binary_sources() {
+	find "$ERUN_UI_DIR" -maxdepth 1 -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/headlessserver" -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/../erun-common" -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/../erun-common/assets" -type f -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/frontend/src" -type f -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/frontend/index.html" "$ERUN_UI_DIR/frontend/vite.config.ts" \
+		"$ERUN_UI_DIR/frontend/package.json" "$ERUN_UI_DIR/frontend/tsconfig.json" \
+		-newer "$BIN_PATH" -print 2>/dev/null || true
+}
+
 # Build the desktop binary so the webServer fixture has something to spawn.
-# By default we only build when the binary is missing — packaging flows do
-# their own build step right before invoking this script. Devs who changed
-# Go code and want a fresh binary pass --build.
-if [ "$FORCE_BUILD" -eq 1 ] || [ ! -x "$BIN_PATH" ]; then
-	printf '>> playwright: building %s...\n' "$BIN_PATH" >&2
+# By default we build when the binary is missing OR older than the sources
+# that feed it, so a binary built before a rebase never silently tests the
+# rebase's specs against pre-rebase code. Packaging flows that already
+# produced a current binary in an earlier step still skip the cost.
+BUILD_NEEDED=0
+STALE_ONLY=0
+BUILD_REASON=""
+if [ "$FORCE_BUILD" -eq 1 ]; then
+	BUILD_NEEDED=1
+	BUILD_REASON="--build was passed"
+elif [ ! -x "$BIN_PATH" ]; then
+	BUILD_NEEDED=1
+	BUILD_REASON="$BIN_PATH does not exist"
+elif STALE_SOURCE=$(find_stale_binary_sources | head -n1) && [ -n "$STALE_SOURCE" ]; then
+	BUILD_NEEDED=1
+	STALE_ONLY=1
+	BUILD_REASON="$BIN_PATH predates $STALE_SOURCE"
+fi
+
+if [ "$BUILD_NEEDED" -eq 1 ] && [ "$STALE_ONLY" -eq 1 ] && [ "$EXPLICIT_SKIP_BUILD" -eq 1 ]; then
+	printf '>> playwright: WARNING: %s is stale (%s), binary age %s, but --skip-build was passed — running the stale binary anyway.\n' "$BIN_PATH" "$BUILD_REASON" "$(binary_age "$BIN_PATH")" >&2
+	BUILD_NEEDED=0
+fi
+
+if [ "$BUILD_NEEDED" -eq 1 ]; then
+	printf '>> playwright: building %s (%s)...\n' "$BIN_PATH" "$BUILD_REASON" >&2
 	if [ "$SKIP_LINT" -eq 1 ]; then
 		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
 	else
