@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,10 +209,36 @@ func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orche
 			Notice:         orchestratorTrackedConversationUnconfirmedNotice(id, record.ConversationID, derived, reason),
 		}
 	}
+	// The tracked conversation is confirmed and stands: report it only while it
+	// is new information. Once this exact tracked id has already been told to
+	// the operator, resolving to it again on every later launch has nothing new
+	// to say -- repeating a healthy steady state on every launch is what trains
+	// the operator to stop reading this notice family at all. A tracked id that
+	// changes from what was last reported is new information again and is
+	// reported.
+	notice := ""
+	if strings.TrimSpace(entry.LastReportedConversationID) != record.ConversationID {
+		notice = orchestratorResumedTrackedConversationNotice(id, record.ConversationID, derived)
+	}
 	return orchestratorConversationChoice{
 		ConversationID: record.ConversationID,
 		Source:         orchestratorConversationTracked,
-		Notice:         orchestratorResumedTrackedConversationNotice(id, record.ConversationID, derived),
+		Notice:         notice,
+	}
+}
+
+// markConversationChoiceReported persists that the operator has now been told
+// about a tracked-conversation resolution, so a later launch that resolves to
+// the SAME tracked conversation finds nothing new to say. Only the "info"
+// resolution is ever recorded here -- see orchestratorConversationNoticeKind --
+// because the three warning resolutions must keep reporting on every
+// occurrence. A no-op when there was nothing to report.
+func (a *App) markConversationChoiceReported(id string, choice orchestratorConversationChoice) {
+	if choice.Notice == "" || choice.Source != orchestratorConversationTracked {
+		return
+	}
+	if err := markOrchestratorConversationReported(a.deps.orchestratorOpenPath, id, choice.ConversationID); err != nil {
+		log.Printf("erun-app: mark orchestrator %s conversation reported: %v", id, err)
 	}
 }
 

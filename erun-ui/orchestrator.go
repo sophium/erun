@@ -1710,6 +1710,7 @@ func (a *App) conversationToLaunch(id, named string) string {
 	}
 	choice := a.resolveOrchestratorConversation(orchestratorEntryOrEmpty(
 		readOpenOrchestrators(a.deps.orchestratorOpenPath), id))
+	a.markConversationChoiceReported(id, choice)
 	if choice.Notice != "" {
 		a.emitAppNotification(orchestratorConversationNoticeKind(choice.Source), choice.Notice)
 	}

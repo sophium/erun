@@ -308,6 +308,7 @@ func (a *App) resolveReopenSessionID(entry orchestratorOpenEntry) (string, strin
 		return uuid.NewString(), ""
 	}
 	choice := a.resolveOrchestratorConversation(entry)
+	a.markConversationChoiceReported(entry.OrchestratorID, choice)
 	return choice.ConversationID, choice.Notice
 }
 
