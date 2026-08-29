@@ -73,6 +73,7 @@ function environmentActivityUnchanged(
 ): boolean {
   return (
     current?.reachable === activity.reachable &&
+    current.observed === activity.observed &&
     current.outage === activity.outage &&
     current.checkFailed === activity.checkFailed &&
     current.busy === activity.busy &&
