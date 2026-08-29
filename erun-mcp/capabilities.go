@@ -2,11 +2,14 @@ package erunmcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 	"sync"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -64,7 +67,43 @@ func addTool[In, Out any](reg toolRegistrar, tool *mcp.Tool, handler mcp.ToolHan
 		return
 	}
 	describeTool(tool)
+	if tool.OutputSchema == nil {
+		if schema := outputSchemaFor[Out](); schema != nil {
+			tool.OutputSchema = schema
+		}
+	}
 	mcp.AddTool(reg.server, tool, guardTool(reg.identity, tool.Name, reg.metrics, handler))
+}
+
+// rawJSONSchemaOverrides widens json.RawMessage fields to accept any JSON
+// value. The SDK's reflector otherwise reads json.RawMessage by its
+// underlying Go kind — a []byte — and renders the wire representation of "an
+// arbitrary JSON value captured verbatim" (e.g. EnvironmentJob.Result) as an
+// array of bytes, which the value it actually carries (an object, a string, a
+// number...) can never satisfy.
+var rawJSONSchemaOverrides = &jsonschema.ForOptions{
+	TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[json.RawMessage](): {},
+	},
+}
+
+// outputSchemaFor computes the schema for a tool's Out type the same way the
+// SDK's own AddTool does when no explicit schema is given, except routed
+// through rawJSONSchemaOverrides. It returns nil for Out == any, matching the
+// SDK's own choice to omit the output schema entirely in that case.
+func outputSchemaFor[Out any]() *jsonschema.Schema {
+	rt := reflect.TypeFor[Out]()
+	if rt == reflect.TypeFor[any]() {
+		return nil
+	}
+	if rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+	schema, err := jsonschema.ForType(rt, rawJSONSchemaOverrides)
+	if err != nil {
+		panic(fmt.Sprintf("erun-mcp: computing output schema for %s: %v", rt, err))
+	}
+	return schema
 }
 
 // describeTool attaches the tool's family, CLI path, title and annotations from
