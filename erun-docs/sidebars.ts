@@ -149,6 +149,11 @@ const sidebars: SidebarsConfig = {
           label: 'Review loop topology',
         },
         {
+          type: 'doc',
+          id: 'collaboration/merge-queue',
+          label: 'Merge queue',
+        },
+        {
           type: 'category',
           label: 'erun API',
           link: { type: 'generated-index' },

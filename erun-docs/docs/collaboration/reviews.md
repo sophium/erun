@@ -109,48 +109,15 @@ The status transitions are enforced server-side: an Agent cannot directly mark a
 
 ## Merge queue
 
-The merge queue is **shared per target branch**. Every `READY` review for a given `targetBranch` waits in a single FIFO — `GET /v1/reviews/merge-queue?targetBranch=main` lists that waiting line. The review currently being gated (status `MERGE`) has already left the waiting line; only one review per target branch may be `MERGE` at a time. `POST /v1/reviews/merge-queue/advance` promotes the head of the waiting line:
+`GET /v1/reviews/merge-queue` and `POST /v1/reviews/merge-queue/advance` (and its `override-advance` counterpart) above are the wire contract for the merge queue. For why it exists, the queue's shape, what the gate does, the unresolved-thread check's structured body, advancing and overriding it from every client, and recovering a wedged gate — see **[Merge queue](/collaboration/merge-queue)**.
 
-```
-POST /v1/reviews/merge-queue/advance
-Content-Type: application/json
+### Overriding the gate {#overriding-the-gate}
 
-{ "targetBranch": "main" }
-```
-
-Before promoting, the server checks the head review's comment threads: if any thread is still `OPEN` (its root comment unresolved), `advance` refuses with `409 Conflict` and a structured body naming the count and the review, rather than the plain-text body every other error on this API returns —
-
-```jsonc
-{
-  "error": "unresolved_threads",
-  "message": "review rev_01H... has 3 unresolved comment thread(s); resolve them before advancing the merge queue",
-  "reviewId": "rev_01H...",
-  "unresolvedThreads": 3
-}
-```
-
-— so a caller can act on the refusal (open the review, resolve the threads, or use [`override-advance`](#overriding-the-gate)) instead of parsing a sentence. Once every thread is resolved (or there are none), `advance` picks the head of the waiting line for that target branch, transitions it to `MERGE`, and dispatches the merge queue's gate for it: fetch the review's target and source branches, build the prospective merge of the source onto the *current* target, run a real build against that prospective merge, and push it only if the build passes. The response to `advance` is the promoted (now `MERGE`) review, not the merged one — poll `GET /v1/reviews/{reviewId}` for the terminal `MERGED` or `FAILED` outcome. If the waiting line is empty, or another review is already `MERGE` for that target branch, the API returns an error.
-
-This is what catches two reviews that are each green on their own but broken together: the second review promoted onto a target branch is always gated against whatever the first one just landed, not against a stale snapshot, so their combination is tested before the target branch ever sees it.
-
-If a `MERGE` review's gate never reaches a terminal state (an operator-diagnosed stuck run), `PATCH /v1/reviews/{reviewId}/status` with `{"status": "READY"}` and no `buildId` requeues it: it moves back to `READY` and rejoins the waiting line at the tail rather than being promoted again immediately.
-
-### Overriding the gate
-
-`POST /v1/reviews/merge-queue/override-advance` promotes the head of the waiting line exactly as `advance` does, but skips the unresolved-thread check:
-
-```
-POST /v1/reviews/merge-queue/override-advance
-Content-Type: application/json
-
-{ "targetBranch": "main", "reason": "hotfix, reviewers unavailable" }
-```
-
-`reason` is required — a blank or missing one is refused with `400 Bad Request` before anything is promoted — and is recorded in the [audit trail](/agent-reference/audit-log) alongside the caller's identity, as an `API`-type event whose `apiPath` is `/v1/reviews/merge-queue/override-advance`. This is the one legitimate escape from the thread gate: it is deliberate (a distinct call, not a flag on `advance`), accountable (the reason and the caller are both durably recorded), and separately authorized — a tenant's `role_permissions` can grant `advance` without granting `override-advance`, since they are different API paths. A caller with no permission for this path gets the same `403 Forbidden` any unauthorized route returns.
+See [Merge queue § Overriding the gate](/collaboration/merge-queue#overriding-the-gate).
 
 ## Errors
 
-All endpoints return JSON error bodies:
+Endpoints return a plain-text error body by default (the HTTP status text). The one structured exception today is the merge queue's unresolved-thread refusal — see [Merge queue § The unresolved-thread check](/collaboration/merge-queue#the-unresolved-thread-check) for its JSON shape. *Machine error codes* below is this API's target `code`/`details` contract for the rest of these cases — it is not yet wired into any response, the one exception above aside.
 
 ```jsonc
 {
@@ -165,8 +132,8 @@ All endpoints return JSON error bodies:
 | `400 Bad Request` | Malformed JSON, missing required fields, type mismatches; a caller asserting `MERGE` or `MERGED` directly; `override-advance` with a blank or missing `reason`. | `POST /v1/reviews` without `sourceBranch`; `PATCH .../status` with `{"status": "MERGED"}` — that status is written only by the merge queue's own gate result; `override-advance` with `reason` omitted. |
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
-| `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller. | `GET /v1/reviews/rev_unknown`. |
-| `409 Conflict` | Invalid state transition or queue-state mismatch; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews/merge-queue/advance` while another review is already `MERGE` for that target branch; `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](#merge-queue) for that response's structured body. |
+| `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller; `merge-queue/advance` against a target branch with nothing waiting to promote — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table). | `GET /v1/reviews/rev_unknown`; `POST /v1/reviews/merge-queue/advance` on an empty queue, or while another review is already `MERGE` for that target branch. |
+| `409 Conflict` | Invalid state transition; a second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body. |
 | `422 Unprocessable Entity` | Structurally valid but semantically invalid. | `PATCH status` to `READY` without a successful build. |
 | `429 Too Many Requests` | Rate limit exceeded. | Burst of `POST /comments`. |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |
@@ -176,7 +143,7 @@ All endpoints return JSON error bodies:
 | `code` | When | HTTP status |
 |---|---|---|
 | `INVALID_TRANSITION` | `PATCH /status` with a transition not allowed by the [Status lifecycle](#status-lifecycle). `details.validTargets` lists the allowed next statuses. | `409` |
-| `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `MERGE`-status reviews. | `409` |
+| `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `READY` reviews waiting — a review already `MERGE` has left that waiting line, so its presence is the separate "another review already merging" case, not this one. | `404` |
 | `UNKNOWN_COMMIT` | `PATCH /status` (or `POST /builds`) referencing a `buildId` whose `commitId` doesn't exist on the review's `sourceBranch`. | `422` |
 | `INVALID_BODY` | Request body missing required field or fails type validation. `details.field` names the offender. | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is not a valid branch name. | `400` |

@@ -4,7 +4,7 @@ title: erun review
 
 # `erun review`
 
-Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, close a review, and inspect or advance a target branch's merge queue.
+Review code on a hosted erun platform from a terminal or an Agent — the client for the [collaboration API](/collaboration/reviews) — using the **erun-type cloud alias** [`erun cloud init erun`](/cli/cloud) and `erun cloud login` set up. List reviews, open one, comment on a line (or reply to an existing comment), resolve or reopen a comment thread, close a review, and inspect or advance a target branch's [merge queue](/collaboration/merge-queue).
 
 Starting a review needs the source branch to already exist on the remote — push it first with [`erun exec push`](/cli/exec#exec-push).
 
@@ -62,17 +62,17 @@ Comments on a line of a review, or replies to an existing comment with `--reply-
 
 ### `review resolve` / `review unresolve` {#review-resolve--review-unresolve}
 
-Resolve a comment thread by closing its root comment, or reopen one by marking its root comment `OPEN` again. A thread's status lives entirely on its root comment — `COMMENT_ID` must be the thread's root (the first comment posted at a file/line, not one made with `--reply-to`); addressing a reply fails, naming the root comment to retry against.
+Resolve a comment thread by closing its root comment, or reopen one by marking its root comment `OPEN` again. A thread's status lives entirely on its root comment — `COMMENT_ID` must be the thread's root (the first comment posted at a file/line, not one made with `--reply-to`); addressing a reply fails, naming the root comment to retry against. Only that thread's own root-comment author can resolve or reopen it — running this against someone else's thread is refused; ask that author, or see [Merge queue § Overriding the gate](/collaboration/merge-queue#overriding-the-gate) if it's blocking a merge and the author is unavailable.
 
 ### `review close`
 
 Closes a review without merging it.
 
-### `review queue list` / `review queue advance`
+### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty, its head is not `READY`, or the head still has unresolved comment threads. On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`.
+Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build (no CLI flag for that yet; see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
 
-### `review queue override-advance`
+### `review queue override-advance` {#review-queue-override-advance}
 
 Bypasses `review queue advance`'s unresolved-thread check and advances anyway. `--reason` is required and is recorded in the platform's [audit trail](/collaboration/operator-in-the-loop) alongside your identity — this is a deliberate, accountable escape hatch for a genuine exception, not a routine way to advance the queue. A tenant can grant this separately from ordinary `advance`, so it may be unavailable even to operators who can otherwise advance the queue.
 
@@ -112,6 +112,6 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
 | `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |
-| `queue advance` on an empty queue, or whose head is not `READY`. | `409 Conflict`. |
+| `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
