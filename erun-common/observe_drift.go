@@ -20,26 +20,40 @@ func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, po
 	var findings []string
 	recordedVersion := strings.TrimSpace(req.RuntimeVersion)
 
-	if !release.Found {
+	// release.Found is only false when the helm read itself failed (see
+	// ObservedHelmRelease's doc comment); release.Error then distinguishes a
+	// confirmed absence from a read that could not tell — a caller must never
+	// see the same "not found" line for both. Either way, runningImageDrift
+	// and runtimePodDrift below still run: their own inputs (release fields
+	// populated only on a successful read) make them no-ops here today, but
+	// nothing about this branch should stop them from evaluating whatever
+	// they can.
+	switch {
+	case !release.Found && release.Error != "":
+		if recordedVersion != "" {
+			findings = append(findings, fmt.Sprintf(
+				"env config records runtimeversion %s but the runtime helm release %q in namespace %q could not be read: %s",
+				recordedVersion, release.Name, req.Namespace, release.Error))
+		}
+	case !release.Found:
 		if recordedVersion != "" {
 			findings = append(findings, fmt.Sprintf(
 				"env config records runtimeversion %s but no runtime helm release %q was found in namespace %q",
 				recordedVersion, release.Name, req.Namespace))
 		}
-		return findings
-	}
-
-	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
-		findings = append(findings, fmt.Sprintf(
-			"env config runtimeversion (%s) does not match the release's app version (%s)",
-			recordedVersion, release.AppVersion))
-	}
-
-	if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
-		if recorded, ok := release.ImageOverrides[DevopsComponentName]; ok && recorded != runtimeImage {
+	default:
+		if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
 			findings = append(findings, fmt.Sprintf(
-				"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
-				runtimeImage, DevopsComponentName, recorded))
+				"env config runtimeversion (%s) does not match the release's app version (%s)",
+				recordedVersion, release.AppVersion))
+		}
+
+		if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
+			if recorded, ok := release.ImageOverrides[DevopsComponentName]; ok && recorded != runtimeImage {
+				findings = append(findings, fmt.Sprintf(
+					"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
+					runtimeImage, DevopsComponentName, recorded))
+			}
 		}
 	}
 
