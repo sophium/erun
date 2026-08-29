@@ -61,11 +61,56 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 
 	loadReviewDetailComments(requestCtx, client, capabilities, reviewID, usernames, &detail)
 	loadReviewDetailBuilds(requestCtx, client, capabilities, reviewID, review.Name, &detail)
+	loadReviewDetailReviewers(requestCtx, client, capabilities, reviewID, usernames, &detail)
 	detail.QueuePosition = loadReviewDetailQueuePosition(requestCtx, client, capabilities, review, reviewID)
 	detail.CanComment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteComment) == ""
 	detail.CanClose = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewStatus) == ""
 	detail.CanResolveComments = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCommentStatus) == ""
+	detail.CanAssignReviewers = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteReviewers) == ""
+	detail.CanRemoveReviewers = restrictedTenantDashboardRead(capabilities, tenantDashboardRemoveReviewers) == ""
+	if detail.CanAssignReviewers {
+		detail.AvailableReviewers = tenantDashboardEnrolledReviewerChoices(requestCtx, client, capabilities)
+	}
 	return detail, nil
+}
+
+// loadReviewDetailReviewers loads a review's assigned reviewers, degrading
+// independently like loadReviewDetailComments/loadReviewDetailBuilds: a
+// caller who cannot read reviewers still sees the rest of the detail.
+func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
+		detail.ReviewersRestricted = restricted
+		return
+	}
+	reviewers, err := client.ListReviewers(ctx, reviewID)
+	if err != nil {
+		detail.ReviewersError = tenantDashboardReadError(tenantDashboardReadReviewers, err)
+		return
+	}
+	converted := make([]uiReviewer, 0, len(reviewers))
+	for _, reviewer := range reviewers {
+		converted = append(converted, uiReviewer{UserID: reviewer.UserID, Username: usernames[reviewer.UserID]})
+	}
+	detail.Reviewers = converted
+}
+
+// tenantDashboardEnrolledReviewerChoices lists the tenant's enrolled users for
+// the Add reviewers picker, best effort: a caller who cannot read /v1/users,
+// or a read that fails, gets back nil rather than failing the whole detail —
+// the Add reviewers action itself simply has nothing to offer.
+func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) []uiReviewer {
+	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
+		return nil
+	}
+	users, err := client.ListUsers(ctx, eruncommon.PlatformListUsersParams{})
+	if err != nil {
+		return nil
+	}
+	choices := make([]uiReviewer, 0, len(users))
+	for _, user := range users {
+		choices = append(choices, uiReviewer{UserID: user.UserID, Username: user.Username})
+	}
+	return choices
 }
 
 func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {

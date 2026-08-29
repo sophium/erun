@@ -50,6 +50,14 @@ type PlatformComment struct {
 	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
+// PlatformReviewer mirrors model.ReviewReviewer's JSON shape.
+type PlatformReviewer struct {
+	ReviewID  string    `json:"reviewId"`
+	UserID    string    `json:"userId"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // PlatformBuild mirrors model.Build's JSON shape.
 type PlatformBuild struct {
 	BuildID    string `json:"buildId"`
@@ -257,6 +265,33 @@ func (c *PlatformClient) UpdateCommentStatus(ctx context.Context, reviewID, comm
 	var comment PlatformComment
 	err := c.do(ctx, http.MethodPatch, "/v1/reviews/"+url.PathEscape(reviewID)+"/comments/"+url.PathEscape(commentID)+"/status", params, true, &comment)
 	return comment, err
+}
+
+// ListReviewers lists the users assigned to review a review.
+func (c *PlatformClient) ListReviewers(ctx context.Context, reviewID string) ([]PlatformReviewer, error) {
+	var reviewers []PlatformReviewer
+	err := c.do(ctx, http.MethodGet, "/v1/reviews/"+url.PathEscape(reviewID)+"/reviewers", nil, true, &reviewers)
+	return reviewers, err
+}
+
+// PlatformAddReviewerParams is the reviewer-assignment input.
+type PlatformAddReviewerParams struct {
+	UserID string `json:"userId"`
+}
+
+// AddReviewer assigns userId as a reviewer on a review. The platform refuses
+// (ErrPlatformConflict) an already-assigned userId, and refuses
+// (ErrPlatformNotFound, via the tenant-scoped foreign key) a userId outside
+// the caller's tenant.
+func (c *PlatformClient) AddReviewer(ctx context.Context, reviewID string, params PlatformAddReviewerParams) (PlatformReviewer, error) {
+	var reviewer PlatformReviewer
+	err := c.do(ctx, http.MethodPost, "/v1/reviews/"+url.PathEscape(reviewID)+"/reviewers", params, true, &reviewer)
+	return reviewer, err
+}
+
+// RemoveReviewer unassigns userId from a review's reviewers.
+func (c *PlatformClient) RemoveReviewer(ctx context.Context, reviewID, userID string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/reviews/"+url.PathEscape(reviewID)+"/reviewers/"+url.PathEscape(userID), nil, true, nil)
 }
 
 // ListBuilds lists the builds recorded against a review.

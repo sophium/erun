@@ -30,6 +30,8 @@ const (
 	actionCommentReview        platformAction = "comment on this review"
 	actionResolveComment       platformAction = "resolve this comment thread"
 	actionUnresolveComment     platformAction = "reopen this comment thread"
+	actionAddReviewer          platformAction = "assign this reviewer"
+	actionRemoveReviewer       platformAction = "remove this reviewer"
 )
 
 // operatorPlatformError turns a platform failure into what the operator needs
@@ -46,7 +48,11 @@ func operatorPlatformError(action platformAction, err error) error {
 	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
 		sentence = "Your sign-in is no longer valid for this tenant. Sign in again and retry."
 	case errors.Is(err, eruncommon.ErrPlatformNotFound):
-		sentence = "That review no longer exists. Refresh to see the current list."
+		if action == actionAddReviewer || action == actionRemoveReviewer {
+			sentence = fmt.Sprintf("erun could not %s: the review or reviewer no longer exists. Refresh and try again.", action)
+		} else {
+			sentence = "That review no longer exists. Refresh to see the current list."
+		}
 	case errors.Is(err, eruncommon.ErrPlatformConflict):
 		// A conflict is the one refusal that is usually transient and usually
 		// somebody else's write, so it says what to do rather than what broke.

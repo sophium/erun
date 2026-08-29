@@ -565,3 +565,185 @@ test.describe('tenant dashboard — advancing the merge queue (#1348)', () => {
     }
   });
 });
+
+// The desktop could read a review's reviewers but do nothing else: no way to
+// assign one, so `erun review list --waiting-on-me`'s own filter had nothing
+// to ever return. These specs cover the Add reviewers action over the
+// stubbed platform RPC, mirroring the close/advance specs above.
+test.describe('tenant dashboard — assigning reviewers', () => {
+  const JANE = { userId: 'user-2', username: 'jane' };
+  const BOB = { userId: 'user-3', username: 'bob' };
+
+  async function openReviewWithReviewers(
+    app: AppShell,
+    page: Page,
+    environment: string,
+    overrides: Partial<{
+      reviewers: (typeof JANE)[];
+      availableReviewers: (typeof JANE)[];
+      canAssignReviewers: boolean;
+      canRemoveReviewers: boolean;
+      reviewersRestricted: string;
+    }>,
+    onAdd?: (userId: string) => void,
+    onRemove?: (userId: string) => void,
+  ): Promise<{ reviewers: (typeof JANE)[] }> {
+    const state = { reviewers: overrides.reviewers ?? [] };
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadTenantDashboard') {
+        await fulfillJSON(route, dashboardResponse(environment, { reviews: [REVIEW] }));
+        return;
+      }
+      if (body.method === 'LoadReviewDetail') {
+        await fulfillJSON(route, {
+          reviewId: REVIEW.reviewId,
+          review: REVIEW,
+          canComment: true,
+          reviewers: state.reviewers,
+          reviewersRestricted: overrides.reviewersRestricted,
+          canAssignReviewers: overrides.canAssignReviewers ?? true,
+          canRemoveReviewers: overrides.canRemoveReviewers ?? true,
+          availableReviewers: overrides.availableReviewers ?? [JANE, BOB],
+        });
+        return;
+      }
+      if (body.method === 'AddReviewer') {
+        const args = (JSON.parse(request.postData() ?? '{}') as { args?: [{ userId?: string }] })
+          .args ?? [{}];
+        const userId = args[0]?.userId ?? '';
+        onAdd?.(userId);
+        const assigned = [JANE, BOB].find((user) => user.userId === userId);
+        if (assigned) {
+          state.reviewers = [...state.reviewers, assigned];
+        }
+        await fulfillJSON(route, { userId });
+        return;
+      }
+      if (body.method === 'RemoveReviewer') {
+        const args = (JSON.parse(request.postData() ?? '{}') as { args?: [{ userId?: string }] })
+          .args ?? [{}];
+        const userId = args[0]?.userId ?? '';
+        onRemove?.(userId);
+        state.reviewers = state.reviewers.filter((user) => user.userId !== userId);
+        await fulfillJSON(route, null);
+        return;
+      }
+      await route.continue();
+    });
+
+    await openDashboardReviewsTab(app, environment);
+    await app.tenantDashboard.openReview('Add widget');
+    await app.reviewDetailDialog.waitForOpen();
+    return state;
+  }
+
+  test('assigning a reviewer from the picker shows it in the list and offers Remove', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviewer-add');
+    try {
+      let addedUserId = '';
+      await openReviewWithReviewers(app, page, environment, {}, (userId) => {
+        addedUserId = userId;
+      });
+
+      const dialog = app.reviewDetailDialog;
+      await expect(dialog.locator()).toContainText('No reviewers assigned yet.');
+      await dialog.addReviewerButton().click();
+      await dialog.choosePendingReviewer('jane');
+      await dialog.assignReviewerButton().click();
+
+      await expect(dialog.reviewerRow('jane')).toBeVisible();
+      expect(addedUserId).toBe(JANE.userId);
+      await expect(dialog.removeReviewerButton('jane')).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('removing a reviewer requires confirmation and reflects the empty list afterward', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviewer-remove');
+    try {
+      let removedUserId = '';
+      await openReviewWithReviewers(
+        app,
+        page,
+        environment,
+        { reviewers: [JANE] },
+        undefined,
+        (userId) => {
+          removedUserId = userId;
+        },
+      );
+
+      const dialog = app.reviewDetailDialog;
+      await expect(dialog.reviewerRow('jane')).toBeVisible();
+      await dialog.removeReviewerButton('jane').click();
+      await expect(dialog.confirmRemoveReviewerButton('jane')).toBeVisible();
+      await dialog.confirmRemoveReviewerButton('jane').click();
+
+      await expect(dialog.locator()).toContainText('No reviewers assigned yet.');
+      expect(removedUserId).toBe(JANE.userId);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('hides Add reviewer and names the missing access when the caller cannot assign', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviewer-add-restricted');
+    try {
+      await openReviewWithReviewers(app, page, environment, { canAssignReviewers: false });
+
+      const dialog = app.reviewDetailDialog;
+      await expect(dialog.addReviewerButton()).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('names the missing access instead of a blank list when the caller cannot read reviewers', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviewer-list-restricted');
+    try {
+      await openReviewWithReviewers(app, page, environment, {
+        reviewersRestricted: 'GET /v1/reviews/{review_id}/reviewers',
+      });
+
+      const dialog = app.reviewDetailDialog;
+      await expect(dialog.reviewersRestrictedNote()).toBeVisible();
+      await expect(dialog.addReviewerButton()).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('names the enrollment remedy when every enrolled user is already a reviewer', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviewer-add-none-left');
+    try {
+      await openReviewWithReviewers(app, page, environment, {
+        reviewers: [JANE],
+        availableReviewers: [JANE],
+      });
+
+      const dialog = app.reviewDetailDialog;
+      await dialog.addReviewerButton().click();
+      await expect(dialog.noReviewersLeftNote()).toBeVisible();
+      await expect(dialog.reviewerPickerTrigger()).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});

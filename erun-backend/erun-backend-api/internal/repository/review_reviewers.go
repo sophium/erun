@@ -30,6 +30,9 @@ func (r *ReviewReviewerRepository) Create(ctx context.Context, reviewer model.Re
 		if isUniqueViolation(err) {
 			return ErrConflict
 		}
+		if isForeignKeyViolation(err) {
+			return ErrNotFound
+		}
 		return err
 	})
 	return created, err

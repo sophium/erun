@@ -557,7 +557,32 @@ type uiReviewDetail struct {
 	// CanResolveComments mirrors CanComment for the resolve/unresolve action,
 	// gated on its own write route since resolving a thread and posting to it
 	// are different permissions on the platform.
-	CanResolveComments bool `json:"canResolveComments"`
+	CanResolveComments  bool         `json:"canResolveComments"`
+	Reviewers           []uiReviewer `json:"reviewers,omitempty"`
+	ReviewersRestricted string       `json:"reviewersRestricted,omitempty"`
+	ReviewersError      string       `json:"reviewersError,omitempty"`
+	// CanAssignReviewers mirrors CanComment for the Add reviewers action,
+	// gated on its own write route (POST .../reviewers) since assigning a
+	// reviewer is a distinct permission from every other review write.
+	CanAssignReviewers bool `json:"canAssignReviewers"`
+	// CanRemoveReviewers mirrors CanAssignReviewers for the Remove action —
+	// DELETE is a distinct route from POST, gated separately.
+	CanRemoveReviewers bool `json:"canRemoveReviewers"`
+	// AvailableReviewers lists the tenant's enrolled users the Add reviewers
+	// picker may choose from — populated only when CanAssignReviewers is set,
+	// so a caller who cannot assign never pays for the extra read. A
+	// constrained picker, not a free-text id, is the point: it is how a
+	// cross-tenant userId becomes structurally impossible to submit rather
+	// than merely refused after the fact.
+	AvailableReviewers []uiReviewer `json:"availableReviewers,omitempty"`
+}
+
+// uiReviewer is one entry in a review's assigned-reviewers list.
+// Username is resolved best-effort the same way uiTenantDashboardReview's
+// AuthorUsername is, empty when it could not be resolved.
+type uiReviewer struct {
+	UserID   string `json:"userId"`
+	Username string `json:"username,omitempty"`
 }
 
 type uiReviewComment struct {
@@ -625,6 +650,21 @@ type uiOverrideAdvanceMergeQueueInput struct {
 	// Reason is required by the platform and is recorded in its audit trail
 	// alongside the caller's identity.
 	Reason string `json:"reason"`
+}
+
+// uiAddReviewerInput assigns userId as a reviewer on a review. userId must
+// already be enrolled in the caller's own tenant.
+type uiAddReviewerInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	UserID   string `json:"userId"`
+}
+
+// uiRemoveReviewerInput unassigns userId from a review's reviewers.
+type uiRemoveReviewerInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	UserID   string `json:"userId"`
 }
 
 // uiCreateReviewCommentInput starts a new top-level thread anchored to a diff

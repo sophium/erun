@@ -163,6 +163,72 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 	return tenantDashboardReview(review), nil
 }
 
+// AddReviewer assigns userId as a reviewer on a review. The Add reviewers
+// picker (uiReviewDetail.AvailableReviewers) already constrains userId to the
+// tenant's own enrolled users, so a cross-tenant id is structurally
+// unreachable from this control rather than merely refused after the fact.
+func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
+	tenant, err := requireTenant("assigning a reviewer", input.Tenant)
+	if err != nil {
+		return uiReviewer{}, err
+	}
+	reviewID := strings.TrimSpace(input.ReviewID)
+	if reviewID == "" {
+		return uiReviewer{}, fmt.Errorf("review id is required")
+	}
+	userID := strings.TrimSpace(input.UserID)
+	if userID == "" {
+		return uiReviewer{}, fmt.Errorf("user id is required")
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	if err != nil {
+		return uiReviewer{}, err
+	}
+	defer cancel()
+
+	reviewer, err := client.AddReviewer(requestCtx, reviewID, eruncommon.PlatformAddReviewerParams{UserID: userID})
+	if err != nil {
+		return uiReviewer{}, operatorPlatformError(actionAddReviewer, err)
+	}
+	return uiReviewer{UserID: reviewer.UserID}, nil
+}
+
+// RemoveReviewer unassigns userId from a review's reviewers.
+func (a *App) RemoveReviewer(input uiRemoveReviewerInput) error {
+	tenant, err := requireTenant("removing a reviewer", input.Tenant)
+	if err != nil {
+		return err
+	}
+	reviewID := strings.TrimSpace(input.ReviewID)
+	if reviewID == "" {
+		return fmt.Errorf("review id is required")
+	}
+	userID := strings.TrimSpace(input.UserID)
+	if userID == "" {
+		return fmt.Errorf("user id is required")
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	if err := client.RemoveReviewer(requestCtx, reviewID, userID); err != nil {
+		return operatorPlatformError(actionRemoveReviewer, err)
+	}
+	return nil
+}
+
 // validateCreateReviewCommentInput checks CreateReviewComment's already-
 // trimmed input, kept apart from the call itself so that function's own
 // branching stays under the module's cyclomatic-complexity cap.

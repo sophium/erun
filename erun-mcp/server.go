@@ -505,6 +505,18 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewRecordBuildTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "review_reviewers_list",
+		Description: "List the users assigned to review a review on the erun platform. Supports preview.",
+	}, reviewReviewersListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_reviewers_add",
+		Description: "Assign a reviewer to a review on the erun platform, so an Agent can assign a peer Agent (or itself) as reviewer. userId must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; use review_queue_advance's unresolved-thread gate for what actually blocks a merge. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewReviewerAddTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_reviewers_remove",
+		Description: "Remove a reviewer from a review on the erun platform. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewReviewerRemoveTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_list",
 		Description: "List a target branch's merge queue on the erun platform, in queue order. Supports preview.",
 	}, reviewMergeQueueListTool(runtime))

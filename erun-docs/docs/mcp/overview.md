@@ -300,11 +300,14 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
 | `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. |
+| `review_reviewers_list` | Read | List the users assigned to review a review. |
+| `review_reviewers_add` | Work (idempotent) | Assign a reviewer, so an Agent can assign a peer Agent (or itself). `userId` must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; see [merge queue](/collaboration/merge-queue) for what actually blocks a merge. |
+| `review_reviewers_remove` | Work (destructive, idempotent) | Remove a reviewer from a review. |
 | `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
 | `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
 | `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
-All eleven support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All fourteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -432,6 +435,9 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_unresolve` | `erun review unresolve` | Work |
 | review | `review_close` | `erun review close` | Work |
 | review | `review_record-build` | `erun review record-build` | Work |
+| review | `review_reviewers_list` | `erun review reviewers list` | Read |
+| review | `review_reviewers_add` | `erun review reviewers add` | Work |
+| review | `review_reviewers_remove` | `erun review reviewers remove` | Work |
 | review | `review_queue_list` | `erun review queue list` | Read |
 | review | `review_queue_advance` | `erun review queue advance` | Work |
 | review | `review_queue_override-advance` | `erun review queue override-advance` | Work |

@@ -50,6 +50,22 @@ func TestOperatorPlatformErrorMapsEachDistinctRefusal(t *testing.T) {
 	}
 }
 
+// Assigning or removing a reviewer's 404 means "review or reviewer no longer
+// exists", not "that review no longer exists" — the generic review-detail
+// wording would be a wrong diagnosis for a reviewer that was removed by
+// someone else between the picker loading and the submit.
+func TestOperatorPlatformErrorNamesReviewerNotFoundDistinctly(t *testing.T) {
+	for _, action := range []platformAction{actionAddReviewer, actionRemoveReviewer} {
+		got := operatorPlatformError(action, fmt.Errorf("wrapped: %w", eruncommon.ErrPlatformNotFound))
+		if got == nil {
+			t.Fatalf("%s: expected an error", action)
+		}
+		if !strings.Contains(got.Error(), "review or reviewer no longer exists") {
+			t.Fatalf("%s: expected the reviewer-specific not-found message, got %v", action, got)
+		}
+	}
+}
+
 // A failure erun cannot classify keeps its own text: a sentence that guesses
 // wrong is worse than one that is merely technical.
 func TestOperatorPlatformErrorPassesThroughWhatItCannotClassify(t *testing.T) {

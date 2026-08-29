@@ -31,6 +31,7 @@ import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
+import { ReviewDetailReviewers } from './ReviewDetailDialog.Reviewers';
 import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { BranchArrow, RelativeTime } from './TenantDashboardMessage';
 
@@ -137,6 +138,7 @@ function ReviewDetailLoaded({
       <CloseReviewAction review={review} data={data} detail={detail} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
         <ReviewDetailBuilds data={data} />
+        <ReviewDetailReviewers data={data} detail={detail} />
         <ReviewDetailComments detail={detail} />
       </div>
     </>
