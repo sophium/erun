@@ -69,9 +69,10 @@ stringData:
 // none of the registries in play name a host of their own (a bare Docker Hub
 // namespace), or when no host resolved a credential at all, in which case
 // nothing is read or applied and every named Secret is left exactly as it
-// was. When at least one host resolves, each named Secret is read back and
-// only the resolved hosts' entries are overlaid onto it (mergeImagePullSecretAuths):
-// a host that is known but did not resolve this run (no aws/docker session on
+// was. When at least one host resolves, each named Secret is read back (real
+// runs only -- see applyImagePullSecrets for the dry-run trace) and only the
+// resolved hosts' entries are overlaid onto it (mergeImagePullSecretAuths): a
+// host that is known but did not resolve this run (no aws/docker session on
 // the machine running the deploy) keeps its existing coverage in the Secret
 // exactly as it was, the same fallback provisionRegistryCredentialSecret uses
 // for the ghcr registry-credential secret; the other hosts' credentials still
@@ -110,9 +111,12 @@ func resolveImagePullSecretCredentials(ctx Context, deployInput HelmDeploySpec) 
 // existingImagePullSecretAuths reads a named dockerconfigjson Secret back and
 // decodes its current auths document, so applyImagePullSecrets can overlay
 // this run's resolved credentials onto it instead of replacing the whole
-// document (see refreshImagePullSecrets). This is a read with no side effect,
-// so it runs the same under dry-run as for real -- only the apply that
-// follows it is conditional on ctx.DryRun.
+// document (see refreshImagePullSecrets). Called only for a real run: a dry
+// run has no cluster read to show without every dry-run scenario needing a
+// kubectl stub it otherwise has no reason to declare, the same tradeoff
+// TraceEnsureKubernetesNamespace makes for the namespace-exists check, so
+// applyImagePullSecrets states the merge as conditional instead of asserting
+// it. args is the exact get command already traced by the caller.
 //
 // A Secret that does not exist yet reads as no existing coverage, exactly
 // what a first deploy always saw. A Secret that exists but cannot be decoded
@@ -121,9 +125,7 @@ func resolveImagePullSecretCredentials(ctx Context, deployInput HelmDeploySpec) 
 // alone, because guessing wrong here would destroy exactly the coverage this
 // function exists to protect; a genuine cluster read failure (RBAC denial,
 // unreachable API server) is refused for the same reason.
-func existingImagePullSecretAuths(ctx Context, deployInput HelmDeploySpec, name string) (map[string]dockerConfigJSONAuthEntry, error) {
-	ctx.Trace("image pull secret " + name + ": reading existing coverage before merge")
-	args := imagePullSecretGetArgs(deployInput.Namespace, deployInput.KubernetesContext, name)
+func existingImagePullSecretAuths(name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		if KubernetesResourceNotFound(string(output)) {
@@ -170,8 +172,10 @@ func mergeImagePullSecretAuths(existing map[string]dockerConfigJSONAuthEntry, cr
 // applyImagePullSecrets re-applies every named dockerconfigjson Secret,
 // merging this run's resolved credentials into whatever the Secret already
 // covers (see existingImagePullSecretAuths / mergeImagePullSecretAuths)
-// instead of replacing the whole auths document, tracing each apply (dry-run
-// stops before the write, not before the read).
+// instead of replacing the whole auths document. Real mode reads the Secret
+// back and applies the merged result; dry-run traces both commands it would
+// run but executes neither, stating the merge as conditional on what the get
+// above would find (see existingImagePullSecretAuths for why).
 func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials map[string]registryBasicAuth) error {
 	applyArgs := imagePullSecretApplyArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
@@ -179,18 +183,21 @@ func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials 
 		if name == "" {
 			continue
 		}
-		existing, err := existingImagePullSecretAuths(ctx, deployInput, name)
+		getArgs := imagePullSecretGetArgs(deployInput.Namespace, deployInput.KubernetesContext, name)
+		ctx.TraceCommand("", "kubectl", getArgs...)
+		ctx.Trace("apply image pull secret " + name + " (credential redacted)")
+		ctx.TraceCommand("", "kubectl", applyArgs...)
+		if ctx.DryRun {
+			ctx.Trace("image pull secret " + name + ": every host the read above already covers keeps its existing entry except the ones just resolved, which refresh")
+			continue
+		}
+		existing, err := existingImagePullSecretAuths(name, getArgs)
 		if err != nil {
 			return err
 		}
 		dockerConfigJSON, err := dockerConfigJSONForAuthEntries(mergeImagePullSecretAuths(existing, credentials))
 		if err != nil {
 			return fmt.Errorf("render image pull secret %s: %w", name, err)
-		}
-		ctx.Trace("apply image pull secret " + name + " (credential redacted)")
-		ctx.TraceCommand("", "kubectl", applyArgs...)
-		if ctx.DryRun {
-			continue
 		}
 		manifest := renderImagePullSecret(name, deployInput.Namespace, dockerConfigJSON)
 		cmd := Command("kubectl", applyArgs...)

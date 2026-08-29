@@ -525,7 +525,16 @@ func TestDeploy(t *testing.T) {
 		}
 
 		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "kubectl", "")
+		// The refresh reads the Secret back before applying (to merge rather
+		// than replace its auths), so the generic empty-output kubectl stub
+		// every other kubectl call here still uses must answer "get secret"
+		// specifically: NotFound, since ecr-pull has never been created in
+		// this fixture.
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", `case "$*" in
+  *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+`)
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)

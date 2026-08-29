@@ -138,16 +138,16 @@ func TestRefreshImagePullSecretsFirstDeployNoExistingSecret(t *testing.T) {
 	}
 }
 
-// TestRefreshImagePullSecretsDryRunWritesNothing proves dry-run still reads
-// the existing Secret back (so its trace reflects the real merge outcome)
-// but never calls kubectl apply: the stub fails the test outright if apply
-// runs at all.
+// TestRefreshImagePullSecretsDryRunWritesNothing proves dry-run calls kubectl
+// not at all -- neither the read nor the apply -- the same tradeoff
+// TraceEnsureKubernetesNamespace makes for the namespace-exists check: a dry
+// run states the merge outcome as conditional on a read it never performs,
+// instead of forcing every dry-run scenario to declare a kubectl stub. The
+// stub here declares no responses at all, so any invocation fails the test.
 func TestRefreshImagePullSecretsDryRunWritesNothing(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
 	useDockerConfigDir(t, dir)
-
-	existingSecretJSON := secretGetJSON(`{"auths":{"ghcr.io":{"auth":"stale-ghcr-auth"}}}`)
-	imagePullSecretKubectlStub(t, map[string]string{"regcred": existingSecretJSON}, "")
+	imagePullSecretKubectlStub(t, nil, "")
 
 	deployInput := HelmDeploySpec{
 		Namespace:         "team-dev",
@@ -169,12 +169,8 @@ func TestExistingImagePullSecretAuthsRefusesMalformedSecret(t *testing.T) {
 	getBody := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`, badEncoded)
 	imagePullSecretKubectlStub(t, map[string]string{"regcred": getBody}, "")
 
-	deployInput := HelmDeploySpec{
-		Namespace:        "team-dev",
-		ImagePullSecrets: []string{"regcred"},
-	}
-
-	_, err := existingImagePullSecretAuths(testTraceContext(false), deployInput, "regcred")
+	args := imagePullSecretGetArgs("team-dev", "", "regcred")
+	_, err := existingImagePullSecretAuths("regcred", args)
 	if err == nil {
 		t.Fatal("expected an error for a Secret whose .dockerconfigjson does not decode, got nil")
 	}
