@@ -336,18 +336,27 @@ func orchestratorAttachmentUnusableNotice(id, attached, reason string) string {
 // moves to a new id mid-run is exactly the case this exists for, so the record
 // has to be refreshed as the session goes rather than only at its start.
 //
-// Bare shell, like the activity hooks and the no-ask guard, so it keeps working
-// when erun is not on PATH. Every failure path is `|| true`: a hook that could
-// wedge a session costs more than a missed record.
+// Runs through node, like the other orchestrator hooks, rather than a POSIX
+// shell reading its own stdin with sed: this fires on every session and turn
+// boundary of every orchestrator, and Windows' own hook shell (PowerShell)
+// parses `[ -n ... ]` test syntax as something else entirely rather than
+// executing it. Node needs no helper binary on PATH -- the AI harness that
+// launched the session is itself an npm package -- and resolves identically
+// regardless of the host's own hook shell. Every failure path is swallowed:
+// a hook that could wedge a session costs more than a missed record.
 func orchestratorLiveConversationHookCommand() string {
 	dir := filepath.ToSlash(orchestratorLiveConversationDir())
-	return `input=$(cat); ` +
-		`sid=$(printf '%s' "$input" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'); ` +
-		`[ -n "$ERUN_ORCHESTRATOR_ID" ] && [ -n "$` + orchestratorLaunchEnvVar + `" ] && [ -n "$sid" ] && ` +
-		`mkdir -p "` + dir + `" && ` +
-		`printf '{"conversationId":"%s","launchId":"%s","atUnix":%s}' "$sid" "$` + orchestratorLaunchEnvVar + `" "$(date +%s)" ` +
-		`> "` + dir + `/$ERUN_ORCHESTRATOR_ID.json"` +
-		` || true`
+	script := `let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
+		`const id=process.env.ERUN_ORCHESTRATOR_ID;` +
+		`const launch=process.env.` + orchestratorLaunchEnvVar + `;` +
+		`if(!id||!launch)return;` +
+		`const j=JSON.parse(d);` +
+		`const sid=j.session_id;` +
+		`if(!sid)return;` +
+		`const fs=require("fs");fs.mkdirSync("` + dir + `",{recursive:true});` +
+		`fs.writeFileSync("` + dir + `/"+id+".json",JSON.stringify({conversationId:sid,launchId:launch,atUnix:Math.floor(Date.now()/1000)}));` +
+		`}catch(e){}});`
+	return `node -e '` + script + `'`
 }
 
 // isOrchestratorLiveConversationHookBlock reports whether a settings hook block
@@ -373,7 +382,7 @@ func isOrchestratorLiveConversationHookBlock(block any) bool {
 		if !ok {
 			continue
 		}
-		if strings.Contains(command, `"conversationId":`) && strings.Contains(command, orchestratorLaunchEnvVar) {
+		if strings.Contains(command, `conversationId:`) && strings.Contains(command, orchestratorLaunchEnvVar) {
 			return true
 		}
 	}

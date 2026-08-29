@@ -78,12 +78,15 @@ func guardHookInput(t *testing.T, transcript string, active bool) string {
 	return string(encoded)
 }
 
-// The guard is a shell one-liner, so asserting on its text would prove nothing
-// about what it does. This runs it.
+// The guard is a one-liner, so asserting on its text would prove nothing about
+// what it does. This runs it.
 func TestOrchestratorNoAskStopGuardDecidesOnTheTurnsLastWords(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no POSIX shell on this host")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("no node on this host")
 	}
 	dir := t.TempDir()
 	gate := writeGuardTranscript(t, dir, "gate.jsonl", "Filed it. Say the word and I will open the PR.")

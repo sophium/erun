@@ -174,14 +174,17 @@ func TestOrchestratorShellActivityHooksResolveTheirOwnOrchestrator(t *testing.T)
 	clear := shellHookBlockCommand(t, blocks[1], "TaskOutput|TaskStop")
 
 	for _, command := range []string{start, clear} {
-		if !strings.Contains(command, "$ERUN_ORCHESTRATOR_ID") {
+		if !strings.Contains(command, "process.env.ERUN_ORCHESTRATOR_ID") {
 			t.Fatalf("the hook must resolve its orchestrator at run time: %q", command)
 		}
-		if !strings.Contains(command, `[ -n "$ERUN_ORCHESTRATOR_ID" ]`) {
+		if !strings.Contains(command, "if(!id)return") {
 			t.Fatalf("the hook must skip a session with no id: %q", command)
 		}
 		if !strings.Contains(command, "node -e") {
 			t.Fatalf("the hook must parse structured JSON, not scan text: %q", command)
+		}
+		if !orchestratorHookCommandIsPortable(command) {
+			t.Fatalf("the hook must run through node, not a POSIX shell: %q", command)
 		}
 	}
 }

@@ -111,15 +111,21 @@ func orchestratorActivityDir() string {
 // A session without that variable (transient/Investigate) writes nothing rather
 // than a file named for nobody.
 //
-// It is a bare shell redirect rather than a helper binary on purpose: this runs
-// at every turn boundary of every orchestrator, and a hook that needed erun on
-// PATH would stop reporting exactly when the environment is misconfigured.
+// It runs through node rather than a POSIX shell on purpose: this runs at every
+// turn boundary of every orchestrator, and Windows' own hook shell (PowerShell)
+// parses `[ -n ... ]`-style test syntax as something else entirely instead of
+// executing it. Node needs no helper binary on PATH -- the orchestrator session
+// could not have started without it, since the AI harness that launched it is
+// itself an npm package -- and resolves identically regardless of the host's
+// own hook shell.
 func orchestratorActivityHookCommand(busy bool) string {
 	dir := filepath.ToSlash(orchestratorActivityDir())
 	state := strconv.FormatBool(busy)
-	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
-		`printf '{"busy":` + state + `,"atUnix":%s}' "$(date +%s)" > "` + dir + `/$ERUN_ORCHESTRATOR_ID.json"` +
-		` || true`
+	script := `try{const id=process.env.ERUN_ORCHESTRATOR_ID;if(id){const fs=require("fs");` +
+		`fs.mkdirSync("` + dir + `",{recursive:true});` +
+		`fs.writeFileSync("` + dir + `/"+id+".json",JSON.stringify({busy:` + state + `,atUnix:Math.floor(Date.now()/1000)}));` +
+		`}}catch(e){}`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorActivityHookMarker identifies a hook this file wrote, so a rewrite
@@ -150,7 +156,7 @@ func isOrchestratorActivityHookBlock(block any) bool {
 		if !ok {
 			continue
 		}
-		if strings.Contains(command, marker) && strings.Contains(command, `"busy":`) {
+		if strings.Contains(command, marker) && strings.Contains(command, `busy:`) {
 			return true
 		}
 	}
