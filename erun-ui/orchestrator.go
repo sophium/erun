@@ -645,10 +645,8 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// orchestratorContractFallback is echoed when the shared CLAUDE.md is somehow
-// missing, so a session still boots knowing it is under the contract. It is
-// ASCII-only and apostrophe-free so the single-quoted echo is safe in both Git
-// Bash (Windows) and sh (macOS/Linux).
+// orchestratorContractFallback is printed when the shared CLAUDE.md is somehow
+// missing, so a session still boots knowing it is under the contract.
 const orchestratorContractFallback = "You are a host-side erun orchestrator. Read and follow the CLAUDE.md in this directory and the erun-orchestrate skill before doing anything, even a trivial-looking question."
 
 // orchestratorSkillHookCommand is the SessionStart hook command written into the
@@ -656,29 +654,36 @@ const orchestratorContractFallback = "You are a host-side erun orchestrator. Rea
 // into the session by printing the shared CLAUDE.md to plain stdout (added to the
 // session context), so an orchestrator always has its contract in context instead
 // of being asked to load a skill it can skip. Plain stdout — not JSON — sidesteps
-// the 10,000-char additionalContext cap; cat reads the file directly, so the
-// contract body is never shell-quoted and only the forward-slashed path is
-// double-quoted (safe in Git Bash and sh). The apostrophe-free echo is the
-// fallback if the file is ever missing.
+// the 10,000-char additionalContext cap.
+//
+// Runs through node rather than cat/echo chained with a POSIX shell: this is a
+// SessionStart hook, and Windows' own hook shell (PowerShell) parses
+// `[ -n ... ]` test syntax as something else entirely rather than executing
+// it. Node reads each file directly and writes its bytes straight to stdout,
+// so neither file's body ever passes through the shell at all -- only the
+// two forward-slashed paths are baked into the script, and node resolves
+// identically regardless of the host's own hook shell.
 func orchestratorSkillHookCommand(dir string) string {
 	claudeMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
 	// The per-orchestrator layer, injected AFTER the shared contract so the
 	// ordering is the precedence rule: a role file can add to the common
-	// contract or override a line of it, and a reader can see which won (#1175).
+	// contract or override a line of it, and a reader can see which won.
 	//
-	// $ERUN_ORCHESTRATOR_ID is set at launch and is already proven visible to
-	// SessionStart hook commands on both host OSes -- the activity hook in this
-	// same block interpolates it into a path one line down. A transient
-	// (Investigate) session has an empty id by design, so the guard skips it and
-	// it gets the shared contract only.
+	// ERUN_ORCHESTRATOR_ID is set at launch and resolved at run time, since
+	// this settings file is shared by every orchestrator. A transient
+	// (Investigate) session has an empty id by design, so the guard skips it
+	// and it gets the shared contract only.
 	//
-	// Absent file is a silent no-op: most orchestrators will not have one, and a
-	// missing file must neither fail the hook nor write to stderr. Same quoting
-	// discipline as above -- forward-slashed, double-quoted path, and no file
-	// body ever passes through the shell -- so sh and Git Bash both work.
-	roleMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.$ERUN_ORCHESTRATOR_ID.md"))
-	return `cat "` + claudeMd + `" 2>/dev/null || echo '` + orchestratorContractFallback + `'` + "\n" +
-		`[ -n "$ERUN_ORCHESTRATOR_ID" ] && cat "` + roleMd + `" 2>/dev/null || true`
+	// Absent file is a silent no-op: most orchestrators will not have one, and
+	// a missing file must neither fail the hook nor write to stderr.
+	roleDir := filepath.ToSlash(dir)
+	script := `try{const fs=require("fs");` +
+		`try{process.stdout.write(fs.readFileSync("` + claudeMd + `","utf8"));}` +
+		`catch(e){process.stdout.write("` + orchestratorContractFallback + `\n");}` +
+		`const id=process.env.ERUN_ORCHESTRATOR_ID;` +
+		`if(id){try{process.stdout.write(fs.readFileSync("` + roleDir + `/CLAUDE."+id+".md","utf8"));}catch(e){}}` +
+		`}catch(e){}`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorRoleFileSeed is written once into CLAUDE.<id>.md and never
@@ -799,8 +804,9 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 const orchestratorNoAskGuardMarker = "noask_guard=1"
 
 // orchestratorNoAskStopGuardReason is fed back to the session when the guard
-// fires. ASCII-only and apostrophe-free so the single-quoted printf is safe in
-// both Git Bash (Windows) and sh (macOS/Linux).
+// fires. ASCII-only and apostrophe-free, since it is embedded as a plain JS
+// string inside a script wrapped in a single-quoted shell argument -- a
+// literal single quote in the text would close that argument early.
 const orchestratorNoAskStopGuardReason = "Your closing message hands the operator a decision. " +
 	"The orchestrator contract resolves ambiguity itself and carries the task to a verified end, " +
 	"so a question is a defect, not caution. Do what you offered, or state it as a decision already taken, " +
@@ -812,11 +818,18 @@ const orchestratorNoAskStopGuardReason = "Your closing message hands the operato
 // as long. Reading the turn's own last words is what puts the guarantee at the
 // layer the behaviour surfaces on.
 //
-// Every failure path exits 0. A guard that wedged a session on a transcript it
-// could not parse would cost more than the stalls it prevents, and an already
-// nudged turn (stop_hook_active) is let go so a session is corrected once rather
-// than looped. Like the activity reports it is bare shell, so it keeps working
-// when erun is not on PATH.
+// Every failure path falls through to node's default exit code, 0. A guard
+// that wedged a session on a transcript it could not parse would cost more
+// than the stalls it prevents, and an already nudged turn (stop_hook_active)
+// is let go so a session is corrected once rather than looped.
+//
+// Runs through node rather than a POSIX shell reading its own stdin with sed
+// and grep: this fires on every Stop event of every orchestrator, and
+// Windows' own hook shell (PowerShell) parses `[ -f ... ]` test syntax as
+// something else entirely rather than executing it. Node needs no helper
+// binary on PATH -- the AI harness that launched the session is itself an
+// npm package -- and resolves identically regardless of the host's own hook
+// shell.
 //
 // It reads the turn's last ASSISTANT entry, never the raw tail of the
 // transcript. A firing is itself recorded in the transcript, and the record
@@ -826,13 +839,21 @@ const orchestratorNoAskStopGuardReason = "Your closing message hands the operato
 // me to…") refuse the reply that answered it. Only what the turn said can
 // decide whether the turn handed back a decision.
 func orchestratorNoAskStopGuardCommand() string {
-	return orchestratorNoAskGuardMarker + `; input=$(cat); ` +
-		`printf '%s' "$input" | grep -q '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && exit 0; ` +
-		`transcript=$(printf '%s' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's/\\\\/\//g'); ` +
-		`[ -f "$transcript" ] || exit 0; ` +
-		`said=$(tail -n 40 "$transcript" | grep -E '"type"[[:space:]]*:[[:space:]]*"assistant"' | tail -n 1); ` +
-		`printf '%s' "$said" | grep -qiE 'say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call' || exit 0; ` +
-		`printf '%s' '` + orchestratorNoAskStopGuardReason + `' >&2; exit 2`
+	script := `/*` + orchestratorNoAskGuardMarker + `*/` +
+		`let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
+		`const j=JSON.parse(d);` +
+		`if(j.stop_hook_active===true)return;` +
+		`const fs=require("fs");` +
+		`const lines=fs.readFileSync(j.transcript_path,"utf8").split("\n");` +
+		`const tail=lines.slice(-40);` +
+		`let said="";` +
+		`for(const line of tail){if(/"type"\s*:\s*"assistant"/.test(line))said=line;}` +
+		`const trigger=/say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call/i;` +
+		`if(!trigger.test(said))return;` +
+		`process.stderr.write("` + orchestratorNoAskStopGuardReason + `");` +
+		`process.exit(2);` +
+		`}catch(e){}});`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorNoAskStopGuardBlock is the guard bound to the Stop event.

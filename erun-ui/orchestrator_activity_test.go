@@ -98,19 +98,22 @@ func TestOrchestratorActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 	idle := hookCommandText(t, idleHook)
 
 	for _, command := range []string{busy, idle} {
-		if !strings.Contains(command, "$ERUN_ORCHESTRATOR_ID") {
+		if !strings.Contains(command, "process.env.ERUN_ORCHESTRATOR_ID") {
 			t.Fatalf("the hook must resolve its orchestrator at run time: %q", command)
 		}
 		// A transient session carries no id and must write nothing rather than a
 		// file named for nobody.
-		if !strings.Contains(command, `[ -n "$ERUN_ORCHESTRATOR_ID" ]`) {
+		if !strings.Contains(command, "if(id)") {
 			t.Fatalf("the hook must skip a session with no id: %q", command)
 		}
+		if !orchestratorHookCommandIsPortable(command) {
+			t.Fatalf("the hook must run through node, not a POSIX shell: %q", command)
+		}
 	}
-	if !strings.Contains(busy, `"busy":true`) {
+	if !strings.Contains(busy, `busy:true`) {
 		t.Fatalf("the turn-start hook must report working: %q", busy)
 	}
-	if !strings.Contains(idle, `"busy":false`) {
+	if !strings.Contains(idle, `busy:false`) {
 		t.Fatalf("the turn-end hook must report idle: %q", idle)
 	}
 }

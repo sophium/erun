@@ -137,12 +137,15 @@ func shellActivityNamesAReplacedSession(reportSessionID, liveSessionID string) b
 	return reportSessionID != "" && liveSessionID != "" && reportSessionID != liveSessionID
 }
 
-// orchestratorShellActivityFileVar is both the environment variable the hook
-// commands resolve their report path through and the marker
-// isOrchestratorShellActivityHookBlock looks for, so a rewrite recognizes and
-// replaces its own previous blocks instead of stacking another copy beside
-// them.
-const orchestratorShellActivityFileVar = "ERUN_SHELL_ACTIVITY_FILE"
+// orchestratorShellActivityHookMarker identifies a hook this file wrote, so a
+// rewrite replaces its own previous block instead of stacking another copy
+// beside it. The directory every one of these hooks resolves its report path
+// under is baked into the command at generation time and unique to this
+// report, so it doubles as the marker -- the same approach
+// orchestratorActivityHookMarker uses.
+func orchestratorShellActivityHookMarker() string {
+	return filepath.ToSlash(orchestratorShellActivityDir())
+}
 
 // isOrchestratorShellActivityHookBlock reports whether a settings hook block
 // is one of ours — either the start or the clear block, which share the
@@ -156,6 +159,7 @@ func isOrchestratorShellActivityHookBlock(block any) bool {
 	if !ok {
 		return false
 	}
+	marker := orchestratorShellActivityHookMarker()
 	for _, hook := range hooks {
 		entry, ok := hook.(map[string]any)
 		if !ok {
@@ -165,7 +169,7 @@ func isOrchestratorShellActivityHookBlock(block any) bool {
 		if !ok {
 			continue
 		}
-		if strings.Contains(command, orchestratorShellActivityFileVar) {
+		if strings.Contains(command, marker) {
 			return true
 		}
 	}
@@ -181,17 +185,24 @@ func isOrchestratorShellActivityHookBlock(block any) bool {
 // still live. Any other Bash call — foreground, or one that never
 // backgrounds — leaves the previous report untouched: a foreground command
 // says nothing about whatever shell is already running.
+//
+// Runs entirely inside the node script, including the orchestrator-id guard
+// and the report directory's creation: a POSIX shell prefix ("[ -n ... ] &&
+// mkdir ... && VAR=... node -e ...") is exactly the syntax Windows' own hook
+// shell (PowerShell) does not parse the way a POSIX shell does, and
+// "VAR=value command" inline env assignment is not PowerShell syntax at all.
 func orchestratorShellActivityStartHookCommand() string {
 	dir := filepath.ToSlash(orchestratorShellActivityDir())
 	script := `let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
+		`const id=process.env.ERUN_ORCHESTRATOR_ID;if(!id)return;` +
 		`const j=JSON.parse(d);` +
-		`const id=j.tool_response&&j.tool_response.backgroundTaskId;` +
-		`if(!id)return;` +
-		`const out={running:true,command:(j.tool_input&&j.tool_input.command)||"",taskId:id,sessionId:j.session_id||"",atUnix:Math.floor(Date.now()/1000)};` +
-		`require("fs").writeFileSync(process.env.` + orchestratorShellActivityFileVar + `,JSON.stringify(out));` +
+		`const taskId=j.tool_response&&j.tool_response.backgroundTaskId;` +
+		`if(!taskId)return;` +
+		`const out={running:true,command:(j.tool_input&&j.tool_input.command)||"",taskId:taskId,sessionId:j.session_id||"",atUnix:Math.floor(Date.now()/1000)};` +
+		`const fs=require("fs");fs.mkdirSync("` + dir + `",{recursive:true});` +
+		`fs.writeFileSync("` + dir + `/"+id+".json",JSON.stringify(out));` +
 		`}catch(e){}});`
-	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
-		orchestratorShellActivityFileVar + `="` + dir + `/$ERUN_ORCHESTRATOR_ID.json" node -e '` + script + `' || true`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorShellActivityClearHookCommand recognizes a TaskOutput or
@@ -202,18 +213,19 @@ func orchestratorShellActivityStartHookCommand() string {
 func orchestratorShellActivityClearHookCommand() string {
 	dir := filepath.ToSlash(orchestratorShellActivityDir())
 	script := `let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
+		`const id=process.env.ERUN_ORCHESTRATOR_ID;if(!id)return;` +
 		`const j=JSON.parse(d);` +
 		`const task=(j.tool_response&&j.tool_response.task)||{};` +
-		`const id=task.task_id||(j.tool_input&&(j.tool_input.task_id||j.tool_input.shell_id))||"";` +
-		`if(!id||task.status==="running")return;` +
-		`const path=process.env.` + orchestratorShellActivityFileVar + `;` +
+		`const taskId=task.task_id||(j.tool_input&&(j.tool_input.task_id||j.tool_input.shell_id))||"";` +
+		`if(!taskId||task.status==="running")return;` +
+		`const fs=require("fs");fs.mkdirSync("` + dir + `",{recursive:true});` +
+		`const path="` + dir + `/"+id+".json";` +
 		`let prev={};` +
-		`try{prev=JSON.parse(require("fs").readFileSync(path,"utf8"));}catch(e){}` +
-		`if(prev.taskId!==id)return;` +
-		`require("fs").writeFileSync(path,JSON.stringify({running:false,atUnix:Math.floor(Date.now()/1000)}));` +
+		`try{prev=JSON.parse(fs.readFileSync(path,"utf8"));}catch(e){}` +
+		`if(prev.taskId!==taskId)return;` +
+		`fs.writeFileSync(path,JSON.stringify({running:false,atUnix:Math.floor(Date.now()/1000)}));` +
 		`}catch(e){}});`
-	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
-		orchestratorShellActivityFileVar + `="` + dir + `/$ERUN_ORCHESTRATOR_ID.json" node -e '` + script + `' || true`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorShellActivityResetHookCommand clears an inherited "running"
@@ -221,14 +233,14 @@ func orchestratorShellActivityClearHookCommand() string {
 // (false) clears the busy report there: an orchestrator id is mutable and
 // reusable, so a report a previous run under this id left behind — including
 // one whose shell finished without either hook ever observing it — must not
-// survive into a session that has not started any shell of its own yet. A
-// bare printf, like the busy report's reset, since there is nothing to parse:
-// it always writes the same fixed shape.
+// survive into a session that has not started any shell of its own yet.
 func orchestratorShellActivityResetHookCommand() string {
 	dir := filepath.ToSlash(orchestratorShellActivityDir())
-	return `[ -n "$ERUN_ORCHESTRATOR_ID" ] && mkdir -p "` + dir + `" && ` +
-		`printf '{"running":false,"atUnix":%s}' "$(date +%s)" > "` + dir + `/$ERUN_ORCHESTRATOR_ID.json"` +
-		` || true`
+	script := `try{const id=process.env.ERUN_ORCHESTRATOR_ID;if(id){const fs=require("fs");` +
+		`fs.mkdirSync("` + dir + `",{recursive:true});` +
+		`fs.writeFileSync("` + dir + `/"+id+".json",JSON.stringify({running:false,atUnix:Math.floor(Date.now()/1000)}));` +
+		`}}catch(e){}`
+	return `node -e '` + script + `'`
 }
 
 // orchestratorShellActivityHookBlocks are the two PostToolUse-only hooks the

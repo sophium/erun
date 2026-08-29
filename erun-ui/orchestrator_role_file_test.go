@@ -89,7 +89,7 @@ func TestOrchestratorSkillHookInjectsTheRoleFileAfterTheSharedContract(t *testin
 	command := orchestratorSkillHookCommand("/tmp/orchestrators")
 
 	shared := strings.Index(command, "CLAUDE.md")
-	role := strings.Index(command, "CLAUDE.$ERUN_ORCHESTRATOR_ID.md")
+	role := strings.Index(command, `CLAUDE."+id+".md`)
 	if shared < 0 {
 		t.Fatalf("hook does not read the shared contract:\n%s", command)
 	}
@@ -99,12 +99,15 @@ func TestOrchestratorSkillHookInjectsTheRoleFileAfterTheSharedContract(t *testin
 	if role < shared {
 		t.Errorf("the role file is read BEFORE the shared contract, inverting precedence:\n%s", command)
 	}
-	if !strings.Contains(command, `[ -n "$ERUN_ORCHESTRATOR_ID" ]`) {
-		t.Errorf("no guard on the id, so a transient session would cat CLAUDE..md:\n%s", command)
+	if !strings.Contains(command, "if(id)") {
+		t.Errorf("no guard on the id, so a transient session would read CLAUDE..md:\n%s", command)
 	}
 	// A missing role file is the common case and must not fail the hook or write
 	// to stderr.
-	if !strings.Contains(command, "|| true") {
+	if !strings.Contains(command, `id+".md","utf8"));}catch(e){}`) {
 		t.Errorf("a missing role file must be a silent no-op:\n%s", command)
+	}
+	if !orchestratorHookCommandIsPortable(command) {
+		t.Errorf("the hook must run through node, not a POSIX shell: %q", command)
 	}
 }
