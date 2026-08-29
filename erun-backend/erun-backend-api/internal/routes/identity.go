@@ -25,6 +25,7 @@ type IdentityAdminClient interface {
 	UpdateOrgSettings(ctx context.Context, params zitadel.UpdateOrgSettingsParams) (zitadel.OrgSettings, error)
 	GetSMTPStatus(ctx context.Context) (zitadel.SMTPStatus, error)
 	UpdateSMTPConfig(ctx context.Context, params zitadel.SetSMTPConfigParams) (zitadel.SMTPStatus, error)
+	CreateOrg(ctx context.Context, name string) (zitadel.Org, error)
 }
 
 // IdentityEnroller creates an IdP identity and its erun user mapping as one
@@ -63,6 +64,13 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	register(http.MethodPost, "/v1/identity/users", http.HandlerFunc(routes.createUser))
 	register(http.MethodPost, "/v1/identity/users/{external_id}/deactivate", http.HandlerFunc(routes.deactivateUser))
 	register(http.MethodPost, "/v1/identity/users/{external_id}/reactivate", http.HandlerFunc(routes.reactivateUser))
+	// Creating an org is what makes a *second* tenant possible on the
+	// platform's own IdP: an org-scoped issuer resolves tenants by the org
+	// claim, so a new tenant needs an org for its mapping to point at. Until
+	// this, that was a hand-made org in Zitadel's own console — erun could
+	// register the tenant and the issuer mapping and then had nowhere to
+	// point them (issue #1605).
+	register(http.MethodPost, "/v1/identity/orgs", http.HandlerFunc(routes.createOrg))
 	register(http.MethodGet, "/v1/identity/org-settings", http.HandlerFunc(routes.getOrgSettings))
 	register(http.MethodPatch, "/v1/identity/org-settings", http.HandlerFunc(routes.updateOrgSettings))
 	// The platform's honest answer to "can this instance send mail at all"
@@ -264,6 +272,39 @@ func (r IdentityRoutes) reactivateUser(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// createOrgRequest is the org-creation input. Name only: everything else
+// about a Zitadel org is policy this surface already administers separately.
+type createOrgRequest struct {
+	Name string `json:"name"`
+}
+
+// createOrg creates a Zitadel organization to hold a tenant's own identities.
+// It deliberately stops there rather than also registering the erun tenant:
+// the two are separate resources with separate gates, and an operator may be
+// creating an org for a tenant that already exists. Pair the returned id with
+// POST /v1/tenants orgFieldValue, or with PATCH /v1/tenant-issuers to convert
+// a single-tenant issuer first.
+func (r IdentityRoutes) createOrg(w http.ResponseWriter, req *http.Request) {
+	if _, ok := r.securityContext(w, req); !ok {
+		return
+	}
+	var input createOrgRequest
+	if err := decodeJSON(req, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	org, err := r.admin.CreateOrg(req.Context(), input.Name)
+	if err != nil {
+		writeIdentityAdminError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, org)
 }
 
 func (r IdentityRoutes) getOrgSettings(w http.ResponseWriter, req *http.Request) {

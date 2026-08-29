@@ -301,6 +301,37 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 	}, nil
 }
 
+// Org is a Zitadel organization. Its ID is what an org-scoped issuer's
+// org_field_value holds, and what the urn:zitadel:iam:user:resourceowner:id
+// claim carries for a user who belongs to it.
+type Org struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// CreateOrg creates a Zitadel organization, the per-tenant identity boundary
+// an org-scoped issuer resolves tenants by. Without it, onboarding a second
+// tenant onto the platform's own IdP needed a hand-made org in Zitadel's
+// console: erun could register the tenant and the issuer mapping, but had no
+// way to create the org the mapping points at (issue #1605).
+//
+// The org is created but deliberately not made the client's own: this
+// credential stays scoped to the platform's org, and the new org's first
+// erun caller becomes its admin through the per-tenant first-user bootstrap.
+func (c *Client) CreateOrg(ctx context.Context, name string) (Org, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Org{}, fmt.Errorf("org name is required to create a zitadel org")
+	}
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := c.call(ctx, http.MethodPost, "/management/v1/orgs", map[string]any{"name": name}, &resp); err != nil {
+		return Org{}, err
+	}
+	return Org{ID: resp.ID, Name: name}, nil
+}
+
 // DeactivateUser deactivates the IdP user, preventing their next sign-in.
 func (c *Client) DeactivateUser(ctx context.Context, userID string) error {
 	return c.call(ctx, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_deactivate", url.PathEscape(userID)), map[string]any{}, nil)
