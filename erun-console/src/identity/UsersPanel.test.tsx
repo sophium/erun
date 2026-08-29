@@ -438,7 +438,9 @@ describe('UsersPanel', () => {
     await screen.findByText('Roles for alice');
     fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/revoke role failed/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /revoking this role would leave the tenant with no user able to grant roles/,
+    );
     // The refused revoke must leave the role in place, not optimistically clear it.
     expect(screen.getByText('WriteAll')).toBeInTheDocument();
   });

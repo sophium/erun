@@ -14,15 +14,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-// Only the identity panels fetch on mount (Users, Org settings, Outbound
-// mail); every other section fetches only on submit. A blanket 200-empty
-// response is enough to let navigating into any of them without erroring.
+// The identity panels and Tenants fetch on mount (Users, Org settings,
+// Outbound mail, Tenants); every other section fetches only on submit. A
+// blanket 200-empty response is enough to let navigating into any of them
+// without erroring.
 function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL) => {
       const url = input instanceof URL ? input.href : input;
-      if (url.includes('/v1/identity/users')) {
+      if (url.includes('/v1/identity/users') || url.includes('/v1/tenants')) {
         return Promise.resolve(jsonResponse([]));
       }
       return Promise.resolve(jsonResponse({}));
@@ -64,19 +65,25 @@ afterEach(() => {
 });
 
 describe('AppShell navigation', () => {
-  it('shows the identity sections only for an OPERATIONS tenant', () => {
+  it('shows the operations-only sections, including Tenants, for an OPERATIONS tenant', () => {
     stubFetch();
     renderShell(OPERATIONS_CONFIG);
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    expect(nav.getByRole('button', { name: /Tenants/ })).toBeInTheDocument();
     expect(nav.getByRole('button', { name: /Users/ })).toBeInTheDocument();
     expect(nav.getByRole('button', { name: /Org settings/ })).toBeInTheDocument();
     expect(nav.getByRole('button', { name: /Outbound mail/ })).toBeInTheDocument();
   });
 
-  it('hides the identity sections for a non-OPERATIONS tenant', () => {
+  // The negative case matters as much as the positive one here: Tenants
+  // registration is the one action only an OPERATIONS tenant may take, so a
+  // COMPANY-tenant Operator must not even see a control that would refuse
+  // them, the same rule Users/Org settings/Outbound mail already follow.
+  it('hides the operations-only sections, including Tenants, for a non-OPERATIONS tenant', () => {
     stubFetch();
     renderShell(COMPANY_CONFIG);
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    expect(nav.queryByRole('button', { name: /Tenants/ })).not.toBeInTheDocument();
     expect(nav.queryByRole('button', { name: /Users/ })).not.toBeInTheDocument();
     expect(nav.queryByRole('button', { name: /Org settings/ })).not.toBeInTheDocument();
     expect(nav.queryByRole('button', { name: /Outbound mail/ })).not.toBeInTheDocument();

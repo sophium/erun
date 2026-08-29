@@ -156,6 +156,7 @@ function AppContent({
           brand={brand}
           token={state.token}
           config={state.config}
+          docsUrl={platform.docsUrl}
           onChanged={onChanged}
           onSignOut={onSignOut}
         />

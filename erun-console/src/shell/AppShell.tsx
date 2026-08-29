@@ -10,6 +10,7 @@ import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
+import { TenantsPanel } from '../tenants/TenantsPanel';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ConsoleSidebar } from './ConsoleSidebar';
 import { type ConsoleSection, type ConsoleSectionId, sectionsForTenant } from './sections';
@@ -23,11 +24,13 @@ function SectionContent({
   active,
   token,
   config,
+  docsUrl,
   onChanged,
 }: {
   active: ConsoleSectionId;
   token: string;
   config: TenantConfigView;
+  docsUrl: string | undefined;
   onChanged: () => void;
 }): React.ReactElement {
   switch (active) {
@@ -48,6 +51,8 @@ function SectionContent({
       return <MCPAccessPanel token={token} environments={config.environments} />;
     case 'invites':
       return <InvitesPanel token={token} />;
+    case 'tenants':
+      return <TenantsPanel token={token} docsUrl={docsUrl} />;
     case 'users':
       return <UsersPanel token={token} />;
     case 'org-settings':
@@ -69,12 +74,14 @@ export function AppShell({
   brand,
   token,
   config,
+  docsUrl,
   onChanged,
   onSignOut,
 }: {
   brand: string | undefined;
   token: string;
   config: TenantConfigView;
+  docsUrl?: string;
   onChanged: () => void;
   onSignOut: () => void;
 }): React.ReactElement {
@@ -95,7 +102,13 @@ export function AppShell({
           onSignOut={onSignOut}
         />
         <main className="min-h-0 flex-1 overflow-auto px-6 py-6">
-          <SectionContent active={active} token={token} config={config} onChanged={onChanged} />
+          <SectionContent
+            active={active}
+            token={token}
+            config={config}
+            docsUrl={docsUrl}
+            onChanged={onChanged}
+          />
         </main>
       </div>
     </div>
