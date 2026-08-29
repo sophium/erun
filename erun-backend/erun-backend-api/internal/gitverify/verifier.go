@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
@@ -45,43 +46,66 @@ func (RemoteVerifier) Contains(ctx context.Context, remoteURL, branch, commit st
 		return false, "", fmt.Errorf("commit %q is not a git commit hash", commit)
 	}
 
-	repo, err := git.Init(memory.NewStorage(), nil)
+	repo, err := fetchBranch(ctx, remoteURL, branch)
 	if err != nil {
 		return false, "", err
 	}
-	remote, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
-	if err != nil {
-		return false, "", err
-	}
-	refSpec := config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))
-	if err := remote.FetchContext(ctx, &git.FetchOptions{RefSpecs: []config.RefSpec{refSpec}}); err != nil {
-		return false, "", fmt.Errorf("fetching %s from the target remote: %w", branch, err)
-	}
-
-	tipRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branch), true)
-	if err != nil {
-		return false, "", fmt.Errorf("reading the fetched tip of %s: %w", branch, err)
-	}
-	tipCommit, err := repo.CommitObject(tipRef.Hash())
+	tipCommit, err := branchTip(repo, branch)
 	if err != nil {
 		return false, "", err
 	}
 
-	target := plumbing.NewHash(commit)
-	targetCommit, err := repo.CommitObject(target)
+	targetCommit, err := repo.CommitObject(plumbing.NewHash(commit))
 	if err != nil {
 		// Not present anywhere in the fetched history: definitely not on the
 		// branch, not a lookup failure.
 		return false, "", nil
 	}
-	parent := ""
-	if len(targetCommit.ParentHashes) > 0 {
-		parent = targetCommit.ParentHashes[0].String()
+	return commitReachesTip(targetCommit, tipCommit)
+}
+
+// fetchBranch clones branch from remoteURL into a fresh in-memory repository,
+// so the API needs no persistent checkout of its own for the check.
+func fetchBranch(ctx context.Context, remoteURL, branch string) (*git.Repository, error) {
+	repo, err := git.Init(memory.NewStorage(), nil)
+	if err != nil {
+		return nil, err
 	}
-	if target == tipRef.Hash() {
+	remote, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	if err != nil {
+		return nil, err
+	}
+	refSpec := config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch))
+	if err := remote.FetchContext(ctx, &git.FetchOptions{RefSpecs: []config.RefSpec{refSpec}}); err != nil {
+		return nil, fmt.Errorf("fetching %s from the target remote: %w", branch, err)
+	}
+	return repo, nil
+}
+
+// branchTip reads the commit at branch's just-fetched tip.
+func branchTip(repo *git.Repository, branch string) (*object.Commit, error) {
+	tipRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branch), true)
+	if err != nil {
+		return nil, fmt.Errorf("reading the fetched tip of %s: %w", branch, err)
+	}
+	tipCommit, err := repo.CommitObject(tipRef.Hash())
+	if err != nil {
+		return nil, err
+	}
+	return tipCommit, nil
+}
+
+// commitReachesTip reports whether target is tip itself or one of its
+// ancestors, together with target's own parent commit hash.
+func commitReachesTip(target, tip *object.Commit) (bool, string, error) {
+	parent := ""
+	if len(target.ParentHashes) > 0 {
+		parent = target.ParentHashes[0].String()
+	}
+	if target.Hash == tip.Hash {
 		return true, parent, nil
 	}
-	isAncestor, err := targetCommit.IsAncestor(tipCommit)
+	isAncestor, err := target.IsAncestor(tip)
 	if err != nil {
 		return false, "", err
 	}
