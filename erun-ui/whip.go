@@ -44,6 +44,13 @@ func (a *App) whipAllEnvironmentsNow(ctx context.Context) ([]eruncommon.WhipResu
 			return nil, fmt.Errorf("whip: listing %s's environments: %w", tenant.Name, err)
 		}
 		for _, env := range envs {
+			// A host-type env has no pod and no cluster contact at all
+			// (EnvConfig.HasPod's doc comment), so it can never carry an AI
+			// session to push -- reporting it every pass is pure noise, not a
+			// skip the operator can act on.
+			if !env.HasPod() {
+				continue
+			}
 			targets = append(targets, whipTarget{tenant: tenant.Name, environment: env.Name})
 		}
 	}
@@ -108,6 +115,13 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 			Error:     err.Error(),
 		}
 	}
+	// The desktop already knows which target this is -- it built id above and
+	// used it in every other return path. Stamp it here too rather than
+	// trusting the remote payload for host-side identity: a report row must
+	// never depend on what a pod chose to echo back.
+	decoded.Candidate.Kind = eruncommon.WhipTargetEnvironment
+	decoded.Candidate.ID = id
+	decoded.Candidate.Name = id
 	return decoded
 }
 

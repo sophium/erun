@@ -63,6 +63,14 @@ test('the whip control renders a pending state and then every target with its ow
       outcome: 'skipped',
       reason: 'not alive — no live session to push',
     },
+    {
+      kind: 'environment',
+      id: 'pw/gamma',
+      name: 'pw/gamma',
+      outcome: 'failed',
+      reason: 'push failed',
+      error: 'writing nudge text: exit status 1',
+    },
   ]);
 
   const whip = app.titlebar.whipButton();
@@ -78,12 +86,20 @@ test('the whip control renders a pending state and then every target with its ow
 
   await expect(body.getByText('pw/alpha')).toBeVisible();
   await expect(body.getByText('pw/beta')).toBeVisible();
+  await expect(body.getByText('pw/gamma')).toBeVisible();
   await expect(body.getByText('pw-orch')).toBeVisible();
   await expect(body.getByText('Pushed')).toBeVisible();
   await expect(body.getByText('Capped')).toBeVisible();
   await expect(body.getByText('Skipped')).toBeVisible();
   await expect(body.getByText(/stopped nudging after repeated silence/)).toBeVisible();
   await expect(body.getByText(/not alive — no live session to push/)).toBeVisible();
+  // A failed push is its own outcome, distinct from a benign skip ():
+  // same decision (nudge) as a pushed row, but refused rather than quiet.
+  // exact: the row's own status word, not the detail line beneath it — this
+  // change adds a "push failed: ..." detail that getByText matches
+  // case-insensitively, so a substring locator resolves to both.
+  await expect(body.getByText('Failed', { exact: true })).toBeVisible();
+  await expect(body.getByText(/push failed.*writing nudge text/)).toBeVisible();
 
   await app.titlebar.closeWhipReport();
   await expect(app.titlebar.whipReportHeading()).toBeHidden();
