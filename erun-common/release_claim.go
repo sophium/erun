@@ -83,11 +83,15 @@ func releaseVersionClaimRefusalError(version string, err error) error {
 		strings.TrimSpace(version), conflict.Holder.Holder.String())
 }
 
-// claimReleaseVersion takes the exclusive lease that stands in for "I am
-// releasing this version", before sync-remote does anything the loser of a
-// race would have to unwind. It returns a release func to defer, which stops
-// renewing and drops the claim; call it whether the release succeeds or
-// fails.
+// claimReleaseVersion takes both claims that stand in for "I am releasing
+// this version" — the local exclusive lease (environment-scoped: keeps this
+// environment from idling out mid-release and is visible to `erun` lease
+// listings) and the repository-global claim on a remote ref (release_repo_claim.go:
+// the one that actually stops two orchestrators driving different
+// environments from racing the same version) — before sync-remote does
+// anything the loser of a race would have to unwind. It returns a release
+// func to defer, which stops renewing and drops both claims; call it whether
+// the release succeeds or fails.
 //
 // The claim only applies inside a runtime pod: injectedRuntimePodIdentity
 // resolves ERUN_TENANT/ERUN_ENVIRONMENT, which only the runtime chart sets.
@@ -104,9 +108,17 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 		return func() {}, nil
 	}
 
-	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env("ERUN_ORCHESTRATOR_ID"))}
+	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env("ERUN_ORCHESTRATOR_ID")), Tenant: tenant}
 	pid := os.Getpid()
+
+	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, holder, pid, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	repo := &releaseRepoClaimHandle{sha: repoSHA}
+
 	if _, err := takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{}); err != nil {
+		releaseRepoClaimIfHeld(ctx, spec, repo)
 		return nil, releaseVersionClaimRefusalError(spec.Version, err)
 	}
 
@@ -122,7 +134,7 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 			case <-stop:
 				return
 			case <-ticker.C:
-				_, _ = takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
+				renewReleaseClaims(ctx, spec, tenant, environment, holder, pid, repo)
 			}
 		}
 	}()
@@ -133,5 +145,50 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 		close(stop)
 		stopped.Wait()
 		_ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		releaseRepoClaimIfHeld(ctx, spec, repo)
 	}, nil
+}
+
+// releaseRepoClaimHandle tracks the repository-global claim's current sha
+// across the renewal goroutine and the release func's cleanup, both of which
+// run concurrently with each other for the whole life of the release.
+type releaseRepoClaimHandle struct {
+	mu  sync.Mutex
+	sha string
+}
+
+func (h *releaseRepoClaimHandle) get() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.sha
+}
+
+func (h *releaseRepoClaimHandle) set(sha string) {
+	h.mu.Lock()
+	h.sha = sha
+	h.mu.Unlock()
+}
+
+// renewReleaseClaims is one renewal tick for both claims. The repository
+// claim is best-effort, matching the local lease's own renewal: a failed
+// renewal keeps the last-known sha and tries again next tick rather than
+// tearing down a release over a transient push failure.
+func renewReleaseClaims(ctx Context, spec ReleaseSpec, tenant, environment string, holder EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
+	_, _ = takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
+
+	sha := repo.get()
+	if sha == "" {
+		return
+	}
+	if renewed, err := renewReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, holder, pid, time.Now(), sha); err == nil {
+		repo.set(renewed)
+	}
+}
+
+// releaseRepoClaimIfHeld drops the repository-global claim if this run ever
+// actually took one (an inconclusive remote read leaves repo holding "").
+func releaseRepoClaimIfHeld(ctx Context, spec ReleaseSpec, repo *releaseRepoClaimHandle) {
+	if sha := repo.get(); sha != "" {
+		_ = deleteReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, sha)
+	}
 }
