@@ -161,6 +161,13 @@ async function stubOrchestratorAndDiffs(
 }
 
 test.describe('orchestrator cross-env diff panel (#1178)', () => {
+  // These cases drive the same two seeded environments (alpha and beta) and the
+  // app state each leaves behind, so they are order-dependent within a worker.
+  // Under fullyParallel a different subset lands in each worker and that
+  // dependence surfaces as an empty diff. Keep them together, in order, in one
+  // worker; the rest of the suite still parallelises around them.
+  test.describe.configure({ mode: 'serial' });
+
   test('renders one section per linked environment, not a single merged diff', async ({
     app,
     page,

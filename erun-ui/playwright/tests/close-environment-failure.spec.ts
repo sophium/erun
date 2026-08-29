@@ -36,7 +36,7 @@ test.describe('close environment — failure surfacing', () => {
       .getByRole('alert')
       .filter({ hasText: 'CLOSE_ENVIRONMENT_UNREACHABLE_MARKER' });
     await expect(pill).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Copy output' })).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy output' })).toBeHidden();
 
     // The close never completed, so the dot must still be there — a stray
     // success side effect alongside the reported failure would itself be a bug.

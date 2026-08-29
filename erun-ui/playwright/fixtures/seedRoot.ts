@@ -50,11 +50,26 @@ export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
 // type — so it links the alpha env and renders stopped on boot.
 export const SEED_ORCHESTRATOR = 'pw-orch';
 
-// isolatedRoot resolves the suite-owned root. When run.sh has not exported
-// ERUN_PLAYWRIGHT_HOME (a direct `playwright test`), the fresh temp root is
-// cached back into the env so every worker shares one root instead of minting
-// its own.
+// workerRootOverride pins every helper below onto a single Playwright
+// worker's own root (see fixtures/workerBackend.ts). Each worker is a
+// separate OS process, so this module-level variable never crosses workers —
+// it only ever overrides isolatedRoot() within the one process that called
+// setWorkerRoot.
+let workerRootOverride: string | undefined;
+
+export function setWorkerRoot(root: string): void {
+  workerRootOverride = root;
+}
+
+// isolatedRoot resolves the suite-owned root. A worker-scoped override (set by
+// fixtures/workerBackend.ts) wins first. Otherwise, when run.sh has not
+// exported ERUN_PLAYWRIGHT_HOME (a direct `playwright test`, or the opt-in
+// e2e-k3d mode's single shared backend), the fresh temp root is cached back
+// into the env so the whole process agrees on one root.
 export function isolatedRoot(): string {
+  if (workerRootOverride) {
+    return workerRootOverride;
+  }
   const configured = process.env.ERUN_PLAYWRIGHT_HOME?.trim();
   if (configured) {
     return configured;
@@ -577,6 +592,18 @@ export function removeIsolatedRoot(): void {
   if (!root || !path.basename(root).startsWith('erun-playwright-home')) {
     return;
   }
+  removeRootDir(root);
+}
+
+// removeWorkerRoot deletes a single worker's own root (see
+// fixtures/workerBackend.ts). Unlike removeIsolatedRoot, no basename check is
+// needed: the caller just minted this exact directory with mkdtempSync, so
+// there is no risk of it being an arbitrary caller-supplied path.
+export function removeWorkerRoot(root: string): void {
+  removeRootDir(root);
+}
+
+function removeRootDir(root: string): void {
   if (isWindows) {
     // A ConPTY stub/shell child spawned with its cwd inside the root (or a
     // still-blocking erun.exe stub from a session the app has not torn down yet)

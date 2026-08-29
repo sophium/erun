@@ -106,3 +106,39 @@ func TestWhipAllOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 		t.Fatalf("gone orchestrator: got %+v, want none/not-alive", got)
 	}
 }
+
+// A configured orchestrator the desktop never opened has no session, and
+// orchestratorPacingRows only enumerates sessions. Naming it anyway is the
+// whole contract of an explicit whip: an omitted target reads as "not
+// considered", where a skip names a reason the operator can act on.
+func TestWhipAllOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testing.T) {
+	isolateOrchestratorWhipConfig(t)
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{store: stubUIStore{config: &eruncommon.ERunConfig{
+		Orchestrators: []eruncommon.OrchestratorConfig{
+			{ID: "opened", Name: "opened"},
+			{ID: "never-opened", Name: "never-opened"},
+		},
+	}}})
+
+	key := orchestratorSessionKey("opened")
+	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+	app.orchestrators["opened"] = &orchestratorSession{id: "opened", serial: 1, name: "opened", startedAt: time.Now()}
+
+	byID := map[string]orchestratorWhipOutcome{}
+	for _, outcome := range app.whipAllOrchestratorsNow() {
+		byID[outcome.id] = outcome
+	}
+
+	got, named := byID["never-opened"]
+	if !named {
+		t.Fatalf("a configured orchestrator with no session was omitted from the report entirely, got %+v", byID)
+	}
+	if got.decision != orchestratorPacingNone || got.reason != orchestratorPacingReasonNotAlive {
+		t.Fatalf("never-opened orchestrator: got %+v, want none/not-alive", got)
+	}
+	if _, named := byID["opened"]; !named {
+		t.Fatalf("the orchestrator holding a live session went missing, got %+v", byID)
+	}
+}

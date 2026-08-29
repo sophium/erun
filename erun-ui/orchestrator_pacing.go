@@ -323,9 +323,36 @@ func (a *App) whipAllOrchestratorsNow() []orchestratorWhipOutcome {
 	now := time.Now()
 	rows := a.orchestratorPacingRows()
 	outcomes := make([]orchestratorWhipOutcome, 0, len(rows))
+	whipped := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		decision, reason := a.reconcileOrchestratorPacingOne(row, now, true)
 		outcomes = append(outcomes, orchestratorWhipOutcome{id: row.id, name: row.name, decision: decision, reason: reason})
+		whipped[row.id] = struct{}{}
+	}
+	// orchestratorPacingRows enumerates the sessions this desktop holds, so on
+	// its own it answers "who could be nudged", not "who was considered". A
+	// configured orchestrator that was never opened has no session and would
+	// therefore be absent from the report entirely -- and an omission reads as
+	// "not a target", where a skip names its reason. The environment half
+	// already lists configs for this reason, as does ListWhipOrchestratorCandidates
+	// on the CLI/MCP transports; this keeps the desktop honest the same way.
+	configs, err := a.loadOrchestratorConfigs()
+	if err != nil {
+		// Report what is known rather than nothing: the sessions above are still
+		// a truthful partial answer, and swallowing them to signal a config read
+		// failure would trade one silence for a larger one.
+		return outcomes
+	}
+	for _, config := range configs {
+		if _, ok := whipped[config.ID]; ok {
+			continue
+		}
+		outcomes = append(outcomes, orchestratorWhipOutcome{
+			id:       config.ID,
+			name:     config.Name,
+			decision: orchestratorPacingNone,
+			reason:   orchestratorPacingReasonNotAlive,
+		})
 	}
 	return outcomes
 }
