@@ -58,6 +58,7 @@ type erunUIDeps struct {
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
+	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
 	stopEnvironmentRuntime func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
 	readRuntimeRunState    func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
@@ -348,6 +349,9 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.loadClusterRegistry == nil {
 		deps.loadClusterRegistry = loadClusterRegistry
 	}
+	if deps.loadHostedRegistry == nil {
+		deps.loadHostedRegistry = loadHostedRegistryWithTestOverride
+	}
 	if deps.checkRuntimeDeployed == nil {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
@@ -405,6 +409,36 @@ func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 // ("0" or "1"). See withDefaultReachabilityDeps for why the harness needs it.
 func localPortReachabilityOverride() (bool, bool) {
 	raw := strings.TrimSpace(os.Getenv("ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE"))
+	if raw == "" {
+		return false, false
+	}
+	return raw == "1", true
+}
+
+// loadHostedRegistryWithTestOverride is the default loadHostedRegistry dep:
+// the test override wins when set, otherwise it defers to the real probe.
+func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
+	available, ok := hostedRegistryReachabilityOverride()
+	if !ok {
+		return loadHostedRegistry(ctx)
+	}
+	status := uiHostedRegistryStatus{Host: eruncommon.HostedRegistryHost, Available: available}
+	if !available {
+		status.Reason = "does not resolve"
+		status.Recovery = "Choose a different registry instead."
+	}
+	return status
+}
+
+// hostedRegistryReachabilityOverride parses ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE
+// ("0" or "1"), pinning the new-environment dialog's hosted-registry probe to
+// a fixed answer instead of a real network call to registry.erunpaas.com.
+// Set only by playwright/fixtures/seedRoot.ts, never in production — the
+// headless harness has no route to stub a Go-side outbound HTTP call the way
+// page.route stubs a Wails method, so without this every spec that opens the
+// dialog would depend on real DNS/network behavior.
+func hostedRegistryReachabilityOverride() (bool, bool) {
+	raw := strings.TrimSpace(os.Getenv("ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE"))
 	if raw == "" {
 		return false, false
 	}

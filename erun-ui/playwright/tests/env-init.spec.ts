@@ -12,12 +12,22 @@ import { SEED_TENANT } from '../fixtures/seedRoot.js';
 // which is exactly what this spec exercises.
 // clusterRegistryFailure, when set, makes the LoadClusterRegistry stub return
 // this error instead of the endpoint's usual pass-through — used by
-// stubDialogClusterWithRegistryFailure below. A single page.route handler (not
-// two stacked registrations) is required: Playwright runs the most-recently
-// registered handler first, and its route.continue() sends the request to the
-// real backend rather than falling through to an earlier handler, so stacking
-// silently defeated the first stub instead of composing with it.
-async function stubDialogCluster(page: Page, clusterRegistryFailure?: string): Promise<void> {
+// stubDialogClusterWithRegistryFailure below. hostedRegistryAvailable, when
+// true, makes the LoadHostedRegistry stub report available instead of the
+// harness's default answer (ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE=0 in
+// backendEnv(), since page.route cannot intercept the real outbound HTTP call
+// underneath that Wails method) — used by
+// stubDialogClusterWithHostedRegistryAvailable below. A single page.route
+// handler (not two stacked registrations) is required: Playwright runs the
+// most-recently registered handler first, and its route.continue() sends the
+// request to the real backend rather than falling through to an earlier
+// handler, so stacking silently defeated the first stub instead of composing
+// with it.
+async function stubDialogCluster(
+  page: Page,
+  clusterRegistryFailure?: string,
+  hostedRegistryAvailable?: boolean,
+): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method === 'LoadKubernetesContexts') {
@@ -59,6 +69,12 @@ async function stubDialogCluster(page: Page, clusterRegistryFailure?: string): P
         body: JSON.stringify({ error: clusterRegistryFailure }),
       });
     }
+    if (body.method === 'LoadHostedRegistry' && hostedRegistryAvailable) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { host: 'registry.erunpaas.com', available: true } }),
+      });
+    }
     await route.continue();
   });
 }
@@ -72,6 +88,12 @@ async function stubDialogCluster(page: Page, clusterRegistryFailure?: string): P
 // the probe failure instead.
 async function stubDialogClusterWithRegistryFailure(page: Page): Promise<void> {
   await stubDialogCluster(page, 'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER');
+}
+
+// stubDialogClusterWithHostedRegistryAvailable is the one route a spec needs
+// to exercise the "available" branch of the hosted-registry gate.
+async function stubDialogClusterWithHostedRegistryAvailable(page: Page): Promise<void> {
+  await stubDialogCluster(page, undefined, true);
 }
 
 test.describe('environment init dialog', () => {
@@ -460,6 +482,60 @@ test.describe('environment init dialog', () => {
     await expect(app.envInitDialog.locator().getByRole('alert')).toContainText(
       'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER',
     );
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('offers the hosted registry only once it is confirmed reachable', async ({
+    app,
+    page,
+  }) => {
+    // The reported defect: the hosted-registry option was offered
+    // unconditionally, with no check that registry.erunpaas.com was actually
+    // reachable, unlike the in-cluster registry which is already gated on
+    // clusterRegistry?.deployed. The harness's default answer (no stub) is
+    // "unavailable" — the same answer this host gets in real life — so the
+    // checkbox must stay disabled and explain why, and picking a different
+    // registry must still be possible.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const hosted = app.envInitDialog.hostedRegistryCheckbox();
+    await expect(hosted).toBeVisible();
+    await expect(hosted).toBeDisabled();
+    await expect(app.envInitDialog.locator()).toContainText('does not resolve');
+
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await app.envInitDialog.fillEnvironment('review');
+    await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
+    await expect(app.envInitDialog.createButton()).toBeEnabled();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('once reachable, selecting the hosted registry clears the container-registry requirement', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogClusterWithHostedRegistryAvailable(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const hosted = app.envInitDialog.hostedRegistryCheckbox();
+    await expect(hosted).toBeEnabled();
+
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await app.envInitDialog.fillEnvironment('review');
+    // No container registry is filled in — the hosted registry needs none.
+    await expect(app.envInitDialog.createButton()).toBeDisabled();
+
+    await hosted.click();
+    await expect(hosted).toBeChecked();
+    await expect(app.envInitDialog.createButton()).toBeEnabled();
+    await expect(app.envInitDialog.submitReason()).toHaveText('');
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

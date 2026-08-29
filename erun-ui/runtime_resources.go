@@ -32,6 +32,29 @@ func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegist
 	return a.deps.loadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
 }
 
+// LoadHostedRegistry reports whether erun's hosted container registry is
+// reachable right now, so the new-environment dialog can gate the "Use
+// erun's hosted registry" option on a real check instead of offering it
+// unconditionally — the asymmetry the in-cluster registry option does not
+// have, since it is already gated on clusterRegistry.deployed.
+func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.deps.loadHostedRegistry(ctx), nil
+}
+
+func loadHostedRegistry(ctx context.Context) uiHostedRegistryStatus {
+	status := eruncommon.ProbeHostedRegistry(ctx, nil)
+	return uiHostedRegistryStatus{
+		Host:      status.Host,
+		Available: status.Available,
+		Reason:    status.Reason,
+		Recovery:  status.Recovery,
+	}
+}
+
 func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
 	input = normalizeRuntimeResourceInput(input)
 	if input.KubernetesContext == "" {

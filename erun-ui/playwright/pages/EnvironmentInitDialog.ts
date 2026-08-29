@@ -60,6 +60,10 @@ export class EnvironmentInitDialog {
     await this.containerRegistryInput().fill(value);
   }
 
+  hostedRegistryCheckbox(): Locator {
+    return this.page.locator('#environment-use-erun-registry');
+  }
+
   // selectKubernetesContext opens the context dropdown and picks an option by
   // its label (the context name).
   async selectKubernetesContext(name: string): Promise<void> {
