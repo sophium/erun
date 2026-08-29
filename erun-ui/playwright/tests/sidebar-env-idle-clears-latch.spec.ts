@@ -28,7 +28,15 @@ import { expect, test } from '../fixtures/erunApp.js';
 // the window still leaves a whole period for the emits to converge.
 const SWEEP_PERIOD_MS = 20_000;
 const SETTLE_TIMEOUT_MS = 5_000;
-const CONVERGE_TIMEOUT_MS = SWEEP_PERIOD_MS * 2 + 10_000;
+// Four periods, not two. The sweep is what releases the latch, so convergence
+// needs a tick to land *and* the emit that follows it to settle inside the same
+// window. On an idle machine two periods was ample; once the suite runs specs
+// in parallel the settle is slow enough that two windows no longer reliably
+// contain one, and the budget expired rather than the logic failing. Widening
+// the window is the honest fix here -- the sweep cannot be shortened (it would
+// overwrite the staged state more often) nor lengthened (it would never release
+// the latch at all), so the only free variable is how long we let it converge.
+const CONVERGE_TIMEOUT_MS = SWEEP_PERIOD_MS * 4 + 20_000;
 
 test.describe('an idle environment clears a stale desktop latch', () => {
   test('an orphaned running entry stops spinning once the environment reports idle', async ({
@@ -38,7 +46,10 @@ test.describe('an idle environment clears a stale desktop latch', () => {
   }) => {
     // Convergence is paced by the backend's own sweep, so this test outlasts the
     // default budget by design rather than by accident.
-    test.slow();
+    // test.slow() triples the default budget, which is not enough to contain
+    // CONVERGE_TIMEOUT_MS above; an expect budget can never exceed the test
+    // budget holding it, so this is set explicitly rather than multiplied.
+    test.setTimeout(CONVERGE_TIMEOUT_MS + 60_000);
     // A per-test environment, not the restored one: the harness auto-opens that
     // one, and an open in flight is this desktop's own operation, which stays
     // authoritative by design and would hold the row busy for an unrelated
