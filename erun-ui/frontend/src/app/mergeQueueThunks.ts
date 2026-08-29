@@ -31,11 +31,15 @@ export const clearAdvanceMergeQueueError = (): AppThunk => (dispatch) => {
   dispatch(patchMergeQueueAction({ error: '' }));
 };
 
+// tenant is explicit rather than read from state.tenantDashboard: the diff
+// panel's own "Advance queue" chip action reaches this without the tenant
+// dashboard ever having been opened, the same reason openReviewDetail
+// (reviewDetailThunks.ts) takes an explicit callerTenant.
 export const submitAdvanceMergeQueue =
-  (targetBranch: string): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    const { tenant } = getState().tenantDashboard;
-    if (!tenant.trim() || !targetBranch) {
+  (tenant: string, targetBranch: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    tenant = tenant.trim();
+    if (!tenant || !targetBranch) {
       dispatch(patchMergeQueueAction({ error: 'No tenant is open.' }));
       return;
     }

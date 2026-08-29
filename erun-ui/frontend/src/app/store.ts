@@ -27,6 +27,7 @@ import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import closeGateReducer from './slices/closeGateSlice';
 import contributeReducer from './slices/contributeSlice';
 import createReviewDialogReducer from './slices/createReviewDialogSlice';
+import diffReviewStatusReducer from './slices/diffReviewStatusSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import envStatusReducer from './slices/envStatusSlice';
@@ -90,6 +91,7 @@ export const store = configureStore({
     orchestratorShellActivity: orchestratorShellActivityReducer,
     mergeQueueAction: mergeQueueActionReducer,
     createReviewDialog: createReviewDialogReducer,
+    diffReviewStatus: diffReviewStatusReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

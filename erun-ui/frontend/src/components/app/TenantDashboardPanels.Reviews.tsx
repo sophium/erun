@@ -306,7 +306,11 @@ function AdvanceMergeQueueAction({
   return (
     <div className="flex min-w-0 flex-col items-end gap-2">
       {action.confirming ? (
-        <AdvanceMergeQueueConfirm targetBranch={targetBranch} busy={action.busy} />
+        <AdvanceMergeQueueConfirm
+          tenant={data.tenant}
+          targetBranch={targetBranch}
+          busy={action.busy}
+        />
       ) : (
         <Button
           type="button"
@@ -338,9 +342,11 @@ function AdvanceMergeQueueAction({
 // two answers, and a failure lands under it rather than shouldering its way
 // into the middle of the sentence.
 function AdvanceMergeQueueConfirm({
+  tenant,
   targetBranch,
   busy,
 }: {
+  tenant: string;
   targetBranch: string;
   busy: boolean;
 }): React.ReactElement {
@@ -366,7 +372,7 @@ function AdvanceMergeQueueConfirm({
         size="sm"
         disabled={busy}
         onClick={() => {
-          void dispatch(submitAdvanceMergeQueue(targetBranch));
+          void dispatch(submitAdvanceMergeQueue(tenant, targetBranch));
         }}
       >
         {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
