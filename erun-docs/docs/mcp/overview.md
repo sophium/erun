@@ -693,6 +693,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 
