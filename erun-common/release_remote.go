@@ -171,22 +171,31 @@ func repointReleaseTagIfRebased(ctx Context, spec ReleaseSpec, projectRoot strin
 }
 
 // findReplayedReleaseTagCommit locates the commit a rebase gave the release's
-// own tagged commit under its new sha, by the message the two must share
-// (see findCommitBySubjectReachableFromHead).
+// own tagged commit under its new sha, by the message the two must share (see
+// findCommitsBySubjectInRange). The search is bounded to FETCH_HEAD..HEAD —
+// the commits the rebase moments earlier in rebaseReleaseOntoRemoteBranch
+// actually replayed onto the upstream it just fetched — rather than all of
+// history, so an unrelated older commit that happens to share the subject can
+// never be mistaken for the replayed one.
 func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (string, error) {
 	subject, err := gitCommitSubject(projectRoot, tagCommit)
 	if err != nil {
 		return "", err
 	}
-	newCommit, found, err := findCommitBySubjectReachableFromHead(projectRoot, subject)
+	matches, err := findCommitsBySubjectInRange(projectRoot, "FETCH_HEAD..HEAD", subject)
 	if err != nil {
 		return "", err
 	}
-	if !found {
+	switch len(matches) {
+	case 0:
 		return "", fmt.Errorf("tag %q named a commit the rebase rewrote, but no commit with its original message %q could be found on %s; move the tag onto the right commit by hand and push it",
 			tag, subject, branch)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("tag %q named a commit the rebase rewrote, but %d commits with its original message %q were found on %s; move the tag onto the right commit by hand and push it",
+			tag, len(matches), subject, branch)
 	}
-	return newCommit, nil
 }
 
 // moveReleaseTagOnto re-creates tag at newCommit, preserving its original
@@ -231,23 +240,25 @@ func gitCommitSubject(projectRoot, commit string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// findCommitBySubjectReachableFromHead re-locates the release's own commit
-// after a rebase gave it a new sha. A rebase replays commits in order without
+// findCommitsBySubjectInRange returns every commit in revRange whose subject
+// is an exact match, newest first. A rebase replays commits in order without
 // changing their message, and the release's generated commit subjects always
-// carry the version being released, so the exact subject the tag's old
-// commit had is unique enough to find its replayed successor.
-func findCommitBySubjectReachableFromHead(projectRoot, subject string) (string, bool, error) {
-	output, err := Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", "HEAD").Output()
+// carry the version being released, so the subject is normally unique within
+// the commits a rebase just replayed — but the caller decides what to do with
+// more than one match rather than this function silently picking one.
+func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]string, error) {
+	output, err := Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", revRange).Output()
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
+	var matches []string
 	for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
 		hash, lineSubject, ok := strings.Cut(line, "\x01")
 		if ok && lineSubject == subject {
-			return hash, true, nil
+			matches = append(matches, hash)
 		}
 	}
-	return "", false, nil
+	return matches, nil
 }
 
 func gitTagAnnotationSubject(projectRoot, tag string) (string, error) {

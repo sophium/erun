@@ -169,3 +169,110 @@ func runGitCheckForTest(dir string, args ...string) error {
 	cmd := Command("git", append([]string{"-C", dir}, args...)...)
 	return cmd.Run()
 }
+
+// TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideTheRebasedRange
+// guards the bound itself: an older commit sharing the release commit's exact
+// subject, already common history before this release ever started, must not
+// be mistaken for the commit the rebase just replayed.
+func TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideTheRebasedRange(t *testing.T) {
+	repo := newAgentJobTestRepo(t)
+
+	// A prior release of the same version, already part of history before
+	// this run starts. It carries the exact subject this run's own release
+	// commit will carry too, but it sits outside anything a rebase replays.
+	if err := os.WriteFile(filepath.Join(repo, "OLD.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatalf("write old file: %v", err)
+	}
+	runGitForTest(t, repo, "add", "OLD.txt")
+	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] release 1.0.213")
+
+	remote := newBareRemoteForTest(t, repo)
+	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.213\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	runGitForTest(t, repo, "add", "VERSION")
+	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] release 1.0.213")
+	runGitForTest(t, repo, "tag", "-a", "v1.0.213", "-m", "Release 1.0.213")
+	runGitForTest(t, repo, "push", "-q", "origin", "v1.0.213")
+
+	other := cloneRepoForTest(t, remote)
+	if err := os.WriteFile(filepath.Join(other, "OTHER.txt"), []byte("unrelated change\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated file in the other checkout: %v", err)
+	}
+	runGitForTest(t, other, "add", "OTHER.txt")
+	runGitForTest(t, other, "commit", "-q", "-m", "unrelated mainline change")
+	runGitForTest(t, other, "push", "-q", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.214-next\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION bump: %v", err)
+	}
+	runGitForTest(t, repo, "add", "VERSION")
+	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] prepare 1.0.214-next")
+
+	ctx := newTestClaimContext()
+	spec := ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: ReleaseModeStable}
+	command := ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
+
+	if err := runReleaseBranchPush(ctx, spec, command, GitCommandRunner); err != nil {
+		t.Fatalf("runReleaseBranchPush: %v", err)
+	}
+
+	runGitForTest(t, repo, "fetch", "-q", "origin", "main")
+	if err := runGitCheckForTest(repo, "merge-base", "--is-ancestor", "v1.0.213", "FETCH_HEAD"); err != nil {
+		t.Fatalf("expected v1.0.213 to remain reachable from origin/main after the rebase, but it does not: %v", err)
+	}
+}
+
+// TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject guards the
+// refusal itself: two commits inside the range the rebase just replayed share
+// the tagged commit's exact subject, and the repoint must refuse rather than
+// silently retag onto whichever one it happened to see first.
+func TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject(t *testing.T) {
+	repo := newAgentJobTestRepo(t)
+	remote := newBareRemoteForTest(t, repo)
+	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.213\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	runGitForTest(t, repo, "add", "VERSION")
+	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] release 1.0.213")
+	runGitForTest(t, repo, "tag", "-a", "v1.0.213", "-m", "Release 1.0.213")
+	runGitForTest(t, repo, "push", "-q", "origin", "v1.0.213")
+
+	// A second commit that happens to carry the exact same subject as the
+	// tagged one, replayed by the same rebase alongside it.
+	if err := os.WriteFile(filepath.Join(repo, "DUPLICATE.txt"), []byte("duplicate\n"), 0o644); err != nil {
+		t.Fatalf("write duplicate-subject file: %v", err)
+	}
+	runGitForTest(t, repo, "add", "DUPLICATE.txt")
+	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] release 1.0.213")
+
+	other := cloneRepoForTest(t, remote)
+	if err := os.WriteFile(filepath.Join(other, "OTHER.txt"), []byte("unrelated change\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated file in the other checkout: %v", err)
+	}
+	runGitForTest(t, other, "add", "OTHER.txt")
+	runGitForTest(t, other, "commit", "-q", "-m", "unrelated mainline change")
+	runGitForTest(t, other, "push", "-q", "origin", "main")
+
+	ctx := newTestClaimContext()
+	spec := ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: ReleaseModeStable}
+	command := ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
+
+	err := runReleaseBranchPush(ctx, spec, command, GitCommandRunner)
+	if err == nil {
+		t.Fatal("expected an ambiguous replayed tag subject to refuse rather than silently retag")
+	}
+	if !strings.Contains(err.Error(), "v1.0.213") {
+		t.Errorf("refusal must name the tag, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "release 1.0.213") {
+		t.Errorf("refusal must name the subject, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "by hand") {
+		t.Errorf("refusal must tell the operator to move the tag by hand, got: %v", err)
+	}
+}
