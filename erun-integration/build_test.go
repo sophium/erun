@@ -1324,12 +1324,20 @@ func TestBuild(t *testing.T) {
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// --release dry-run must trace the per-platform docker build + docker push
 		// for the release-tagged image, plus the local tag for downstream
-		// dependencies.
+		// dependencies. "base" (fixture.SeedReleaseRepo) is a version-pinned
+		// wrapper carrying its own VERSION rather than the release's: a release
+		// must still publish it, not only build and locally tag it, or a
+		// component whose chart is published never gets an image the registry
+		// actually has (erun-oci-registry's own defect, see erun-devops/AGENTS.md
+		// "Wrapping And Pinning Third-Party Service Images").
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "docker manifest push ghcr.io/sophium/base:") {
+			t.Fatalf("expected the version-pinned wrapper image \"base\" to be pushed and assembled into a manifest, not only built and locally tagged: %s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_release_pushes_release_tagged_docker_builds", normalize.Apply(result.Combined))
 	})

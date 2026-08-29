@@ -31,6 +31,7 @@ rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing f
 ==> Verified published chart base <VERSION>
 stage: verify-publication
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>
 step timing (ordered by duration):

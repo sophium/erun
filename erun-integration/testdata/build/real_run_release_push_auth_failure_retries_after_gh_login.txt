@@ -35,6 +35,7 @@ release tag already exists at HEAD; skipping <VERSION>
 docker builder prune -f
 release: docker root free disk space is not observable from this process; skipping the headroom check
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
@@ -59,8 +60,13 @@ fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest push ghcr.io/sophium/base:<VERSION>
 cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push api-<VERSION> oci://ghcr.io/sophium/charts
 ==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
@@ -74,6 +80,8 @@ helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <T
 stage: verify-publication
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>
 step timing (ordered by duration):

@@ -34,6 +34,7 @@ promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
 ==> Verified published chart base <VERSION>
 stage: verify-publication
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
 stage: push-release-tag
 stage: sync-packaging-checksums
 stage: post-release-version-bump

@@ -26,6 +26,7 @@ release: origin/main has not moved since sync-remote
 release: docker builder prune failed, continuing: exit status 1
 release: docker root free disk space is not observable from this process; skipping the headroom check
 simulated docker failure
+simulated docker failure
 stage: publish
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
