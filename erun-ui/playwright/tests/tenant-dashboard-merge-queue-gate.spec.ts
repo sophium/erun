@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -79,10 +79,7 @@ function dashboardResponse(
 }
 
 async function openMergeQueueTab(app: AppShell, environment: string): Promise<void> {
-  await app.reloadEnvironments();
-  await app.sidebar
-    .envRowButton(SEED_TENANT, environment)
-    .waitFor({ state: 'visible', timeout: 15_000 });
+  await waitForSeededRow(app, SEED_TENANT, environment);
   await app.sidebar.openTenantDashboard(SEED_TENANT);
   await app.tenantDashboard.waitForOpen();
   await app.tenantDashboard.selectTab('Merge queue');

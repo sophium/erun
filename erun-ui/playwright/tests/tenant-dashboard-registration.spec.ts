@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   removeEnvironment,
   seedEnvironment,
@@ -79,10 +79,7 @@ test.describe('tenant dashboard — Registration tab', () => {
   test('shows the two registries and what is already registered', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('registration-visible');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await routeInvoke(page, {
         LoadTenantDashboard: () =>
@@ -131,10 +128,7 @@ test.describe('tenant dashboard — Registration tab', () => {
   }) => {
     const environment = seedDashboardEnvironment('registration-restricted');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await routeInvoke(page, {
         LoadTenantDashboard: () => ({
@@ -167,10 +161,7 @@ test.describe('tenant dashboard — Registration tab', () => {
   }) => {
     const environment = seedDashboardEnvironment('registration-full-path');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       let dashboardLoads = 0;
       let previewCalled = false;
@@ -236,10 +227,7 @@ test.describe('tenant dashboard — Registration tab', () => {
   }) => {
     const environment = seedDashboardEnvironment('registration-quota-conflict');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await routeInvoke(page, {
         LoadTenantDashboard: () =>
@@ -273,10 +261,7 @@ test.describe('tenant dashboard — Registration tab', () => {
   test('deleting an environment requires typing its name to confirm', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('registration-delete-confirm');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       let deleteCalled = false;
       await routeInvoke(page, {

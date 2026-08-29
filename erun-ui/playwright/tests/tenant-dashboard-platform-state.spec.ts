@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -66,10 +66,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   test('not-connected renders a Connect action, no tab strip', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('platform-not-connected');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       stubRPC(page, {
         LoadTenantDashboard: { data: { tenant: SEED_TENANT, platformState: 'not-connected' } },
@@ -100,10 +97,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   }) => {
     const environment = seedDashboardEnvironment('platform-not-connected-bad-url');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       stubRPC(page, {
         LoadTenantDashboard: { data: { tenant: SEED_TENANT, platformState: 'not-connected' } },
@@ -131,10 +125,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   test('choose-alias lists every configured alias as its own choice', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('platform-choose-alias');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       stubRPC(page, {
         LoadTenantDashboard: {
@@ -161,10 +152,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   }) => {
     const environment = seedDashboardEnvironment('platform-not-signed-in');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       const stub = stubRPC(page, {
         LoadTenantDashboard: {
@@ -216,10 +204,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   }) => {
     const environment = seedDashboardEnvironment('platform-not-enrolled');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       stubRPC(page, {
         LoadTenantDashboard: {
@@ -250,10 +235,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
   test('no-permission is a plain notice with no dead-end action', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('platform-no-permission');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       stubRPC(page, {
         LoadTenantDashboard: {

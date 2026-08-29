@@ -1,6 +1,6 @@
 import type { Route, Request } from '@playwright/test';
 
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -58,10 +58,7 @@ test.describe('tenant dashboard — refresh (#1213)', () => {
   }) => {
     const environment = seedDashboardEnvironment('refresh-refetches');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       const stub = stubLoadTenantDashboard(page, {
         data: {
@@ -104,10 +101,7 @@ test.describe('tenant dashboard — refresh (#1213)', () => {
   test('a failing refresh reports the failure, not a success toast', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('refresh-reports-failure');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       const stub = stubLoadTenantDashboard(page, {
         data: {

@@ -1,6 +1,6 @@
 import type { Route, Request } from '@playwright/test';
 
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -56,10 +56,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
   }) => {
     const environment = seedDashboardEnvironment('permissions-hidden-tabs');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await stubLoadTenantDashboard(
         page,
@@ -110,10 +107,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
   }) => {
     const environment = seedDashboardEnvironment('permissions-partial-failure');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await stubLoadTenantDashboard(
         page,
@@ -169,10 +163,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
   }) => {
     const environment = seedDashboardEnvironment('permissions-none');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await stubLoadTenantDashboard(
         page,
@@ -272,10 +263,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
       await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
@@ -332,10 +320,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
       await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
@@ -381,10 +366,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
         await route.continue();
       });
 
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
       await expect(app.tenantDashboard.noPermissionHeading()).toBeVisible();

@@ -1,6 +1,6 @@
 import * as http from 'node:http';
 
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -59,10 +59,7 @@ test.describe('local port isolation from a real, unrelated listener', () => {
 
     try {
       seedEnvironment(SEED_TENANT, environment, `localportrangestart: ${PINNED_RANGE_START}\n`);
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await app.sidebar.openEnvironment(SEED_TENANT, environment);
 
@@ -118,10 +115,7 @@ test.describe('local port isolation from a real, unrelated listener', () => {
         `localportrangestart: ${PINNED_RANGE_START_WITH_LEASE}\n`,
       );
       writeHeldLease(SEED_TENANT, environment, OCCUPANT_LEASE);
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await app.sidebar.openEnvironment(SEED_TENANT, environment);
 

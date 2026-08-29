@@ -1,6 +1,6 @@
 import type { Route, Request } from '@playwright/test';
 
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -43,10 +43,7 @@ test.describe('tenant dashboard — audit log tab (#1205)', () => {
   }) => {
     const environment = seedDashboardEnvironment('audit-log-populated');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await stubLoadTenantDashboard(page, {
         tenant: SEED_TENANT,
@@ -100,10 +97,7 @@ test.describe('tenant dashboard — audit log tab (#1205)', () => {
   }) => {
     const environment = seedDashboardEnvironment('audit-log-empty');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await stubLoadTenantDashboard(page, {
         tenant: SEED_TENANT,

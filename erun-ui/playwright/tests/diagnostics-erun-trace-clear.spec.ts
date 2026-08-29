@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -78,9 +78,7 @@ test.describe('diagnostics erun-trace clear', () => {
     const envB = uniqueEnvironmentName('per-env-reset-b');
     seedEnvironment(SEED_TENANT, envB);
     try {
-      await app.sidebar
-        .envRowButton(SEED_TENANT, envB)
-        .waitFor({ state: 'visible', timeout: 10_000 });
+      await waitForSeededRow(app, SEED_TENANT, envB);
 
       await page.route('**/__erun_invoke', async (route, request) => {
         const body = JSON.parse(request.postData() ?? '{}') as {
