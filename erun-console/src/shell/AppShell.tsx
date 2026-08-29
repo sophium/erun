@@ -11,6 +11,7 @@ import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
+import { QuotaPanel } from '../quota/QuotaPanel';
 import { TenantsPanel } from '../tenants/TenantsPanel';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ConsoleSidebar } from './ConsoleSidebar';
@@ -40,7 +41,12 @@ function SectionContent({
 }): React.ReactElement {
   switch (active) {
     case 'overview':
-      return <ConfigView config={config} />;
+      return (
+        <div className="grid gap-6">
+          <ConfigView config={config} />
+          <QuotaPanel token={token} />
+        </div>
+      );
     case 'environments':
       return (
         <EnvironmentsPanel

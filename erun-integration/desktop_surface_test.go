@@ -240,6 +240,35 @@ func apiRouteMapLiteral(file *ast.File, mapName string, dest map[string]bool) {
 	})
 }
 
+// apiRouteWailsBindings hand-maps a "METHOD /path" API route to the exported
+// erun-ui *App method that provides its real desktop entry point, for the
+// routes where the operator surface exists but is reachable only through
+// Wails, never through a literal path in TypeScript (see
+// desktopsurface.Capability.WailsBinding). Each entry is verified on both
+// ends before it is added here: the named erun-ui/*.go method calls the
+// eruncommon.PlatformClient method that issues this exact route (e.g.
+// AddReviewer -> client.AddReviewer -> "POST /v1/reviews/{review_id}/reviewers"
+// in erun-common/platform_client_reviews.go), and the same method name is
+// called from erun-ui/frontend/src. A shared entry point that loads several
+// routes at once (erun-ui/tenant_review_detail.go's LoadReviewDetail, called
+// from erun-ui/frontend/src/app/api/reviewDetailApi.ts, fans out to
+// ListReviewers/ListComments/ListBuilds) maps each of those routes to that
+// same shared name.
+var apiRouteWailsBindings = map[string]string{
+	"GET /v1/reviews/{review_id}/reviewers":                      "LoadReviewDetail",
+	"POST /v1/reviews/{review_id}/reviewers":                     "AddReviewer",
+	"DELETE /v1/reviews/{review_id}/reviewers/{user_id}":         "RemoveReviewer",
+	"GET /v1/reviews/{review_id}/comments":                       "LoadReviewDetail",
+	"POST /v1/reviews/{review_id}/comments":                      "CreateReviewComment",
+	"PATCH /v1/reviews/{review_id}/comments/{comment_id}/status": "ResolveReviewComment",
+	"GET /v1/reviews/{review_id}/builds":                         "LoadReviewDetail",
+	"PATCH /v1/reviews/{review_id}/status":                       "CloseReview",
+	"POST /v1/reviews/merge-queue/advance":                       "AdvanceMergeQueue",
+	"POST /v1/reviews/merge-queue/override-advance":              "OverrideAdvanceMergeQueue",
+	"POST /v1/provision":                                         "PreviewPlatformProvision",
+	"POST /v1/environments/{environment_id}/stop":                "StopPlatformEnvironment",
+}
+
 // apiRouteCapabilities parses every non-test .go file in
 // erun-backend-api/internal/routes (not imported: it is a separate Go
 // module, the same reason erun-ui's own .go files are parsed rather than
@@ -333,6 +362,7 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 			Pattern:         desktopsurface.APIRoutePattern(s.path),
 			AgentFacing:     internal[full],
 			KnownGap:        knownGap[full],
+			WailsBinding:    apiRouteWailsBindings[full],
 			DeclarationHint: fmt.Sprintf("erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes map (add %q with a comment explaining why)", full),
 			BaselineHint:    fmt.Sprintf("erun-backend-api/internal/routes/route_audit.go's KnownUnsurfacedRoutes map (remove %q)", full),
 		})

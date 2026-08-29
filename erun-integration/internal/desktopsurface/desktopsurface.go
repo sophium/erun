@@ -50,6 +50,21 @@ type Capability struct {
 	// FindStaleBaselineEntries flags it the moment it gains a real reference,
 	// so the baseline can only shrink and never quietly grows stale.
 	KnownGap bool
+	// WailsBinding is a second, independent way an API route capability can
+	// be found referenced: the name of an exported erun-ui *App method whose
+	// call graph is hand-verified to invoke this exact route. It exists
+	// because a route reached only through the desktop never puts its literal
+	// path in TypeScript -- erun-ui/frontend/src calls the Wails-bound Go
+	// method by name, and only erun-ui/*.go (calling erun-common's
+	// PlatformClient) holds the path -- so Pattern alone can never see it.
+	// Checked as a plain substring against the same frontend source Pattern
+	// and Token already read, but kept as its own field rather than folded
+	// into Token so it cannot loosen an API route's existing Pattern-over-
+	// Token precedent (see
+	// TestFindMissingDesktopSurfaceUsesPatternOverTokenWhenBothCouldMatch):
+	// Token alone is deliberately a loose, unverified guess, while a
+	// WailsBinding entry is hand-verified true on both ends before it is set.
+	WailsBinding string
 	// DeclarationHint names, in prose, where a capability from this Source
 	// declares itself exempt -- used verbatim in Missing.Message() so the
 	// failure points at the fix instead of a generic pointer.
@@ -150,10 +165,16 @@ func FindMissingDesktopSurface(capabilities []Capability, frontendSource Fronten
 }
 
 // referencedInFrontend reports whether c's Pattern (or, absent one, its
-// Token) appears in frontendSource.
+// Token) appears in frontendSource. A Pattern-bearing capability with no
+// Pattern match gets one more chance through WailsBinding, since some routes
+// are only ever reachable from TypeScript by a Go method name, never their
+// own path -- see Capability.WailsBinding.
 func referencedInFrontend(c Capability, frontendSource FrontendSource) bool {
 	if c.Pattern != "" {
-		return frontendSource.ContainsPattern(c.Pattern)
+		if frontendSource.ContainsPattern(c.Pattern) {
+			return true
+		}
+		return c.WailsBinding != "" && frontendSource.Contains(c.WailsBinding)
 	}
 	return frontendSource.Contains(c.Token)
 }
