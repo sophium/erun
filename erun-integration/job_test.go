@@ -766,6 +766,61 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", normalize.Apply(status.Combined+await.Combined))
 	})
 
+	t.Run("an_agent_job_that_ends_with_an_uncommitted_working_tree_is_checkpointed_pushed_and_not_reported_as_success", func(t *testing.T) {
+		// The reproduction this closes: an agent's own turn ends after it edited
+		// files but before it committed them, and the job's exit code alone reads
+		// as a plain success. The agent here is a stubbed "claude" binary (routed
+		// through the ERUN_CLAUDE_BIN seam, same as kubectl/helm elsewhere in this
+		// suite) that just writes an uncommitted file and exits 0 -- standing in
+		// for an agent turn that produced real, uncommitted work. The lane's
+		// working tree and remote are real git repositories, not stubs, so "the
+		// checkpoint commit actually landed on the remote" is an observable fact.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+
+		lane := filepath.Join(setup.Cwd, "lane")
+		fixture.SeedGitRepo(t, lane)
+		fixture.RunGit(t, lane, "checkout", "-q", "-b", "feature/lane")
+		remote := filepath.Join(setup.Home, "lane-origin.git")
+		fixture.RunGit(t, setup.Home, "init", "-q", "--bare", remote)
+		fixture.RunGit(t, lane, "remote", "add", "origin", remote)
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude", "printf 'lane work\\n' > uncommitted.txt\nexit 0\n")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "lane"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "lane", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode == 0 {
+			t.Fatalf("expected a dirty-worktree job to report a failure outcome, got 0:\n%s", await.Combined)
+		}
+		// The checkpoint commit itself reached the real remote -- not stubbed,
+		// not asserted only through the job record.
+		fixture.RunGit(t, remote, "show-ref", "--verify", "--quiet", "refs/heads/feature/lane")
+		golden.Equal(t, "job/an_agent_job_that_ends_with_an_uncommitted_working_tree_is_checkpointed_pushed_and_not_reported_as_success", normalize.Apply(status.Combined+await.Combined))
+	})
+
 	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {
 		// The supervisor stamps the pod's hostname at start, so a record
 		// read back from a different hostname is definitive proof of pod

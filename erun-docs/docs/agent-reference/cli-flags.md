@@ -1137,6 +1137,33 @@ The supervisor folds the stream every 2 seconds and rewrites the record only whe
 
 `job output` needs no special handling for an agent job: the log is the event stream, so the existing incremental read returns events while the agent works.
 
+### Working tree checkpoints {#worktree-checkpoints}
+
+An agent job's exit status says nothing about the state of the working tree it ran in — a clean `exited 0` and a tree with a thousand uncommitted lines are otherwise indistinguishable. When an [agent job](#agent-jobs) (`kind: agent`) with a `--dir` finishes, the supervisor checks that directory's git state once, before the record is written, and folds what it found into seven more fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `worktreeDirty` | bool | `true` only when `--dir` was a git working tree with uncommitted changes (tracked or untracked, respecting `.gitignore`) at the moment the job ended. `false` — meaning absent from the record — covers every other case identically: a command job (never checked), an agent job with no `--dir` or a `--dir` outside a git repo, and an agent job that left its tree clean. |
+| `worktreeBranch` | string | The branch HEAD pointed at when the check ran; the literal `"HEAD"` when detached. Empty when `worktreeDirty` is `false`. |
+| `worktreeDetached` | bool | `true` when HEAD was not on a branch at all. |
+| `worktreeCommit` | string | The checkpoint commit the supervisor made, empty when it made none. |
+| `worktreePushed` | bool | Whether `worktreeCommit` reached `worktreeRemote`. A commit that exists only in the working tree is exactly as exposed to a lost pod as the uncommitted changes it was meant to save. |
+| `worktreeRemote` | string | The remote `worktreeCommit` was pushed to (`origin`), empty when nothing was pushed. |
+| `worktreeReason` | string | Why no checkpoint was made, or why one was made but not pushed. Empty when `worktreeDirty` is `false`, or when a commit was made and pushed cleanly. |
+
+When the tree is dirty, the supervisor does not just report — it makes a machine-authored checkpoint commit (message: `WIP: checkpoint by the erun job supervisor`, explicitly inviting the reader to rewrite or squash it) and pushes it to `origin`, because the agent that would otherwise do this by hand is already gone by the time anyone reads the record. It only does this where committing is actually safe:
+
+| Condition | What happens |
+|---|---|
+| HEAD is detached (`worktreeBranch: "HEAD"`) | No commit: it would be unreachable the moment HEAD moves. `worktreeDetached: true`, `worktreeReason` explains it. |
+| A merge, rebase, cherry-pick, or revert is in progress | No commit: committing over the operation's own state could corrupt it. |
+| The branch is one this job treats as protected — the remote's actual default branch (`origin/HEAD`) when it can be read, else `main`/`master`/`develop` | No commit: refused rather than depositing a WIP commit directly on a protected branch. |
+| None of the above, and the commit itself fails | `worktreeCommit` empty, `worktreeReason` names the failure. |
+| The commit succeeds but the push fails | `worktreeCommit` set, `worktreePushed: false`, `worktreeReason` names the push failure — the commit still exists locally, but "only as safe as this one working tree". |
+| The commit succeeds and the push succeeds | `worktreeCommit` and `worktreeRemote` set, `worktreePushed: true`, `worktreeReason` empty. |
+
+A dirty working tree is never a success, whatever `exitCode` says: `job.Succeeded()`'s single definition folds `!worktreeDirty` in alongside `state == exited && exitCode == 0`, the same way it already folds in "nothing left running behind it" for `abandoned`/`gate-incomplete`. `job status`/`job await`'s text line appends `working tree was dirty; checkpointed as <sha> and pushed to <remote>` (or `but not pushed: <reason>`, or `and left uncommitted: <reason>`) to whatever state line it would otherwise render — including a plain `exited 0` line, since a checkpointed-and-pushed tree is still worth an orchestrator's attention even though nothing was lost.
+
 ### `erun job attach`
 
 Registers work erun did **not** start, so it is visible and holds an activity lease.
@@ -1186,8 +1213,8 @@ The call returns inside the timeout either way, so no connection is held open fo
 
 | Exit code | Meaning |
 |---|---|
-| `0` | The job reached `exited` with code `0`. |
-| `1` | The job reached `exited` with a non-zero code, or its state is `abandoned` or `gate-incomplete` — work it started (a process it left running, or a job it started that has not finished) outlived it, so even a captured `exitCode` of `0` is never a success. `job.exitCode` carries the captured code either way; the message text says which case it is. |
+| `0` | The job reached `exited` with code `0` and, for an agent job, `worktreeDirty` is `false`. |
+| `1` | The job reached `exited` with a non-zero code, its state is `abandoned` or `gate-incomplete` — work it started (a process it left running, or a job it started that has not finished) outlived it — or `worktreeDirty` is `true` — see [Working tree checkpoints](#worktree-checkpoints). Any of these is never a success, even at a captured `exitCode` of `0`. `job.exitCode` carries the captured code either way; the message text says which case it is. |
 | `124` | The timeout elapsed with the job still running. Matches `timeout(1)`. |
 | `125` | The job's state is `unknown` — no outcome was ever recorded. |
 

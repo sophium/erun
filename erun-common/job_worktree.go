@@ -64,48 +64,73 @@ func (o environmentJobWorktreeOutcome) apply(job *EnvironmentJob) {
 // not a user-facing trace, it is the same kind of internal bookkeeping call
 // finishEnvironmentJob already makes.
 func captureAgentJobWorktreeOutcome(job EnvironmentJob) environmentJobWorktreeOutcome {
-	if job.Kind != EnvironmentJobKindAgent {
+	ctx := Context{Logger: NewLogger(VerbosityInfo)}
+	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
+	if !dirty {
 		return environmentJobWorktreeOutcome{}
 	}
-	dir := strings.TrimSpace(job.Dir)
+	outcome := environmentJobWorktreeOutcome{dirty: true, branch: branch, detached: branch == "HEAD"}
+	if reason, refused := refuseAgentJobWorktreeCheckpoint(ctx, dir, branch); refused {
+		outcome.reason = reason
+		return outcome
+	}
+	return checkpointAgentJobWorktree(ctx, dir, branch, outcome)
+}
+
+// agentJobDirtyWorktree reports whether job is a finished agent job whose Dir
+// is a git working tree with uncommitted changes, and if so, its directory
+// and current branch ("HEAD" literal when detached).
+func agentJobDirtyWorktree(ctx Context, job EnvironmentJob) (dir, branch string, dirty bool) {
+	if job.Kind != EnvironmentJobKindAgent {
+		return "", "", false
+	}
+	dir = strings.TrimSpace(job.Dir)
 	if dir == "" {
-		return environmentJobWorktreeOutcome{}
+		return "", "", false
 	}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return environmentJobWorktreeOutcome{}
+		return "", "", false
 	}
-	ctx := Context{Logger: NewLogger(VerbosityInfo)}
 	if inside, err := gitIsInsideWorkTree(ctx, dir); err != nil || !inside {
-		return environmentJobWorktreeOutcome{}
+		return "", "", false
 	}
 	changed, err := gitChangedWorkingTreeFiles(ctx, dir)
 	if err != nil || len(changed) == 0 {
-		return environmentJobWorktreeOutcome{}
+		return "", "", false
 	}
-	branch, err := GitCurrentBranch(ctx, dir)
+	branch, err = GitCurrentBranch(ctx, dir)
 	if err != nil {
-		return environmentJobWorktreeOutcome{}
+		return "", "", false
 	}
+	return dir, branch, true
+}
 
-	outcome := environmentJobWorktreeOutcome{dirty: true, branch: branch}
+// refuseAgentJobWorktreeCheckpoint reports whether an automatic checkpoint
+// commit in dir on branch would be unsafe, and if so, why: a detached HEAD
+// (unreachable the moment HEAD moves), a merge/rebase/cherry-pick/revert in
+// progress (committing over it could corrupt that operation's own state), or
+// a branch this job treats as protected.
+func refuseAgentJobWorktreeCheckpoint(ctx Context, dir, branch string) (string, bool) {
 	if branch == "HEAD" {
-		outcome.detached = true
-		outcome.reason = "the working tree had uncommitted changes when the job ended, but HEAD was detached; " +
-			"a checkpoint commit there would be unreachable the moment HEAD moves, so none was made"
-		return outcome
+		return "the working tree had uncommitted changes when the job ended, but HEAD was detached; " +
+			"a checkpoint commit there would be unreachable the moment HEAD moves, so none was made", true
 	}
 	if repoDir, err := gitResolveGitDir(ctx, dir); err == nil && gitOperationInProgress(repoDir) {
-		outcome.reason = "the working tree had uncommitted changes when the job ended, but a git operation " +
+		return "the working tree had uncommitted changes when the job ended, but a git operation " +
 			"(merge, rebase, cherry-pick, or revert) was in progress; committing over it could corrupt that " +
-			"operation's own state, so none was made"
-		return outcome
+			"operation's own state, so none was made", true
 	}
 	if environmentJobWorktreeIsProtectedBranch(ctx, dir, branch) {
-		outcome.reason = fmt.Sprintf("the working tree had uncommitted changes when the job ended, on %q, which "+
-			"this job treats as a protected branch; an automatic checkpoint commit there is refused", branch)
-		return outcome
+		return fmt.Sprintf("the working tree had uncommitted changes when the job ended, on %q, which "+
+			"this job treats as a protected branch; an automatic checkpoint commit there is refused", branch), true
 	}
+	return "", false
+}
 
+// checkpointAgentJobWorktree makes the machine-authored commit and pushes it,
+// folding whichever step fails into outcome.reason so a caller always learns
+// what the supervisor actually managed to preserve.
+func checkpointAgentJobWorktree(ctx Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
 	commitResult, err := CommitWorkingTree(ctx, dir, CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
