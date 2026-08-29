@@ -453,13 +453,14 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | activity | `activity_lease_list` | *(MCP-only)* | Read |
 | activity | `activity_lease_take` | *(MCP-only)* | Work |
 | activity | `activity_lease_release` | *(MCP-only)* | Work |
+| activity | `ai_sessions` | *(MCP-only)* | Read |
 | outputs | `outputs_list` | `erun outputs list` | Read |
 | outputs | `outputs_download` | `erun outputs download` | Read |
 | inputs | `inputs_upload` | `erun inputs upload` | Work |
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-75 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+76 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 
@@ -493,6 +494,29 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
   ]
 }
 ```
+
+### `ai_sessions`
+
+Resolves the structured status of AI tool sessions in this environment — `idle`, `busy`, `awaiting-input`, `exited`, or `oom-killed` — from each session's own last reported turn-boundary event, never from PTY output volume or silence. A session that finished its turn and is waiting on the Operator produces no output at all, which is exactly what an idle or finished session also looks like from the outside; only a direct signal from the tool distinguishes the two, which is what this tool reports. Pass `session` to resolve one session; omit it to list every session recorded for the environment.
+
+The write side is the CLI verb `erun activity ai-session report`, which a tool's own hooks invoke at each turn boundary (`turn-start`, `tool-use`, `turn-end`, `notify`, `exit`) — there is no MCP write tool for this today, since the natural caller is the hook's own shell command running inside the pod, not a remote client.
+
+```jsonc
+// ai_sessions { "session": "abc123" }
+{
+  "sessions": [
+    {
+      "sessionId": "abc123",
+      "tool": "claude",
+      "state": "awaiting-input",
+      "reason": "finished its turn and is waiting for your next message",
+      "lastActivity": "2026-05-25T14:31:02Z"
+    }
+  ]
+}
+```
+
+An `exited` or `oom-killed` session additionally carries `exitCode` when the process reported one. `oom-killed` is reported only when the caller that recorded the exit explicitly said so (`exitReason: "oom"`) — detecting the kill itself (a cgroup `memory.events` read, a `dmesg` scan) is the reporting side's job, not this tool's.
 
 ### `whip`
 

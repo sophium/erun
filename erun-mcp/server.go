@@ -261,6 +261,12 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "idle_stop_record",
 		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
 	}, idleStopRecordTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name: "ai_sessions",
+		Description: "Return the structured status (idle, busy, awaiting-input, exited, or oom-killed) of AI tool sessions in this environment, resolved from each session's own last reported turn-boundary event -- never from PTY output volume or silence. " +
+			"Pass session to resolve one session; omit it to list every session recorded for the environment. " +
+			"The write side is 'erun activity ai-session report', which a tool's own hooks invoke at each turn boundary.",
+	}, aiSessionsTool(runtime))
 }
 
 // registerJobTools registers the exec_job_* family (#1246, following the

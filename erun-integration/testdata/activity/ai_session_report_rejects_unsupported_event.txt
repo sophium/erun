@@ -1,0 +1,2 @@
+audit: erun activity ai-session report --environment dev --event bogus --session sess-1 --tenant team
+unsupported AI session event "bogus"

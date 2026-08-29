@@ -28,6 +28,7 @@ func newActivityCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Com
 		newActivityCancelStopPendingCmd(),
 		newActivityRecordStopCmd(),
 		newActivitySSHProxyCmd(),
+		newActivityAISessionCmd(),
 	)
 	return cmd
 }

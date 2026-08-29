@@ -158,6 +158,11 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"activity_lease_list":    {Family: "activity", CLIPath: nil, Title: "List activity leases held on an environment", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"activity_lease_take":    {Family: "activity", CLIPath: nil, Title: "Take an activity lease, deferring auto-stop", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"activity_lease_release": {Family: "activity", CLIPath: nil, Title: "Release an activity lease", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
+	// The structured AI-session status a tool's own turn-boundary hooks report
+	// (erun activity ai-session report); an orchestrator or a future mobile
+	// client polls this directly, the way it already polls exec_job_status --
+	// there is no desktop UI over this specific tool call to reference.
+	"ai_sessions": {Family: "activity", CLIPath: nil, Title: "Report structured AI-session status (busy/idle/awaiting-input/exited/oom-killed)", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"outputs_list":           {Family: "outputs", CLIPath: []string{"outputs", "list"}, Title: "List an environment's build outputs", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"outputs_download":       {Family: "outputs", CLIPath: []string{"outputs", "download"}, Title: "Download a build output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"inputs_upload":          {Family: "inputs", CLIPath: []string{"inputs", "upload"}, Title: "Upload a file into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
