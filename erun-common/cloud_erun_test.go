@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -389,9 +390,133 @@ func TestERunCloudProviderBearerTokenRequiresConfiguration(t *testing.T) {
 func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 	store := erunTestCloudStore{}
 	provider := NormalizeCloudProviderConfig(CloudProviderConfig{Alias: "erun+x@erun", Provider: CloudProviderERun})
-	if _, err := erunCloudProviderLogin(Context{}, &store, provider, CloudDependencies{}); err == nil {
+	if _, err := erunCloudProviderLogin(Context{}, &store, provider, "", CloudDependencies{}); err == nil {
 		t.Fatal("expected an error for a provider with no ERun config")
 	} else if !strings.Contains(err.Error(), "cloud init erun") {
 		t.Fatalf("error %q does not point at `erun cloud init erun`", err.Error())
+	}
+}
+
+// A device grant that cannot complete must not be a dead end: the issuer
+// advertises the endpoint, so auto starts there, but the authorization-code
+// path still has to run when it fails. Regression for issue #1603, where one
+// broken authentication method locked the CLI out entirely.
+func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing.T) {
+	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
+	secrets := NewFileCloudSecretStore(t.TempDir())
+	provider := erunTestProvider()
+
+	deviceStarted, authCodeCalled := false, false
+	deps := CloudDependencies{
+		CloudSecretStore: secrets,
+		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
+		},
+		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
+			deviceStarted = true
+			return ERunDeviceAuthorization{DeviceCode: "device-code-3", UserCode: "WXYZ-1234"}, nil
+		},
+		PollERunDeviceToken: func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error) {
+			return ERunTokens{}, fmt.Errorf("device authorization expired before sign-in completed")
+		},
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+			authCodeCalled = true
+			return ERunTokens{AccessToken: "access-3", RefreshToken: "refresh-3", ExpiresIn: time.Hour}, nil
+		},
+	}
+
+	status, err := LoginCloudProviderAlias(Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps)
+	if err != nil {
+		t.Fatalf("LoginCloudProviderAlias: %v", err)
+	}
+	if !deviceStarted {
+		t.Fatal("auto must try the device grant first when the issuer advertises one")
+	}
+	if !authCodeCalled {
+		t.Fatal("auto must fall back to authorization code + PKCE when the device grant fails")
+	}
+	if status.Status != CloudTokenStatusActive {
+		t.Fatalf("Status = %q, want active", status.Status)
+	}
+	if cached, ok := loadCachedERunAccessToken(secrets, provider.Alias); !ok || cached != "access-3" {
+		t.Fatalf("cached = %q (ok=%v), want access-3 from the fallback flow", cached, ok)
+	}
+}
+
+// An explicit --flow authcode skips the device grant even where one is
+// advertised: that is the whole point of the override, for an operator whose
+// device-page method is broken but whose browser session already works.
+func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
+	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
+	provider := erunTestProvider()
+
+	deps := CloudDependencies{
+		CloudSecretStore: NewFileCloudSecretStore(t.TempDir()),
+		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
+		},
+		StartERunDeviceAuthorization: func(Context, OIDCDiscovery, string) (ERunDeviceAuthorization, error) {
+			t.Fatal("an explicit authcode flow must not start the device grant")
+			return ERunDeviceAuthorization{}, nil
+		},
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+			return ERunTokens{AccessToken: "access-4", RefreshToken: "refresh-4", ExpiresIn: time.Hour}, nil
+		},
+	}
+
+	if _, err := LoginCloudProviderAlias(Context{}, &store, CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowAuthCode}, deps); err != nil {
+		t.Fatalf("LoginCloudProviderAlias: %v", err)
+	}
+}
+
+// An explicit --flow device against an issuer without the endpoint fails
+// loudly, naming the flow that would work, rather than silently doing
+// something the operator did not ask for.
+func TestERunCloudProviderLoginExplicitDeviceFlowWithoutEndpointErrors(t *testing.T) {
+	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
+	provider := erunTestProvider()
+
+	deps := CloudDependencies{
+		CloudSecretStore: NewFileCloudSecretStore(t.TempDir()),
+		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
+		},
+		RunERunAuthCodeLogin: func(Context, OIDCDiscovery, string) (ERunTokens, error) {
+			t.Fatal("an explicit device flow must not silently use authorization code")
+			return ERunTokens{}, nil
+		},
+	}
+
+	_, err := LoginCloudProviderAlias(Context{}, &store, CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowDevice}, deps)
+	if err == nil {
+		t.Fatal("expected an error for an explicit device flow with no device endpoint")
+	}
+	if !strings.Contains(err.Error(), ERunLoginFlowAuthCode) {
+		t.Fatalf("error %q does not name the flow that would work", err.Error())
+	}
+}
+
+func TestNormalizeERunLoginFlow(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ERunLoginFlowAuto},
+		{in: "auto", want: ERunLoginFlowAuto},
+		{in: " Device ", want: ERunLoginFlowDevice},
+		{in: "AUTHCODE", want: ERunLoginFlowAuthCode},
+		{in: "pkce", wantErr: true},
+	} {
+		got, err := NormalizeERunLoginFlow(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("NormalizeERunLoginFlow(%q) = %q, want an error naming the accepted values", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("NormalizeERunLoginFlow(%q) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
 	}
 }

@@ -40,6 +40,7 @@ type CloudInitERunInput struct {
 
 type CloudLoginInput struct {
 	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to login"`
+	Flow      string `json:"flow,omitempty" jsonschema:"OIDC grant for an erun-hosted alias: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -184,7 +185,7 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias}, cloudDependencies())
+		status, err := eruncommon.LoginCloudProviderAlias(ctx, runtime.Store, eruncommon.CloudLoginParams{Alias: alias, Flow: input.Flow}, cloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}

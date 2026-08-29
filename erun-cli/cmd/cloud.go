@@ -539,16 +539,18 @@ func traceAWSEnableOIDCCommand(ctx common.Context, profile string) {
 
 func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	var alias string
+	var flow string
 	cmd := &cobra.Command{
 		Use:          "login",
 		Short:        "Login to a configured cloud provider alias",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runCloudLoginCommand(commandContext(cmd), store, promptRunner, selectRunner, common.CloudLoginParams{Alias: alias}, deps)
+			return runCloudLoginCommand(commandContext(cmd), store, promptRunner, selectRunner, common.CloudLoginParams{Alias: alias, Flow: flow}, deps)
 		},
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to login")
+	cmd.Flags().StringVar(&flow, "flow", "", "OIDC grant for an erun-hosted alias: \"device\", \"authcode\", or \"auto\" (default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete. Use \"authcode\" when the device page's authentication method fails — its loopback redirect reuses a browser session you already hold")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -588,7 +590,7 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	if !login {
 		return writeCloudStatus(ctx, status)
 	}
-	status, err = common.LoginCloudProviderAlias(ctx, store, common.CloudLoginParams{Alias: alias, Force: true}, deps)
+	status, err = common.LoginCloudProviderAlias(ctx, store, common.CloudLoginParams{Alias: alias, Force: true, Flow: params.Flow}, deps)
 	if err != nil {
 		return err
 	}

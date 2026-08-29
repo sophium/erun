@@ -53,6 +53,16 @@ The token is stored in a **local secret store** referenced from your config (nev
 
 Refreshes the credential for an alias. For an AWS alias this runs `aws sso login` and only touches the local SSO token cache; for a Cloudflare alias it re-verifies the stored token against the Cloudflare API. `--alias` selects the alias (prompted if omitted; **required** with `--dry-run`).
 
+For an **erun-hosted** alias this performs the OIDC sign-in, and `--flow` selects the grant:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Prefers the Device Authorization Grant when the issuer advertises one, and **falls back to Authorization Code + PKCE when that grant cannot complete**. |
+| `device` | Device grant only. Fails, naming `authcode`, when the issuer advertises no device endpoint. |
+| `authcode` | Authorization Code + PKCE only, on a loopback redirect. |
+
+Reach for `--flow authcode` when the device page's authentication method is the thing that is broken — a passkey that will not assert, an MFA factor you cannot satisfy on this machine. The device page forces a **fresh** authentication, so an existing browser session does not help it; the loopback redirect reuses that session, so an operator who is already signed in completes the login with a click. Before this fallback existed, one unusable method locked the CLI out of every operations-only capability while the same identity worked fine in the console.
+
 ### `cloud oidc`
 
 Re-derives and saves the OIDC issuer for an **AWS** alias by minting a short-lived AWS web-identity token and reading its issuer. `--alias` selects it; `--audience` sets the token audience (default `erun-api`). Cloudflare aliases have no OIDC issuer, so this command rejects them.

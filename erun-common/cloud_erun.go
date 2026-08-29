@@ -123,7 +123,7 @@ func erunPlatformHost(apiURL string) string {
 // Authorization Code + PKCE on a loopback listener otherwise. On success it
 // persists the refresh token (via the secret store, referenced from config)
 // and caches the access token with its expiry.
-func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProviderConfig, deps CloudDependencies) (CloudProviderStatus, error) {
+func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProviderConfig, requestedFlow string, deps CloudDependencies) (CloudProviderStatus, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
 		return CloudProviderStatus{}, fmt.Errorf("erun cloud provider %q is not fully configured; run `erun cloud init erun` first", provider.Alias)
 	}
@@ -133,10 +133,34 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 		return CloudProviderStatus{}, err
 	}
 
+	flow, err := NormalizeERunLoginFlow(requestedFlow)
+	if err != nil {
+		return CloudProviderStatus{}, err
+	}
+	hasDeviceEndpoint := strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) != ""
+
 	var tokens ERunTokens
-	if strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) != "" {
+	switch {
+	case flow == ERunLoginFlowAuthCode:
+		ctx.Trace("cloud login erun: authorization code + PKCE requested explicitly")
+		tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID)
+	case flow == ERunLoginFlowDevice:
+		if !hasDeviceEndpoint {
+			return CloudProviderStatus{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint; retry with --flow %s", discovery.Issuer, ERunLoginFlowAuthCode)
+		}
 		tokens, err = erunDeviceFlowLogin(ctx, discovery, provider.ERun.ClientID, deps)
-	} else {
+	case hasDeviceEndpoint:
+		// Auto: prefer the device grant, but a failure here is not the end of
+		// the road. The device page forces a fresh authentication, so an
+		// account whose only method there is broken can never finish it —
+		// while the authorization-code redirect reuses the browser session
+		// that same operator may already hold.
+		tokens, err = erunDeviceFlowLogin(ctx, discovery, provider.ERun.ClientID, deps)
+		if err != nil {
+			ctx.Trace("cloud login erun: device flow did not complete (" + err.Error() + "); falling back to authorization code + PKCE")
+			tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID)
+		}
+	default:
 		tokens, err = deps.RunERunAuthCodeLogin(ctx, discovery, provider.ERun.ClientID)
 	}
 	if err != nil {

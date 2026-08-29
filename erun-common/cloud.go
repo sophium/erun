@@ -101,6 +101,37 @@ type InitAWSCloudProviderParams struct {
 type CloudLoginParams struct {
 	Alias string
 	Force bool
+	// Flow selects the OIDC grant used for an erun-hosted alias:
+	// ERunLoginFlowDevice, ERunLoginFlowAuthCode, or empty/ERunLoginFlowAuto.
+	// Ignored by every other provider, which has only one login path.
+	Flow string
+}
+
+// The OIDC grants an erun-hosted alias can sign in with. Auto is the default:
+// it prefers the device grant when the issuer advertises one, and falls back to
+// authorization code + PKCE when that grant cannot complete — a single
+// unusable authentication method must not lock the CLI out when a second,
+// working flow exists (issue #1603).
+const (
+	ERunLoginFlowAuto     = "auto"
+	ERunLoginFlowDevice   = "device"
+	ERunLoginFlowAuthCode = "authcode"
+)
+
+// NormalizeERunLoginFlow validates a requested flow and resolves the empty
+// value to auto. The error names the accepted values, since this is operator
+// input from a flag or a tool argument.
+func NormalizeERunLoginFlow(flow string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(flow)) {
+	case "", ERunLoginFlowAuto:
+		return ERunLoginFlowAuto, nil
+	case ERunLoginFlowDevice:
+		return ERunLoginFlowDevice, nil
+	case ERunLoginFlowAuthCode:
+		return ERunLoginFlowAuthCode, nil
+	default:
+		return "", fmt.Errorf("unsupported login flow %q: expected %q, %q or %q", strings.TrimSpace(flow), ERunLoginFlowAuto, ERunLoginFlowDevice, ERunLoginFlowAuthCode)
+	}
 }
 
 type CloudBearerParams struct {
@@ -366,7 +397,7 @@ func hasAWSProfileConfig(params InitAWSCloudProviderParams) bool {
 }
 
 func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginParams, deps CloudDependencies) (CloudProviderStatus, error) {
-	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v", strings.TrimSpace(params.Alias), params.Force))
+	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v flow=%s", strings.TrimSpace(params.Alias), params.Force, strings.TrimSpace(params.Flow)))
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
 		ctx.Trace("cloud login: provider lookup failed: " + err.Error())
@@ -393,7 +424,7 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 		// erunCloudProviderLogin resolves its own final status (it may have
 		// just persisted a new refresh token ref onto provider), so it returns
 		// directly rather than falling through to the stale pre-login value.
-		return erunCloudProviderLogin(ctx, store, provider, deps)
+		return erunCloudProviderLogin(ctx, store, provider, params.Flow, deps)
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
