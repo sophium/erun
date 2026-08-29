@@ -159,7 +159,7 @@ var wantRegisteredTools = []string{
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
-	"contribute_clone", "delete", "deploy", "diff", "doctor", "exec_agent", "exec_commit",
+	"contribute_clone", "delete", "deploy", "diff", "doctor", "environment", "exec_agent", "exec_commit",
 	"exec_diff", "exec_gate-merge", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_merge", "exec_push", "exec_raw", "exec_write", "expose", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
