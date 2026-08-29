@@ -198,6 +198,15 @@ export function backendEnv(): Record<string, string> {
     // environment's live state as the seeded env's own. See erun-ui/app.go
     // withDefaultReachabilityDeps.
     ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE: '0',
+    // The new-environment dialog probes erun's hosted registry
+    // (registry.erunpaas.com) over a real outbound HTTP call the moment it
+    // opens — page.route can stub the Wails method that wraps it, but has no
+    // way to intercept that underlying network call itself, so an unstubbed
+    // spec would depend on real DNS/network behavior. This pins the default
+    // (unstubbed) answer to "unavailable", which also happens to match this
+    // host's real current production state. See erun-ui/app.go
+    // hostedRegistryReachabilityOverride.
+    ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE: '0',
     // The Local tab otherwise launches the operator's own $SHELL: a
     // terminal-content spec that selects text by screen position then
     // inherits that shell's dotfile-configured prompt and startup timing,

@@ -116,8 +116,7 @@ export const refreshDialogClusterRegistry =
 // resolves to "not available" rather than throwing, so this always lands a
 // definite status the "Use erun's hosted registry" checkbox can gate on.
 export const refreshDialogHostedRegistry =
-  (): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     if (!getState().environmentDialog.open) {
       return;
     }
