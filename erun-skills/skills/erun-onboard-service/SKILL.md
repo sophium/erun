@@ -204,7 +204,32 @@ opposite case and stays a host-side operation.
 Expect the build to produce **both** `linux/amd64` and `linux/arm64` — that pair
 is hardcoded, with no flag or config to narrow it, so a single-architecture
 cluster pays for an emulated image it can never schedule. On a local cluster that
-emulated half is usually the whole wait. Two rules learned the hard
+emulated half is usually the whole wait.
+
+**On an insecure in-cluster registry the erun publish path does not currently
+complete**, and both failures look like something else:
+
+- `erun push` pushes both per-arch images, then dies at
+  `no such manifest: <registry>/<component>:<version>-amd64`. `docker manifest`
+  is the one Docker subcommand that ignores the daemon's insecure-registry list;
+  it needs `--insecure` of its own. Because the push aborts there, **the chart is
+  never published either**.
+- `erun deploy --components` then refuses, because it verifies the tenant's
+  component chart in the *runtime-image* registry rather than the deploy
+  registry, and probes it over forced HTTPS.
+
+Do not read either refusal as "the chart is missing". Assemble the manifest by
+hand (`docker manifest create --insecure --amend …` then
+`docker manifest push --insecure …`), and if the deploy still refuses, install
+the packaged chart with `helm upgrade --install` using the same
+`values.<env>.yaml`. Report both as deviations rather than absorbing them.
+
+**Publish a chart under a `charts/` prefix.** `helm push chart.tgz
+oci://<registry>` writes to `<registry>/<chart-name>:<version>` — byte-for-byte
+the tag the *image* occupies, so it silently overwrites the image manifest and
+the pod then tries to run a chart. erun's own convention is
+`oci://<registry>/charts/<name>`; use it, and if you have already clobbered the
+image tag, re-create the image manifest before deploying. Two rules learned the hard
 way: an empty-stub secret is worse than no secret (an empty `DATABASE_URL`
 breaks a driver's connect at import time, so prefer an explicitly empty
 `env.secret: []` plus a real value), and a build gate inside the Dockerfile
@@ -247,11 +272,33 @@ limits that take a week to clear.
 
 **Localhost with a valid certificate.** A locally-trusted CA (mkcert and friends)
 produces a certificate that is only valid on the machine that trusts it. Prefer a
-real one: issue for the public hostname as above, then resolve that hostname to
-`127.0.0.1` in the host's `hosts` file and reach the local ingress. The browser
-validates a genuine chain and no traffic leaves the machine. On WSL2-hosted
-clusters the ingress's published ports are already reachable on Windows
-`localhost`.
+real one: issue for the public hostname as above and point that hostname at
+`127.0.0.1`. Where a public certificate is genuinely unobtainable — no zone under
+the operator's control, or a blocked DNS-01 dependency — a local CA is a
+legitimate fallback, but label it as machine-local trust and never call it
+"valid" without that qualifier.
+
+Mechanics that save an hour each:
+
+- **No `hosts` edit is needed.** `*.localtest.me` already resolves to `127.0.0.1`
+  publicly, so `<name>.localtest.me` gives a real hostname for SNI and the
+  certificate's SAN with no administrative change.
+- **A WSL2-hosted cluster does *not* publish the ingress on Windows
+  `localhost`.** The LoadBalancer binds inside the VM's own network namespace, so
+  `127.0.0.1:443` on the host is refused. Forward it:
+  `kubectl -n <ingress-ns> port-forward svc/<ingress> 443:443 --address 127.0.0.1`.
+- **The repo's committed Ingress annotations are usually for a different
+  controller.** Check `ingress.className` against what the cluster actually runs
+  (`traefik` on k3s, not `nginx`) and blank the controller-specific annotations,
+  or the Ingress is created and silently served by nobody.
+- **Installing a local CA into the trust store is an interactive gate.** Windows
+  refuses it headlessly — `Import-Certificate` reports "UI is not allowed in this
+  operation" and `certutil -addstore` blocks on a dialog. Hand the operator that
+  one command rather than pretending it can be automated.
+- **Verify with a tool that honours `--cacert`.** Windows `curl.exe` (and Git's)
+  are Schannel builds that ignore it and read the system store, so a chain that
+  is provably fine fails with exit 60. Use `openssl s_client -CAfile …
+  -verify_return_error`, which answers the question directly.
 
 ## Step 6 — Verify the artifact, not the object
 
@@ -293,6 +340,11 @@ cover the hostname actually being used.
 | `kubectl get svc kube-system/erun-registry: Forbidden` | The SA is not bound to the registry-access Role. Add it as a subject to the existing RoleBinding if one exists; do not switch registries to dodge it. |
 | dind still lacks `--insecure-registry` after fixing RBAC | The runtime has not been redeployed since. `erun deploy <tenant> <env> --current`, then re-read the arg. |
 | Image manifest returns 403/404 at the pinned version | Stop. Mirror it into the in-cluster registry or make the package pullable — an unpullable image cannot be deployed around. |
+| `no such manifest: …-amd64` on push to an insecure registry | `docker manifest` needs its own `--insecure`. Assemble by hand; the chart was not published either. |
+| Deploy refuses: chart "could not be determined" in the runtime registry, or `http: server gave HTTP response to HTTPS client` | The verification probe is looking in the wrong registry, over HTTPS. Install the packaged chart with helm and report it. |
+| The pod tries to run a Helm chart as its image | A `helm push` without a `charts/` prefix overwrote the image tag. Re-create the image manifest and republish the chart under `charts/`. |
+| Ingress exists, nothing answers | `ingress.className` names a controller the cluster does not run. |
+| `curl` exits 60 despite a good chain | Schannel curl ignores `--cacert`. Verify with `openssl s_client -CAfile`. |
 | Pod CrashLoopBackOff on first deploy | Almost always the production values from Step 3.5. Apply the non-prod override. |
 | Builder-stage test gate fails | The repo team's fix. Report it; do not bypass the gate to get a green deploy. |
 | `erun expose` resolves but the Ingress 503s | The Service name is repo-native, not `<tenant>-<service>`. Add an Ingress to the repo's chart instead of renaming the Service. |
