@@ -39,6 +39,37 @@ export interface UIReviewDetail {
   // canResolveComments mirrors canComment for the resolve/unresolve action —
   // a distinct write route on the platform, gated separately.
   canResolveComments: boolean;
+  reviewers?: UIReviewer[];
+  reviewersRestricted?: string;
+  reviewersError?: string;
+  // canAssignReviewers mirrors canComment for the Add reviewers action — a
+  // distinct write route on the platform, gated separately.
+  canAssignReviewers: boolean;
+  // canRemoveReviewers mirrors canAssignReviewers for the Remove action — a
+  // distinct write route (DELETE), gated separately.
+  canRemoveReviewers: boolean;
+  // availableReviewers lists the tenant's enrolled users the Add reviewers
+  // picker may choose from, populated only when canAssignReviewers is set.
+  // A constrained picker, not a free-text id, is what keeps a cross-tenant
+  // userId structurally unreachable from this control.
+  availableReviewers?: UIReviewer[];
+}
+
+export interface UIReviewer {
+  userId: string;
+  username?: string;
+}
+
+export interface UIAddReviewerInput {
+  tenant: string;
+  reviewId: string;
+  userId: string;
+}
+
+export interface UIRemoveReviewerInput {
+  tenant: string;
+  reviewId: string;
+  userId: string;
 }
 
 export interface UIReviewComment {

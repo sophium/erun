@@ -29,6 +29,7 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 		newReviewUnresolveCmd(store, &alias, deps),
 		newReviewCloseCmd(store, &alias, deps),
 		newReviewRecordBuildCmd(store, &alias, deps),
+		newReviewReviewersCmd(store, &alias, deps),
 		newReviewMergeQueueCmd(store, &alias, deps),
 	)
 	cmd.PersistentFlags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
@@ -396,6 +397,124 @@ func writeReviewBuildLine(ctx common.Context, build common.PlatformBuild) error 
 	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] successful=%t commit=%s version=%s\n",
 		build.BuildID, build.Successful, build.CommitID, build.Version)
 	return err
+}
+
+func newReviewReviewersCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	return newCommandGroup(
+		"reviewers",
+		"Assign and remove reviewers on a review",
+		newReviewReviewersListCmd(store, alias, deps),
+		newReviewReviewersAddCmd(store, alias, deps),
+		newReviewReviewersRemoveCmd(store, alias, deps),
+	)
+}
+
+func writeReviewerLine(ctx common.Context, reviewer common.PlatformReviewer) error {
+	_, err := fmt.Fprintf(ctx.Stdout, "  - %s\n", reviewer.UserID)
+	return err
+}
+
+func newReviewReviewersListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "list REVIEW_ID",
+		Short:        "List a review's assigned reviewers",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Example:      "  erun review reviewers list 018f...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			reviewers, err := common.RunReviewReviewersList(ctx, store, *alias, args[0], deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers list planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if len(reviewers) == 0 {
+					if _, err := fmt.Fprintln(ctx.Stdout, "no reviewers"); err != nil {
+						return err
+					}
+				}
+				for _, reviewer := range reviewers {
+					if err := writeReviewerLine(ctx, reviewer); err != nil {
+						return err
+					}
+				}
+			}
+			return ctx.WriteResult(reviewers)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewReviewersAddCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var userID string
+	cmd := &cobra.Command{
+		Use:   "add REVIEW_ID",
+		Short: "Assign a reviewer to a review",
+		Long: "Assign a reviewer to a review.\n\n" +
+			"--user-id must already be enrolled in your own tenant — checked before the network call, " +
+			"not only by the platform's own tenant-scoped refusal. A real, immediate write; assigning " +
+			"a reviewer gates no status transition (see `erun review queue`'s unresolved-thread gate " +
+			"for what actually blocks a merge).",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Example:      "  erun review reviewers add 018f... --user-id 018g...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			reviewer, err := common.RunReviewReviewerAdd(ctx, store, *alias, args[0], userID, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers add planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewerLine(ctx, reviewer); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(reviewer)
+		},
+	}
+	cmd.Flags().StringVar(&userID, "user-id", "", "User id to assign as a reviewer (required)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewReviewersRemoveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var userID string
+	cmd := &cobra.Command{
+		Use:          "remove REVIEW_ID",
+		Short:        "Remove a reviewer from a review",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Example:      "  erun review reviewers remove 018f... --user-id 018g...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			err := common.RunReviewReviewerRemove(ctx, store, *alias, args[0], userID, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers remove planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "removed reviewer %s\n", userID); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(map[string]string{"reviewId": args[0], "userId": userID})
+		},
+	}
+	cmd.Flags().StringVar(&userID, "user-id", "", "User id to remove as a reviewer (required)")
+	addDryRunFlag(cmd)
+	return cmd
 }
 
 func newReviewMergeQueueCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {

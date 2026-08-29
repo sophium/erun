@@ -280,6 +280,135 @@ function submitCommentStatus(
   };
 }
 
+// startAddReviewer/cancelAddReviewer/setAddReviewerUserId/clearAddReviewerError/
+// submitAddReviewer back the Add reviewers picker. Not destructive, so unlike
+// Close/Remove it opens straight into the picker with no confirm step.
+export const startAddReviewer = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ addReviewerOpen: true, addReviewerUserId: '', addReviewerError: '' }),
+  );
+};
+
+export const cancelAddReviewer = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ addReviewerOpen: false, addReviewerUserId: '', addReviewerError: '' }),
+  );
+};
+
+export const setAddReviewerUserId =
+  (userId: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ addReviewerUserId: userId }));
+  };
+
+// clearAddReviewerError mirrors clearCloseReviewError for the Add reviewers
+// picker's own write error.
+export const clearAddReviewerError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ addReviewerError: '' }));
+};
+
+export const submitAddReviewer = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId, addReviewerUserId } = state.reviewDetail;
+  const userId = addReviewerUserId.trim();
+  if (!userId) {
+    return;
+  }
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ addReviewerError: 'No tenant is open.' }));
+    return;
+  }
+  dispatch(patchReviewDetail({ addReviewerSubmitting: true, addReviewerError: '' }));
+  try {
+    await dispatch(
+      reviewDetailApi.endpoints.addReviewer.initiate({ tenant: context.tenant, reviewId, userId }),
+    ).unwrap();
+    dispatch(
+      patchReviewDetail({
+        addReviewerSubmitting: false,
+        addReviewerOpen: false,
+        addReviewerUserId: '',
+        addReviewerError: '',
+      }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(
+      patchReviewDetail({ addReviewerSubmitting: false, addReviewerError: readError(error) }),
+    );
+  }
+};
+
+// confirmRemoveReviewer/cancelRemoveReviewer give Remove the same
+// cancel-before-commitment boundary Close gets — it revokes access, not just
+// a passive read.
+export const confirmRemoveReviewer =
+  (userId: string): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      patchReviewDetail({ removeReviewerConfirmingUserId: userId, removeReviewerError: '' }),
+    );
+  };
+
+export const cancelRemoveReviewer = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ removeReviewerConfirmingUserId: '', removeReviewerError: '' }));
+};
+
+export const clearRemoveReviewerError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ removeReviewerError: '', removeReviewerErrorUserId: '' }));
+};
+
+export const submitRemoveReviewer =
+  (userId: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const state = getState();
+    const { reviewId } = state.reviewDetail;
+    const context = reviewCallerContext(state, reviewId);
+    if (!context) {
+      dispatch(
+        patchReviewDetail({
+          removeReviewerError: 'No tenant is open.',
+          removeReviewerErrorUserId: userId,
+        }),
+      );
+      return;
+    }
+    dispatch(
+      patchReviewDetail({
+        removingReviewerId: userId,
+        removeReviewerConfirmingUserId: '',
+        removeReviewerError: '',
+        removeReviewerErrorUserId: '',
+      }),
+    );
+    try {
+      await dispatch(
+        reviewDetailApi.endpoints.removeReviewer.initiate({
+          tenant: context.tenant,
+          reviewId,
+          userId,
+        }),
+      ).unwrap();
+      dispatch(
+        patchReviewDetail({
+          removingReviewerId: '',
+          removeReviewerError: '',
+          removeReviewerErrorUserId: '',
+        }),
+      );
+      await dispatch(loadReviewDetail(reviewId));
+    } catch (error) {
+      dispatch(
+        patchReviewDetail({
+          removingReviewerId: '',
+          removeReviewerError: readError(error),
+          removeReviewerErrorUserId: userId,
+        }),
+      );
+    }
+  };
+
 // startReviewComment/cancelReviewComment/setReviewCommentDraft/
 // submitReviewComment mirror the reply flow above, but for opening a brand
 // new top-level thread anchored to a diff line the operator clicked — the

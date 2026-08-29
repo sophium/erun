@@ -232,6 +232,84 @@ func reviewUnresolveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 	}
 }
 
+type ReviewReviewersListInput struct {
+	platformAliasInput
+	ReviewID string `json:"reviewId" jsonschema:"review id to list reviewers for"`
+}
+
+type ReviewReviewersListResult struct {
+	Preview   bool                          `json:"preview"`
+	Reviewers []eruncommon.PlatformReviewer `json:"reviewers,omitempty"`
+	Trace     []string                      `json:"trace,omitempty"`
+}
+
+func reviewReviewersListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" {
+			return nil, ReviewReviewersListResult{}, fmt.Errorf("reviewId is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		reviewers, err := eruncommon.RunReviewReviewersList(ctx, runtime.Store, input.Alias, input.ReviewID, cloudDependencies())
+		if err != nil {
+			return nil, ReviewReviewersListResult{}, err
+		}
+		return nil, ReviewReviewersListResult{Preview: input.Preview, Reviewers: reviewers, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+type ReviewReviewerAddInput struct {
+	platformAliasInput
+	ReviewID string `json:"reviewId" jsonschema:"review id to assign a reviewer on"`
+	UserID   string `json:"userId" jsonschema:"user id to assign as a reviewer; must already be enrolled in the caller's own tenant"`
+}
+
+type ReviewReviewerResult struct {
+	Preview  bool                        `json:"preview"`
+	Reviewer eruncommon.PlatformReviewer `json:"reviewer,omitempty"`
+	Trace    []string                    `json:"trace,omitempty"`
+}
+
+func reviewReviewerAddTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.UserID) == "" {
+			return nil, ReviewReviewerResult{}, fmt.Errorf("reviewId and userId are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		reviewer, err := eruncommon.RunReviewReviewerAdd(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, cloudDependencies())
+		if err != nil {
+			return nil, ReviewReviewerResult{}, err
+		}
+		return nil, ReviewReviewerResult{Preview: input.Preview, Reviewer: reviewer, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+type ReviewReviewerRemoveInput struct {
+	platformAliasInput
+	ReviewID string `json:"reviewId" jsonschema:"review id to remove a reviewer from"`
+	UserID   string `json:"userId" jsonschema:"user id to remove as a reviewer"`
+}
+
+type ReviewReviewerRemoveResult struct {
+	Preview bool     `json:"preview"`
+	Trace   []string `json:"trace,omitempty"`
+}
+
+func reviewReviewerRemoveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerRemoveInput) (*mcp.CallToolResult, ReviewReviewerRemoveResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReviewerRemoveInput) (*mcp.CallToolResult, ReviewReviewerRemoveResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.UserID) == "" {
+			return nil, ReviewReviewerRemoveResult{}, fmt.Errorf("reviewId and userId are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		if err := eruncommon.RunReviewReviewerRemove(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, cloudDependencies()); err != nil {
+			return nil, ReviewReviewerRemoveResult{}, err
+		}
+		return nil, ReviewReviewerRemoveResult{Preview: input.Preview, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type ReviewMergeQueueListInput struct {
 	platformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch to list the merge queue for"`

@@ -49,7 +49,7 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 Every review has exactly one author and any number of reviewers:
 
 - **Author.** Set once, at creation, to the authenticated caller. It never changes and cannot be reassigned.
-- **Reviewers.** Zero or more users explicitly assigned to a review. Assigning a reviewer does not gate any status transition today — `PATCH .../status` still works the same regardless of who (if anyone) is assigned. A reviewer's tenant must match the review's tenant; a cross-tenant `userId` is refused.
+- **Reviewers.** Zero or more users explicitly assigned to a review. Assigning a reviewer does not gate any status transition today — `PATCH .../status` still works the same regardless of who (if anyone) is assigned. A reviewer's tenant must match the review's tenant; a cross-tenant `userId` is refused by this API and, on the CLI and MCP clients, before the network call at all (see [`erun review reviewers`](/cli/review#review-reviewers)).
 
 The reviewer resource:
 

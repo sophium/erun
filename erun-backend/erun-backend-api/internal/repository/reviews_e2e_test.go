@@ -174,8 +174,12 @@ func TestReviewReviewerFromAnotherTenantIsRefusedByTheFK(t *testing.T) {
 	t.Cleanup(func() { clearReviewsTenant(t, db, otherTenantID) })
 	outsider := seedReviewsUser(t, db, otherTenantID, "outsider")
 
-	if _, err := reviewers.Create(ctx, model.ReviewReviewer{ReviewID: review.ReviewID, UserID: outsider}); err == nil {
+	_, err = reviewers.Create(ctx, model.ReviewReviewer{ReviewID: review.ReviewID, UserID: outsider})
+	if err == nil {
 		t.Fatal("a reviewer from another tenant was accepted, want the FK to refuse it")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want it to unwrap to ErrNotFound (so the API reports 404, not a bare 500)", err)
 	}
 }
 

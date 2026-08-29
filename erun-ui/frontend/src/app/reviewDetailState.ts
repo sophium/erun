@@ -94,6 +94,21 @@ export interface ReviewDetailState {
   newCommentDraft: string;
   newCommentSubmitting: boolean;
   newCommentSubmitError: string;
+  // addReviewerOpen is the Add reviewers picker's own open/closed state —
+  // not destructive, so unlike Close/Remove it needs no confirm step.
+  addReviewerOpen: boolean;
+  addReviewerUserId: string;
+  addReviewerSubmitting: boolean;
+  addReviewerError: string;
+  // removeReviewerConfirmingUserId is the reviewer currently at the "are you
+  // sure" step ('' when none) — Remove is access-revoking, so it gets the
+  // same cancel-before-commitment boundary Close does.
+  removeReviewerConfirmingUserId: string;
+  // removingReviewerId is the reviewer currently being removed ('' when
+  // idle), so only that row shows a busy state.
+  removingReviewerId: string;
+  removeReviewerError: string;
+  removeReviewerErrorUserId: string;
 }
 
 export const defaultReviewFilter = (): ReviewFilterState => ({
@@ -140,4 +155,12 @@ export const defaultReviewDetail = (): ReviewDetailState => ({
   newCommentDraft: '',
   newCommentSubmitting: false,
   newCommentSubmitError: '',
+  addReviewerOpen: false,
+  addReviewerUserId: '',
+  addReviewerSubmitting: false,
+  addReviewerError: '',
+  removeReviewerConfirmingUserId: '',
+  removingReviewerId: '',
+  removeReviewerError: '',
+  removeReviewerErrorUserId: '',
 });

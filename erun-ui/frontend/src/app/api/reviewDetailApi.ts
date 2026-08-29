@@ -1,23 +1,29 @@
 import type {
+  UIAddReviewerInput,
   UICloseReviewInput,
   UICreateReviewCommentInput,
   UICreateReviewReplyInput,
+  UIRemoveReviewerInput,
   UIReviewComment,
   UIReviewDetail,
   UIReviewDetailInput,
+  UIReviewer,
   UITenantDashboardReview,
   UIUpdateReviewCommentStatusInput,
 } from '@/types';
 
 import {
+  AddReviewer,
   CloseReview,
   CreateReviewComment,
   CreateReviewReply,
   LoadReviewDetail,
+  RemoveReviewer,
   ResolveReviewComment,
   UnresolveReviewComment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
+import type { NoValue } from './wailsBaseQuery';
 import { wailsQueryFn } from './wailsBaseQuery';
 
 // reviewDetailApi is named apart from reviewApi (the local diff panel's own
@@ -70,6 +76,14 @@ export const reviewDetailApi = wailsApi.injectEndpoints({
         { type: 'TenantDashboard', id: input.tenant },
       ],
     }),
+    addReviewer: builder.mutation<UIReviewer, UIAddReviewerInput>({
+      queryFn: wailsQueryFn<UIAddReviewerInput, UIReviewer>((input) => AddReviewer(input)),
+      invalidatesTags: (_result, _error, input) => [{ type: 'ReviewDetail', id: input.reviewId }],
+    }),
+    removeReviewer: builder.mutation<NoValue, UIRemoveReviewerInput>({
+      queryFn: wailsQueryFn<UIRemoveReviewerInput, NoValue>((input) => RemoveReviewer(input)),
+      invalidatesTags: (_result, _error, input) => [{ type: 'ReviewDetail', id: input.reviewId }],
+    }),
   }),
 });
 
@@ -81,4 +95,6 @@ export const {
   useCloseReviewMutation,
   useResolveReviewCommentMutation,
   useUnresolveReviewCommentMutation,
+  useAddReviewerMutation,
+  useRemoveReviewerMutation,
 } = reviewDetailApi;

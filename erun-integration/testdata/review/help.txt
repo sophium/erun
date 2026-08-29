@@ -11,6 +11,7 @@ Available Commands:
   queue        Inspect and advance a target branch's merge queue
   record-build Record a build against a review, moving it to READY or FAILED
   resolve      Resolve a comment thread by closing its root comment
+  reviewers    Assign and remove reviewers on a review
   show         Show a review, its comment threads, and its recorded builds
   unresolve    Reopen a comment thread by marking its root comment OPEN
 

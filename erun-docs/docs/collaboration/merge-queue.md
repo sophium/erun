@@ -6,7 +6,7 @@ title: Merge queue
 
 The merge queue is the only path to `MERGED` — it is what makes two independently-green reviews that break the target branch together impossible, and it carries the one audited escape hatch in the product. It also has a lot of surface: a shape, a gate, a comment-thread check, three clients that can advance it, and a wedge-recovery path. This page is the single account of all of it; [Reviews](/collaboration/reviews) stays the wire-level endpoint reference, [`erun review`](/cli/review) the CLI reference, and the [desktop reviews tab](/desktop/reviews) the app reference — each links here for the mechanics rather than repeating them.
 
-For the standing builder/reviewer roles that drive a review through this queue, see [Review loop topology](/collaboration/review-loop-topology).
+For the standing builder/reviewer roles that drive a review through this queue, see [Review loop topology](/collaboration/review-loop-topology). Getting a reviewer into that role in the first place — assigning or removing one from any client — is [`erun review reviewers`](/cli/review#review-reviewers) (also `review_reviewers_*` over MCP); see [Reviews § Author, reviewers, and discovery](/collaboration/reviews#author-reviewers-and-discovery) for the resource itself.
 
 ## Why it exists
 

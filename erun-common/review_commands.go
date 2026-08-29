@@ -316,6 +316,77 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	})
 }
 
+// RunReviewReviewersList lists the users assigned to review a review.
+func RunReviewReviewersList(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) ([]PlatformReviewer, error) {
+	if strings.TrimSpace(reviewID) == "" {
+		return nil, fmt.Errorf("review id is required")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return nil, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID+"/reviewers")
+	if ctx.DryRun {
+		return nil, nil
+	}
+	return client.ListReviewers(context.Background(), reviewID)
+}
+
+// ensureReviewerIsEnrolledInCallerTenant refuses a cross-tenant userId before
+// the network call that would assign it, rather than leaving that refusal to
+// the backend's tenant-scoped foreign key alone (collaboration/reviews): it
+// resolves the caller's own tenant's enrolled users (RLS scopes ListUsers's
+// empty TenantID to the caller's tenant) and checks userID is one of them.
+func ensureReviewerIsEnrolledInCallerTenant(client *PlatformClient, userID string) error {
+	users, err := client.ListUsers(context.Background(), PlatformListUsersParams{})
+	if err != nil {
+		return fmt.Errorf("resolve your tenant's enrolled users: %w", err)
+	}
+	for _, user := range users {
+		if user.UserID == userID {
+			return nil
+		}
+	}
+	return fmt.Errorf("user %s is not enrolled in your tenant; a reviewer must already be enrolled — see `erun platform user list`, or `erun platform user enroll` to add one", userID)
+}
+
+// RunReviewReviewerAdd assigns userID as a reviewer on reviewID. A userID not
+// enrolled in the caller's own tenant is refused before the network call.
+func RunReviewReviewerAdd(ctx Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) (PlatformReviewer, error) {
+	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
+		return PlatformReviewer{}, fmt.Errorf("review id and user id are required")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformReviewer{}, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/users")
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/"+reviewID+"/reviewers", "userId="+userID)
+	if ctx.DryRun {
+		return PlatformReviewer{}, nil
+	}
+	if err := ensureReviewerIsEnrolledInCallerTenant(client, userID); err != nil {
+		return PlatformReviewer{}, err
+	}
+	return client.AddReviewer(context.Background(), reviewID, PlatformAddReviewerParams{UserID: userID})
+}
+
+// RunReviewReviewerRemove unassigns userID from reviewID's reviewers.
+func RunReviewReviewerRemove(ctx Context, store CloudReadStore, alias, reviewID, userID string, deps CloudDependencies) error {
+	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("review id and user id are required")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return err
+	}
+	tracePlatformCall(ctx, provider, "DELETE", "/v1/reviews/"+reviewID+"/reviewers/"+userID)
+	if ctx.DryRun {
+		return nil
+	}
+	return client.RemoveReviewer(context.Background(), reviewID, userID)
+}
+
 // RunReviewMergeQueueList lists targetBranch's merge queue.
 func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias, targetBranch string, deps CloudDependencies) ([]PlatformReview, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
