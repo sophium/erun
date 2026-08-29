@@ -55,10 +55,7 @@ test.describe('titlebar "Report a bug" action', () => {
   // remedy rendered no action at all, so the operator had nothing to do about
   // it. A test that only checked an error *with* a remedy would still pass
   // while that dead end shipped.
-  test('an error with no known remedy still offers a reporting action', async ({
-    app,
-    page,
-  }) => {
+  test('an error with no known remedy still offers a reporting action', async ({ app, page }) => {
     await emitErrorNotification(page, { message: 'Could not reach the runtime.' });
     await expect(app.titlebar.errorAlert()).toBeVisible();
     await expect(app.titlebar.reportBugButton()).toBeVisible();
@@ -95,7 +92,9 @@ test.describe('titlebar "Report a bug" action', () => {
     const labels = await app.titlebar
       .errorAlert()
       .evaluate((alert) =>
-        Array.from(alert.querySelectorAll('button')).map((button) => button.textContent?.trim() ?? ''),
+        Array.from(alert.querySelectorAll('button')).map(
+          (button) => button.textContent?.trim() ?? '',
+        ),
       );
     const deployIndex = labels.findIndex((text) => text.includes('Deploy'));
     const reportIndex = labels.findIndex((text) => text.includes('Report a bug'));
@@ -115,6 +114,15 @@ test.describe('titlebar "Report a bug" action', () => {
     await emitErrorNotification(page, { message: 'Could not reach the runtime.' });
     await expect(app.titlebar.reportBugButton()).toBeVisible();
 
+    // This sandbox can reach the real github.com, which would otherwise
+    // redirect the popup to a sign-in page before the URL is read (and
+    // aborting the request instead navigates to chrome-error://, which is no
+    // more stable) — fulfill it locally so the popup's URL never changes.
+    await page
+      .context()
+      .route('https://github.com/**', (route) =>
+        route.fulfill({ status: 200, contentType: 'text/plain', body: 'stubbed for the test' }),
+      );
     const [popup] = await Promise.all([
       page.waitForEvent('popup'),
       app.titlebar.reportBugButton().click(),
