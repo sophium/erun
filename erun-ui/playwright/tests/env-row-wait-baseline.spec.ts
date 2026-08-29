@@ -4,8 +4,8 @@ import * as path from 'node:path';
 import { expect, test } from '@playwright/test';
 import ts from 'typescript';
 
-// env-row-wait-baseline.spec.ts is a repo-state structural gate for issue
-// #1565: a seeded-row wait shaped like
+// env-row-wait-baseline.spec.ts is a repo-state structural gate: a
+// seeded-row wait shaped like
 //
 //   await app.reloadEnvironments();
 //   await app.sidebar
@@ -182,7 +182,7 @@ function findStaleBaselineEntries(): string[] {
 
 // This gate scans source, not rendered UI, so it needs neither the app
 // fixture nor the headless backend.
-test.describe('env row wait baseline (#1565)', () => {
+test.describe('env row wait baseline', () => {
   test('no file exceeds its envRowWaitBaseline entry', () => {
     expect(findOverages()).toEqual([]);
   });
