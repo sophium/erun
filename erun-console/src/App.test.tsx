@@ -2,6 +2,7 @@ import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { beginTenantSwitch } from './shell/tenantSwitch';
 import { renderWithStore } from './test/renderWithStore';
 
 const PLATFORM = {
@@ -32,6 +33,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  sessionStorage.clear();
 });
 
 describe('App signed-out route', () => {
@@ -113,5 +115,52 @@ describe('App signed-out route', () => {
       'https://docs.erunpaas.com',
     );
     expect(document.querySelector('img')).toBeNull();
+  });
+});
+
+function stubConfigFetch(tenant: { tenantId: string; name: string; type: string }): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL) => {
+      const url = input instanceof URL ? input.href : input;
+      if (url.includes('/v1/platform')) {
+        return Promise.resolve(jsonResponse(PLATFORM));
+      }
+      if (url.includes('/v1/config')) {
+        return Promise.resolve(jsonResponse({ tenant, environments: [], contexts: [] }));
+      }
+      return Promise.resolve(jsonResponse([]));
+    }),
+  );
+}
+
+// This is the acceptance-criteria-level check: the console never keeps the
+// old token and relabels which tenant it claims to be on. A switch attempt is
+// only real once the API itself resolves the new token to the requested
+// tenant — a caller that comes back resolved to some *other* tenant (still
+// signed into the same account, chose a different one, whatever the cause)
+// must be told, not silently shown as if the switch worked.
+describe('App tenant switch mismatch', () => {
+  it('surfaces a mismatch banner when a switch attempt resolves to a different tenant than requested', async () => {
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
+    beginTenantSwitch({ tenantId: 'tenant-b', name: 'Beta' });
+    stubConfigFetch({ tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY' });
+
+    renderWithStore(<App />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Beta');
+    expect(alert).toHaveTextContent('Acme');
+  });
+
+  it('shows no mismatch banner when nothing was pending, or the switch reached its target', async () => {
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
+    beginTenantSwitch({ tenantId: 'tenant-a', name: 'Acme' });
+    stubConfigFetch({ tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY' });
+
+    renderWithStore(<App />);
+
+    await screen.findByRole('heading', { level: 1, name: 'Overview' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

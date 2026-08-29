@@ -41,6 +41,13 @@ func (r *stubTenantRepository) List(_ context.Context) ([]model.Tenant, error) {
 	return r.list, nil
 }
 
+func (r *stubTenantRepository) Reachable(_ context.Context) ([]model.Tenant, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.list, nil
+}
+
 func postCreateTenant(t *testing.T, tenants *stubTenantRepository, tenantType string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/tenants", bytes.NewBufferString(body))
@@ -183,6 +190,51 @@ func TestListTenantsSurfacesRepositoryError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/tenants", nil)
 	rec := httptest.NewRecorder()
 	TenantRoutes{tenants: tenants}.listTenants(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// TestReachableTenantsHasNoOperationsGate is the route-level half of the
+// negative requirement: unlike createTenant/listTenants' admin branch, a
+// COMPANY-tenant caller must reach this handler at all, because it answers
+// about the caller's own identity, not the platform's tenant registry. The
+// real scoping guarantee (a caller only ever sees tenants their own verified
+// identity maps to) lives in TenantRepository.Reachable's SQL, exercised by
+// TestReachableOnlyReturnsTenantsMappedToCallersIdentity in the repository
+// package against a real database.
+func TestReachableTenantsHasNoOperationsGate(t *testing.T) {
+	want := []model.Tenant{{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
+	tenants := &stubTenantRepository{list: want}
+	req := httptest.NewRequest(http.MethodGet, "/v1/tenants/reachable", nil)
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:       "tenant-1",
+		TenantType:     string(model.TenantTypeCompany),
+		ErunUserID:     "user-1",
+		ExternalIssuer: "https://idp.example",
+		ExternalUserID: "sub-1",
+	}))
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants}.reachableTenants(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var response []model.Tenant
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response) != 1 || response[0].TenantID != "tenant-1" {
+		t.Fatalf("unexpected reachable tenants: %+v", response)
+	}
+}
+
+func TestReachableTenantsSurfacesRepositoryError(t *testing.T) {
+	tenants := &stubTenantRepository{err: errForeignKey{}}
+	req := httptest.NewRequest(http.MethodGet, "/v1/tenants/reachable", nil)
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants}.reachableTenants(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)

@@ -51,6 +51,9 @@ function renderShell(config: TenantConfigView): void {
           brand="Acme"
           token="dev-token"
           config={config}
+          oidc={undefined}
+          switchMismatch={undefined}
+          onDismissSwitchMismatch={vi.fn()}
           onChanged={vi.fn()}
           onSignOut={vi.fn()}
         />
@@ -129,6 +132,9 @@ describe('AppShell identity chrome', () => {
             brand="Acme"
             token="dev-token"
             config={OPERATIONS_CONFIG}
+            oidc={undefined}
+            switchMismatch={undefined}
+            onDismissSwitchMismatch={vi.fn()}
             onChanged={vi.fn()}
             onSignOut={onSignOut}
           />

@@ -7,12 +7,14 @@ import { useAppDispatch, useAppSelector } from './app/hooks';
 import { describeQueryError } from './app/queryError';
 import { clearAuth } from './app/slices/authSlice';
 import type { OidcConfig } from './auth/auth';
-import { signOut } from './auth/auth';
+import { beginLogin, signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
 import { AcceptInvitePage } from './identity/AcceptInvitePage';
 import { AppShell } from './shell/AppShell';
 import { LandingScreen } from './shell/LandingScreen';
 import { ErrorScreen, LoadingScreen, NotEnrolledScreen } from './shell/PreShellScreens';
+import { beginTenantSwitch, consumeTenantSwitchIntent } from './shell/tenantSwitch';
+import type { TenantSwitchMismatch } from './shell/TenantSwitchMismatchBanner';
 import { applyTheme, initialTheme } from './shell/theme';
 
 type LoadState =
@@ -116,20 +118,45 @@ function usePlatformInfo(): PlatformInfo {
   return info;
 }
 
+// retrySwitchHandler rebuilds the pending-switch intent and relaunches sign-in
+// so "try again" repeats the same requested target rather than losing it —
+// undefined (no retry offered) when there is nothing to retry against, either
+// because there's no live mismatch or no OIDC config to redirect through
+// (the dev-token fallback).
+function retrySwitchHandler(
+  oidc: OidcConfig | undefined,
+  switchMismatch: TenantSwitchMismatch | undefined,
+): (() => void) | undefined {
+  if (oidc === undefined || switchMismatch === undefined) {
+    return undefined;
+  }
+  return () => {
+    beginTenantSwitch({
+      tenantId: switchMismatch.requestedTenantId,
+      name: switchMismatch.requestedName,
+    });
+    void beginLogin(oidc, 'select_account');
+  };
+}
+
 function AppContent({
   platform,
   state,
   oidc,
   oidcFallbackReason,
+  switchMismatch,
   onChanged,
   onSignOut,
+  onDismissSwitchMismatch,
 }: {
   platform: PlatformInfo;
   state: LoadState;
   oidc: OidcConfig | undefined;
   oidcFallbackReason: string | undefined;
+  switchMismatch: TenantSwitchMismatch | undefined;
   onChanged: () => void;
   onSignOut: () => void;
+  onDismissSwitchMismatch: () => void;
 }): React.ReactElement {
   const brand = platform.brand;
   switch (state.status) {
@@ -157,6 +184,10 @@ function AppContent({
           token={state.token}
           config={state.config}
           docsUrl={platform.docsUrl}
+          oidc={oidc}
+          switchMismatch={switchMismatch}
+          onRetrySwitch={retrySwitchHandler(oidc, switchMismatch)}
+          onDismissSwitchMismatch={onDismissSwitchMismatch}
           onChanged={onChanged}
           onSignOut={onSignOut}
         />
@@ -210,11 +241,39 @@ export function App(): React.ReactElement {
     skip: acceptInvite || auth.token === undefined,
   });
 
+  const state = computeLoadState(auth, configQuery);
+
+  // A pending tenant-switch target (shell/tenantSwitch.ts) is consumed exactly
+  // once, the first time the config a fresh sign-in produced is actually
+  // known — a ref (not just the effect's dependency) guards that, since
+  // `state` is a fresh object every render and consuming twice would be a
+  // silent no-op the second time anyway, but only the first matters for
+  // deciding whether this sign-in reached its requested target. Declared
+  // unconditionally (above the accept-invite early return below) because
+  // hooks cannot run conditionally.
+  const switchIntentConsumed = React.useRef(false);
+  const [switchMismatch, setSwitchMismatch] = React.useState<TenantSwitchMismatch | undefined>(
+    undefined,
+  );
+  React.useEffect(() => {
+    if (acceptInvite || state.status !== 'ready' || switchIntentConsumed.current) {
+      return;
+    }
+    switchIntentConsumed.current = true;
+    const intent = consumeTenantSwitchIntent();
+    if (intent !== undefined && intent.tenantId !== state.config.tenant.tenantId) {
+      setSwitchMismatch({
+        requestedTenantId: intent.tenantId,
+        requestedName: intent.name,
+        resolvedName: state.config.tenant.name,
+        resolvedType: state.config.tenant.type,
+      });
+    }
+  }, [acceptInvite, state]);
+
   if (acceptInvite) {
     return <AcceptInvitePage token={acceptInviteToken()} />;
   }
-
-  const state = computeLoadState(auth, configQuery);
 
   // IconTooltip (used by the theme toggle and, once panels adopt it, elsewhere)
   // requires a TooltipProvider ancestor, same as the desktop's App.tsx.
@@ -225,12 +284,16 @@ export function App(): React.ReactElement {
         state={state}
         oidc={auth.oidc}
         oidcFallbackReason={auth.oidcFallbackReason}
+        switchMismatch={switchMismatch}
         onChanged={() => {
           void configQuery.refetch();
         }}
         onSignOut={() => {
           signOut();
           dispatch(clearAuth());
+        }}
+        onDismissSwitchMismatch={() => {
+          setSwitchMismatch(undefined);
         }}
       />
     </TooltipProvider>

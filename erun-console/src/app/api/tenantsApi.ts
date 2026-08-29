@@ -71,7 +71,17 @@ export const tenantsApi = platformApi.injectEndpoints({
       transformResponse: parsePlatformTenantResponse,
       invalidatesTags: ['Tenants'],
     }),
+
+    // getReachableTenants answers "which tenants can I, this caller, reach" —
+    // GET /v1/tenants/reachable, available to any signed-in caller (unlike
+    // listTenants above, which is operations-only). It backs the tenant
+    // switcher: the caller's own identity may map to more than one tenant.
+    getReachableTenants: builder.query<PlatformTenant[], string>({
+      query: (token) => ({ url: '/v1/tenants/reachable', token, label: 'list reachable tenants' }),
+      transformResponse: parsePlatformTenantList,
+    }),
   }),
 });
 
-export const { useListTenantsQuery, useCreateTenantMutation } = tenantsApi;
+export const { useListTenantsQuery, useCreateTenantMutation, useGetReachableTenantsQuery } =
+  tenantsApi;

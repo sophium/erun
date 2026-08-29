@@ -115,6 +115,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/provision` | Return the complete, ordered **plan** to provision a hosted env (quota check → placement → context bootstrap → namespace → env registration → runtime deploy → auth-edge wiring → exposure) for the caller's tenant. Preview-only; no execution, no writes. Body below. | Tenant member (write) |
 | `POST` | `/v1/tenants` | Register a new tenant plus its OIDC issuer mapping. Operations-only. Body below. | Operations only |
 | `GET` | `/v1/tenants` | List every tenant (operations-only caller), or a single-item list containing just the caller's own tenant otherwise. | Tenant member (read) |
+| `GET` | `/v1/tenants/reachable` | List the tenants the caller's own verified identity maps to — the one endpoint that deliberately answers across tenant scope. Response below. | Tenant member (read) |
 | `POST` | `/v1/users` | Enroll a user in the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/users` | List the caller's tenant's users, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 | `GET` | `/v1/roles` | List the caller's tenant's roles with their permissions. | Tenant member (read) |
@@ -740,6 +741,29 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
+
+### `GET /v1/tenants/reachable` {#get-v1tenantsreachable}
+
+Answers a question no other endpoint does: **which tenants does the calling identity map to**, not which tenant the current token resolved to. Resolution is `(iss, org) → exactly one tenant` per token ([Identity model](#tenant-issuers)), but the same external identity can be enrolled in more than one tenant — `user_external_ids` is keyed `(tenant_id, issuer, external_id)`, so `(tenantA, iss, sub)` and `(tenantB, iss, sub)` are both legal rows for the same human. This endpoint is what lets a caller discover the rest of their own reachable tenants so they can re-authenticate into one of them (see the console's tenant switcher below).
+
+**This is the one endpoint that deliberately crosses the tenant-scoping boundary every other read observes.** It keys the lookup on the caller's own verified `(issuer, subject)` from the token — never a caller-supplied identity — and joins across every `tenant_id` in `user_external_ids`, not just the one the request resolved to. It returns tenant identity only (`tenantId`, `name`, `type`): nothing scoped inside any of those tenants, since the caller is authenticated to the one tenant this request resolved to, not to any of the others being reported. No other route in this API is written this way; do not use it as a precedent for a new cross-tenant read without the same deliberate design pass.
+
+```jsonc
+// 200 response — every tenant the caller's own (issuer, subject) maps to,
+// including the one this request already resolved to
+[
+  { "tenantId": "019a7fa5-…", "name": "acme", "type": "COMPANY", "createdAt": "…", "updatedAt": "…" },
+  { "tenantId": "019a8b21-…", "name": "beta", "type": "COMPANY", "createdAt": "…", "updatedAt": "…" }
+]
+```
+
+**Switching is a re-authentication, not a re-scope.** Because tenant resolution is a pure function of the token, the console cannot move the active tenant by changing client-side state — it holds a bearer token with no server-side session, and relabeling which tenant it claims to operate on would leave the API still resolving the original tenant from that token. The console's tenant switcher (visible in the app shell whenever this endpoint reports more than one reachable tenant) instead starts a fresh OIDC sign-in with `prompt=select_account`, so the identity provider offers an account/org picker instead of silently reusing the existing browser session, and remembers which tenant it asked for. If the credential that comes back resolves (via `GET /v1/config`) to a different tenant than requested, the console says so and offers to try again — it never claims a switch succeeded that the API disagrees with.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `500` | The request-scoped security context is missing its verified issuer/subject (an internal wiring error). | Retry with a valid bearer token; if it persists, it is a server bug. |
 
 ### `POST /v1/users` and `GET /v1/users` {#post-v1users-and-get-v1users}
 

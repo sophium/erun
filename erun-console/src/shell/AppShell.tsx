@@ -1,6 +1,7 @@
 import type { TenantConfigView } from 'erun-kit';
 import * as React from 'react';
 
+import type { OidcConfig } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
@@ -14,6 +15,10 @@ import { TenantsPanel } from '../tenants/TenantsPanel';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ConsoleSidebar } from './ConsoleSidebar';
 import { type ConsoleSection, type ConsoleSectionId, sectionsForTenant } from './sections';
+import {
+  type TenantSwitchMismatch,
+  TenantSwitchMismatchBanner,
+} from './TenantSwitchMismatchBanner';
 import { useTheme } from './useTheme';
 
 // SectionContent renders exactly one panel for the active section — the main
@@ -75,6 +80,10 @@ export function AppShell({
   token,
   config,
   docsUrl,
+  oidc,
+  switchMismatch,
+  onRetrySwitch,
+  onDismissSwitchMismatch,
   onChanged,
   onSignOut,
 }: {
@@ -82,6 +91,10 @@ export function AppShell({
   token: string;
   config: TenantConfigView;
   docsUrl?: string;
+  oidc: OidcConfig | undefined;
+  switchMismatch: TenantSwitchMismatch | undefined;
+  onRetrySwitch?: () => void;
+  onDismissSwitchMismatch: () => void;
   onChanged: () => void;
   onSignOut: () => void;
 }): React.ReactElement {
@@ -92,7 +105,15 @@ export function AppShell({
 
   return (
     <div className="flex h-dvh min-h-0 w-full bg-background text-foreground">
-      <ConsoleSidebar brand={brand} sections={sections} active={active} onSelect={setActive} />
+      <ConsoleSidebar
+        brand={brand}
+        token={token}
+        currentTenant={config.tenant}
+        oidc={oidc}
+        sections={sections}
+        active={active}
+        onSelect={setActive}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <ConsoleHeader
           title={sectionLabel(sections, active)}
@@ -101,6 +122,13 @@ export function AppShell({
           onToggleTheme={toggleTheme}
           onSignOut={onSignOut}
         />
+        {switchMismatch !== undefined && (
+          <TenantSwitchMismatchBanner
+            mismatch={switchMismatch}
+            onRetry={onRetrySwitch}
+            onDismiss={onDismissSwitchMismatch}
+          />
+        )}
         <main className="min-h-0 flex-1 overflow-auto px-6 py-6">
           <SectionContent
             active={active}
