@@ -88,9 +88,9 @@ test('the whip control renders a pending state and then every target with its ow
   await expect(body.getByText('pw/beta')).toBeVisible();
   await expect(body.getByText('pw/gamma')).toBeVisible();
   await expect(body.getByText('pw-orch')).toBeVisible();
-  await expect(body.getByText('Pushed')).toBeVisible();
-  await expect(body.getByText('Capped')).toBeVisible();
-  await expect(body.getByText('Skipped')).toBeVisible();
+  await expect(body.getByText('Pushed', { exact: true })).toBeVisible();
+  await expect(body.getByText('Capped', { exact: true })).toBeVisible();
+  await expect(body.getByText('Skipped', { exact: true })).toBeVisible();
   await expect(body.getByText(/stopped nudging after repeated silence/)).toBeVisible();
   await expect(body.getByText(/not alive — no live session to push/)).toBeVisible();
   // A failed push is its own outcome, distinct from a benign skip ():
