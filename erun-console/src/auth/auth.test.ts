@@ -47,6 +47,7 @@ function cleanup(): void {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  restoreLocation();
   sessionStorage.clear();
   setCallbackUrl('');
 }
@@ -86,8 +87,11 @@ let realLocation: Location | undefined;
 function stubLocationAssign(): ReturnType<typeof vi.fn> {
   const assign = vi.fn();
   realLocation = window.location;
+  // beginLogin only ever calls .assign(...) on window.location, so the stub
+  // needs nothing else — copying the rest of the real Location instance would
+  // lose its prototype (its own methods aren't plain data properties).
   Object.defineProperty(window, 'location', {
-    value: { ...realLocation, assign },
+    value: { assign },
     writable: true,
     configurable: true,
   });
