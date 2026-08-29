@@ -25,6 +25,8 @@ func (s *stubEnrolledUserLister) List(context.Context, repository.UserFilter) ([
 }
 
 type stubIdentityAdminClient struct {
+	createdOrgName    string
+	createOrgErr      error
 	users             []zitadel.User
 	listErr           error
 	deactivateErr     error
@@ -62,6 +64,14 @@ func (s *stubIdentityAdminClient) GetOrgSettings(context.Context) (zitadel.OrgSe
 func (s *stubIdentityAdminClient) UpdateOrgSettings(_ context.Context, params zitadel.UpdateOrgSettingsParams) (zitadel.OrgSettings, error) {
 	s.gotUpdateParams = params
 	return s.settings, s.updateSettingsErr
+}
+
+func (s *stubIdentityAdminClient) CreateOrg(_ context.Context, name string) (zitadel.Org, error) {
+	s.createdOrgName = name
+	if s.createOrgErr != nil {
+		return zitadel.Org{}, s.createOrgErr
+	}
+	return zitadel.Org{ID: "org-1", Name: name}, nil
 }
 
 func (s *stubIdentityAdminClient) GetSMTPStatus(context.Context) (zitadel.SMTPStatus, error) {
@@ -380,5 +390,60 @@ func TestUpdateSMTPSettingsPassesDeclaredFields(t *testing.T) {
 	}
 	if admin.gotSMTPParams.Host != "smtp.example.com:587" || admin.gotSMTPParams.Password != "s3cret" || !admin.gotSMTPParams.TLS {
 		t.Fatalf("gotSMTPParams = %+v, want the declared fields passed through", admin.gotSMTPParams)
+	}
+}
+
+// An org is the per-tenant identity boundary an org-scoped issuer resolves
+// by, so being unable to create one left tenant onboarding dependent on a
+// hand-made org in Zitadel's own console (issue #1605).
+func TestIdentityRoutesCreateOrg(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	routes := IdentityRoutes{admin: admin}
+	rec := httptest.NewRecorder()
+
+	routes.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"validationagent"}`, string(model.TenantTypeOperations)))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if admin.createdOrgName != "validationagent" {
+		t.Fatalf("created org name = %q", admin.createdOrgName)
+	}
+	var org zitadel.Org
+	if err := json.NewDecoder(rec.Body).Decode(&org); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if org.ID == "" {
+		t.Fatal("the response must carry the org id: it is what an org-scoped mapping points at")
+	}
+}
+
+func TestIdentityRoutesCreateOrgRequiresName(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	rec := httptest.NewRecorder()
+
+	IdentityRoutes{admin: admin}.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"   "}`, string(model.TenantTypeOperations)))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if admin.createdOrgName != "" {
+		t.Fatal("a blank name must not reach the IdP")
+	}
+}
+
+// Administering the platform's own IdP is not a company tenant's business,
+// and creating orgs least of all.
+func TestIdentityRoutesCreateOrgRequiresOperationsTenant(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	rec := httptest.NewRecorder()
+
+	IdentityRoutes{admin: admin}.createOrg(rec, identityRequest(http.MethodPost, "/v1/identity/orgs", `{"name":"acme"}`, string(model.TenantTypeCompany)))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if admin.createdOrgName != "" {
+		t.Fatal("a company tenant must not reach the IdP")
 	}
 }

@@ -20,6 +20,30 @@ Every operation is a named endpoint below, mapped to one specific Zitadel Manage
 
 Zitadel's built-in `ORG_USER_MANAGER` role would scope user create/list/deactivate/reactivate more narrowly than org-owner. Org policy management (login policy, password complexity) has no built-in role short of org-owner, though. Minting a second, narrower machine-user credential for only the user-CRUD half was considered and rejected for this increment: it would shrink the blast radius for half the surface while adding a second bootstrap-managed credential to operate, and the compensating control — an enumerated, non-proxying endpoint surface (previous section) — already applies uniformly. The single org-owner credential is used for the whole surface; this is a recorded decision, not a default.
 
+## `POST /v1/identity/orgs`
+
+Creates a Zitadel **organization** — the per-tenant identity boundary an org-scoped issuer resolves tenants by.
+
+```jsonc
+// POST /v1/identity/orgs body
+{ "name": "validationagent" }
+
+// 201 response
+{ "id": "386994597030592700", "name": "validationagent" }
+```
+
+Why it exists: a platform's own IdP serves every tenant from one issuer, so tenants are told apart by an org claim (`urn:zitadel:iam:user:resourceowner:id`). Registering a second tenant therefore needs an org for its mapping to point at — and until this endpoint, erun could create the tenant and the issuer mapping and then had nowhere to point them, leaving a hand-made org in Zitadel's own console as the only way through. That is the third of the three gaps in the multi-tenant onboarding path; see [erun API protocol · first-identity bootstrap](/agent-reference/api-protocol#tenant-issuers) and [`PATCH /v1/tenant-issuers`](/agent-reference/api-protocol#patch-v1tenant-issuers).
+
+The returned `id` is what you pass as `orgFieldValue` to [`POST /v1/tenants`](/agent-reference/api-protocol#post-v1tenants), or to `PATCH /v1/tenant-issuers` when converting a single-tenant issuer first.
+
+It creates the org and stops there. It does **not** register an erun tenant, move the caller into the new org, or enrol anyone: those are separate resources with separate gates, and the new org's first erun caller becomes that tenant's admin through the per-tenant first-user bootstrap. The org-owner credential this surface uses stays scoped to the platform's own org.
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `201` | Org created. | — |
+| `400` | `name` is empty or blank. | Send a name. |
+| `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
+
 ## `GET /v1/identity/users`
 
 Lists every identity (human and machine) the platform's IdP knows about, cross-referenced against erun's own `users` table for the caller's tenant so the response distinguishes an enrolled tenant member from an identity that merely exists in the IdP — the fix for a self-registered account (when `allowRegister` was left open, or an account created before it was closed) rendering identically to an actual member.
