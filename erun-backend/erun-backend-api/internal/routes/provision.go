@@ -213,8 +213,13 @@ func (in provisionPlanInput) quotaOk() bool {
 	if in.count >= in.quota.MaxEnvironments {
 		return false
 	}
-	if in.envType == model.EnvironmentTypeRuntime && validateAggregateResourceBudget(in.runtimeCount+1, in.quota) != nil {
-		return false
+	if in.envType == model.EnvironmentTypeRuntime {
+		if validateNamespaceQuotaFloor(in.quota) != nil {
+			return false
+		}
+		if validateAggregateResourceBudget(in.runtimeCount+1, in.quota) != nil {
+			return false
+		}
 	}
 	return true
 }
@@ -239,7 +244,13 @@ func provisionPlan(in provisionPlanInput) []string {
 	}
 	plan = append(plan, quotaLine)
 	if in.envType == model.EnvironmentTypeRuntime {
-		plan = append(plan, fmt.Sprintf("quota: namespace capped at %dm CPU / %dMi memory / %dGi storage", in.quota.MaxCPUMillicores, in.quota.MaxMemoryMB, in.quota.MaxStorageGB))
+		floorLine := fmt.Sprintf("quota: namespace capped at %dm CPU / %dMi memory / %dGi storage", in.quota.MaxCPUMillicores, in.quota.MaxMemoryMB, in.quota.MaxStorageGB)
+		if err := validateNamespaceQuotaFloor(in.quota); err != nil {
+			floorLine += fmt.Sprintf(" — BELOW RUNTIME MINIMUM, provisioning blocked: %s", err.Error())
+		} else {
+			floorLine += " — meets the runtime environment's minimum"
+		}
+		plan = append(plan, floorLine)
 		projected := in.runtimeCount + 1
 		budgetLine := fmt.Sprintf("quota: %d runtime environment(s) at that cap project to %dm CPU / %dMi memory / %dGi storage against a tenant budget of %dm / %dMi / %dGi",
 			projected, projected*in.quota.MaxCPUMillicores, projected*in.quota.MaxMemoryMB, projected*in.quota.MaxStorageGB,
