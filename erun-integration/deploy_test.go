@@ -2995,6 +2995,57 @@ esac
 		golden.Equal(t, "deploy/devops_k8s_deploy_component_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("devops_k8s_deploy_component_in_pod_local_agent_runtime_refused", func(t *testing.T) {
+		// Regression #1673: ResolveDeploySpec (the component-named path behind
+		// `devops k8s deploy` and the MCP deploy tool's component branch) already
+		// applied the runtime chart's other guards — the chart override and the
+		// MCP-auth downgrade refusal — but not this one, so naming the runtime
+		// release as a component reached exactly the in-pod local-agent redeploy
+		// this guard exists to refuse. team-devops is RuntimeReleaseName("team").
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "team-devops", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod local-agent component-named runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_local_agent_runtime_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("devops_k8s_deploy_component_in_pod_local_agent_non_runtime_allowed", func(t *testing.T) {
+		// The guard must stay scoped to the runtime chart alone: naming a
+		// non-runtime component from inside the pod carries no environment shape,
+		// so it must keep working even in-pod on a local-agent env.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "erun-backend-api", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_local_agent_non_runtime_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", func(t *testing.T) {
+		// The guard is scoped to local-agent envs: a remote-agent env owns its
+		// worktree inside the pod, so naming its runtime chart as the component
+		// from inside the pod stays supported — mirrors
+		// in_pod_remote_agent_runtime_deploy_allowed for the component-named path.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		repoPath := filepath.Join(setup.Home, "git", "team")
+		fixture.SeedDevopsRepoAt(t, repoPath, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "team-devops", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_parallel_step_deploys_charts_concurrently", func(t *testing.T) {
 		// Exercises runDeployStep's real-run parallel branch (the goroutine
 		// fan-out + errors.Join), which dry-run never takes because dry-run

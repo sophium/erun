@@ -1091,14 +1091,11 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 		}
 		spec.Deploy.NamespaceQuota = target.NamespaceQuotaOverride
 	}
-	applyRuntimeChartOverride(ctx, target, &spec)
-	if err := applyMCPAuthToRuntimeSpec(ctx, target, &spec); err != nil {
+	specs := []DeploySpec{spec}
+	if err := finalizeRuntimeChartSpecs(ctx, target, resolvedTarget, specs); err != nil {
 		return DeploySpec{}, err
 	}
-	if err := guardMCPAuthDowngrade(ctx, target, spec.Deploy); err != nil {
-		return DeploySpec{}, err
-	}
-	return spec, nil
+	return specs[0], nil
 }
 
 // ResolveCurrentDeploySpecs resolves specs for `erun deploy` — the pure deploy
@@ -1173,23 +1170,32 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	if err != nil {
 		return nil, err
 	}
-	if err := guardInPodLocalAgentRuntimeDeploy(os.Getenv, resolvedTarget, specs); err != nil {
+	if err := finalizeRuntimeChartSpecs(ctx, target, resolvedTarget, specs); err != nil {
 		return nil, err
 	}
-	// Applied here rather than in the exported entrypoints so every deploy of the
-	// runtime chart — `erun deploy`, `erun upgrade`, `open --deploy`,
-	// `build --deploy` — carries the env's MCP-auth state. A path that skips this
-	// silently downgrades the edge to unauthenticated.
+	return specs, nil
+}
+
+// finalizeRuntimeChartSpecs applies every guard and override that only fires
+// when a resolved spec targets the runtime chart — the operator's chart
+// override, the env's MCP-auth state, the MCP-auth downgrade refusal, and the
+// in-pod local-agent redeploy refusal — in place, over whatever specs a path
+// resolved. It is the single seam both `ResolveDeploySpec` (the
+// component-named path) and `resolveCurrentDeploySpecs` (the current-deploy
+// set) funnel through after resolving specs and before returning them, so a
+// future path that resolves a spec able to name the runtime chart inherits
+// these guards for free instead of needing to remember them.
+func finalizeRuntimeChartSpecs(ctx Context, target DeployTarget, resolvedTarget OpenResult, specs []DeploySpec) error {
 	for i := range specs {
 		applyRuntimeChartOverride(ctx, target, &specs[i])
 		if err := applyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
-			return nil, err
+			return err
 		}
 		if err := guardMCPAuthDowngrade(ctx, target, specs[i].Deploy); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return specs, nil
+	return guardInPodLocalAgentRuntimeDeploy(os.Getenv, resolvedTarget, specs)
 }
 
 func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
