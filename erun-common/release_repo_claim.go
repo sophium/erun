@@ -59,17 +59,35 @@ type releaseRepoClaimRecord struct {
 // ReleaseRepoClaimConflictError names the still-live holder of the
 // repository-global claim, in the same wording the local lease's refusal
 // uses, so a second orchestrator sees one consistent message regardless of
-// which of the two claims refused it.
+// which of the two claims refused it. Now is carried alongside StartedAt
+// (rather than computing a duration with time.Now() inside Error) so the
+// message is a pure function of the refusal's own fields and stays testable
+// against a fixed clock.
 type ReleaseRepoClaimConflictError struct {
 	Version     string
 	Holder      EnvironmentActivityLeaseHolder
 	Environment string
+	StartedAt   time.Time
 	ExpiresAt   time.Time
+	Now         time.Time
 }
 
 func (e *ReleaseRepoClaimConflictError) Error() string {
-	return fmt.Sprintf("%s is already being released by %s — wait for it to finish; a holder that crashes or whose pod is replaced is reclaimed automatically on the next attempt",
-		strings.TrimSpace(e.Version), releaseClaimHolderDescription(e.Holder, e.Environment))
+	return fmt.Sprintf("%s is already being released by %s (running for %s) — wait for it to finish; a holder that crashes or whose pod is replaced is reclaimed automatically on the next attempt",
+		strings.TrimSpace(e.Version), releaseClaimHolderDescription(e.Holder, e.Environment), releaseClaimRunningFor(e.StartedAt, e.Now))
+}
+
+// releaseClaimRunningFor reports how long the holder has been running,
+// rounded to the second for a stable, readable duration. StartedAt can be
+// zero for a claim record predating this field, or a previous format that
+// only ever carried ExpiresAt; a zero value is reported as "an unknown
+// duration" rather than the enormous, misleading span time.Since(zero) would
+// compute.
+func releaseClaimRunningFor(startedAt, now time.Time) string {
+	if startedAt.IsZero() {
+		return "an unknown duration"
+	}
+	return now.Sub(startedAt).Round(time.Second).String()
 }
 
 // releaseClaimHolderDescription renders a holder together with the
@@ -116,7 +134,9 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string,
 		}
 
 		if !exists {
-			newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
+			// A fresh claim: nobody held this version before, so now is a
+			// genuine StartedAt.
+			newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now, now)
 			if err != nil {
 				return "", err
 			}
@@ -131,10 +151,12 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string,
 			return "", fmt.Errorf("release: %s exists on %s but its content could not be read: %w", ref, releaseRepoClaimRemote, err)
 		}
 		if releaseRepoClaimHeld(record, now) {
-			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, Environment: record.Environment, ExpiresAt: record.ExpiresAt}
+			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, Environment: record.Environment, StartedAt: record.StartedAt, ExpiresAt: record.ExpiresAt, Now: now}
 		}
 
-		newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
+		// A reclaim of an expired holder: this is a new holder, so it gets
+		// its own StartedAt rather than inheriting the dead holder's.
+		newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now, now)
 		if err != nil {
 			return "", err
 		}
@@ -151,8 +173,20 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string,
 // it (its own renewal having lapsed past the TTL) is never silently
 // overwritten. A failure here is best-effort, matching the local lease's
 // renewal: the caller keeps its last-known sha and tries again next tick.
+//
+// A renewal is the same holder extending the same claim, so it must carry
+// the original StartedAt forward rather than resetting it to now: currentSHA
+// names the blob this process itself wrote (originally or on a prior
+// renewal), and that object already exists locally — reading it is a plain
+// local git object lookup, not a network call, and it happens before the
+// push below, so it neither reads nor writes the ref and cannot weaken the
+// force-with-lease compare-and-swap that follows.
 func renewReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
-	newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now)
+	existing, err := readReleaseRepoClaimBlob(ctx, projectRoot, currentSHA)
+	if err != nil {
+		return "", err
+	}
+	newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, existing.StartedAt, now)
 	if err != nil {
 		return "", err
 	}
@@ -179,11 +213,11 @@ func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time) bool {
 	return !record.ExpiresAt.IsZero() && now.Before(record.ExpiresAt)
 }
 
-func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, now time.Time) (string, error) {
+func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
 	record := releaseRepoClaimRecord{
 		Holder:      holder,
 		Environment: environment,
-		StartedAt:   now,
+		StartedAt:   startedAt,
 		ExpiresAt:   now.Add(releaseVersionClaimTTL),
 	}
 	data, err := json.Marshal(record)
@@ -198,6 +232,24 @@ func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, hol
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// readReleaseRepoClaimBlob reads a claim record blob this process itself
+// wrote earlier via writeReleaseRepoClaimBlob, by its git object sha. The
+// object is already present in the local object database — no fetch, no ref
+// read — which is what lets the renewal path recover the original StartedAt
+// without touching the CAS in takeReleaseRepoClaim/renewReleaseRepoClaim.
+func readReleaseRepoClaimBlob(ctx Context, projectRoot, sha string) (releaseRepoClaimRecord, error) {
+	ctx.TraceCommand(projectRoot, "git", "cat-file", "-p", sha)
+	output, err := Command("git", "-C", projectRoot, "cat-file", "-p", sha).Output()
+	if err != nil {
+		return releaseRepoClaimRecord{}, err
+	}
+	var record releaseRepoClaimRecord
+	if err := json.Unmarshal(output, &record); err != nil {
+		return releaseRepoClaimRecord{}, err
+	}
+	return record, nil
 }
 
 // gitLsRemoteRef reads a single ref's current sha directly from the remote,
