@@ -112,17 +112,8 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		RoleIDs:  body.RoleIDs,
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrUsernameConflict):
-			writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", "a user with this username already exists in the target tenant")
-			return
-		case errors.Is(err, repository.ErrNotFound):
-			writeError(w, http.StatusNotFound, "one or more requested roles do not exist in this tenant")
-			return
-		default:
-			writeRepositoryError(w, req, err)
-			return
-		}
+		writeCreateUserError(w, req, err)
+		return
 	}
 	// Re-enrolling an identity already enrolled in the target tenant is a
 	// no-op success (200, the existing user), not a 201 — see
@@ -133,6 +124,20 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, enrollUserResponse{User: created, AlreadyEnrolled: alreadyEnrolled})
+}
+
+// writeCreateUserError maps Create's discriminated conflicts to their
+// documented codes/messages instead of letting the route fall through to the
+// generic conflict response for a cause it actually knows.
+func writeCreateUserError(w http.ResponseWriter, req *http.Request, err error) {
+	switch {
+	case errors.Is(err, repository.ErrUsernameConflict):
+		writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", "a user with this username already exists in the target tenant")
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, "one or more requested roles do not exist in this tenant")
+	default:
+		writeRepositoryError(w, req, err)
+	}
 }
 
 func (r UserRoutes) listUsers(w http.ResponseWriter, req *http.Request) {

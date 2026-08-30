@@ -72,23 +72,38 @@ func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (m
 	issuer := strings.TrimSpace(params.Issuer)
 	subject := strings.TrimSpace(params.Subject)
 	tenantID := strings.TrimSpace(params.TenantID)
-	roleIDs := make([]string, 0, len(params.RoleIDs))
-	for _, roleID := range params.RoleIDs {
-		if roleID = strings.TrimSpace(roleID); roleID != "" {
-			roleIDs = append(roleIDs, roleID)
-		}
-	}
+	roleIDs := trimmedRoleIDs(params.RoleIDs)
 
 	if issuer != "" && subject != "" {
-		existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject)
-		if err != nil {
-			return model.User{}, false, err
-		}
-		if found {
-			return existing, true, nil
+		if existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject); err != nil || found {
+			return existing, found, err
 		}
 	}
 
+	user, err := r.insertUserAndRoles(ctx, tenantID, username, issuer, subject, roleIDs)
+	if err == nil {
+		return user, false, nil
+	}
+	if errors.Is(err, errIdentityAlreadyEnrolledRace) {
+		return r.resolveIdentityRaceWinner(ctx, tenantID, issuer, subject)
+	}
+	return model.User{}, false, err
+}
+
+// trimmedRoleIDs drops blank entries from a caller-supplied roleIds list.
+func trimmedRoleIDs(roleIDs []string) []string {
+	trimmed := make([]string, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		if roleID = strings.TrimSpace(roleID); roleID != "" {
+			trimmed = append(trimmed, roleID)
+		}
+	}
+	return trimmed
+}
+
+// insertUserAndRoles is Create's actual insert path, run once
+// findUserByExternalID's up-front check has ruled out a no-op re-enrollment.
+func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string, username string, issuer string, subject string, roleIDs []string) (model.User, error) {
 	var user model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		isFirstUser, err := tenantHasNoUsers(ctx, tx, tenantID)
@@ -106,16 +121,20 @@ func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (m
 		}
 		return assignEnrollmentRoles(ctx, tx, tenantID, user.UserID, roleIDs, isFirstUser)
 	})
-	if err != nil {
-		if errors.Is(err, errIdentityAlreadyEnrolledRace) {
-			if existing, found, findErr := r.findUserByExternalID(ctx, tenantID, issuer, subject); findErr == nil && found {
-				return existing, true, nil
-			}
-			return model.User{}, false, ErrUnrecognizedConflict
-		}
-		return model.User{}, false, err
+	return user, err
+}
+
+// resolveIdentityRaceWinner re-resolves the winner of errIdentityAlreadyEnrolledRace
+// the same way Create's up-front check would have, so the caller sees the same
+// no-op success either way. The lookup failing to find anything should not
+// happen (the unique violation that got here proves a winner exists), so it
+// falls back to reporting a genuinely unrecognized conflict rather than
+// guessing.
+func (r *UserRepository) resolveIdentityRaceWinner(ctx context.Context, tenantID string, issuer string, subject string) (model.User, bool, error) {
+	if existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject); err == nil && found {
+		return existing, true, nil
 	}
-	return user, false, nil
+	return model.User{}, false, ErrUnrecognizedConflict
 }
 
 // findUserByExternalID looks up the user already holding tenantID's
