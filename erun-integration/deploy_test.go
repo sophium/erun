@@ -2996,7 +2996,7 @@ esac
 	})
 
 	t.Run("devops_k8s_deploy_component_in_pod_local_agent_runtime_refused", func(t *testing.T) {
-		// Regression #1673: ResolveDeploySpec (the component-named path behind
+		// Regression: ResolveDeploySpec (the component-named path behind
 		// `devops k8s deploy` and the MCP deploy tool's component branch) already
 		// applied the runtime chart's other guards — the chart override and the
 		// MCP-auth downgrade refusal — but not this one, so naming the runtime
