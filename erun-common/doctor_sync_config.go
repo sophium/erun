@@ -134,14 +134,18 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	if region == "" {
 		return providers, nil
 	}
-	contexts := []CloudContextConfig{{
+	// Route through NormalizeCloudContextConfig so an unset ERUN_CLOUD_CONTEXT_NAME
+	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
+	// the entrypoint's shell twin) already defaults it — otherwise the injected ""
+	// never matches the on-disk default and drift never clears.
+	contexts := []CloudContextConfig{NormalizeCloudContextConfig(CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,
 		Region:             region,
 		InstanceID:         instanceID,
 		KubernetesContext:  kubernetesContext,
-	}}
+	})}
 	return providers, contexts
 }
 
