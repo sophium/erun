@@ -798,6 +798,31 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	return dir
 }
 
+// SeedTerraformModuleImageReference adds a third release image
+// (erun-devops/docker/<imageName>) and a Terraform module under
+// erun-devops/terraform-erun that references it the way
+// terraform-erun-cluster-edge's real dns01_webhook_image references
+// ghcr.io/sophium/erun-dns01-webhook: through an interpolated version, not a
+// literal one. Release scenarios use this to exercise the
+// anonymous-pullability check's module-reference discovery.
+func SeedTerraformModuleImageReference(t testing.TB, dir, imageName string) {
+	t.Helper()
+	dockerDir := filepath.Join(dir, "erun-devops", "docker", imageName)
+	if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dockerDir, err)
+	}
+	mustWrite(t, filepath.Join(dockerDir, "Dockerfile"), "FROM alpine:3.22\n")
+
+	moduleDir := filepath.Join(dir, "erun-devops", "terraform-erun", "modules", "terraform-erun-fixture")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", moduleDir, err)
+	}
+	mustWrite(t, filepath.Join(moduleDir, "main.tf"), `locals {
+  fixture_image = local.arg_fixture_image != "" ? local.arg_fixture_image : "ghcr.io/sophium/`+imageName+`:${local.fixture_chart_app_version}"
+}
+`)
+}
+
 // SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json so
 // release scenarios can exercise the marketplace.json source.sha bump path.
 func SeedMarketplaceJSON(t testing.TB, dir string) {
