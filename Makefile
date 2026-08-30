@@ -52,13 +52,18 @@ LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun
 # single module's own analysis has serial phases that leave cores idle: p1
 # (serial) 13.5s, p2 10.3s, p3 9.3s, p4 9.6s, p6 (all modules at once) 8.7s
 # wall, peak memory climbing from 2.5GiB at p1 to 4.1GiB at p6 (see erun#1690).
-# Scaled off `nproc` rather than a flat constant so a small pod runs fewer
-# concurrent golangci-lint processes -- each wants the full core count, and a
-# flat width sized for a 12-core pod would oversubscribe a 4-core one far
-# harder and multiply its peak memory for no wall-clock benefit it has the
-# cores to use anyway. Capped at the module count: more workers than modules
-# cannot help.
-LINT_PARALLELISM ?= $(shell n=$$(nproc 2>/dev/null || echo 4); m=$(words $(LINT_MODULES)); if [ "$$n" -lt "$$m" ]; then echo "$$n"; else echo "$$m"; fi)
+# Sized by scripts/parallel-gate.sh's `width` mode off the environment's real
+# CPU quota (cgroup cpu.max, not the `nproc` affinity mask -- see #1702) and a
+# per-job memory cost, not `nproc` alone: a flat width sized for a 12-core pod
+# would oversubscribe a smaller one, and #1702 found this recipe was the one
+# gate width in the repo not accounting for the memory it demonstrably scales
+# with. Capped at the module count: more workers than modules cannot help.
+# LINT_JOB_MEMORY_MIB is the measured p6 peak (4.1GiB) averaged across its 6
+# concurrent processes (~700MiB/job) -- conservative, since golangci-lint's
+# own fixed overhead (most of the 2.5GiB seen at p1) doesn't actually scale
+# per added job, but there is no measured marginal-cost figure to use instead.
+LINT_JOB_MEMORY_MIB := 700
+LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB))
 
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
@@ -156,11 +161,17 @@ test-frontend:
 # template` render (no cluster, no docker), so unlike lint this scales cleanly
 # with width and memory stays flat: measured on a 12-core pod at p1 2.7s, p2
 # 2.4s, p4 1.9s, p8 (every current script at once) 1.1s wall, ~1.25-1.3GiB
-# peak memory across all widths (see erun#1690). Scaled off `nproc` like
-# LINT_PARALLELISM anyway, capped at the actual script count, so a small pod
-# doesn't launch more `helm template` processes than it has cores for and a
-# growing k8s/ directory can't launch unboundedly many at once.
-HELM_CHART_TEST_PARALLELISM ?= $(shell n=$$(nproc 2>/dev/null || echo 4); m=$(words $(wildcard erun-devops/k8s/*_test.sh)); if [ "$$n" -lt "$$m" ]; then echo "$$n"; else echo "$$m"; fi)
+# peak memory across all widths (see erun#1690) -- i.e. no per-job slope to
+# derive a cost from, unlike LINT_JOB_MEMORY_MIB above. Sized by
+# scripts/parallel-gate.sh's `width` mode off the real CPU quota like
+# LINT_PARALLELISM (see its comment for why that isn't `nproc`), capped at the
+# actual script count so a growing k8s/ directory can't launch unboundedly
+# many at once. HELM_CHART_TEST_JOB_MEMORY_MIB is the flat measured total
+# (~1.3GiB) divided across the current script count -- deliberately not a
+# fabricated per-job slope, since none was observed; the memory term is
+# expected to stay non-binding here and CPU/script-count to decide the width.
+HELM_CHART_TEST_JOB_MEMORY_MIB := 163
+HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB))
 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
