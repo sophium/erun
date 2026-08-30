@@ -57,12 +57,11 @@ function useOrchestratorConversations(orchestratorId: string): {
 }
 
 // OrchestratorConversationsSection is how a wrong resume is corrected without
-// leaving the app. An orchestrator normally resumes the conversation its own
-// session was last live on, and when that cannot be confirmed it falls back to
-// the one its name resolves to — which is the case where the work sits in a
-// conversation nothing is attached to. This lists every conversation the
-// orchestrator could be pointed at, says which one it is on and why, and
-// attaches another.
+// leaving the app. An orchestrator resumes the conversation derived from its
+// id every launch, unless the operator explicitly attached something else — a
+// session that moved on (a `/clear`, a compaction) is never adopted on its own
+// say-so. This lists every conversation the orchestrator could be pointed at
+// instead, says which one it is on and why, and attaches another.
 //
 // Conversations belonging to other orchestrators are not offered: handing one
 // orchestrator another's history is the failure this whole area exists to

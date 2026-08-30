@@ -100,6 +100,102 @@ test.describe('choosing which conversation an orchestrator resumes', () => {
     await app.page.keyboard.press('Escape');
   });
 
+  // erun#1696: a launch never adopts a diverged conversation on its own any
+  // more, so the only way back to it is this surface. What the headless
+  // harness cannot produce is a REAL confirmed "Live" row -- that needs a
+  // session that ran and reported itself through its hooks, which this
+  // harness deliberately has no real Claude to run (see the file comment
+  // above). The backend answer is stubbed so this spec can prove the row a
+  // real one would render: distinct from "nothing diverged", never marked as
+  // what the launch resumes, and reachable with one click. The Go side proves
+  // the record itself is written and confirmed correctly
+  // (erun-ui/orchestrator_live_conversation_test.go's
+  // TestTheLiveConversationRecorderWritesWhatTheListingReadsConfirmed) and
+  // that a launch never adopts it (erun-ui/orchestrator_conversations_test.go).
+  test('a conversation the session diverged onto is listed distinctly from the anchor, and attachable', async ({
+    app,
+    page,
+  }) => {
+    const derived = '11111111-2222-4333-8444-555555555555';
+    const diverged = '22222222-3333-4444-8555-666666666666';
+    const attached: unknown[] = [];
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: unknown[] };
+      if (body.method === 'ListOrchestratorConversations') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              orchestratorId: SEED_ORCHESTRATOR,
+              resuming: derived,
+              resumingSource: 'derived',
+              conversations: [
+                {
+                  conversationId: diverged,
+                  folder: '/Users/pw/orchestrators',
+                  lastWrittenUnix: Math.floor(Date.now() / 1000),
+                  sizeBytes: 4096,
+                  excerpt: 'picking up after a /clear',
+                  role: 'live',
+                  resuming: false,
+                },
+                {
+                  conversationId: derived,
+                  folder: '',
+                  lastWrittenUnix: 0,
+                  sizeBytes: 0,
+                  role: 'derived',
+                  resuming: true,
+                },
+              ],
+              transcriptsRoot: '/tmp/does-not-matter',
+            },
+          }),
+        });
+      }
+      if (body.method === 'AttachOrchestratorConversation') {
+        attached.push(body.args);
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              id: SEED_ORCHESTRATOR,
+              name: SEED_ORCHESTRATOR,
+              environments: [],
+              tenants: [],
+              directories: [],
+              sessionId: 8888,
+              status: 'running',
+              transient: false,
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
+    await app.orchestratorDialog.waitForOpen('Edit orchestrator');
+
+    // The anchor is what a launch resumes now...
+    const anchorRow = app.orchestratorDialog.conversationRow(derived);
+    await expect(anchorRow).toContainText('Resumes now');
+    await expect(anchorRow).toContainText('Default');
+
+    // ...and the diverged conversation is still right there, labelled as real
+    // confirmed work rather than folded into "nothing diverged" or hidden
+    // behind the anchor that now resumes instead of it.
+    const divergedRow = app.orchestratorDialog.conversationRow(diverged);
+    await expect(divergedRow).toBeVisible();
+    await expect(divergedRow).toContainText('Live');
+    await expect(divergedRow).not.toContainText('Resumes now');
+    await expect(divergedRow).toContainText('picking up after a /clear');
+
+    await app.orchestratorDialog.conversationAttachButton(diverged).click();
+    await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+    expect(attached).toEqual([[SEED_ORCHESTRATOR, diverged, 80, 24]]);
+  });
+
   test('attaching a conversation restarts the orchestrator on it and closes the dialog', async ({
     app,
     page,

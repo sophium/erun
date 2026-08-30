@@ -1702,18 +1702,18 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 // conversationToLaunch answers which conversation a spawn attaches to. A named
 // one (a restart hand-off, an operator attaching one deliberately) is taken as
 // given: it names the conversation that asked for this launch. Otherwise the
-// launch resolves what this orchestrator is on -- attached, tracked, or the
-// derived anchor -- and reports anything surprising about that answer, since a
-// resume that lands somewhere unexpected in silence is the whole defect.
+// launch resolves what this orchestrator is on -- attached, or the derived
+// anchor -- and reports anything surprising about that answer: today, only an
+// attachment that could not be honoured, since a resume that lands somewhere
+// unexpected in silence is the whole defect.
 func (a *App) conversationToLaunch(id, named string) string {
 	if conversationID := strings.TrimSpace(named); conversationID != "" {
 		return conversationID
 	}
 	choice := a.resolveOrchestratorConversation(orchestratorEntryOrEmpty(
 		readOpenOrchestrators(a.deps.orchestratorOpenPath), id))
-	a.markConversationChoiceReported(id, choice)
 	if choice.Notice != "" {
-		a.emitAppNotification(orchestratorConversationNoticeKind(choice.Source), choice.Notice)
+		a.emitAppNotification("warning", choice.Notice)
 	}
 	return choice.ConversationID
 }

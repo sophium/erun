@@ -446,10 +446,12 @@ func assertAllNoticesAreWarnings(t *testing.T, notices []orchestratorNotice) {
 }
 
 // The heart of the bug this fixes: several orchestrators resolving on the same
-// restore must each carry their own kind. A genuine warning sitting among
-// routine successes must stay distinguishable from them rather than being
-// flattened into one string that reads uniformly as either.
-func TestMixedRestoreCarriesDistinctKindsPerOrchestrator(t *testing.T) {
+// restore must each carry their own notice, attributed to the right one rather
+// than flattened into one string. Both causes here are warnings -- a launch
+// resumes the derived anchor with nothing to report unless something the
+// operator asked for could not be honoured (erun#1696), so a mixed restore's
+// two notices are two warnings, not a routine one beside a genuine one.
+func TestMixedRestoreAttributesEachWarningToItsOwnOrchestrator(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
@@ -460,48 +462,34 @@ func TestMixedRestoreCarriesDistinctKindsPerOrchestrator(t *testing.T) {
 	}
 
 	current := createAndStartNamedOrchestrator(t, app, "other", "laptop")
-	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	const gone = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
 	stageOrchestratorConversation(t, orchestratorSessionID(current))
-	stageOrchestratorConversation(t, live)
-	writeLiveConversationRecord(t, current, orchestratorLiveConversation{
-		ConversationID: live,
-		LaunchID:       recordedLaunchID(t, openPath, current),
-	})
+	if err := setAttachedOrchestratorConversation(openPath, current, gone); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
 
 	target := app.ResolveOrchestratorToReopen()
 	if target.OrchestratorID != current {
 		t.Fatalf("expected %q (started last) to own the pane, got %q", current, target.OrchestratorID)
 	}
-	assertExactlyOneInfoAndOneWarning(t, target.Notices, current, stale)
+	assertTwoWarningsEachAttributed(t, target.Notices, current, stale)
 }
 
-// assertExactlyOneInfoAndOneWarning fails unless notices carries exactly one
-// info notice (belonging to wantInfoID) and one warning notice (belonging to
-// wantWarningID) — the shape a mixed restore must produce, with each kind kept
-// distinct and attributed to the right orchestrator rather than merged.
-func assertExactlyOneInfoAndOneWarning(t *testing.T, notices []orchestratorNotice, wantInfoID, wantWarningID string) {
+// assertTwoWarningsEachAttributed fails unless notices carries exactly two
+// warning notices, one attributed to each of the given orchestrators, kept
+// distinct rather than merged into one.
+func assertTwoWarningsEachAttributed(t *testing.T, notices []orchestratorNotice, first, second string) {
 	t.Helper()
-	var infoCount, warningCount int
+	seen := map[string]bool{}
 	for _, notice := range notices {
-		if notice.Kind == orchestratorNoticeInfo {
-			infoCount++
-			if notice.OrchestratorID != wantInfoID {
-				t.Fatalf("expected the info notice to belong to %q, got %+v", wantInfoID, notice)
-			}
-			continue
+		if notice.Kind != orchestratorNoticeWarning {
+			t.Fatalf("expected every notice here to be a warning, got %+v", notice)
 		}
-		if notice.Kind == orchestratorNoticeWarning {
-			warningCount++
-			if notice.OrchestratorID != wantWarningID {
-				t.Fatalf("expected the warning notice to belong to %q, got %+v", wantWarningID, notice)
-			}
-			continue
-		}
-		t.Fatalf("unexpected notice kind %+v", notice)
+		seen[notice.OrchestratorID] = true
 	}
-	if infoCount != 1 || warningCount != 1 {
-		t.Fatalf("expected exactly one info notice (%s's resumed tracked conversation) and one warning "+
-			"notice (%s's changed scope), got %+v", wantInfoID, wantWarningID, notices)
+	if len(notices) != 2 || !seen[first] || !seen[second] {
+		t.Fatalf("expected one warning for %q (unhonourable attachment) and one for %q (changed scope), got %+v",
+			first, second, notices)
 	}
 }
 

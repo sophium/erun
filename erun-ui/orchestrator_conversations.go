@@ -50,7 +50,10 @@ const (
 	// orchestratorConversationRoleAttached is the one the operator attached.
 	orchestratorConversationRoleAttached = "attached"
 	// orchestratorConversationRoleLive is the one this orchestrator's own session
-	// reported being on, under the launch that recorded it.
+	// reported being on, under the launch that recorded it. A launch never
+	// resumes this automatically (erun#1696) -- it is offered here for the
+	// operator to attach deliberately, most often after a `/clear` or a
+	// compaction started the session writing somewhere other than the anchor.
 	orchestratorConversationRoleLive = "live"
 	// orchestratorConversationRoleStranded is one recorded as live by a launch
 	// that cannot be confirmed. It is the case that needs a decision: the work
@@ -120,7 +123,7 @@ func (a *App) ListOrchestratorConversations(id string) (orchestratorConversation
 		TranscriptsRoot: orchestratorTranscriptsRoot(),
 	}
 	claims := a.otherOrchestratorConversationClaims(id)
-	roles := a.orchestratorConversationRoles(id, entry, choice)
+	roles := a.orchestratorConversationRoles(id, entry, claims)
 	files, err := orchestratorTranscriptFiles()
 	if err != nil {
 		return out, err
@@ -157,15 +160,22 @@ func (a *App) ListOrchestratorConversations(id string) (orchestratorConversation
 }
 
 // orchestratorConversationRoles maps the conversations this orchestrator has a
-// relationship with to what that relationship is.
-func (a *App) orchestratorConversationRoles(id string, entry orchestratorOpenEntry, choice orchestratorConversationChoice) map[string]string {
-	roles := map[string]string{orchestratorSessionID(id): orchestratorConversationRoleDerived}
-	if record, ok := readOrchestratorLiveConversation(id); ok {
-		// The same record reads as live or as stranded depending on whether the
-		// resolution could stand behind it, which is exactly the distinction an
-		// operator staring at two transcripts needs drawn for them.
+// relationship with to what that relationship is. A launch never adopts the
+// tracked conversation automatically any more (erun#1696), so a record's role
+// here is judged on its own confirmation -- the launch nonce, ownership, and
+// transcript checks orchestratorTrackedUnconfirmedReason runs -- never on
+// whether a launch happened to resume it.
+func (a *App) orchestratorConversationRoles(id string, entry orchestratorOpenEntry, claims map[string]string) map[string]string {
+	derived := orchestratorSessionID(id)
+	roles := map[string]string{derived: orchestratorConversationRoleDerived}
+	if record, ok := readOrchestratorLiveConversation(id); ok && record.ConversationID != derived {
+		// The same record reads as live or as stranded depending on whether it is
+		// confirmed, which is exactly the distinction an operator staring at two
+		// transcripts needs drawn for them: one is real, current work the anchor
+		// no longer surfaces on its own; the other is a record nothing can vouch
+		// for any more.
 		role := orchestratorConversationRoleStranded
-		if choice.Source == orchestratorConversationTracked && choice.ConversationID == record.ConversationID {
+		if orchestratorTrackedUnconfirmedReason(record, entry, claims) == "" {
 			role = orchestratorConversationRoleLive
 		}
 		roles[record.ConversationID] = role
@@ -222,8 +232,7 @@ func (a *App) AttachOrchestratorConversation(id, conversationID string, cols, ro
 }
 
 // DetachOrchestratorConversation drops an explicit attachment and restarts the
-// orchestrator on whatever it would resolve to on its own -- what it is tracked
-// as live on, or the derived anchor. An attachment the operator could set and
+// orchestrator on the derived anchor. An attachment the operator could set and
 // not clear would be a trap rather than a correction.
 func (a *App) DetachOrchestratorConversation(id string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)

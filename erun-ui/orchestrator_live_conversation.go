@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,16 +12,24 @@ import (
 // conversation is this orchestrator on right now" are two questions, and only
 // the first one can be derived. uuid5(namespace, orchestratorID) answers the
 // first perfectly: it is the same on every launch and on every machine, so it
-// cannot go stale and nothing can point it elsewhere. It answers the second
-// only while every live conversation happens to be the derived one, and it is
-// not: the harness does not always adopt the id erun asks it to resume, so a
-// launch that asks for the derived id can end up writing to a different
-// conversation entirely. A restart then resumes the derived transcript, which
-// stopped growing at the fork, while the conversation holding the work is left
-// with no session attached.
+// cannot go stale and nothing can point it elsewhere. It does not answer the
+// second -- the harness does not always adopt the id erun asks it to resume,
+// and an operator's own `/clear` or a compaction starts a new conversation
+// under a new id -- but a launch resumes the derived answer anyway, every
+// time, unless the operator has explicitly attached something else.
 //
-// So the live id is recorded, by the only thing that knows it -- the session --
-// and the derivation stays as the anchor a first launch starts from.
+// That is a deliberate trade, not an oversight (erun#1696). The alternative --
+// silently adopting whatever conversation a previous session happened to drift
+// onto -- has its own failure: nothing ever moves a drifted record back, so one
+// `/clear` used to rebind an orchestrator to that conversation permanently,
+// with every later launch reporting the same "surprising" rebinding forever
+// rather than the one-time event it actually was. Resuming the anchor bounds
+// that drift to the lifetime of the session that caused it: the next launch
+// starts clean, and the conversation it left behind is never lost -- it stays
+// recorded (see readOrchestratorLiveConversation) and offered in the Manage
+// dialog's Conversation section for the operator to attach deliberately (see
+// orchestratorConversationRoles in orchestrator_conversations.go). What it no
+// longer does is override the anchor without being asked.
 //
 // A record like this was removed once, and for a good reason: its writer keyed
 // purely on $ERUN_ORCHESTRATOR_ID, so any session that ever ran under the wrong
@@ -34,17 +41,18 @@ import (
 //
 // Every launch mints a nonce, hands it to the session in the environment, and
 // writes it into the durable open-set entry itself. The session's own hooks echo
-// it back beside the session id they see. A record is authoritative only when
-// its nonce matches the nonce of the launch that entry recorded, which makes
-// three things true by construction:
+// it back beside the session id they see. A record only counts as CONFIRMED --
+// worth showing as this orchestrator's real, current live conversation rather
+// than one nothing can vouch for -- when its nonce matches the nonce of the
+// launch that entry recorded, which makes three things true by construction:
 //
 //   - A record from an earlier launch, or from a session that never saw this
 //     launch's nonce, cannot be mistaken for the current answer.
 //   - A record nobody writes any more decays on its own: the next launch mints a
-//     nonce no record carries, so the store stops being authoritative the moment
-//     its writer stops -- and says so instead of going quiet.
+//     nonce no record carries, so the store stops being confirmable the moment
+//     its writer stops -- and the Manage dialog says so instead of going quiet.
 //   - Neither half is authoritative alone. The desktop writes the nonce, the
-//     session writes the conversation, and a resume needs both to agree.
+//     session writes the conversation, and confirmation needs both to agree.
 
 // orchestratorLiveConversationDirName holds one file per orchestrator naming
 // the conversation that orchestrator's own session last reported being on.
@@ -72,9 +80,6 @@ type orchestratorConversationSource string
 const (
 	// orchestratorConversationAttached is a conversation the operator chose.
 	orchestratorConversationAttached orchestratorConversationSource = "attached"
-	// orchestratorConversationTracked is the one this orchestrator's session
-	// reported being live on under the launch that recorded it.
-	orchestratorConversationTracked orchestratorConversationSource = "tracked"
 	// orchestratorConversationDerived is the anchor: uuid5 of the orchestrator id.
 	orchestratorConversationDerived orchestratorConversationSource = "derived"
 )
@@ -82,8 +87,7 @@ const (
 // orchestratorConversationChoice is a resolved resume decision: which
 // conversation, why, and what the operator has to be told about it. Notice is
 // non-empty exactly when the answer is not the plain, unsurprising one -- the
-// tracked conversation and the derived one disagreed, or something that should
-// have decided the answer could not be confirmed.
+// operator's own explicit attachment could not be honoured.
 type orchestratorConversationChoice struct {
 	ConversationID string
 	Source         orchestratorConversationSource
@@ -153,30 +157,22 @@ func orchestratorLiveConversationForLaunch(id, launchID, fallback string) string
 	return record.ConversationID
 }
 
-// orchestratorConversationNoticeKind picks how loudly a resolution reports
-// itself. Resuming the tracked conversation is the mechanism working, so it is
-// information; anything else means a resolution the operator asked for, or one
-// a session recorded, could not be honoured, and that is a warning.
-func orchestratorConversationNoticeKind(source orchestratorConversationSource) string {
-	if source == orchestratorConversationTracked {
-		return "info"
-	}
-	return "warning"
-}
-
 // resolveOrchestratorConversation decides which conversation a launch of this
 // orchestrator resumes, and what to say about it.
 //
-// Order of authority: the conversation the operator explicitly attached, then
-// the one this orchestrator's session reported under the launch this entry
-// records, then the derived anchor. Each candidate ahead of the anchor has to
-// clear the same two checks -- its transcript is still on disk, and no other
-// orchestrator claims it -- because the cost of resuming the wrong conversation
-// is somebody else's history presented as this orchestrator's own.
+// Order of authority: the conversation the operator explicitly attached, else
+// the anchor derived from the orchestrator id (erun#1696). The attachment has
+// to clear two checks the anchor never needs -- its transcript is still on
+// disk, and no other orchestrator claims it -- because the cost of resuming
+// the wrong conversation is somebody else's history presented as this
+// orchestrator's own. A conversation this orchestrator's own session reported
+// being on (see readOrchestratorLiveConversation) is not consulted here at
+// all: it is offered in the Manage dialog for the operator to attach
+// deliberately (see orchestratorConversationRoles), never adopted on its own.
 //
-// A candidate that fails falls through to the anchor WITH a notice. Falling
-// through silently is what let a stale record hand an orchestrator ten hours of
-// amnesia while it looked perfectly healthy.
+// An attachment that fails falls through to the anchor WITH a notice: an
+// operator's explicit instruction that silently stopped applying is the
+// failure this guards against.
 func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orchestratorConversationChoice {
 	id := strings.TrimSpace(entry.OrchestratorID)
 	if id == "" {
@@ -185,8 +181,8 @@ func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orche
 		return orchestratorConversationChoice{Source: orchestratorConversationDerived}
 	}
 	derived := orchestratorSessionID(id)
-	claims := a.otherOrchestratorConversationClaims(id)
 	if attached := strings.TrimSpace(entry.AttachedConversationID); attached != "" {
+		claims := a.otherOrchestratorConversationClaims(id)
 		if reason := orchestratorConversationUnusableReason(attached, claims); reason != "" {
 			return orchestratorConversationChoice{
 				ConversationID: derived,
@@ -196,58 +192,18 @@ func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orche
 		}
 		return orchestratorConversationChoice{ConversationID: attached, Source: orchestratorConversationAttached}
 	}
-	record, ok := readOrchestratorLiveConversation(id)
-	if !ok || record.ConversationID == derived {
-		// Nothing tracked (a first launch), or tracked and already the anchor:
-		// the ordinary case, and nothing to report.
-		return orchestratorConversationChoice{ConversationID: derived, Source: orchestratorConversationDerived}
-	}
-	if reason := orchestratorTrackedUnconfirmedReason(record, entry, claims); reason != "" {
-		return orchestratorConversationChoice{
-			ConversationID: derived,
-			Source:         orchestratorConversationDerived,
-			Notice:         orchestratorTrackedConversationUnconfirmedNotice(id, record.ConversationID, derived, reason),
-		}
-	}
-	// The tracked conversation is confirmed and stands: report it only while it
-	// is new information. Once this exact tracked id has already been told to
-	// the operator, resolving to it again on every later launch has nothing new
-	// to say -- repeating a healthy steady state on every launch is what trains
-	// the operator to stop reading this notice family at all. A tracked id that
-	// changes from what was last reported is new information again and is
-	// reported.
-	notice := ""
-	if strings.TrimSpace(entry.LastReportedConversationID) != record.ConversationID {
-		notice = orchestratorResumedTrackedConversationNotice(id, record.ConversationID, derived)
-	}
-	return orchestratorConversationChoice{
-		ConversationID: record.ConversationID,
-		Source:         orchestratorConversationTracked,
-		Notice:         notice,
-	}
-}
-
-// markConversationChoiceReported persists that the operator has now been told
-// about a tracked-conversation resolution, so a later launch that resolves to
-// the SAME tracked conversation finds nothing new to say. Only the "info"
-// resolution is ever recorded here -- see orchestratorConversationNoticeKind --
-// because the three warning resolutions must keep reporting on every
-// occurrence. A no-op when there was nothing to report.
-func (a *App) markConversationChoiceReported(id string, choice orchestratorConversationChoice) {
-	if choice.Notice == "" || choice.Source != orchestratorConversationTracked {
-		return
-	}
-	if err := markOrchestratorConversationReported(a.deps.orchestratorOpenPath, id, choice.ConversationID); err != nil {
-		log.Printf("erun-app: mark orchestrator %s conversation reported: %v", id, err)
-	}
+	return orchestratorConversationChoice{ConversationID: derived, Source: orchestratorConversationDerived}
 }
 
 // orchestratorTrackedUnconfirmedReason reports why a tracked record cannot be
-// treated as this orchestrator's live conversation, or "" when it can. The
-// launch check is the load-bearing one: without a nonce that matches the launch
-// the durable entry recorded, a record is either from a run that has since been
-// replaced or from a writer that no longer exists, and neither may decide what a
-// resume attaches to.
+// shown as this orchestrator's CONFIRMED live conversation in the Manage
+// dialog, or "" when it can (see orchestratorConversationRoles in
+// orchestrator_conversations.go, the only caller). The launch check is the
+// load-bearing one: without a nonce that matches the launch the durable entry
+// recorded, a record is either from a run that has since been replaced or from
+// a writer that no longer exists, and neither may be presented as confirmed --
+// though either can still be attached by hand, since attaching only requires
+// the conversation to exist and belong to nobody else.
 func orchestratorTrackedUnconfirmedReason(record orchestratorLiveConversation, entry orchestratorOpenEntry, claims map[string]string) string {
 	launch := strings.TrimSpace(entry.LaunchID)
 	switch {
@@ -317,29 +273,6 @@ func orchestratorClaimedConversations(id string, entries []orchestratorOpenEntry
 		out = append(out, record.ConversationID)
 	}
 	return out
-}
-
-// orchestratorResumedTrackedConversationNotice reports that this orchestrator
-// came back on the conversation it was really live on rather than the one its id
-// derives to. It is the good outcome and still worth saying: the two ids
-// disagree, and the operator is the only one who can tell whether the one that
-// won is the work they expect to see.
-func orchestratorResumedTrackedConversationNotice(id, tracked, derived string) string {
-	return fmt.Sprintf("Reopened %s on the conversation its session was last live on (%s), "+
-		"not the one derived from its id (%s). "+
-		"Manage the orchestrator to see every conversation it can resume and attach a different one.",
-		id, tracked, derived)
-}
-
-// orchestratorTrackedConversationUnconfirmedNotice reports that a conversation
-// was recorded as this orchestrator's live one and could not be confirmed, so
-// the launch fell back to the derived anchor. It names the unconfirmed id
-// because that id is the operator's way back to the work: the conversation list
-// can attach it deliberately.
-func orchestratorTrackedConversationUnconfirmedNotice(id, tracked, derived, reason string) string {
-	return fmt.Sprintf("Reopened %s on the conversation derived from its id (%s), not the one last recorded as live (%s): %s. "+
-		"If that conversation holds the work, manage the orchestrator and attach it.",
-		id, derived, tracked, reason)
 }
 
 // orchestratorAttachmentUnusableNotice reports that the conversation the
