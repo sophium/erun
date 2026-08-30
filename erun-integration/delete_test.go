@@ -376,6 +376,111 @@ exit 0
 		golden.Equal(t, "delete/real_run_with_output_json_reports_namespace_delete_failure", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_refused_namespace_delete_reports_the_refusal_not_a_timeout", func(t *testing.T) {
+		// A delete the cluster refuses outright -- here RBAC, in milliseconds --
+		// used to be reported as a twenty-minute termination timeout carrying the
+		// namespace's termination conditions, sending an operator to investigate
+		// finalizers when the real fault was a missing grant. It must instead
+		// report kubectl's own refusal and name the permission problem. The
+		// challenge read is refused by the same kubeconfig, which is what proves
+		// the retraction note is left out too: it warns about holding up a delete
+		// that here was never in flight.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`case "$*" in
+  *"get challenges"*)
+    printf '%s\n' 'Error from server (Forbidden): challenges.acme.cert-manager.io is forbidden: User "jane" cannot list resource "challenges"' >&2
+    exit 1
+    ;;
+  *"delete namespace"*)
+    printf '%s\n' 'Error from server (Forbidden): namespaces "team-dev" is forbidden: User "jane" cannot delete resource "namespaces" in API group "" at the cluster scope' >&2
+    exit 1
+    ;;
+  *"get namespace"*)
+    # The delete never took effect, so the namespace is still Active -- the
+    # exact state that used to be misread as wedged in Terminating.
+    printf '%s\n' 'namespace/team-dev'
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_refused_namespace_delete_reports_the_refusal_not_a_timeout", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_wedged_namespace_delete_still_reports_the_termination_timeout", func(t *testing.T) {
+		// The counterpart to the refusal scenario above, and the one that stops
+		// the two cases being flattened into one: a delete the cluster accepted
+		// and then could not finish must still read as a termination timeout,
+		// carrying the namespace's own conditions and the retraction note in the
+		// single string an operator reads off the environment row.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`case "$*" in
+  *"get challenges"*)
+    printf '%s\n' 'Error from server (Forbidden): challenges.acme.cert-manager.io is forbidden: User "jane" cannot list resource "challenges"' >&2
+    exit 1
+    ;;
+  *"-o jsonpath"*)
+    printf '%s\t%s\n' 'NamespaceContentRemaining=True' 'challenges.acme.cert-manager.io has 1 resource instances'
+    printf '%s\t%s\n' 'NamespaceFinalizersRemaining=True' 'acme.cert-manager.io/finalizer in 1 resource instances'
+    ;;
+  *"delete namespace"*)
+    printf '%s\n' 'error: timed out waiting for the condition on namespaces/team-dev' >&2
+    exit 1
+    ;;
+  *"get namespace"*)
+    printf '%s\n' 'namespace/team-dev'
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_wedged_namespace_delete_still_reports_the_termination_timeout", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_namespace_already_gone_after_a_failed_delete_reports_success", func(t *testing.T) {
+		// The benign race the delete is built to tolerate: kubectl's wait fails,
+		// but by the time erun looks the namespace has actually gone. That is a
+		// success, so it must report no warning at all -- neither a refusal nor a
+		// termination timeout. (A delete that simply succeeds is covered by
+		// real_run_with_yes_flag_skips_confirmation_and_removes_config below.)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl",
+			`case "$*" in
+  *"delete namespace"*)
+    printf '%s\n' 'error: An error occurred while waiting for the object to be deleted: unable to decode an event from the watch stream' >&2
+    exit 1
+    ;;
+  *"get namespace"*)
+    printf '%s\n' 'Error from server (NotFound): namespaces "team-dev" not found' >&2
+    exit 1
+    ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_namespace_already_gone_after_a_failed_delete_reports_success", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
 		// --yes bypasses the confirmation prompt and really removes the env
 		// config tree.
