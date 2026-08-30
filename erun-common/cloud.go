@@ -543,12 +543,16 @@ func awsCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, para
 
 func awsBearerTokenWithOIDCRetry(ctx Context, provider CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
 	rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
-	if err == nil {
-		return rawToken, nil
-	}
-	if !isAWSOutboundWebIdentityFederationDisabled(err) {
+	if err != nil && !isAWSOutboundWebIdentityFederationDisabled(err) {
 		return "", err
 	}
+	if err == nil && !ctx.DryRun {
+		return rawToken, nil
+	}
+	// Either federation was reported disabled on a real run, or this is a dry
+	// run: RunAWSBearerToken always reports success without ever invoking AWS,
+	// so the only way to preview the recovery this command would perform is to
+	// trace it unconditionally here too.
 	if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
 		return "", enableErr
 	}
@@ -1191,9 +1195,20 @@ func defaultRunAWSEnableOIDC(ctx Context, profile string) (string, error) {
 		if isAWSOutboundWebIdentityFederationAlreadyEnabledMessage(message) {
 			return "", nil
 		}
+		if isAWSAccessDeniedMessage(message) {
+			return "", fmt.Errorf("enable AWS outbound web identity federation requires the iam:EnableOutboundWebIdentityFederation permission: %s", message)
+		}
 		return "", fmt.Errorf("enable AWS outbound web identity federation: %s", message)
 	}
 	return normalizeOIDCIssuerURL(stdout.String()), nil
+}
+
+func isAWSAccessDeniedMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "accessdenied") ||
+		strings.Contains(message, "access denied") ||
+		strings.Contains(message, "unauthorizedaccess") ||
+		strings.Contains(message, "not authorized to perform")
 }
 
 func isAWSOutboundWebIdentityFederationDisabled(err error) bool {
