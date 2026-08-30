@@ -70,6 +70,14 @@ func (r *Runner) Run(ctx context.Context, job *batchv1.Job) (Result, error) {
 	return r.watch(ctx, job.Namespace, job.Name)
 }
 
+// Watch blocks on an already-created Job by name until it reaches a terminal
+// state, without attempting to create it. Used when a caller has already
+// determined — by some means other than this Job's own name — that a Job for
+// its current attempt exists and is still in flight.
+func (r *Runner) Watch(ctx context.Context, namespace, name string) (Result, error) {
+	return r.watch(ctx, namespace, name)
+}
+
 func (r *Runner) watch(ctx context.Context, namespace, name string) (Result, error) {
 	for {
 		job, err := r.kube.BatchV1().Jobs(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -113,4 +121,13 @@ func jobOutcome(job *batchv1.Job) (Outcome, bool) {
 		return OutcomeFailed, true
 	}
 	return "", false
+}
+
+// IsTerminal reports whether a Job has already reached a terminal outcome —
+// exported so a caller deciding whether an existing Job is still in flight
+// (rather than one this package created and is about to watch) can ask the
+// same question this package asks of its own Jobs.
+func IsTerminal(job *batchv1.Job) bool {
+	_, done := jobOutcome(job)
+	return done
 }

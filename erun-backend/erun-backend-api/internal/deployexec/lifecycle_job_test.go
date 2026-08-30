@@ -9,7 +9,9 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func testStopParams() StopJobParams {
@@ -232,7 +234,7 @@ func TestLauncherRunsStopAndDelete(t *testing.T) {
 	deleteParams.DeleteID = "3f2a91cc-1111-2222-3333-444455556666"
 	kube := fake.NewSimpleClientset(
 		&batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{Name: StopJobName(stopParams.Tenant, stopParams.Environment), Namespace: stopParams.Namespace},
+			ObjectMeta: metav1.ObjectMeta{Name: StopJobName(stopParams.Tenant, stopParams.Environment, stopParams.StopID), Namespace: stopParams.Namespace},
 			Status:     batchv1.JobStatus{Succeeded: 1},
 		},
 		&batchv1.Job{
@@ -358,12 +360,213 @@ func TestDeleteJobNameFitsKubernetesLimit(t *testing.T) {
 
 func TestLifecycleJobNameSanitizesAndTruncates(t *testing.T) {
 	long := "a-very-long-tenant-name-that-pushes-past-the-kubernetes-object-name-limit"
-	name := StopJobName(long, "prod")
+	name := StopJobName(long, "prod", "")
 	if len(name) > 63 {
 		t.Fatalf("job name length = %d, want <= 63", len(name))
 	}
 	deleteName := DeleteJobName(long, "prod", "3f2a91cc-1111-2222-3333-444455556666")
 	if len(deleteName) > 63 {
 		t.Fatalf("job name length = %d, want <= 63", len(deleteName))
+	}
+}
+
+// admitAndCompleteJobReactors installs the same pair of fake-clientset
+// reactors TestRunCreatesWhenAbsent uses: "create" admits the Job Active
+// (standing in for the cluster's own Job controller) and records what was
+// created, then "get" flips it to Succeeded once it has been observed
+// running at least once — driving the transition off the client calls
+// themselves keeps the test free of any timing assumption. Only reacts to
+// Jobs named watchName, so a pre-seeded, unrelated Job already in the fake
+// clientset is left alone.
+func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, namespace string) (created func() *batchv1.Job) {
+	t.Helper()
+	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
+	var createdJob *batchv1.Job
+	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		obj := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		if obj.Name != watchName {
+			return false, nil, nil
+		}
+		createdJob = obj
+		admitted := obj.DeepCopy()
+		admitted.Status.Active = 1
+		if err := kube.Tracker().Add(admitted); err != nil {
+			return true, nil, err
+		}
+		return true, admitted, nil
+	})
+	polls := 0
+	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		getAction := action.(k8stesting.GetAction)
+		if getAction.GetNamespace() != namespace || getAction.GetName() != watchName {
+			return false, nil, nil
+		}
+		polls++
+		if polls > 1 && createdJob != nil {
+			completed := createdJob.DeepCopy()
+			completed.Status.Succeeded = 1
+			if err := kube.Tracker().Update(jobsResource, completed, namespace); err != nil {
+				return true, nil, err
+			}
+		}
+		return false, nil, nil
+	})
+	return func() *batchv1.Job { return createdJob }
+}
+
+// TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops is the
+// regression test for erun#1678: a stop issued after a previous stop Job already
+// went terminal must run a fresh Job to a fresh outcome, never replay the
+// old one's cached result. The old Job is seeded Failed specifically so a
+// wrongly-replayed outcome is caught by the outcome assertion, not just by
+// the job count.
+func TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops(t *testing.T) {
+	params := testStopParams()
+	oldID := "3f2a91cc-1111-2222-3333-444455556666"
+	newID := "9b7d40aa-1111-2222-3333-444455556666"
+	oldName := StopJobName(params.Tenant, params.Environment, oldID)
+	newName := StopJobName(params.Tenant, params.Environment, newID)
+	if oldName == newName {
+		t.Fatalf("old and new stop attempts share the job name %q", oldName)
+	}
+
+	kube := fake.NewSimpleClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: oldName, Namespace: params.Namespace, Labels: lifecycleJobLabels(params.Tenant, params.Environment)},
+		Status:     batchv1.JobStatus{Failed: 1},
+	})
+	created := admitAndCompleteJobReactors(t, kube, newName, params.Namespace)
+
+	launcher := NewLauncher(kube)
+	launcher.PollEvery(0)
+	params.StopID = newID
+	result, err := launcher.RunStop(context.Background(), params)
+	if err != nil {
+		t.Fatalf("run stop: %v", err)
+	}
+	if result.Outcome != OutcomeSucceeded {
+		t.Fatalf("stop outcome = %q, want succeeded — got the previous terminal attempt's cached outcome instead of running a new Job", result.Outcome)
+	}
+	if created() == nil {
+		t.Fatal("a fresh stop job was not created for the new attempt")
+	}
+
+	jobs, err := kube.BatchV1().Jobs(params.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 2 {
+		t.Fatalf("jobs in namespace = %d, want 2 (the old terminal attempt plus the new one)", len(jobs.Items))
+	}
+}
+
+// TestRunStopWhileStopJobStillRunningReWatchesIt is the dedup test erun#1678
+// asks to be preserved: a stop issued while a previous stop Job is still in
+// flight must re-watch that same Job rather than starting a second one. The
+// "create" reactor fails the test outright if a second Job is ever created,
+// so this catches the fix regressing into "always mint a fresh Job".
+func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
+	params := testStopParams()
+	inFlightID := "3f2a91cc-1111-2222-3333-444455556666"
+	inFlightName := StopJobName(params.Tenant, params.Environment, inFlightID)
+
+	kube := fake.NewSimpleClientset(&batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: inFlightName, Namespace: params.Namespace, Labels: lifecycleJobLabels(params.Tenant, params.Environment)},
+		Status:     batchv1.JobStatus{Active: 1},
+	})
+
+	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
+	polls := 0
+	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		getAction := action.(k8stesting.GetAction)
+		if getAction.GetName() != inFlightName {
+			return false, nil, nil
+		}
+		polls++
+		if polls > 1 {
+			completed := &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: inFlightName, Namespace: params.Namespace, Labels: lifecycleJobLabels(params.Tenant, params.Environment)},
+				Status:     batchv1.JobStatus{Succeeded: 1},
+			}
+			if err := kube.Tracker().Update(jobsResource, completed, params.Namespace); err != nil {
+				return true, nil, err
+			}
+		}
+		return false, nil, nil
+	})
+	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		obj := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job)
+		t.Fatalf("a second stop job %q was created while %q was still in flight", obj.Name, inFlightName)
+		return true, nil, nil
+	})
+
+	launcher := NewLauncher(kube)
+	launcher.PollEvery(0)
+	// A fresh explicit stop request still mints its own attempt id, exactly
+	// as routes.EnvironmentRoutes.stopEnvironment does — the point of this
+	// test is that RunStop finds the in-flight Job before that id is ever
+	// used to build a Job name.
+	params.StopID = "9b7d40aa-1111-2222-3333-444455556666"
+	result, err := launcher.RunStop(context.Background(), params)
+	if err != nil {
+		t.Fatalf("run stop: %v", err)
+	}
+	if result.Outcome != OutcomeSucceeded {
+		t.Fatalf("stop outcome = %q, want succeeded", result.Outcome)
+	}
+
+	jobs, err := kube.BatchV1().Jobs(params.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("jobs in namespace = %d, want 1 — the fresh attempt should have re-watched the in-flight job instead of starting a second", len(jobs.Items))
+	}
+	if jobs.Items[0].Name != inFlightName {
+		t.Fatalf("job name = %q, want the original in-flight job %q to have been re-watched, not replaced", jobs.Items[0].Name, inFlightName)
+	}
+}
+
+// TestStopAfterRedeploySequenceEndsStopped reproduces the exact sequence
+// erun#1678 reported: stop, redeploy, stop again. The redeploy's own Job shares
+// the identical tenant+environment labels every lifecycle Job carries (and
+// is left running, to prove it), so this also pins that activeStopJobName's
+// name-prefix filter tells a deploy Job apart from a stop Job rather than
+// mistaking one for an in-flight stop.
+func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
+	stopParams := testStopParams()
+	firstStopID := "3f2a91cc-1111-2222-3333-444455556666"
+	secondStopID := "9b7d40aa-1111-2222-3333-444455556666"
+	firstStopName := StopJobName(stopParams.Tenant, stopParams.Environment, firstStopID)
+	secondStopName := StopJobName(stopParams.Tenant, stopParams.Environment, secondStopID)
+
+	deployParams := testParams()
+	deployName := DeployJobName(deployParams.Tenant, deployParams.Environment, deployParams.Version, "")
+
+	// The first stop already ran to completion; the environment was then
+	// redeployed and that Job is still active when the second stop runs.
+	kube := fake.NewSimpleClientset(
+		&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: firstStopName, Namespace: stopParams.Namespace, Labels: lifecycleJobLabels(stopParams.Tenant, stopParams.Environment)},
+			Status:     batchv1.JobStatus{Succeeded: 1},
+		},
+		&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: deployName, Namespace: deployParams.Namespace, Labels: lifecycleJobLabels(deployParams.Tenant, deployParams.Environment)},
+			Status:     batchv1.JobStatus{Active: 1},
+		},
+	)
+	created := admitAndCompleteJobReactors(t, kube, secondStopName, stopParams.Namespace)
+
+	launcher := NewLauncher(kube)
+	launcher.PollEvery(0)
+	stopParams.StopID = secondStopID
+	result, err := launcher.RunStop(context.Background(), stopParams)
+	if err != nil {
+		t.Fatalf("run second stop: %v", err)
+	}
+	if result.Outcome != OutcomeSucceeded {
+		t.Fatalf("second stop outcome = %q, want succeeded — the environment must end up stopped", result.Outcome)
+	}
+	if created() == nil {
+		t.Fatal("the second stop did not create its own fresh job — it was confused by, or replayed, an unrelated job")
 	}
 }
