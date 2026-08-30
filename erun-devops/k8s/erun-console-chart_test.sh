@@ -168,7 +168,27 @@ grep -q '^    - host: apex.custom.test$' "${redirect_ingress}" ||
 grep -q '^    - host: www.custom.test$' "${redirect_ingress}" ||
     fail "console.wwwHost must override the derived www host"
 
-# --- 7. A missing external domain still fails the render loudly, unaffected
+# --- 7. console.apexHost set alone, with no platform.baseDomain: a
+#        half-configured pair must not silently disable the redirect. Gating
+#        on baseDomain alone both left this off and made the status
+#        ConfigMap's "not configured" reason lie about a host that was, in
+#        fact, configured. ---
+rendered=$(render --set-string console.externalDomain=console.example.test --set-string console.apexHost=apex.custom.test)
+document "${rendered}" Ingress team-console-apex-redirect >"${redirect_ingress}"
+[ -s "${redirect_ingress}" ] || fail "console.apexHost alone (no platform.baseDomain) must still enable the redirect"
+grep -q '^    - host: apex.custom.test$' "${redirect_ingress}" ||
+    fail "the redirect Ingress must route the explicit apex host when baseDomain is unset"
+grep -q '^    - host: www.apex.custom.test$' "${redirect_ingress}" ||
+    fail "the www host must derive from console.apexHost when baseDomain is unset"
+
+status="${work_root}/status-apexhost-only.yaml"
+document "${rendered}" ConfigMap team-console-apex-status >"${status}"
+grep -q '^  enabled: "true"$' "${status}" ||
+    fail "the status ConfigMap must record enabled: \"true\" when console.apexHost is set even without platform.baseDomain"
+grep -q '^  apexHost: "apex.custom.test"$' "${status}" ||
+    fail "the status ConfigMap must record the explicit apex host"
+
+# --- 8. A missing external domain still fails the render loudly, unaffected
 #        by the apex-redirect wiring above ---
 if helm template test "${chart_dir}" --namespace team-prod --set tenant=team >"${work_root}/nohost.log" 2>&1; then
     fail "a render with no external domain must fail"
