@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -454,5 +455,136 @@ func TestReclaimAgentJobWorkCloneStillRunningIsNeverTouched(t *testing.T) {
 	}
 	if !job.CloneReclaimed {
 		t.Fatalf("CloneReclaimed = false once the job actually finished, want true (kept reason: %s)", job.CloneKeptReason)
+	}
+}
+
+// TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim guards
+// the exact false success this repository just shipped: finishEnvironmentJob
+// used to settle State (a terminal value job.Finished() polls on) in one
+// recorder.update, then decide and act on reclaim, then settle
+// CloneReclaimed/CloneKeptReason in a *second* recorder.update. A caller
+// polling the job record between those two writes -- exactly what job
+// status/await do from a separate process -- could read "finished" while the
+// clone was still fully present on disk and the reclaim decision not yet
+// made, let alone acted on. A concurrent poller here stands in for that
+// caller: it fails the moment it ever observes the job as finished with
+// neither a reclaim nor a kept-reason recorded yet, or observes
+// CloneReclaimed=true while the directory still resolves on disk.
+// pollReclaimSettleOnce reads the job record once and flags either violation
+// the concurrent poller in the test below watches for.
+func pollReclaimSettleOnce(tenant, environment, id, repo string, sawUnsettledFinish, sawReclaimedWhilePresent *atomic.Bool) {
+	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
+	if err != nil {
+		return
+	}
+	if job.Finished() && !job.CloneReclaimed && job.CloneKeptReason == "" {
+		sawUnsettledFinish.Store(true)
+	}
+	if job.CloneReclaimed {
+		if _, statErr := os.Stat(repo); !os.IsNotExist(statErr) {
+			sawReclaimedWhilePresent.Store(true)
+		}
+	}
+}
+
+func TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim(t *testing.T) {
+	isolateActivityCache(t)
+	_, root := withFakeWorkHome(t)
+	repo := filepath.Join(root, "erun-w6")
+	initGitRepoAt(t, repo)
+	newBareRemoteForTest(t, repo)
+	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
+	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
+
+	const tenant, environment, id = "reclaim-contract", "settle-order", "job"
+
+	stop := make(chan struct{})
+	var sawUnsettledFinish, sawReclaimedWhilePresent atomic.Bool
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			pollReclaimSettleOnce(tenant, environment, id, repo, &sawUnsettledFinish, &sawReclaimedWhilePresent)
+		}
+	}()
+
+	err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant: tenant, Environment: environment, ID: id, Name: id,
+		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
+	})
+	close(stop)
+	<-pollDone
+	if err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+	if sawUnsettledFinish.Load() {
+		t.Fatalf("observed the job record as finished before its clone-reclaim outcome settled -- a status/await poll could report success before reclaim ran")
+	}
+	if sawReclaimedWhilePresent.Load() {
+		t.Fatalf("observed CloneReclaimed=true while the clone still resolved on disk")
+	}
+}
+
+// TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed covers the
+// other direction of the same contract: a clone the git-state check judges
+// safe to delete, but whose actual removal fails (permission denied on a
+// nested entry here), must be reported kept with a reason -- never reclaimed
+// -- because a caller that trusted "reclaimed" would believe the disk is
+// clear when it is not.
+func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T) {
+	isolateActivityCache(t)
+	_, root := withFakeWorkHome(t)
+	repo := filepath.Join(root, "erun-w7")
+	initGitRepoAt(t, repo)
+	newBareRemoteForTest(t, repo)
+	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
+	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
+
+	// An untracked, gitignored subdirectory: it does not make the working
+	// tree look dirty (so the decision stays "safe to reclaim"), but its own
+	// permissions block os.RemoveAll from unlinking the file inside it.
+	locked := filepath.Join(repo, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatalf("mkdir locked dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "file.txt"), []byte("data\n"), 0o644); err != nil {
+		t.Fatalf("write locked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("locked/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	runGitForTest(t, repo, "add", ".gitignore")
+	runGitForTest(t, repo, "commit", "-q", "-m", "ignore locked dir")
+	runGitForTest(t, repo, "push", "-q", "origin", "feature/lane")
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatalf("chmod locked dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	const tenant, environment, id = "reclaim-contract", "removal-failure", "job"
+	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant: tenant, Environment: environment, ID: id, Name: id,
+		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
+	}); err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+
+	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+	if job.CloneReclaimed {
+		t.Fatalf("CloneReclaimed = true even though removal failed on a locked file")
+	}
+	if job.CloneKeptReason == "" {
+		t.Fatalf("CloneKeptReason is empty, want an explanation of the removal failure")
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("clone dir must still be present when removal failed: %v", err)
 	}
 }
