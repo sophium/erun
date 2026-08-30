@@ -330,30 +330,43 @@ func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
+	params, status, msg := parseSubmitInviteRequestParams(req, claims)
+	if msg != "" {
+		writeError(w, status, msg)
+		return
+	}
+
+	request, err := r.requests.Submit(req.Context(), params)
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, request)
+}
+
+// parseSubmitInviteRequestParams decodes and validates the submit body,
+// returning a non-empty message (with its HTTP status) when the input must
+// be refused before ever reaching the repository.
+func parseSubmitInviteRequestParams(req *http.Request, claims security.Claims) (repository.SubmitInviteRequestParams, int, string) {
 	var body submitInviteRequestBody
 	if err := decodeJSON(req, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
+		return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, "invalid request body"
 	}
 	kind := model.InviteRequestKind(strings.ToUpper(strings.TrimSpace(body.Kind)))
 	tenantName := strings.TrimSpace(body.TenantName)
 	switch kind {
 	case model.InviteRequestKindJoinTenant:
 		if tenantName == "" {
-			writeError(w, http.StatusBadRequest, "tenantName is required")
-			return
+			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, "tenantName is required"
 		}
 	case model.InviteRequestKindCreateTenant:
 		if err := eruncommon.ValidateTenantName(tenantName); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
+			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, err.Error()
 		}
 	default:
-		writeError(w, http.StatusBadRequest, "kind must be one of JOIN_TENANT, CREATE_TENANT")
-		return
+		return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, "kind must be one of JOIN_TENANT, CREATE_TENANT"
 	}
-
-	request, err := r.requests.Submit(req.Context(), repository.SubmitInviteRequestParams{
+	return repository.SubmitInviteRequestParams{
 		Issuer:          claims.Issuer,
 		Subject:         claims.Subject,
 		Email:           strings.TrimSpace(body.Email),
@@ -362,12 +375,7 @@ func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Reque
 		TenantName:      tenantName,
 		EnvironmentName: strings.TrimSpace(body.EnvironmentName),
 		Note:            strings.TrimSpace(body.Note),
-	})
-	if err != nil {
-		writeRepositoryError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, request)
+	}, 0, ""
 }
 
 // mine answers "what is the state of my own request" — the one thing a
