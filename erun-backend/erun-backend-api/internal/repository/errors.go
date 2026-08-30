@@ -30,6 +30,17 @@ var (
 	// other check_violations so a caller can be given the documented
 	// INVALID_BODY machine code instead of a generic one.
 	ErrCommentBodyInvalid = fmt.Errorf("comment body is empty or exceeds 8 KiB: %w", ErrInvalidInput)
+	// ErrUsernameConflict signals users_tenant_username_key specifically: a
+	// different identity already holds the requested username in the target
+	// tenant. Distinguished from ErrIdentityConflict so a caller is told which
+	// of the table's two uniqueness contracts actually fired, instead of a
+	// single conflict message guessing at the cause.
+	ErrUsernameConflict = fmt.Errorf("a user with this username already exists in the target tenant: %w", ErrConflict)
+	// ErrUnrecognizedConflict is UserRepository.Create's fallback for a
+	// uniqueness violation that matches neither users_tenant_username_key nor
+	// user_external_ids' primary key — reported as genuinely unknown rather
+	// than guessed at as the most likely-sounding cause.
+	ErrUnrecognizedConflict = fmt.Errorf("an unrecognized uniqueness constraint was violated: %w", ErrConflict)
 )
 
 func normalizeNoRows(err error) error {

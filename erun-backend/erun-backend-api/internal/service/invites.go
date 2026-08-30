@@ -114,7 +114,7 @@ func (s *InviteService) Accept(ctx context.Context, params AcceptInviteParams) (
 		TenantID:   invite.TenantID,
 		TenantType: consumed.TenantType,
 	})
-	erunUser, err := s.users.Create(tenantCtx, repository.CreateUserParams{
+	erunUser, _, err := s.users.Create(tenantCtx, repository.CreateUserParams{
 		Username: params.Username,
 		Issuer:   invite.Issuer,
 		Subject:  idpUser.ID,

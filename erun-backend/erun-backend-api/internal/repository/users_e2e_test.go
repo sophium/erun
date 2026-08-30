@@ -47,7 +47,7 @@ func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 	authorizer := &PermissionAuthorizer{txs: txs}
 	ctx := rolesContext(tenantID, "")
 
-	created, err := users.Create(ctx, CreateUserParams{Username: "first-admin"})
+	created, _, err := users.Create(ctx, CreateUserParams{Username: "first-admin"})
 	mustNoErr(t, err, "create first user")
 
 	names, err := users.RoleNames(rolesContext(tenantID, created.UserID), created.UserID)
@@ -84,7 +84,7 @@ func TestUserRepositoryLaterUserGetsTenantUserByDefault(t *testing.T) {
 		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
 	})
 
-	created, err := users.Create(rolesContext(tenantID, first), CreateUserParams{Username: "second-user"})
+	created, _, err := users.Create(rolesContext(tenantID, first), CreateUserParams{Username: "second-user"})
 	mustNoErr(t, err, "create second user")
 
 	names, err := users.RoleNames(rolesContext(tenantID, first), created.UserID)
@@ -127,7 +127,7 @@ func TestUserRepositoryExplicitRoleIDsAreGranted(t *testing.T) {
 	})
 	mustNoErr(t, err, "create narrow role")
 
-	created, err := users.Create(adminCtx, CreateUserParams{Username: "narrow-user", RoleIDs: []string{role.RoleID}})
+	created, _, err := users.Create(adminCtx, CreateUserParams{Username: "narrow-user", RoleIDs: []string{role.RoleID}})
 	mustNoErr(t, err, "create user with explicit roles")
 
 	names, err := users.RoleNames(adminCtx, created.UserID)
@@ -157,12 +157,85 @@ func TestUserRepositoryCreateRejectsUnknownRoleID(t *testing.T) {
 		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
 	})
 
-	_, err := users.Create(rolesContext(tenantID, first), CreateUserParams{
+	_, _, err := users.Create(rolesContext(tenantID, first), CreateUserParams{
 		Username: "someone",
 		RoleIDs:  []string{"00000000-0000-0000-0000-000000000000"},
 	})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for an unknown role id, got %v", err)
+	}
+}
+
+// seedTenantIssuer registers issuer for tenantID so a user_external_ids row
+// can foreign-key it — the same registration bootstrap already performs, done
+// by hand here since these tests seed enrollment directly.
+func seedTenantIssuer(t *testing.T, db *sql.DB, tenantID, issuer string) {
+	t.Helper()
+	_, err := db.Exec(`INSERT INTO issuers (issuer) VALUES ($1) ON CONFLICT (issuer) DO NOTHING`, issuer)
+	mustNoErr(t, err, "seed issuers")
+	_, err = db.Exec(`INSERT INTO tenant_issuers (tenant_id, issuer, name) VALUES ($1, $2, $3)`, tenantID, issuer, issuer)
+	mustNoErr(t, err, "seed tenant_issuers")
+}
+
+// TestUserRepositoryCreateReportsUsernameConflictDistinctly proves a plain
+// username collision (no external identity involved) surfaces as
+// ErrUsernameConflict, not the bare ErrConflict a caller could not tell apart
+// from any other uniqueness violation.
+func TestUserRepositoryCreateReportsUsernameConflictDistinctly(t *testing.T) {
+	db, tenantID := usersDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	users := &UserRepository{txs: txs}
+	first := seedPermissionsUser(t, db, tenantID, "first-admin")
+
+	_, _, err := users.Create(rolesContext(tenantID, first), CreateUserParams{Username: "first-admin"})
+	if !errors.Is(err, ErrUsernameConflict) {
+		t.Fatalf("expected ErrUsernameConflict for a colliding username, got %v", err)
+	}
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrUsernameConflict to still satisfy errors.Is(err, ErrConflict), got %v", err)
+	}
+}
+
+// TestUserRepositoryCreateTreatsReEnrollmentAsNoOp is the regression this fix
+// addresses: re-enrolling an identity already linked in the tenant, even
+// under a *different* requested username, reports the existing user back
+// (alreadyEnrolled=true) instead of the wrong-cause username-collision 409
+// that sent an operator hunting for a username that did not exist.
+func TestUserRepositoryCreateTreatsReEnrollmentAsNoOp(t *testing.T) {
+	db, tenantID := usersDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	users := &UserRepository{txs: txs}
+	first := seedPermissionsUser(t, db, tenantID, "first-admin")
+	issuer := "https://issuer.example"
+	seedTenantIssuer(t, db, tenantID, issuer)
+
+	created, alreadyEnrolled, err := users.Create(rolesContext(tenantID, first), CreateUserParams{
+		Username: "rihards-frs-lv",
+		Issuer:   issuer,
+		Subject:  "subject-1",
+	})
+	mustNoErr(t, err, "enroll identity first time")
+	if alreadyEnrolled {
+		t.Fatalf("expected the first enrollment to not be reported as already enrolled")
+	}
+
+	reEnrolled, alreadyEnrolled, err := users.Create(rolesContext(tenantID, first), CreateUserParams{
+		Username: "rihards", // a different username than the one already on file
+		Issuer:   issuer,
+		Subject:  "subject-1",
+	})
+	mustNoErr(t, err, "re-enroll the same identity")
+	if !alreadyEnrolled {
+		t.Fatalf("expected re-enrolling an already-linked identity to be reported as already enrolled")
+	}
+	if reEnrolled.UserID != created.UserID || reEnrolled.Username != created.Username {
+		t.Fatalf("re-enrollment = %+v, want the original user %+v untouched (no new row, no rename)", reEnrolled, created)
+	}
+
+	var count int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND username = $2`, tenantID, "rihards").Scan(&count), "count rows for the requested username")
+	if count != 0 {
+		t.Fatalf("expected no user row for the requested (unused) username, got %d", count)
 	}
 }
 

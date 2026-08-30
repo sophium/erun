@@ -42,13 +42,13 @@ type stubInviteRequestUserEnroller struct {
 	calls              int
 }
 
-func (s *stubInviteRequestUserEnroller) Create(ctx context.Context, params repository.CreateUserParams) (model.User, error) {
+func (s *stubInviteRequestUserEnroller) Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error) {
 	s.got = params
 	s.calls++
 	if sc, ok := security.FromContext(ctx); ok {
 		s.gotSecurityContext = sc
 	}
-	return s.user, s.err
+	return s.user, false, s.err
 }
 
 type stubInviteRequestInviteMinter struct {

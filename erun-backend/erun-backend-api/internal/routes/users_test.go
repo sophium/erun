@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -13,9 +14,11 @@ import (
 )
 
 type stubUserEnrollmentRepository struct {
-	createCalls int
-	createErr   error
-	gotCreate   repository.CreateUserParams
+	createCalls     int
+	createErr       error
+	createAlreadyOn bool
+	createExisting  model.User
+	gotCreate       repository.CreateUserParams
 
 	listCalls int
 	listErr   error
@@ -23,17 +26,20 @@ type stubUserEnrollmentRepository struct {
 	users     []model.User
 }
 
-func (r *stubUserEnrollmentRepository) Create(_ context.Context, params repository.CreateUserParams) (model.User, error) {
+func (r *stubUserEnrollmentRepository) Create(_ context.Context, params repository.CreateUserParams) (model.User, bool, error) {
 	r.createCalls++
 	r.gotCreate = params
 	if r.createErr != nil {
-		return model.User{}, r.createErr
+		return model.User{}, false, r.createErr
+	}
+	if r.createAlreadyOn {
+		return r.createExisting, true, nil
 	}
 	tenantID := params.TenantID
 	if tenantID == "" {
 		tenantID = "caller-tenant"
 	}
-	return model.User{UserID: "user-new", TenantID: tenantID, Username: params.Username}, nil
+	return model.User{UserID: "user-new", TenantID: tenantID, Username: params.Username}, false, nil
 }
 
 func (r *stubUserEnrollmentRepository) List(_ context.Context, filter repository.UserFilter) ([]model.User, error) {
@@ -109,11 +115,58 @@ func TestCreateUserRejectsEmptyUsername(t *testing.T) {
 	}
 }
 
-func TestCreateUserMapsConflictToStatusConflict(t *testing.T) {
-	users := &stubUserEnrollmentRepository{createErr: repository.ErrConflict}
+// TestCreateUserMapsUnrecognizedConflictToGenericStatusConflict proves a
+// conflict Create cannot name a specific cause for still maps to 409, without
+// guessing at wording the way the pre-fix username-collision message did for
+// every conflict class.
+func TestCreateUserMapsUnrecognizedConflictToGenericStatusConflict(t *testing.T) {
+	users := &stubUserEnrollmentRepository{createErr: repository.ErrUnrecognizedConflict}
 	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice"}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "username") {
+		t.Fatalf("body = %q, an unrecognized conflict must not guess a username-collision cause", rec.Body.String())
+	}
+}
+
+// TestCreateUserMapsUsernameConflictToUsernameTakenCode proves a username
+// collision is reported with its own machine code and an accurate message,
+// rather than the same generic conflict response every conflict class used
+// to get regardless of which uniqueness constraint actually fired.
+func TestCreateUserMapsUsernameConflictToUsernameTakenCode(t *testing.T) {
+	users := &stubUserEnrollmentRepository{createErr: repository.ErrUsernameConflict}
+	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"USERNAME_TAKEN"`) {
+		t.Fatalf("body = %q, want code USERNAME_TAKEN", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "username") {
+		t.Fatalf("body = %q, want a message naming the username cause", rec.Body.String())
+	}
+}
+
+// TestCreateUserReportsAlreadyEnrolledAsSuccessNotConflict proves re-enrolling
+// an identity already enrolled in the tenant is reported as the no-op it is —
+// 200 with alreadyEnrolled true and the real existing username — rather than
+// as any kind of conflict.
+func TestCreateUserReportsAlreadyEnrolledAsSuccessNotConflict(t *testing.T) {
+	users := &stubUserEnrollmentRepository{
+		createAlreadyOn: true,
+		createExisting:  model.User{UserID: "user-existing", TenantID: "tenant-a", Username: "rihards@frs.lv"},
+	}
+	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"rihards","issuer":"https://issuer.example","subject":"sub-1"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"alreadyEnrolled":true`) {
+		t.Fatalf("body = %q, want alreadyEnrolled true", body)
+	}
+	if !strings.Contains(body, `"username":"rihards@frs.lv"`) {
+		t.Fatalf("body = %q, want the real existing username, not the requested one", body)
 	}
 }
 

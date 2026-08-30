@@ -173,6 +173,7 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 		return user, nil
 	}
 
+	refreshed := user
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if r.dialect == DialectPostgres {
 			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
@@ -189,14 +190,25 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 			 WHERE tenant_id = ?
 			   AND user_id = ?
 			RETURNING user_id, tenant_id, username, created_at, updated_at
-		`, username, tenant.TenantID, user.UserID).Scan(ctx, &user)
+		`, username, tenant.TenantID, user.UserID).Scan(ctx, &refreshed)
 		return normalizeNoRows(err)
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			// The token's claimed username now collides with a different user
+			// already enrolled under it in this tenant. That is a
+			// display-name refresh failing, not a reason to refuse
+			// authentication for an identity that already resolved — sign the
+			// caller in under the username already on record instead of
+			// surfacing the raw constraint violation as an auth rejection
+			// reason.
+			log.Printf("erun api identity username refresh skipped tenant=%q user=%q requestedUsername=%q reason=%q", tenant.TenantID, user.UserID, username, "username already in use by another user in this tenant")
+			return user, nil
+		}
 		return model.User{}, err
 	}
-	log.Printf("erun api identity refreshed username tenant=%q user=%q username=%q", tenant.TenantID, user.UserID, user.Username)
-	return user, nil
+	log.Printf("erun api identity refreshed username tenant=%q user=%q username=%q", tenant.TenantID, user.UserID, refreshed.Username)
+	return refreshed, nil
 }
 
 // ResolveTenantByIssuer maps a verified token to its tenant. The issuer's org-scoping

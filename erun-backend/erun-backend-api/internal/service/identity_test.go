@@ -37,13 +37,13 @@ type stubIdentityUserCreator struct {
 	createCalls int
 }
 
-func (s *stubIdentityUserCreator) Create(_ context.Context, params repository.CreateUserParams) (model.User, error) {
+func (s *stubIdentityUserCreator) Create(_ context.Context, params repository.CreateUserParams) (model.User, bool, error) {
 	s.createCalls++
 	s.gotParams = params
 	if s.err != nil {
-		return model.User{}, s.err
+		return model.User{}, false, s.err
 	}
-	return s.created, nil
+	return s.created, false, nil
 }
 
 func TestIdentityServiceEnrollHappyPath(t *testing.T) {

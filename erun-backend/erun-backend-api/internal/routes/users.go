@@ -13,7 +13,7 @@ import (
 
 // UserEnrollmentRepository is the persistence dependency for POST/GET /v1/users.
 type UserEnrollmentRepository interface {
-	Create(ctx context.Context, params repository.CreateUserParams) (model.User, error)
+	Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error)
 	List(ctx context.Context, filter repository.UserFilter) ([]model.User, error)
 }
 
@@ -35,6 +35,17 @@ type enrollUserRequest struct {
 	Subject  string   `json:"subject,omitempty"`
 	TenantID string   `json:"tenantId,omitempty"`
 	RoleIDs  []string `json:"roleIds,omitempty"`
+}
+
+// enrollUserResponse is createUser's response body: the enrolled (or
+// already-enrolled) user's model shape plus AlreadyEnrolled, which is true
+// only for the no-op re-enrollment case (see UserRepository.Create's doc) —
+// so a caller can tell "brand new, exactly as requested" apart from
+// "already existed, here is what's actually on file" instead of inferring it
+// from the HTTP status alone.
+type enrollUserResponse struct {
+	model.User
+	AlreadyEnrolled bool `json:"alreadyEnrolled,omitempty"`
 }
 
 func RegisterUserRoutes(register ProtectedRouteRegistrar, users UserEnrollmentRepository) {
@@ -93,7 +104,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		overrideTenantID = targetTenantID
 	}
 
-	created, err := r.users.Create(req.Context(), repository.CreateUserParams{
+	created, alreadyEnrolled, err := r.users.Create(req.Context(), repository.CreateUserParams{
 		Username: username,
 		Issuer:   strings.TrimSpace(body.Issuer),
 		Subject:  strings.TrimSpace(body.Subject),
@@ -101,18 +112,27 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		RoleIDs:  body.RoleIDs,
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrConflict) {
-			writeError(w, http.StatusConflict, "a user with this username already exists in the target tenant")
+		switch {
+		case errors.Is(err, repository.ErrUsernameConflict):
+			writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", "a user with this username already exists in the target tenant")
 			return
-		}
-		if errors.Is(err, repository.ErrNotFound) {
+		case errors.Is(err, repository.ErrNotFound):
 			writeError(w, http.StatusNotFound, "one or more requested roles do not exist in this tenant")
 			return
+		default:
+			writeRepositoryError(w, req, err)
+			return
 		}
-		writeRepositoryError(w, req, err)
-		return
 	}
-	writeJSON(w, http.StatusCreated, created)
+	// Re-enrolling an identity already enrolled in the target tenant is a
+	// no-op success (200, the existing user), not a 201 — see
+	// UserRepository.Create's doc for why this is treated as satisfied
+	// intent rather than a conflict.
+	status := http.StatusCreated
+	if alreadyEnrolled {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, enrollUserResponse{User: created, AlreadyEnrolled: alreadyEnrolled})
 }
 
 func (r UserRoutes) listUsers(w http.ResponseWriter, req *http.Request) {

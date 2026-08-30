@@ -31,7 +31,7 @@ type InviteRequestTenantCreator interface {
 // InviteRequestUserEnroller enrols a user into the tenant ctx's own
 // security.Context names. *repository.UserRepository satisfies it.
 type InviteRequestUserEnroller interface {
-	Create(ctx context.Context, params repository.CreateUserParams) (model.User, error)
+	Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error)
 }
 
 // InviteRequestInviteMinter mints an invite. *repository.InviteRepository satisfies it.
@@ -77,7 +77,7 @@ func (s *InviteRequestService) ApproveJoin(ctx context.Context, request model.In
 	if request.Kind != model.InviteRequestKindJoinTenant {
 		return model.InviteRequest{}, ErrInviteRequestWrongKind
 	}
-	if _, err := s.users.Create(ctx, repository.CreateUserParams{
+	if _, _, err := s.users.Create(ctx, repository.CreateUserParams{
 		Username: enrollmentUsername(request),
 		Issuer:   request.Issuer,
 		Subject:  request.Subject,
@@ -144,7 +144,7 @@ func (s *InviteRequestService) ApproveCreateTenant(ctx context.Context, request 
 		TenantID:   tenant.TenantID,
 		TenantType: string(tenant.Type),
 	})
-	if _, err := s.users.Create(tenantCtx, repository.CreateUserParams{
+	if _, _, err := s.users.Create(tenantCtx, repository.CreateUserParams{
 		Username: enrollmentUsername(request),
 		Issuer:   request.Issuer,
 		Subject:  request.Subject,
