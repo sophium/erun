@@ -223,6 +223,47 @@ func removeInflightMarker(path string) error {
 	return nil
 }
 
+// inflightMarkerFate is the dedup decision for a marker that blocked a claim,
+// expressed once so the mutating and dry-run paths cannot drift apart the way
+// the max-age reclaim arm once did on this path alone.
+type inflightMarkerFate int
+
+const (
+	inflightMarkerFateReclaimDead inflightMarkerFate = iota
+	inflightMarkerFateReclaimAged
+	inflightMarkerFateSkipDuplicate
+	inflightMarkerFateConcurrent
+)
+
+// decideInflightMarkerFate is a pure function of the existing marker, the
+// candidate params hash, and deps.now/deps.isAlive; it holds no side effects
+// so both the mutating reconcile path and the dry-run preview can share it.
+func decideInflightMarkerFate(deps helmDeploySingleFlightDeps, existing deployInflightRecord, paramsHash string) inflightMarkerFate {
+	if !deps.isAlive(existing.PID) {
+		return inflightMarkerFateReclaimDead
+	}
+	if !existing.StartedAt.IsZero() && deps.now().Sub(existing.StartedAt) > helmDeploySingleFlightMaxAge {
+		return inflightMarkerFateReclaimAged
+	}
+	if existing.ParamsHash == paramsHash {
+		return inflightMarkerFateSkipDuplicate
+	}
+	return inflightMarkerFateConcurrent
+}
+
+func concurrentDeployError(deploy HelmDeploySpec, existing deployInflightRecord) *HelmReleaseConcurrentDeployError {
+	return &HelmReleaseConcurrentDeployError{
+		ReleaseName:       deploy.ReleaseName,
+		Namespace:         deploy.Namespace,
+		KubernetesContext: deploy.KubernetesContext,
+		OtherPID:          existing.PID,
+		OtherStartedAt:    existing.StartedAt,
+		OtherTenant:       existing.Tenant,
+		OtherEnvironment:  existing.Environment,
+		OtherVersion:      existing.Version,
+	}
+}
+
 // reconcileExistingInflightMarker decides how to handle the marker that blocked
 // our claim. A true first return means it reclaimed the marker and the caller
 // should retry the exclusive create.
@@ -235,33 +276,24 @@ func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDep
 		}
 		return true, HelmDeploySingleFlightProceed, nil
 	}
-	if !deps.isAlive(existing.PID) {
+	switch decideInflightMarkerFate(deps, existing, paramsHash) {
+	case inflightMarkerFateReclaimDead:
 		ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, prior pid=%d is dead)", releaseKey, existing.PID))
 		if rmErr := removeInflightMarker(path); rmErr != nil {
 			return false, HelmDeploySingleFlightProceed, fmt.Errorf("remove stale in-flight marker: %w", rmErr)
 		}
 		return true, HelmDeploySingleFlightProceed, nil
-	}
-	if !existing.StartedAt.IsZero() && deps.now().Sub(existing.StartedAt) > helmDeploySingleFlightMaxAge {
+	case inflightMarkerFateReclaimAged:
 		ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, marker age %s exceeds max %s)", releaseKey, deps.now().Sub(existing.StartedAt).Round(time.Second), helmDeploySingleFlightMaxAge))
 		if rmErr := removeInflightMarker(path); rmErr != nil {
 			return false, HelmDeploySingleFlightProceed, fmt.Errorf("remove aged-out in-flight marker: %w", rmErr)
 		}
 		return true, HelmDeploySingleFlightProceed, nil
-	}
-	if existing.ParamsHash == paramsHash {
+	case inflightMarkerFateSkipDuplicate:
 		ctx.Trace(fmt.Sprintf("dedup: skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
 		return false, HelmDeploySingleFlightSkipDuplicate, nil
-	}
-	return false, HelmDeploySingleFlightProceed, &HelmReleaseConcurrentDeployError{
-		ReleaseName:       deploy.ReleaseName,
-		Namespace:         deploy.Namespace,
-		KubernetesContext: deploy.KubernetesContext,
-		OtherPID:          existing.PID,
-		OtherStartedAt:    existing.StartedAt,
-		OtherTenant:       existing.Tenant,
-		OtherEnvironment:  existing.Environment,
-		OtherVersion:      existing.Version,
+	default:
+		return false, HelmDeploySingleFlightProceed, concurrentDeployError(deploy, existing)
 	}
 }
 
@@ -277,23 +309,18 @@ func reportHelmDeploySingleFlightDryRun(ctx Context, deploy HelmDeploySpec, deps
 		ctx.Trace("dedup: ready (release=" + releaseKey + ", hash=" + paramsHash + ", existing marker unreadable: " + readErr.Error() + ")")
 		return HelmDeploySingleFlightProceed, nil, nil
 	}
-	if !deps.isAlive(existing.PID) {
+	switch decideInflightMarkerFate(deps, existing, paramsHash) {
+	case inflightMarkerFateReclaimDead:
 		ctx.Trace(fmt.Sprintf("dedup: would reclaim (release=%s, prior pid=%d is dead)", releaseKey, existing.PID))
 		return HelmDeploySingleFlightProceed, nil, nil
-	}
-	if existing.ParamsHash == paramsHash {
+	case inflightMarkerFateReclaimAged:
+		ctx.Trace(fmt.Sprintf("dedup: would reclaim (release=%s, marker age %s exceeds max %s)", releaseKey, deps.now().Sub(existing.StartedAt).Round(time.Second), helmDeploySingleFlightMaxAge))
+		return HelmDeploySingleFlightProceed, nil, nil
+	case inflightMarkerFateSkipDuplicate:
 		ctx.Trace(fmt.Sprintf("dedup: would skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
 		return HelmDeploySingleFlightSkipDuplicate, nil, nil
-	}
-	return HelmDeploySingleFlightProceed, nil, &HelmReleaseConcurrentDeployError{
-		ReleaseName:       deploy.ReleaseName,
-		Namespace:         deploy.Namespace,
-		KubernetesContext: deploy.KubernetesContext,
-		OtherPID:          existing.PID,
-		OtherStartedAt:    existing.StartedAt,
-		OtherTenant:       existing.Tenant,
-		OtherEnvironment:  existing.Environment,
-		OtherVersion:      existing.Version,
+	default:
+		return HelmDeploySingleFlightProceed, nil, concurrentDeployError(deploy, existing)
 	}
 }
 
