@@ -433,11 +433,11 @@ describe('signOut', () => {
     expect(storedToken()).toBeUndefined();
   });
 
-  // erun#1720/erun#1721 interaction: the org-claim scope retry is meant to
-  // bound one sign-in attempt, not survive a sign-out. Without this, a
-  // dedicated/BYO issuer that already consumed its one retry would get no
-  // retry on the next sign-in after sign-out either, and resolveToken would
-  // bounce back to the sign-in screen forever instead of retrying.
+  // The org-claim scope retry is meant to bound one sign-in attempt, not
+  // survive a sign-out. Without this, a dedicated/BYO issuer that already
+  // consumed its one retry would get no retry on the next sign-in after
+  // sign-out either, and resolveToken would bounce back to the sign-in
+  // screen forever instead of retrying.
   it('clears the org-claim scope retry flag so the next sign-in can retry again', async () => {
     sessionStorage.setItem('erun.console.oidcOrgScopeRetried', '1');
     vi.stubGlobal(
