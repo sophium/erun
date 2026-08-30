@@ -85,6 +85,13 @@ export interface TenantConfigView {
   tenant: Tenant;
   environments: Environment[];
   contexts: CloudContext[];
+  // The platform-wide POST /v1/invite-requests admission window (issue
+  // #1682 §9), changed only through PATCH /v1/config/invite-request-rate-limit
+  // — an operations-only write. Every tenant reads it (the console's
+  // rate-limit editor is gated on tenant type, not on this field being
+  // present), since a COMPANY tenant's requests panel still needs to show
+  // the current window even though it cannot change it.
+  inviteRequestRateLimitWindowSeconds: number;
 }
 
 // The lenient parsers below turn untyped JSON into the shapes above without
@@ -102,6 +109,10 @@ export function asString(value: unknown): string {
 
 export function asOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+export function asNumber(value: unknown): number {
+  return typeof value === 'number' ? value : 0;
 }
 
 export function asContextStatus(value: unknown): ContextStatus | undefined {
@@ -181,5 +192,6 @@ export function parseTenantConfigView(body: unknown): TenantConfigView {
     tenant: parseTenant(body.tenant),
     environments: parseList(body.environments, parseEnvironment),
     contexts: parseList(body.contexts, parseCloudContext),
+    inviteRequestRateLimitWindowSeconds: asNumber(body.inviteRequestRateLimitWindowSeconds),
   };
 }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type TenantConfigView, TooltipProvider } from 'erun-kit';
 import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -35,12 +35,14 @@ const OPERATIONS_CONFIG: TenantConfigView = {
   tenant: { tenantId: 'tn-1', name: 'Acme', type: 'OPERATIONS' },
   environments: [],
   contexts: [],
+  inviteRequestRateLimitWindowSeconds: 60,
 };
 
 const COMPANY_CONFIG: TenantConfigView = {
   tenant: { tenantId: 'tn-2', name: 'Beta', type: 'COMPANY' },
   environments: [],
   contexts: [],
+  inviteRequestRateLimitWindowSeconds: 60,
 };
 
 function renderShell(config: TenantConfigView): void {
@@ -118,6 +120,55 @@ describe('AppShell navigation', () => {
 
     const current = nav.getAllByRole('button').filter((el) => el.getAttribute('aria-current'));
     expect(current).toHaveLength(1);
+  });
+});
+
+describe('AppShell nav badge', () => {
+  // The pending count must be visible without opening the Requests panel
+  // (issue #1682 §3's own acceptance criterion) -- this asserts the count
+  // renders on the nav item itself, never requiring a click into the panel.
+  it('shows the pending-request count on the Requests nav item', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = input instanceof URL ? input.href : input;
+        if (url.includes('/v1/invite-requests')) {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                inviteRequestId: 'ir-1',
+                issuer: 'https://idp.example.com',
+                subject: 'sub-1',
+                kind: 'JOIN_TENANT',
+                tenantName: 'beta',
+                status: 'PENDING',
+                createdAt: '2026-06-24T10:00:00Z',
+                updatedAt: '2026-06-24T10:00:00Z',
+              },
+            ]),
+          );
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    renderShell(COMPANY_CONFIG);
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    // The badge only appears once the list query resolves — the button
+    // itself renders immediately with just the "Requests" label, so this
+    // must wait for the count rather than asserting on the first match.
+    await waitFor(() => {
+      const requestsButton = nav.getByRole('button', { name: /Requests/ });
+      expect(requestsButton).toHaveTextContent('1');
+    });
+  });
+
+  it('renders no badge when there are no pending requests', async () => {
+    stubFetch();
+    renderShell(COMPANY_CONFIG);
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    const requestsButton = await nav.findByRole('button', { name: 'Requests' });
+    expect(requestsButton).toHaveTextContent('Requests');
+    expect(requestsButton.querySelector('[aria-label$="pending"]')).toBeNull();
   });
 });
 
