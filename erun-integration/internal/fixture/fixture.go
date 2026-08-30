@@ -967,14 +967,19 @@ func StubWorkspaceSyncSSH(t testing.TB, dir string, spec WorkspaceSyncSSHStubSpe
 	if spec.ArchivePath != "" {
 		archiveBranch = "cat " + shellSingleQuote(filepath.ToSlash(spec.ArchivePath))
 	}
-	// The readiness probe runs a bare `true`; everything not answered here — the
-	// outputs listing in particular — is "nothing there yet", which is exit 1.
+	// The readiness probe runs a bare `true`. The outputs listing's own script
+	// exits 42 when its `cd` fails (erun-common's remoteOutputsDirAbsentExitCode)
+	// -- the sentinel that tells "the outputs dir does not exist yet" apart from
+	// every other listing failure, so "nothing there yet" must answer with that
+	// exact code rather than the bare non-zero exit a real connection failure
+	// would also produce.
 	StubBinaryWithScript(t, dir, "ssh", `case "$*" in
   *' true') : ;;
   *'stat -c'*) `+statBranch+` ;;
   *'git ls-files -coz'*) `+indexBranch+` ;;
   *'git ls-files -dz'*) : ;;
   *'git ls-files -sz'*) : ;;
+  *'find . -type f'*) exit 42 ;;
   *'tar --null'*) `+archiveBranch+` ;;
   *) exit 1 ;;
 esac
