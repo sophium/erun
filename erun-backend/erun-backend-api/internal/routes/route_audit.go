@@ -58,17 +58,17 @@ var InternalAPIRoutes = map[string]bool{
 // admin surface designed, not just a fetch wired up), and the DNS-01 token
 // mint (needs `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
-	// The onboarding request/approve queue's backend half. The desktop
-	// (sidebar status icon, request dialog) and console (operator queue)
-	// surfaces for these six routes are a separate, later change — landing
-	// them together with a real operator entry point is what removes this
-	// entry, not a design decision that they need none.
-	"POST /v1/invite-requests":                             true,
-	"GET /v1/invite-requests/mine":                         true,
-	"GET /v1/invite-requests":                              true,
-	"POST /v1/invite-requests/{invite_request_id}/approve": true,
-	"POST /v1/invite-requests/{invite_request_id}/decline": true,
-	"PATCH /v1/config/invite-request-rate-limit":           true,
+	// GET /v1/invite-requests/mine is the one route of the onboarding
+	// request/approve queue this gate's static scan cannot see: the desktop
+	// does call it (GetMyTenantInviteRequest, read from the tenant
+	// dashboard's own NotEnrolledState and the sidebar enrollment poll), but
+	// nothing in erun-ui/frontend/src references its literal path text the
+	// way the gate's heuristic looks for. The other five routes in this
+	// family gained a real operator entry point (the sidebar status icon,
+	// the request dialog, the tenant dashboard's Requests tab, and the
+	// console's Requests panel) and were removed from this map in the same
+	// change.
+	"GET /v1/invite-requests/mine": true,
 	// Creating an org on the platform's own IdP is what makes a second tenant
 	// possible: an org-scoped issuer resolves tenants by the org claim, so a new
 	// tenant needs an org for its mapping to point at. That makes it plainly
