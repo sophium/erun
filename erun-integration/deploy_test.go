@@ -3203,7 +3203,10 @@ esac
 		// the same params hash, dry-run reports "would skip" and exits 0.
 		// We seed the marker with our own pid (always alive during this
 		// test) and the params hash erun --dry-run will compute on the
-		// first run. The second run sees the live identical marker.
+		// first run. The second run sees the live identical marker. The
+		// marker must also be recent or the max-age reclaim arm would fire
+		// first (the fixture's default StartedAt is fixed, so it ages past
+		// the 15-minute ceiling as real time passes).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -3214,6 +3217,7 @@ esac
 		hash := extractDedupHash(t, first.Combined)
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
 			PID:         os.Getpid(),
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
 			ParamsHash:  hash,
 			Tenant:      "team",
 			Environment: "dev",
@@ -3236,12 +3240,16 @@ esac
 		// A live in-flight deploy with a different params hash should fail
 		// the second invocation with HelmReleaseConcurrentDeployError so two
 		// callers with conflicting intent surface the conflict instead of
-		// stomping on each other's helm release.
+		// stomping on each other's helm release. The marker must also be
+		// recent or the max-age reclaim arm would fire first (the fixture's
+		// default StartedAt is fixed, so it ages past the 15-minute ceiling
+		// as real time passes).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
 			PID:         os.Getpid(),
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
 			ParamsHash:  "0000000000000000",
 			Tenant:      "team",
 			Environment: "dev",
