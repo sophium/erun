@@ -15,6 +15,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
 )
@@ -33,6 +34,11 @@ type StopJobParams struct {
 	Namespace      string
 	Image          string
 	ServiceAccount string
+	// StopID identifies one explicit stop attempt, mirroring DeployID/DeleteID:
+	// it is what lets StopJobName give a fresh stop a fresh Job rather than
+	// watching a prior attempt's terminal one. Empty keeps the bare
+	// tenant+environment name.
+	StopID string
 	// Placement names the cluster this stop targets (#1112); see
 	// DeployJobParams.Placement.
 	Placement PlacementParams
@@ -62,10 +68,15 @@ type DeleteJobParams struct {
 	ExposePlatformNamespace string
 }
 
-// StopJobName is deterministic in its inputs, so a retried stop watches the
-// Job it already created rather than starting a second one.
-func StopJobName(tenant, environment string) string {
-	return lifecycleJobName(stopJobNamePrefix, tenant, environment, "")
+// StopJobName appends a per-attempt suffix, mirroring DeployJobName/
+// DeleteJobName: a name keyed only on tenant+environment would make a fresh
+// stop watch a prior attempt's already-terminal Job and replay its cached
+// outcome instead of actually running again — the bug this exists to prevent.
+// stopID empty keeps the bare tenant+environment name. A stop still in flight
+// is found and re-watched by Launcher.RunStop before a new attempt is ever
+// built, so this alone does not decide whether a fresh Job gets created.
+func StopJobName(tenant, environment, stopID string) string {
+	return lifecycleJobName(stopJobNamePrefix, tenant, environment, stopID)
 }
 
 // DeleteJobName appends a per-attempt suffix, mirroring DeployJobName: a
@@ -131,7 +142,7 @@ func buildLifecycleCommand(tenant, environment string, placement PlacementParams
 func buildStopJob(params StopJobParams) *batchv1.Job {
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      StopJobName(params.Tenant, params.Environment),
+			Name:      StopJobName(params.Tenant, params.Environment, params.StopID),
 			Namespace: params.Namespace,
 			Labels:    lifecycleJobLabels(params.Tenant, params.Environment),
 		},
@@ -240,12 +251,52 @@ func NamespaceDeleteFailureFromOutput(output string) string {
 
 // RunStop creates the stop Job and blocks until it reaches a terminal state.
 // When params.Placement targets a remote cluster (#1112), it first upserts
-// the Secret the Job's container reads its admin token from.
+// the Secret the Job's container reads its admin token from. Unlike deploy
+// and delete, an explicit stop carries no durable workflow and no DB-level
+// claim guarding it, so the in-flight dedup a resumed workflow gets for free
+// (reusing its own attempt id) has to be reconstructed here: before minting a
+// fresh attempt, look for an existing stop Job for this tenant+environment
+// that has not yet reached a terminal state, and watch that one instead of
+// starting a second. Only once none is found (none exists, or every one
+// found is already terminal) does a fresh StopID-keyed Job get created,
+// which is what stops a lingering terminal Job's cached outcome from being
+// replayed for a new request (the defect this whole path exists to fix).
 func (l *Launcher) RunStop(ctx context.Context, params StopJobParams) (Result, error) {
 	if err := ensurePlacementSecret(ctx, l.kube, params.Namespace, params.Placement); err != nil {
 		return Result{}, fmt.Errorf("provision placement credential: %w", err)
 	}
+	activeName, err := l.activeStopJobName(ctx, params)
+	if err != nil {
+		return Result{}, err
+	}
+	if activeName != "" {
+		return l.stopRunner.Watch(ctx, params.Namespace, activeName)
+	}
 	return l.stopRunner.Run(ctx, buildStopJob(params))
+}
+
+// activeStopJobName looks for a not-yet-terminal stop Job for params'
+// tenant+environment, returning its name, or "" when none is found. It lists
+// by the same tenant+environment labels every lifecycle Job carries (deploy,
+// stop, and delete Jobs all share them) and filters to stopJobNamePrefix
+// client-side, since a shared label set alone cannot tell a stop Job apart
+// from a deploy or delete Job for the same environment.
+func (l *Launcher) activeStopJobName(ctx context.Context, params StopJobParams) (string, error) {
+	selector := labels.SelectorFromSet(lifecycleJobLabels(params.Tenant, params.Environment)).String()
+	jobs, err := l.kube.BatchV1().Jobs(params.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return "", fmt.Errorf("list stop jobs: %w", err)
+	}
+	for i := range jobs.Items {
+		job := &jobs.Items[i]
+		if !strings.HasPrefix(job.Name, stopJobNamePrefix) {
+			continue
+		}
+		if !jobexec.IsTerminal(job) {
+			return job.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // RunDelete creates the delete Job and blocks until it reaches a terminal

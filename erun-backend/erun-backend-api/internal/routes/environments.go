@@ -157,6 +157,7 @@ func (r EnvironmentRoutes) stopEnvironment(w http.ResponseWriter, req *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to resolve environment placement")
 		return
 	}
+	input.StopID = uuid.NewString()
 	if err := r.lifecycle.Stop(ctx, input); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to stop environment: "+err.Error())
 		return

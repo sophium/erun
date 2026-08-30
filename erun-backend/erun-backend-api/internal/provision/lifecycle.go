@@ -55,10 +55,16 @@ type EnvLifecycleInput struct {
 	PlacementKubernetesContext string
 	PlacementServerURL         string
 	// DeleteID identifies one explicit delete attempt (see
-	// EnvDeleteInput.DeleteID) and is threaded only into the delete Job's
-	// name, never into stop's — a stop request carries no attempt id and
-	// stays keyed on tenant+environment.
+	// EnvDeleteInput.DeleteID) and is threaded into the delete Job's name.
 	DeleteID string
+	// StopID identifies one explicit stop attempt, mirroring DeleteID: it is
+	// threaded into the stop Job's name so a fresh stop gets a fresh Job
+	// rather than replaying a prior attempt's terminal outcome. Unlike
+	// delete, stop has no durable workflow of its own to carry it across a
+	// resume, so the caller (routes.EnvironmentRoutes) mints a fresh one on
+	// every explicit stop request; deployexec.Launcher.RunStop is what still
+	// re-watches a genuinely in-flight stop rather than starting a second.
+	StopID string
 }
 
 // EnvLifecycle runs a hosted env's stop/delete Job to a terminal outcome and
@@ -140,6 +146,7 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 		Namespace:      l.config.PlatformNamespace,
 		Image:          l.image(ctx, input.Tenant, input.RunningVersion),
 		ServiceAccount: l.config.DeployerServiceAccount,
+		StopID:         input.StopID,
 		Placement:      placement,
 	})
 	if err != nil {
