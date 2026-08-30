@@ -2396,18 +2396,64 @@ esac
 		golden.Equal(t, "deploy/saved_deploy_components_drive_selection_without_flag", normalize.Apply(result.Combined))
 	})
 
-	t.Run("saved_deploy_components_shadowing_plan_reports_what_was_lost", func(t *testing.T) {
-		// When a saved deploy.components set wins over a repo
-		// k8s.deployments plan that names more, the divergence from the reviewed
-		// plan must be visible at normal (non -vv) verbosity, naming exactly what
-		// the plan asked for beyond the saved set.
+	t.Run("saved_deploy_components_shadowing_plan_refuses_to_deploy", func(t *testing.T) {
+		// When a saved deploy.components set wins over a repo k8s.deployments
+		// plan that names more, a plain deploy must not silently roll out the
+		// stale subset forever (erun#1712: a component added to the plan after
+		// the saved selection was written sat a whole release behind because
+		// nothing besides a trace line ever said so). It refuses instead,
+		// naming exactly what the plan asked for beyond the saved set and both
+		// ways out — adopt it via `erun init --components`, or return to the
+		// plan by clearing the saved selection.
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		golden.Equal(t, "deploy/saved_deploy_components_shadowing_plan_reports_what_was_lost", normalize.Apply(result.Combined))
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a saved selection shadowing the repo plan, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("expected the refusal to stop before any helm invocation, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/saved_deploy_components_shadowing_plan_refuses_to_deploy", normalize.Apply(result.Combined))
+	})
+
+	t.Run("explicit_components_still_narrows_and_does_not_resurrect_shadowed_plan_extras", func(t *testing.T) {
+		// --components is its own, higher-precedence selection tier, resolved
+		// before a saved selection or the repo plan ever applies. This is the
+		// same shadowed setup as saved_deploy_components_shadowing_plan_refuses_to_deploy
+		// (saved omits what the plan names), but this run passes --components
+		// explicitly, naming exactly the saved subset. Two properties must both
+		// hold: the flag bypasses the saved-vs-plan guard entirely (an operator
+		// naming a subset explicitly is narrowing on purpose for that one run,
+		// and that must keep working exactly as before), and the deploy must
+		// install only what was named — the fix must never react to a shadowed
+		// saved selection by widening what actually gets installed, which would
+		// resurrect a component an operator could have deliberately narrowed
+		// away, the opposite failure from the one erun#1712 reports.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for an explicit --components run bypassing the saved-selection guard, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if got := strings.Count(result.Combined, "helm upgrade --install"); got != 1 {
+			t.Fatalf("expected exactly one helm invocation (the explicitly named component only), got %d:\n%s", got, result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun-backend-db") || strings.Contains(result.Combined, "erun-backend-api") {
+			t.Fatalf("expected the plan-only components to never appear in the deploy, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/explicit_components_still_narrows_and_does_not_resurrect_shadowed_plan_extras", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {
