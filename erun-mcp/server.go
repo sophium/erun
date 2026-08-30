@@ -603,7 +603,8 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, unexposeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "pin",
-		Description: "Re-pin every erun version reference for this environment in one motion: the Terraform module ?ref, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun chart dependencies, the build-env image tag, and the environment's own runtime version. " +
+		Description: "Re-pin every erun version reference for tenant/environment (defaulting to the MCP runtime context) in one motion: the Terraform module ?ref, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun chart dependencies, the build-env image tag, and the environment's own runtime version. " +
+			"Rewrites projectRoot (or, when unset, the runtime repo path); refuses rather than scan a wider directory when neither resolves, since a caller here has no working directory to fall back to the way a shell user does. " +
 			"They only work when they agree, and nothing else keeps them in step. Idempotent and a no-op once aligned. Refuses a version that is not published. Set revert to go back to the version recorded before the last re-pin. " +
 			"Set preview to return the full plan — every site, old and new — without writing. Edits the source of truth only: realizing the version (terraform apply, deploy) stays a separate explicit step.",
 	}, pinTool(runtime))

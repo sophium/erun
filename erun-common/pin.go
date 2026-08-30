@@ -132,8 +132,18 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	if env.ResolvedType() == EnvironmentTypeHost {
 		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
 	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
 	projectRoot = strings.TrimSpace(projectRoot)
 	target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "v"))
+	// An unresolved tenant/environment must refuse here rather than flow into a
+	// plan: the runtime-version site below would otherwise report a real-looking
+	// row (current "", detail "/") for an environment nobody actually named,
+	// which a caller could mistake for an honest reading rather than a resolution
+	// failure.
+	if tenant == "" || environment == "" {
+		return PinPlan{}, fmt.Errorf("pin: tenant and environment must both be resolved before a plan can be built (got tenant=%q environment=%q)", tenant, environment)
+	}
 	if projectRoot == "" {
 		return PinPlan{}, fmt.Errorf("a project root is required to resolve the pin sites")
 	}
