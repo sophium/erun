@@ -821,6 +821,116 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/an_agent_job_that_ends_with_an_uncommitted_working_tree_is_checkpointed_pushed_and_not_reported_as_success", normalize.Apply(status.Combined+await.Combined))
 	})
 
+	t.Run("an_agent_jobs_clean_pushed_clone_under_the_work_root_is_reclaimed_after_it_finishes", func(t *testing.T) {
+		// The reproduction this closes: every agent task clones the repo into
+		// /home/erun/work/<name> and nothing ever reclaims it, so the work
+		// directory grows without bound (erun#1710). A clone under the work
+		// root whose tree is clean and fully pushed has nothing left to lose,
+		// so the supervisor removes it the moment the job that owned it exits
+		// -- proven here against a real git working tree and a real remote,
+		// not just the job record's own claim.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+
+		lane := filepath.Join(setup.Home, "work", "erun-w1")
+		fixture.SeedGitRepo(t, lane)
+		fixture.RunGit(t, lane, "checkout", "-q", "-b", "feature/lane")
+		remote := filepath.Join(setup.Home, "lane-origin.git")
+		fixture.RunGit(t, setup.Home, "init", "-q", "--bare", remote)
+		fixture.RunGit(t, lane, "remote", "add", "origin", remote)
+		fixture.RunGit(t, lane, "push", "-q", "-u", "origin", "feature/lane")
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude", "exit 0\n")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "lane"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "lane", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected a clean, fully-pushed job to report success, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		// The clone itself is gone from disk -- not asserted only through the
+		// job record.
+		if _, err := os.Stat(lane); !os.IsNotExist(err) {
+			t.Fatalf("clone dir still exists after being reported reclaimed: %v", err)
+		}
+		golden.Equal(t, "job/an_agent_jobs_clean_pushed_clone_under_the_work_root_is_reclaimed_after_it_finishes", normalize.Apply(status.Combined+await.Combined))
+	})
+
+	t.Run("an_agent_jobs_dirty_detached_clone_is_kept_and_the_reason_is_named", func(t *testing.T) {
+		// The obvious reclaim is destructive: a detached HEAD with
+		// uncommitted work is exactly the shape the reported environment's
+		// stale clones had (erun#1710). The supervisor must refuse to remove
+		// it and say why, rather than leaving an operator to rediscover by
+		// hand that a clone still holds real work.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+
+		lane := filepath.Join(setup.Home, "work", "erun-w2")
+		fixture.SeedGitRepo(t, lane)
+		remote := filepath.Join(setup.Home, "lane-origin.git")
+		fixture.RunGit(t, setup.Home, "init", "-q", "--bare", remote)
+		fixture.RunGit(t, lane, "remote", "add", "origin", remote)
+		fixture.RunGit(t, lane, "push", "-q", "origin", "main")
+		fixture.RunGit(t, lane, "checkout", "-q", "--detach", "HEAD")
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "claude", "printf 'lane work\\n' > uncommitted.txt\nexit 0\n")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "lane",
+			"--dir", lane, "--agent", "claude", "--", "do the lane's work"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "lane"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "lane", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode == 0 {
+			t.Fatalf("expected a dirty-worktree job to report a failure outcome, got 0:\n%s", await.Combined)
+		}
+		if _, err := os.Stat(lane); err != nil {
+			t.Fatalf("clone dir was removed even though it should have been kept: %v", err)
+		}
+		golden.Equal(t, "job/an_agent_jobs_dirty_detached_clone_is_kept_and_the_reason_is_named", normalize.Apply(status.Combined+await.Combined))
+	})
+
 	t.Run("a_job_started_on_a_different_pod_reads_back_as_pod_replaced_not_a_guess", func(t *testing.T) {
 		// The supervisor stamps the pod's hostname at start, so a record
 		// read back from a different hostname is definitive proof of pod

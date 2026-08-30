@@ -435,7 +435,23 @@ func jobExitedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
 	}
-	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobCloneSuffix surfaces what happened to an agent job's own working
+// directory now that it has finished: reclaimed once nothing would be lost by
+// deleting it, or kept with the exact reason an operator would otherwise have
+// to work out by hand from git state. Silent either way, a vanished directory
+// and an accumulating one both read as the product doing nothing. See
+// work_clone_reclaim.go in erun-common.
+func jobCloneSuffix(job common.EnvironmentJob) string {
+	if job.CloneReclaimed {
+		return ", clone reclaimed"
+	}
+	if strings.TrimSpace(job.CloneKeptReason) != "" {
+		return ", clone kept: " + job.CloneKeptReason
+	}
+	return ""
 }
 
 // jobWorktreeSuffix surfaces a dirty working tree on any terminal line, so a
