@@ -231,13 +231,25 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselined(t 
 	}
 }
 
+// withAnonymousPullabilityBaseline overrides the package-level baseline for
+// the duration of a test, restoring the original afterward. The real baseline
+// is expected to be empty most of the time (erun-common/AGENTS.md's
+// dependency-injection-over-globals preference doesn't apply cleanly to a
+// shrink-only map that production code also reads by name), so tests that
+// need a baselined entry inject their own fixture name instead of depending
+// on whatever the real map currently holds.
+func withAnonymousPullabilityBaseline(t *testing.T, baseline map[string]bool) {
+	t.Helper()
+	original := anonymousPullabilityBaseline
+	anonymousPullabilityBaseline = baseline
+	t.Cleanup(func() { anonymousPullabilityBaseline = original })
+}
+
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *testing.T) {
+	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
-	// erun-dns01-webhook is the real, current anonymousPullabilityBaseline
-	// entry, so this exercises the baseline as it stands today, not a
-	// fixture-only name.
-	writeModuleFixture(t, root, "erun-dns01-webhook")
-	execution := fakeExecutionForImage("erun-dns01-webhook", "ghcr.io/sophium/erun-dns01-webhook:1.0.217", "1.0.217")
+	writeModuleFixture(t, root, "erun-baselined-webhook")
+	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.217", "1.0.217")
 	var logBuf strings.Builder
 	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
 
@@ -247,6 +259,31 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *t
 	}
 	if !strings.Contains(logBuf.String(), "Not anonymously pullable (baselined") {
 		t.Fatalf("expected the baselined gap to be reported, got log:\n%s", logBuf.String())
+	}
+}
+
+// This is the property erun#1587 found missing: a baselined image is a
+// record that the package is *currently* private, not a promise it will stay
+// that way. Once it probes as anonymously pullable, the entry is a lie that
+// would otherwise let this check silently no-op forever, so the release must
+// fail and name the stale entry to remove.
+func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNowPullable(t *testing.T) {
+	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
+	root := t.TempDir()
+	writeModuleFixture(t, root, "erun-baselined-webhook")
+	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.221", "1.0.221")
+	ctx := Context{Logger: NewLogger(0)}
+
+	probe := func(context.Context, *http.Client, string, string) (bool, error) { return true, nil }
+	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
+	if err == nil {
+		t.Fatal("expected an error: a baselined image that now probes as pullable means the baseline entry is stale")
+	}
+	if !strings.Contains(err.Error(), "erun-baselined-webhook") {
+		t.Fatalf("error should name the stale entry, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "anonymousPullabilityBaseline") {
+		t.Fatalf("error should point at anonymousPullabilityBaseline, got: %v", err)
 	}
 }
 
@@ -262,13 +299,14 @@ func realProbeAt(server *httptest.Server) anonymousPullProbeFunc {
 }
 
 // This is the 1.0.219 regression itself: ghcr refuses the anonymous token
-// request for the known-private erun-dns01-webhook package with 401. That
-// refusal must be reported and the release must proceed, because the
-// baseline already records this image as known not anonymously pullable.
+// request for a known-private package with 401. That refusal must be
+// reported and the release must proceed, because the baseline already
+// records this image as known not anonymously pullable.
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedTokenRequestRefused(t *testing.T) {
+	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
-	writeModuleFixture(t, root, "erun-dns01-webhook")
-	execution := fakeExecutionForImage("erun-dns01-webhook", "ghcr.io/sophium/erun-dns01-webhook:1.0.219", "1.0.219")
+	writeModuleFixture(t, root, "erun-baselined-webhook")
+	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.219", "1.0.219")
 	var logBuf strings.Builder
 	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
 
@@ -343,9 +381,10 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedPro
 // the image's status is already recorded as known-not-anonymously-pullable --
 // so it must not fail the release either.
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndProbeUnreachable(t *testing.T) {
+	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
-	writeModuleFixture(t, root, "erun-dns01-webhook")
-	execution := fakeExecutionForImage("erun-dns01-webhook", "ghcr.io/sophium/erun-dns01-webhook:1.0.219", "1.0.219")
+	writeModuleFixture(t, root, "erun-baselined-webhook")
+	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.219", "1.0.219")
 	var logBuf strings.Builder
 	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
 
