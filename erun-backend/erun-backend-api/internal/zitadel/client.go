@@ -134,27 +134,9 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 }
 
 func (c *Client) callWithHeaders(ctx context.Context, method string, path string, body any, out any, headers map[string]string) error {
-	var reader io.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encode zitadel request %s %s: %w", method, path, err)
-		}
-		reader = bytes.NewReader(encoded)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	req, err := c.newRequest(ctx, method, path, body, headers)
 	if err != nil {
-		return fmt.Errorf("build zitadel request %s %s: %w", method, path, err)
-	}
-	// Zitadel resolves which instance a Management API call targets from the
-	// Host header, not from the address the call is actually addressed to
-	// (see erun-zitadel chart header and oidc-bootstrap.sh); req.Host is what
-	// net/http actually sends as the wire Host, a plain header set is ignored.
-	req.Host = c.externalDomain
-	req.Header.Set("Authorization", "Bearer "+c.pat)
-	req.Header.Set("Content-Type", "application/json")
-	for name, value := range headers {
-		req.Header.Set(name, value)
+		return err
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -175,6 +157,35 @@ func (c *Client) callWithHeaders(ctx context.Context, method string, path string
 		return fmt.Errorf("decode zitadel response %s %s: %w", method, path, err)
 	}
 	return nil
+}
+
+// newRequest encodes the body and builds the authenticated request. Split out
+// of callWithHeaders so that function stays under the complexity threshold;
+// the sequence is unchanged.
+func (c *Client) newRequest(ctx context.Context, method string, path string, body any, headers map[string]string) (*http.Request, error) {
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("encode zitadel request %s %s: %w", method, path, err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return nil, fmt.Errorf("build zitadel request %s %s: %w", method, path, err)
+	}
+	// Zitadel resolves which instance a Management API call targets from the
+	// Host header, not from the address the call is actually addressed to
+	// (see erun-zitadel chart header and oidc-bootstrap.sh); req.Host is what
+	// net/http actually sends as the wire Host, a plain header set is ignored.
+	req.Host = c.externalDomain
+	req.Header.Set("Authorization", "Bearer "+c.pat)
+	req.Header.Set("Content-Type", "application/json")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	return req, nil
 }
 
 func truncate(body []byte, limit int) string {
