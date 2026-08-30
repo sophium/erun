@@ -112,7 +112,28 @@ func (e *APIError) NotFound() bool {
 
 const errorBodyTruncateLimit = 500
 
+// callInOrg is call, addressed at one organization instead of the
+// credential's own. Zitadel scopes a Management API call by the
+// x-zitadel-orgid header, so the same org-owner credential can act in an org
+// it did not create — which is what lets a tenant's first user be created in
+// the org that tenant resolves by. An empty orgID is exactly call.
+func (c *Client) callInOrg(ctx context.Context, orgID string, method string, path string, body any, out any) error {
+	return c.callWithHeaders(ctx, method, path, body, out, orgHeaders(orgID))
+}
+
+func orgHeaders(orgID string) map[string]string {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return nil
+	}
+	return map[string]string{"x-zitadel-orgid": orgID}
+}
+
 func (c *Client) call(ctx context.Context, method string, path string, body any, out any) error {
+	return c.callWithHeaders(ctx, method, path, body, out, nil)
+}
+
+func (c *Client) callWithHeaders(ctx context.Context, method string, path string, body any, out any, headers map[string]string) error {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -132,6 +153,9 @@ func (c *Client) call(ctx context.Context, method string, path string, body any,
 	req.Host = c.externalDomain
 	req.Header.Set("Authorization", "Bearer "+c.pat)
 	req.Header.Set("Content-Type", "application/json")
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("call zitadel management api %s %s: %w", method, path, err)
@@ -247,6 +271,9 @@ type CreateHumanUserParams struct {
 	FirstName       string
 	LastName        string
 	InitialPassword string
+	// OrgID creates the user in that organization rather than the
+	// credential's own. Empty keeps today's behaviour.
+	OrgID string
 }
 
 // CreateHumanUser creates a new human user in Zitadel. See
@@ -284,7 +311,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 	var resp struct {
 		UserID string `json:"userId"`
 	}
-	if err := c.call(ctx, http.MethodPost, "/management/v1/users/human", body, &resp); err != nil {
+	if err := c.callInOrg(ctx, params.OrgID, http.MethodPost, "/management/v1/users/human", body, &resp); err != nil {
 		return User{}, err
 	}
 	state := "USER_STATE_INITIAL"

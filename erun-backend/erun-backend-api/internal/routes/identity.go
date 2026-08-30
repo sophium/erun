@@ -169,6 +169,12 @@ type enrollIdentityUserRequest struct {
 	Email     string `json:"email"`
 	FirstName string `json:"firstName,omitempty"`
 	LastName  string `json:"lastName,omitempty"`
+	// OrgID enrolls into another organization rather than the platform's own
+	// -- the identity boundary another tenant resolves by, and the only way a
+	// newly created tenant can receive its first user. No erun user row is
+	// written in that case; the target tenant's own first-user bootstrap
+	// enrols them, with full access, on their first sign-in.
+	OrgID string `json:"orgId"`
 }
 
 // enrollIdentityUserResponse always carries IdPUser once the IdP half
@@ -232,6 +238,7 @@ func (r IdentityRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		FirstName: strings.TrimSpace(body.FirstName),
 		LastName:  strings.TrimSpace(body.LastName),
 		Issuer:    securityContext.ExternalIssuer,
+		OrgID:     strings.TrimSpace(body.OrgID),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrIdentityMappingFailed) {
