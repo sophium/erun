@@ -156,6 +156,107 @@ func TestUsage(t *testing.T) {
 			t.Fatalf("expected a warnings field in the JSON output, got:\n%s", result.Combined)
 		}
 	})
+
+	// real_run_unreadable_peak_renders_unavailable_not_zero: an unreadable
+	// memory.peak (an older cgroup v2 kernel, or cgroup v1) must render as
+	// unavailable, not as a measured "peak 0B" -- the reassuring wrong answer
+	// for the least known state.
+	t.Run("real_run_unreadable_peak_renders_unavailable_not_zero", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=0",
+			"cpu_usage_after=0",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "peak 0B") {
+			t.Fatalf("an unreadable peak must never render as a measured 0B, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_unreadable_peak_renders_unavailable_not_zero", normalize.Apply(result.Combined))
+	})
+
+	// real_run_unreadable_peak_json_omits_peak_fields is the JSON-mode sibling
+	// of the scenario above: the wire shape must let a consumer tell "peak not
+	// readable here" from "peak is zero" (peakObserved's presence), and the
+	// close-to-OOM warning must not compute a percentage from a reading it
+	// never took, even though current usage alone is nowhere near either
+	// threshold in this fixture.
+	t.Run("real_run_unreadable_peak_json_omits_peak_fields", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=0",
+			"cpu_usage_after=0",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "peakBytes") || strings.Contains(result.Combined, "peakObserved") {
+			t.Fatalf("an unreadable peak must omit both peakBytes and peakObserved, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "memory.peak reached") {
+			t.Fatalf("an unreadable peak must not warn from a percentage it never computed, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_unreadable_peak_json_omits_peak_fields", normalize.Apply(result.Combined))
+	})
+
+	// real_run_genuine_zero_peak_renders_unchanged is the regression guard for
+	// the sibling of the two scenarios above: a memory.peak that was actually
+	// read as zero must keep rendering exactly as before this fix, since a
+	// real zero is not the unknown state the two scenarios above cover.
+	t.Run("real_run_genuine_zero_peak_renders_unchanged", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=0",
+			"memory_max=2147483648",
+			"memory_peak=0",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=0",
+			"cpu_usage_after=0",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "peak 0B") {
+			t.Fatalf("a genuinely-zero, observed peak must still render as peak 0B, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_genuine_zero_peak_renders_unchanged", normalize.Apply(result.Combined))
+	})
 }
 
 // stubUsageKubectlExec stubs `kubectl exec` to answer the usage reading
