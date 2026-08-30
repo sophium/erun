@@ -115,7 +115,7 @@ func RegisterContextRoutes(register ProtectedRouteRegistrar, contexts ContextRep
 func (r ContextRoutes) listContexts(w http.ResponseWriter, req *http.Request) {
 	contexts, err := r.contexts.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, contexts)
@@ -124,7 +124,7 @@ func (r ContextRoutes) listContexts(w http.ResponseWriter, req *http.Request) {
 func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
 	cloudContext, err := r.contexts.Get(req.Context(), req.PathValue("context_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cloudContext)
@@ -162,7 +162,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		MaxEnvironments:    input.maxEnvironments,
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
@@ -176,7 +176,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if err := r.provisioner.Start(provision.ProvisionInput{
@@ -191,7 +191,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		DiskType:           input.diskType,
 		DiskSizeGB:         input.diskSizeGB,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+		writeInternalError(w, req, "failed to start provisioning", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, createContextResponse{Context: &created, Plan: plan})

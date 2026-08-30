@@ -60,7 +60,7 @@ func (r ReleaseRoutes) createRelease(w http.ResponseWriter, req *http.Request) {
 		CommitID:     strings.TrimSpace(body.CommitID),
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	if result.Created {
@@ -87,7 +87,7 @@ func (r ReleaseRoutes) listReleases(w http.ResponseWriter, req *http.Request) {
 		Status:       model.ReleaseStatus(query.Get("status")),
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, releases)
@@ -98,7 +98,7 @@ func (r ReleaseRoutes) listReleases(w http.ResponseWriter, req *http.Request) {
 func (r ReleaseRoutes) listReviewReleases(w http.ResponseWriter, req *http.Request) {
 	releases, err := r.releases.List(req.Context(), apirepository.ReleaseFilter{ReviewID: req.PathValue("review_id")})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, releases)
@@ -107,7 +107,7 @@ func (r ReleaseRoutes) listReviewReleases(w http.ResponseWriter, req *http.Reque
 func (r ReleaseRoutes) getRelease(w http.ResponseWriter, req *http.Request) {
 	release, err := r.releases.Get(req.Context(), req.PathValue("release_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, release)

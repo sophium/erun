@@ -34,7 +34,7 @@ func RegisterBuildRoutes(register ProtectedRouteRegistrar, builds BuildRepositor
 func (r BuildRoutes) listBuilds(w http.ResponseWriter, req *http.Request) {
 	builds, err := r.builds.List(req.Context(), apirepository.BuildFilter{ReviewID: req.PathValue("review_id")})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, builds)
@@ -59,7 +59,7 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 	}
 	build, err := r.service.Create(req.Context(), build)
 	if err != nil {
-		writeBuildError(w, err)
+		writeBuildError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, build)
@@ -68,7 +68,7 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 // writeBuildError gives builds.md's documented business codes their exact
 // machine code; every other failure falls through to the generic
 // status-derived code.
-func writeBuildError(w http.ResponseWriter, err error) {
+func writeBuildError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidCommitID *service.InvalidCommitIDError
 	if errors.As(err, &invalidCommitID) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_COMMIT_ID", invalidCommitID.Error())
@@ -84,13 +84,13 @@ func writeBuildError(w http.ResponseWriter, err error) {
 		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", missingFailureDetail.Error(), map[string]any{"field": "failureDetail"})
 		return
 	}
-	writeRepositoryError(w, err)
+	writeRepositoryError(w, req, err)
 }
 
 func (r BuildRoutes) getBuild(w http.ResponseWriter, req *http.Request) {
 	build, err := r.builds.Get(req.Context(), req.PathValue("build_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, build)

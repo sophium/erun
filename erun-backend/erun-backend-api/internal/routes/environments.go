@@ -145,7 +145,7 @@ func (r EnvironmentRoutes) stopEnvironment(w http.ResponseWriter, req *http.Requ
 	ctx := req.Context()
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	if environment.Type != model.EnvironmentTypeRuntime {
@@ -154,7 +154,7 @@ func (r EnvironmentRoutes) stopEnvironment(w http.ResponseWriter, req *http.Requ
 	}
 	input, err := r.lifecycleInput(ctx, environment)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve environment placement")
+		writeInternalError(w, req, "failed to resolve environment placement", err)
 		return
 	}
 	input.StopID = uuid.NewString()
@@ -187,7 +187,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 	ctx := req.Context()
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	// Claiming before starting the workflow is what keeps a double-submit
@@ -196,7 +196,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 	// to notice and wait it out by hand.
 	claimed, err := r.environments.ClaimDelete(ctx, environment.EnvironmentID, deleteClaimStaleAfter)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	if !claimed {
@@ -281,6 +281,7 @@ func deleteClaimRefusal(status model.EnvironmentStatus) string {
 // strand the environment there with no workflow run left to move it out.
 func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
 	_ = r.environments.MarkDeleteBlocked(ctx, environmentID, err.Error())
+	logServerErrorForRoute(ctx, "DELETE /v1/environments/{environment_id}", err)
 	writeError(w, http.StatusInternalServerError, "failed to start delete")
 }
 
@@ -350,7 +351,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	ctx := req.Context()
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	version, err := resolveDeployVersion(req, environment)
@@ -369,14 +370,14 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 			writeError(w, http.StatusConflict, exceeded.Error())
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	// Claiming before starting the workflow is what keeps a double-submit from
 	// running two rollouts into the same release.
 	claimed, err := r.environments.ClaimDeploy(ctx, environment.EnvironmentID, deployClaimStaleAfter)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	if !claimed {
@@ -543,7 +544,7 @@ func (r EnvironmentRoutes) validatePlacementCapacity(ctx context.Context, cloudC
 // candidate having room (an explicit context at capacity, or the whole
 // auto-select inventory exhausted) is a 409, matching the existing
 // quota-exceeded shape; anything else is a repository-layer failure.
-func writePlacementError(w http.ResponseWriter, err error) {
+func writePlacementError(w http.ResponseWriter, req *http.Request, err error) {
 	var capacityErr *placementCapacityError
 	switch {
 	case errors.As(err, &capacityErr):
@@ -551,7 +552,7 @@ func writePlacementError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errPlacementContextNotFound), errors.Is(err, errCrossClusterPlacementUnsupported):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 	}
 }
 
@@ -613,7 +614,7 @@ func resolveDeployVersion(req *http.Request, environment model.Environment) (str
 func (r EnvironmentRoutes) listEnvironments(w http.ResponseWriter, req *http.Request) {
 	environments, err := r.environments.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, environments)
@@ -622,7 +623,7 @@ func (r EnvironmentRoutes) listEnvironments(w http.ResponseWriter, req *http.Req
 func (r EnvironmentRoutes) getEnvironment(w http.ResponseWriter, req *http.Request) {
 	environment, err := r.environments.Get(req.Context(), req.PathValue("environment_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, environment)
@@ -762,14 +763,14 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 	// what the caller sent — is what gets persisted and deployed.
 	placement, err := r.resolvePlacement(req.Context(), environment)
 	if err != nil {
-		writePlacementError(w, err)
+		writePlacementError(w, req, err)
 		return
 	}
 	environment.ContextID = placement.ContextID
 
 	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	if preview {
@@ -787,7 +788,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		}
 		runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, req, err)
 			return
 		}
 		if err := validateAggregateResourceBudget(runtimeCount+1, quota); err != nil {
@@ -807,7 +808,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment, placement resolvedPlacement) {
 	created, err := r.environments.Create(req.Context(), environment)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
@@ -821,7 +822,7 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 		return
 	}
 	if err := r.startProvisioning(req.Context(), created, placement); err != nil {
-		writeStartProvisioningError(w, err)
+		writeStartProvisioningError(w, req.Context(), err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, created)
@@ -832,7 +833,8 @@ func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *
 // already left it (registered, not provisioning) — nothing was attempted, so
 // nothing needs unwinding. A missing tenant runtime image is no longer this
 // path: it now selects the canonical-image bootstrap instead of failing here.
-func writeStartProvisioningError(w http.ResponseWriter, _ error) {
+func writeStartProvisioningError(w http.ResponseWriter, ctx context.Context, err error) {
+	logServerErrorForRoute(ctx, "POST /v1/environments", err)
 	writeError(w, http.StatusInternalServerError, "failed to start provisioning")
 }
 
@@ -842,6 +844,7 @@ func writeStartProvisioningError(w http.ResponseWriter, _ error) {
 // environment there with no workflow run left to move it out.
 func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
 	_ = r.environments.MarkDeployFailed(ctx, environmentID, err.Error())
+	logServerErrorForRoute(ctx, "POST /v1/environments/{environment_id}/deploy", err)
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
 
@@ -855,12 +858,12 @@ func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx cont
 func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota) {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	plan := provisionPlanInput{

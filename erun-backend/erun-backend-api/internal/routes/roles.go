@@ -48,7 +48,7 @@ type createRoleRequest struct {
 func (routes RoleRoutes) listRoles(w http.ResponseWriter, req *http.Request) {
 	roles, err := routes.roles.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, roles)
@@ -89,7 +89,7 @@ func (routes RoleRoutes) createRole(w http.ResponseWriter, req *http.Request) {
 			writeError(w, http.StatusConflict, "a role with this name, or a permission on it, already exists in this tenant")
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, role)
@@ -98,7 +98,7 @@ func (routes RoleRoutes) createRole(w http.ResponseWriter, req *http.Request) {
 func (routes RoleRoutes) listUserRoles(w http.ResponseWriter, req *http.Request) {
 	roles, err := routes.roles.ForUser(req.Context(), req.PathValue("user_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, roles)
@@ -130,7 +130,7 @@ func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request)
 			writeError(w, http.StatusNotFound, "the user or role does not exist in this tenant")
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, grant)
@@ -143,7 +143,7 @@ func (routes RoleRoutes) revokeUserRole(w http.ResponseWriter, req *http.Request
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

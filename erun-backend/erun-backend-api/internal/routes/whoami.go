@@ -56,7 +56,7 @@ type whoamiResponse struct {
 func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	securityContext, err := security.RequiredFromContext(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, r, http.StatusText(http.StatusInternalServerError), err)
 		return
 	}
 
@@ -69,13 +69,13 @@ func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) 
 	if routes.users != nil {
 		user, err := routes.users.Get(r.Context(), securityContext.ErunUserID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, r, err)
 			return
 		}
 		response.Username = user.Username
 		roles, err := routes.users.RoleNames(r.Context(), securityContext.ErunUserID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, r, err)
 			return
 		}
 		response.Roles = roles
@@ -87,7 +87,7 @@ func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) 
 	if routes.capabilities != nil && routes.catalog != nil {
 		capabilities, err := routes.capabilities.PermittedRoutes(r.Context(), routes.catalog())
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, r, err)
 			return
 		}
 		response.Capabilities = capabilities

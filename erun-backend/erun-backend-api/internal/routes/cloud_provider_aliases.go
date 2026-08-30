@@ -54,7 +54,7 @@ func (r CloudProviderAliasRoutes) setAlias(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	if err := r.aliases.Set(req.Context(), alias, provider, body.Credentials); err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

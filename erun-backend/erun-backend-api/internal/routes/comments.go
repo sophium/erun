@@ -39,7 +39,7 @@ type updateCommentStatusRequest struct {
 func (r CommentRoutes) listComments(w http.ResponseWriter, req *http.Request) {
 	comments, err := r.comments.List(req.Context(), apirepository.CommentFilter{ReviewID: req.PathValue("review_id")})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, comments)
@@ -54,12 +54,12 @@ func (r CommentRoutes) createComment(w http.ResponseWriter, req *http.Request) {
 	comment.ReviewID = req.PathValue("review_id")
 	comment, err := r.service.PrepareCreate(req.Context(), comment)
 	if err != nil {
-		writeCommentError(w, err)
+		writeCommentError(w, req, err)
 		return
 	}
 	comment, err = r.comments.Create(req.Context(), comment)
 	if err != nil {
-		writeCommentError(w, err)
+		writeCommentError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, comment)
@@ -73,7 +73,7 @@ func (r CommentRoutes) updateCommentStatus(w http.ResponseWriter, req *http.Requ
 	}
 	comment, err := r.service.UpdateStatus(req.Context(), req.PathValue("comment_id"), input.Status)
 	if err != nil {
-		writeCommentError(w, err)
+		writeCommentError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, comment)
@@ -82,7 +82,7 @@ func (r CommentRoutes) updateCommentStatus(w http.ResponseWriter, req *http.Requ
 // writeCommentError gives comments.md's documented business codes their
 // exact machine code; every other failure falls through to the generic
 // status-derived code.
-func writeCommentError(w http.ResponseWriter, err error) {
+func writeCommentError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidCommitID *service.InvalidCommitIDError
 	if errors.As(err, &invalidCommitID) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_COMMIT_ID", invalidCommitID.Error())
@@ -97,5 +97,5 @@ func writeCommentError(w http.ResponseWriter, err error) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	writeRepositoryError(w, err)
+	writeRepositoryError(w, req, err)
 }

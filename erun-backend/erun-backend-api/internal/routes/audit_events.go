@@ -41,7 +41,7 @@ func (r AuditEventRoutes) listAuditEvents(w http.ResponseWriter, req *http.Reque
 	}
 	page, err := r.events.List(req.Context(), filter)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, auditEventsResponse{Events: page.Events, NextCursor: page.NextCursor})

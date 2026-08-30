@@ -1,12 +1,15 @@
 package routes
 
 import (
+	"context"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 // errorEnvelope is the {code, message, details} JSON body every error
@@ -52,7 +55,7 @@ func writeErrorDetails(w http.ResponseWriter, status int, code, message string, 
 	writeJSON(w, status, errorEnvelope{Code: code, Message: message, Details: details})
 }
 
-func writeRepositoryError(w http.ResponseWriter, err error) {
+func writeRepositoryError(w http.ResponseWriter, req *http.Request, err error) {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		writeError(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
@@ -61,10 +64,46 @@ func writeRepositoryError(w http.ResponseWriter, err error) {
 	case errors.Is(err, repository.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
 	case errors.Is(err, repository.ErrMissingSecurityContext):
+		logServerError(req, err)
 		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	case errors.Is(err, repository.ErrConflict):
 		writeError(w, http.StatusConflict, http.StatusText(http.StatusConflict))
 	default:
+		logServerError(req, err)
 		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
 	}
+}
+
+// logServerError is the one log line every 5xx from an authenticated route
+// must leave behind (erun#1722): which route, which actor, and the real
+// underlying error — never shown to the caller, whose response body stays
+// the generic status text. An unauthenticated route (no security context
+// yet resolved) still logs, just without an actor to name.
+func logServerError(req *http.Request, err error) {
+	tenantID, userID := "", ""
+	if securityContext, ok := security.FromContext(req.Context()); ok {
+		tenantID, userID = securityContext.TenantID, securityContext.ErunUserID
+	}
+	log.Printf("erun api server error method=%s path=%s tenant=%q user=%q error=%q", req.Method, req.URL.Path, tenantID, userID, err.Error())
+}
+
+// writeInternalError is writeRepositoryError's counterpart for a 500 that
+// did not come from a repository call — e.g. a security context the
+// authentication middleware should have already stamped, or a downstream
+// signer failure. err is logged in full and never reaches the response
+// body; message is the client-facing text the call site already used.
+func writeInternalError(w http.ResponseWriter, req *http.Request, message string, err error) {
+	logServerError(req, err)
+	writeError(w, http.StatusInternalServerError, message)
+}
+
+// logServerErrorForRoute is logServerError's counterpart for the few call
+// sites (environments.go's start-delete/deploy/provisioning failure paths)
+// that only carry a context, not the original *http.Request.
+func logServerErrorForRoute(ctx context.Context, route string, err error) {
+	tenantID, userID := "", ""
+	if securityContext, ok := security.FromContext(ctx); ok {
+		tenantID, userID = securityContext.TenantID, securityContext.ErunUserID
+	}
+	log.Printf("erun api server error route=%q tenant=%q user=%q error=%q", route, tenantID, userID, err.Error())
 }

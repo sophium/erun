@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -14,12 +15,23 @@ type stubInviteRequestTenantCreator struct {
 	err    error
 	got    repository.CreateTenantParams
 	calls  int
+
+	byNameTenant model.Tenant
+	byNameErr    error
+	gotByName    string
+	byNameCalls  int
 }
 
 func (s *stubInviteRequestTenantCreator) Create(_ context.Context, params repository.CreateTenantParams) (model.Tenant, error) {
 	s.got = params
 	s.calls++
 	return s.tenant, s.err
+}
+
+func (s *stubInviteRequestTenantCreator) GetByName(_ context.Context, name string) (model.Tenant, error) {
+	s.gotByName = name
+	s.byNameCalls++
+	return s.byNameTenant, s.byNameErr
 }
 
 type stubInviteRequestUserEnroller struct {
@@ -171,5 +183,87 @@ func TestApproveCreateTenantRegistersTenantEnrolsFirstUserAndMintsInvite(t *test
 	}
 	if invites.got.TenantID != "tenant-new" {
 		t.Fatalf("minted invite tenant = %q, want the newly registered tenant", invites.got.TenantID)
+	}
+}
+
+// TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts is
+// erun#1722's reproduction: the requested tenant name was registered
+// out-of-band between the request being raised and decided (a race, not a
+// mistake). Approving must not 500 on the resulting unique violation and
+// must not leave the request PENDING with no reachable outcome — it enrols
+// the requester into the tenant that already holds the name and completes
+// the approval, landing on APPROVED, a state the operator can act on.
+func TestApproveCreateTenantEnrolsIntoExistingTenantWhenNameConflicts(t *testing.T) {
+	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
+	tenants := &stubInviteRequestTenantCreator{
+		err:          repository.ErrTenantNameConflict,
+		byNameTenant: model.Tenant{TenantID: "tenant-existing", Name: "newco", Type: model.TenantTypeCompany},
+	}
+	users := &stubInviteRequestUserEnroller{user: model.User{UserID: "user-1"}}
+	invites := &stubInviteRequestInviteMinter{invite: model.Invite{InviteID: "invite-1", Token: "tok"}}
+	svc := NewInviteRequestService(requests, tenants, users, invites)
+
+	request := model.InviteRequest{
+		InviteRequestID: "req-1",
+		Issuer:          "https://newco-issuer.example.com",
+		Subject:         "verified-subject",
+		Kind:            model.InviteRequestKindCreateTenant,
+		TenantName:      "newco",
+		Status:          model.InviteRequestStatusPending,
+	}
+	ctx := security.WithContext(context.Background(), security.Context{TenantID: "ops-tenant", TenantType: string(model.TenantTypeOperations)})
+	decided, err := svc.ApproveCreateTenant(ctx, request, "ops-user")
+	if err != nil {
+		t.Fatalf("ApproveCreateTenant: %v", err)
+	}
+
+	if tenants.byNameCalls != 1 || tenants.gotByName != "newco" {
+		t.Fatalf("GetByName called %d times with %q, want 1 call with %q", tenants.byNameCalls, tenants.gotByName, "newco")
+	}
+	if users.gotSecurityContext.TenantID != "tenant-existing" {
+		t.Fatalf("enrollment ran under tenant %q, want the existing tenant %q", users.gotSecurityContext.TenantID, "tenant-existing")
+	}
+	if invites.got.TenantID != "tenant-existing" {
+		t.Fatalf("minted invite tenant = %q, want the existing tenant", invites.got.TenantID)
+	}
+	if requests.approveCalls != 1 {
+		t.Fatalf("MarkApproved called %d times, want 1 — the request must not stay PENDING", requests.approveCalls)
+	}
+	if decided.Status != model.InviteRequestStatusApproved {
+		t.Fatalf("decided.Status = %q, want APPROVED", decided.Status)
+	}
+}
+
+// TestApproveCreateTenantSurfacesUnrelatedTenantCreateFailure is the
+// catch-all guard: only the specific name-conflict sentinel resolves to the
+// existing tenant. Any other failure registering the tenant (a genuine
+// database fault) must still fail the approval outright, leaving the
+// request PENDING rather than silently marking it decided.
+func TestApproveCreateTenantSurfacesUnrelatedTenantCreateFailure(t *testing.T) {
+	requests := &stubInviteRequestDecisionStore{approved: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusApproved}}
+	tenants := &stubInviteRequestTenantCreator{err: errors.New("connection reset by peer")}
+	users := &stubInviteRequestUserEnroller{}
+	invites := &stubInviteRequestInviteMinter{}
+	svc := NewInviteRequestService(requests, tenants, users, invites)
+
+	request := model.InviteRequest{
+		InviteRequestID: "req-1",
+		Issuer:          "https://newco-issuer.example.com",
+		Subject:         "verified-subject",
+		Kind:            model.InviteRequestKindCreateTenant,
+		TenantName:      "newco",
+		Status:          model.InviteRequestStatusPending,
+	}
+	ctx := security.WithContext(context.Background(), security.Context{TenantID: "ops-tenant", TenantType: string(model.TenantTypeOperations)})
+	_, err := svc.ApproveCreateTenant(ctx, request, "ops-user")
+
+	if err == nil {
+		t.Fatal("ApproveCreateTenant: want an error for an unrelated tenant-create failure, got nil")
+	}
+	if tenants.byNameCalls != 0 {
+		t.Fatalf("GetByName called %d times, want 0 — only ErrTenantNameConflict resolves this way", tenants.byNameCalls)
+	}
+	if users.calls != 0 || invites.calls != 0 || requests.approveCalls != 0 {
+		t.Fatalf("enrollment/invite/approve ran (%d/%d/%d calls), want none once tenant registration fails for an unrelated reason", users.calls, invites.calls, requests.approveCalls)
 	}
 }

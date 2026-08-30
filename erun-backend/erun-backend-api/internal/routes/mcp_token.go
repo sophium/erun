@@ -38,22 +38,22 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	tenant, err := r.tenants.Current(ctx)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	securityContext, err := security.RequiredFromContext(ctx)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), err)
 		return
 	}
 	token, audience, err := r.signer.Sign(tenant.Name, environment.Name, securityContext.ErunUserID, time.Now())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, mcpTokenResponse{Token: token, Audience: audience})
