@@ -21,3 +21,4 @@ export type { SSHDInitCompletedPayload } from './sshdInitCompletedPayload';
 export type { TerminalDataDisposable } from './terminalDataDisposable';
 export type { TerminalExitSelections } from './terminalExitSelections';
 export type { TerminalWriteData } from './terminalWriteData';
+export type { WhipDefaultTarget, WhipTargetSelection } from './whipTargetSelection';
