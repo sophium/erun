@@ -2,9 +2,9 @@ import * as React from 'react';
 
 // The type scale both sidebar hover cards (EnvHoverCard, OrchestratorHoverCard)
 // render through -- extracted so the two cards cannot re-drift into their own
-// per-row treatments the way they did before #1694 (six treatments in the env
-// card, three in its value column alone). Exactly three treatments exist in
-// this family, and every row goes through one of them:
+// per-row treatments the way they used to (six treatments in the env card,
+// three in its value column alone). Exactly three treatments exist in this
+// family, and every row goes through one of them:
 //
 //   - label/caption (`HOVER_CARD_CAPTION_CLASS`, 12px/text-xs, muted): the
 //     `dt` in every HoverCardRow, and any secondary caption line under a

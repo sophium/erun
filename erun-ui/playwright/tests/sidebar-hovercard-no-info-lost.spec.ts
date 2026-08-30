@@ -3,7 +3,7 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// #1694 restyled both hover cards onto a shared type scale (HoverCardRow).
+// Both hover cards were restyled onto a shared type scale (HoverCardRow).
 // A restyle that drops or truncates a field is a worse regression than the
 // inconsistent type treatments it replaced, so this spec pins every field
 // both cards rendered before the change, populated with real (not

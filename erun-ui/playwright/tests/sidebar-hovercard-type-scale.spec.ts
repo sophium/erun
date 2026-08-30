@@ -3,8 +3,8 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// #1694: neither sidebar hover card had a declared type scale -- the env card
-// alone mixed three sizes and two faces across a four-row card, and its value
+// Neither sidebar hover card had a declared type scale -- the env card alone
+// mixed three sizes and two faces across a four-row card, and its value
 // column carried three different treatments on its own (mono-12px, sans-12px,
 // and unclassed-inherits-14px). Both cards now render every label/value row
 // through the shared HoverCardRow (Sidebar.HoverCardRow.tsx), which fixes the
