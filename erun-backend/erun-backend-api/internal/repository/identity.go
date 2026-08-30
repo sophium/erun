@@ -351,10 +351,10 @@ func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenan
 	return user, nil
 }
 
-// insertFirstTenantUser enrols the subject as the tenant's first user with
-// TenantAdmin (see insertTenantFirstUserAccess). A tenant that already has a
-// user gets no implicit enrolment, which is ErrNotFound so the caller
-// rejects the unknown subject.
+// insertFirstTenantUser enrols the subject as the tenant's first user (see
+// insertTenantFirstUserAccess for which access it gets, which depends on the
+// tenant's type). A tenant that already has a user gets no implicit
+// enrolment, which is ErrNotFound so the caller rejects the unknown subject.
 func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.Tx, tenant model.Tenant, claims security.Claims) (model.User, error) {
 	var userCount int
 	if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
@@ -382,7 +382,7 @@ func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.T
 	}); err != nil {
 		return model.User{}, err
 	}
-	if err := r.insertTenantFirstUserAccess(ctx, tx, tenant.TenantID, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertTenantFirstUserAccess(ctx, tx, tenant, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.User{}, err
 	}
 	return user, nil
@@ -482,14 +482,16 @@ func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username
 }
 
 // insertDefaultUserAccess links the bootstrapped user's external identity and
-// grants it ReadAll/WriteAll. This is reserved for the platform's own
-// empty-database genesis bootstrap (insertFirstIdentity, creating the very
-// first OPERATIONS tenant): that user has no other user yet to administer
-// even the platform's own tenant registration, so it needs the wildcard
-// operator reach TenantAdmin deliberately does not carry. Every other
-// "tenant's first user" case (a tenant that already exists but has never had
-// a user sign in) goes through insertTenantFirstUserAccess instead. tenantID
-// must always be the enrolling tenant's own ID explicitly: findOrCreateRole's
+// grants it ReadAll/WriteAll. Two callers need exactly this wildcard
+// operator reach rather than TenantAdmin: insertFirstIdentity (the
+// platform's own empty-database genesis bootstrap, creating the very first
+// OPERATIONS tenant) and insertTenantFirstUserAccess's OPERATIONS-tenant
+// case (any other OPERATIONS tenant's first user) — both have no other user
+// yet to administer even the platform's own tenant registration, IdP, or
+// bootstrap-name repair, which live only behind this wildcard. A COMPANY
+// tenant's first user goes through insertTenantFirstUserAccess's TenantAdmin
+// grant instead. tenantID must always be the enrolling tenant's own ID
+// explicitly: findOrCreateRole's
 // untenanted lookup mode relies on the active transaction's own RLS scoping
 // to stay tenant-safe, but that scoping only holds for the erun_tenant role.
 // An OPERATIONS-type tenant's own per-tenant-first-user bootstrap runs as
@@ -513,19 +515,26 @@ func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun
 	return ensureNarrowerRolesExist(ctx, tx, tenantID)
 }
 
-// insertTenantFirstUserAccess links the bootstrapped user's external identity
-// and grants it TenantAdmin: full administration of this tenant, including
-// granting further roles, without the platform-operator reach ReadAll/
-// WriteAll would also carry inside an OPERATIONS tenant. This is the
-// ordinary "a tenant needs an admin" case — a tenant that already exists but
-// has never had a user sign in — and is distinct from
-// insertDefaultUserAccess's platform-genesis case, which has no other user
-// yet to grant TenantAdmin in the first place.
-func (r *IdentityRepository) insertTenantFirstUserAccess(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
+// insertTenantFirstUserAccess links the bootstrapped user's external
+// identity and grants access for a tenant that already exists but has never
+// had a user sign in. For a COMPANY tenant this is the ordinary "a tenant
+// needs an admin" case: TenantAdmin, full administration of this tenant
+// including granting further roles, without the platform-operator reach
+// ReadAll/WriteAll would also carry inside an OPERATIONS tenant. For an
+// OPERATIONS tenant it defers to insertDefaultUserAccess instead — the same
+// ReadAll/WriteAll grant the platform's own genesis bootstrap uses — because
+// this tenant's root-resolution capabilities (registering another tenant,
+// administering the platform's own IdP, the one-time bootstrap-name repair)
+// live only behind that wildcard reach, and no other user exists yet in this
+// tenant to grant it later.
+func (r *IdentityRepository) insertTenantFirstUserAccess(ctx context.Context, tx bun.Tx, tenant model.Tenant, userID string, issuer string, subject string) error {
+	if tenant.Type == model.TenantTypeOperations {
+		return r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, userID, issuer, subject)
+	}
 	if err := insertUserExternalIdentity(ctx, tx, userID, issuer, subject); err != nil {
 		return err
 	}
-	return grantFirstTenantUserRole(ctx, tx, tenantID, userID)
+	return grantFirstTenantUserRole(ctx, tx, tenant.TenantID, userID)
 }
 
 // insertUserExternalIdentity links the external identity that lets the
