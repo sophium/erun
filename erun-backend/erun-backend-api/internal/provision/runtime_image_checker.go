@@ -30,6 +30,13 @@ type RuntimeImageChecker interface {
 	// *knowable* failure, not a gate that blocks a deploy whenever a registry
 	// probe is inconclusive.
 	ConfirmedMissing(ctx context.Context, image, control string) (bool, error)
+	// ConfirmedPresent reports true only when the registry affirmatively
+	// confirms the tag resolves, under the same control-probe precondition as
+	// ConfirmedMissing. It is what lets a caller distinguish "the fallback is
+	// masking an image the platform actually published under another name"
+	// from "nothing is known" — absent, forbidden, and inconclusive all
+	// report false, the same fail-open posture as ConfirmedMissing.
+	ConfirmedPresent(ctx context.Context, image, control string) (bool, error)
 }
 
 // ghcrHost is the only registry this checker knows how to interrogate.
@@ -72,28 +79,48 @@ func (c *GHCRImageChecker) httpClient() *http.Client {
 // references. Hosts other than ghcr.io (a private mirror, a self-hosted
 // registry) are not this checker's responsibility and are never confirmed.
 func (c *GHCRImageChecker) ConfirmedMissing(ctx context.Context, image, control string) (bool, error) {
-	host, repo, tag, ok := parseImageReference(image)
-	if !ok || host != ghcrHost {
-		return false, nil
-	}
-	controlHost, controlRepo, controlTag, ok := parseImageReference(control)
-	if !ok || controlHost != host {
-		return false, nil
-	}
-	credential, _ := c.credentialFor(ctx, host)
-	// The control probe proves the credential can read this registry at all.
-	// Without it a 404 is indistinguishable from "you may not look", which is
-	// what made this check unreachable against a private namespace; it also
-	// means bootstrap is only ever selected when the image it would run has
-	// been seen to resolve.
-	if status, err := c.manifestStatus(ctx, controlRepo, controlTag, credential); err != nil || status != http.StatusOK {
-		return false, nil
-	}
-	status, err := c.manifestStatus(ctx, repo, tag, credential)
-	if err != nil {
+	status, ok := c.probeManifestStatus(ctx, image, control)
+	if !ok {
 		return false, nil
 	}
 	return status == http.StatusNotFound, nil
+}
+
+// ConfirmedPresent implements RuntimeImageChecker's positive counterpart to
+// ConfirmedMissing, sharing the same control-probe precondition and the same
+// ghcr.io-only scope.
+func (c *GHCRImageChecker) ConfirmedPresent(ctx context.Context, image, control string) (bool, error) {
+	status, ok := c.probeManifestStatus(ctx, image, control)
+	if !ok {
+		return false, nil
+	}
+	return status == http.StatusOK, nil
+}
+
+// probeManifestStatus resolves image's manifest status, or ok=false when the
+// question is not decidable at all: an unparseable/foreign-host reference, or
+// a control probe that itself did not come back 200. The control probe proves
+// the credential can read this registry at all — without it a 404 is
+// indistinguishable from "you may not look", which is what made this check
+// unreachable against a private namespace.
+func (c *GHCRImageChecker) probeManifestStatus(ctx context.Context, image, control string) (int, bool) {
+	host, repo, tag, ok := parseImageReference(image)
+	if !ok || host != ghcrHost {
+		return 0, false
+	}
+	controlHost, controlRepo, controlTag, ok := parseImageReference(control)
+	if !ok || controlHost != host {
+		return 0, false
+	}
+	credential, _ := c.credentialFor(ctx, host)
+	if status, err := c.manifestStatus(ctx, controlRepo, controlTag, credential); err != nil || status != http.StatusOK {
+		return 0, false
+	}
+	status, err := c.manifestStatus(ctx, repo, tag, credential)
+	if err != nil {
+		return 0, false
+	}
+	return status, true
 }
 
 // manifestStatus returns the registry's own status for one manifest request, or

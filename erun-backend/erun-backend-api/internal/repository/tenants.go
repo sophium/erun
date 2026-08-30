@@ -178,3 +178,30 @@ func (r *TenantRepository) Current(ctx context.Context) (model.Tenant, error) {
 	})
 	return tenant, err
 }
+
+// UpdateName renames a tenant, filtering explicitly by tenant_id since tenants
+// is a root resolution table with no RLS. Its only intended caller is
+// TenantService.ReconcileBootstrapName, which always passes the caller's own
+// resolved tenant ID (never one a caller supplies) and has already verified
+// the operations-only, no-environments precondition — this method itself
+// enforces neither, the same division `Create` already draws between
+// repository persistence and route/service-level authorization.
+func (r *TenantRepository) UpdateName(ctx context.Context, tenantID, name string) (model.Tenant, error) {
+	var tenant model.Tenant
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		err := tx.NewRaw(`
+			UPDATE tenants
+			   SET name = ?
+			 WHERE tenant_id = ?
+			RETURNING tenant_id, name, type, created_at, updated_at
+		`, name, tenantID).Scan(ctx, &tenant)
+		if err != nil {
+			if isUniqueViolation(err) {
+				return ErrConflict
+			}
+			return normalizeNoRows(err)
+		}
+		return nil
+	})
+	return tenant, err
+}

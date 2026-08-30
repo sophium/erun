@@ -18,6 +18,8 @@ type stubTenantRepository struct {
 	createCalls  int
 	createParams repository.CreateTenantParams
 	list         []model.Tenant
+	current      model.Tenant
+	currentErr   error
 	err          error
 }
 
@@ -48,6 +50,28 @@ func (r *stubTenantRepository) Reachable(_ context.Context) ([]model.Tenant, err
 	return r.list, nil
 }
 
+func (r *stubTenantRepository) Current(_ context.Context) (model.Tenant, error) {
+	if r.currentErr != nil {
+		return model.Tenant{}, r.currentErr
+	}
+	return r.current, nil
+}
+
+// stubBootstrapNameReconciler is TenantBootstrapNameReconciler with a fixed
+// answer, recording whether it was ever called — the assertion that matters
+// for the non-operations-caller test, since reaching the reconciler at all
+// would mean the route's OPERATIONS gate failed to hold.
+type stubBootstrapNameReconciler struct {
+	calls  int
+	result model.Tenant
+	err    error
+}
+
+func (r *stubBootstrapNameReconciler) ReconcileBootstrapName(_ context.Context, _ model.Tenant) (model.Tenant, error) {
+	r.calls++
+	return r.result, r.err
+}
+
 func postCreateTenant(t *testing.T, tenants *stubTenantRepository, tenantType string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/tenants", bytes.NewBufferString(body))
@@ -75,6 +99,61 @@ func TestCreateTenantForbidsNonOperationsCaller(t *testing.T) {
 				t.Fatalf("non-operations caller must not reach Create, got %d calls", tenants.createCalls)
 			}
 		})
+	}
+}
+
+func patchReconcileBootstrapName(t *testing.T, tenants *stubTenantRepository, reconciler *stubBootstrapNameReconciler, tenantType string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/tenants/reconcile-bootstrap-name", nil)
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "tenant-caller",
+		TenantType: tenantType,
+		ErunUserID: "user-1",
+	}))
+	rec := httptest.NewRecorder()
+	TenantRoutes{tenants: tenants, reconciler: reconciler}.reconcileBootstrapName(rec, req)
+	return rec
+}
+
+// TestReconcileBootstrapNameForbidsNonOperationsCaller locks erun#1480's
+// authorization boundary: reconciling the platform's own tenant name is
+// restricted to an operations tenant the same way createTenant is, and a
+// non-operations caller must never reach the reconciler at all.
+func TestReconcileBootstrapNameForbidsNonOperationsCaller(t *testing.T) {
+	for _, tenantType := range []string{string(model.TenantTypeCompany), ""} {
+		t.Run("type="+tenantType, func(t *testing.T) {
+			tenants := &stubTenantRepository{current: model.Tenant{TenantID: "tenant-caller", Name: "acme"}}
+			reconciler := &stubBootstrapNameReconciler{result: model.Tenant{TenantID: "tenant-caller", Name: "frs"}}
+			rec := patchReconcileBootstrapName(t, tenants, reconciler, tenantType)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("unexpected status: %d", rec.Code)
+			}
+			if reconciler.calls != 0 {
+				t.Fatalf("non-operations caller must not reach ReconcileBootstrapName, got %d calls", reconciler.calls)
+			}
+		})
+	}
+}
+
+// TestReconcileBootstrapNameOperationsCallerReachesReconciler proves the
+// converse: an operations caller's own resolved tenant reaches the
+// reconciler, and its answer is what the route returns.
+func TestReconcileBootstrapNameOperationsCallerReachesReconciler(t *testing.T) {
+	tenants := &stubTenantRepository{current: model.Tenant{TenantID: "tenant-caller", Name: "operations"}}
+	reconciler := &stubBootstrapNameReconciler{result: model.Tenant{TenantID: "tenant-caller", Name: "frs"}}
+	rec := patchReconcileBootstrapName(t, tenants, reconciler, string(model.TenantTypeOperations))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if reconciler.calls != 1 {
+		t.Fatalf("expected exactly one ReconcileBootstrapName call, got %d", reconciler.calls)
+	}
+	var got model.Tenant
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Name != "frs" {
+		t.Fatalf("response tenant name = %q, want %q", got.Name, "frs")
 	}
 }
 

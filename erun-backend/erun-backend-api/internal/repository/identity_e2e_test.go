@@ -98,6 +98,60 @@ func TestFirstTenantUserBootstrapGrantsBothPredefinedRoles(t *testing.T) {
 	assertHasReadAllAndWriteAll(t, db, user.UserID)
 }
 
+// TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles is the
+// regression test for a bug caught while adding erun#1480's reconcile workflow: a
+// second OPERATIONS-type tenant's own per-tenant-first-user bootstrap runs
+// as erun_operations, whose RLS policy is cross-tenant (USING (true)) rather
+// than scoped like erun_tenant's. insertDefaultUserAccess used to grant
+// predefined roles through an untenanted "WHERE name = ?" lookup that relied
+// on the active role's RLS scoping to stay tenant-safe -- true for
+// erun_tenant, false for erun_operations, so once any tenant anywhere already
+// had a "ReadAll" role, this looked it up, found a foreign tenant's row, and
+// the ensuing role_permissions insert (tenant_id defaulted to the new
+// tenant, role_id pointing at the other tenant's role) violated its
+// composite foreign key outright. Registering a second OPERATIONS tenant is
+// a legitimate, documented action (POST /v1/tenants with type=OPERATIONS),
+// so this must succeed and grant the new tenant's *own* roles.
+func TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	// Bootstrap the platform's own OPERATIONS tenant first, so a "ReadAll" and
+	// "WriteAll" role already exist somewhere in the database before the
+	// second OPERATIONS tenant below ever bootstraps its own.
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  "https://issuer.example/frs-second-ops",
+		Subject: "operator-subject",
+	})
+	mustNoErr(t, err, "bootstrap the platform's own operations tenant")
+
+	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	ctx := security.WithContext(context.Background(), security.Context{TenantType: string(model.TenantTypeOperations)})
+	second, err := tenants.Create(ctx, CreateTenantParams{
+		Name:   "second-operations-tenant",
+		Type:   model.TenantTypeOperations,
+		Issuer: "https://issuer.example/second-operations-tenant",
+	})
+	mustNoErr(t, err, "register a second operations tenant")
+
+	tenant, user, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  "https://issuer.example/second-operations-tenant",
+		Subject: "second-operations-first-user",
+	})
+	mustNoErr(t, err, "bootstrap the second operations tenant's first user")
+	if tenant.TenantID != second.TenantID {
+		t.Fatalf("expected the second operations tenant, got %q", tenant.TenantID)
+	}
+	assertHasReadAllAndWriteAll(t, db, user.UserID)
+
+	var roleCount int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM roles WHERE tenant_id = $1 AND name IN ('ReadAll', 'WriteAll')`, second.TenantID).Scan(&roleCount), "count the second tenant's own roles")
+	if roleCount != 2 {
+		t.Fatalf("expected the second operations tenant to own its own ReadAll+WriteAll roles, found %d", roleCount)
+	}
+}
+
 // assertHasReadAllAndWriteAll locks in that bootstrap keeps granting exactly
 // the predefined ReadAll+WriteAll shape, so the fine-grained role-assignment
 // API added alongside it stays additive rather than changing the default.

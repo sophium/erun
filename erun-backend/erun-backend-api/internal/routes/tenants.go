@@ -12,16 +12,25 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type TenantRepository interface {
 	Create(ctx context.Context, params repository.CreateTenantParams) (model.Tenant, error)
 	List(ctx context.Context) ([]model.Tenant, error)
 	Reachable(ctx context.Context) ([]model.Tenant, error)
+	Current(ctx context.Context) (model.Tenant, error)
+}
+
+// TenantBootstrapNameReconciler is the one-way, operations-only rename
+// workflow. Satisfied by *service.TenantService.
+type TenantBootstrapNameReconciler interface {
+	ReconcileBootstrapName(ctx context.Context, tenant model.Tenant) (model.Tenant, error)
 }
 
 type TenantRoutes struct {
-	tenants TenantRepository
+	tenants    TenantRepository
+	reconciler TenantBootstrapNameReconciler
 }
 
 // createTenantRequest is the operations-only tenant-registration body.
@@ -36,11 +45,12 @@ type createTenantRequest struct {
 	DisplayName   string `json:"displayName"`
 }
 
-func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantRepository) {
-	routes := TenantRoutes{tenants: tenants}
+func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantRepository, reconciler TenantBootstrapNameReconciler) {
+	routes := TenantRoutes{tenants: tenants, reconciler: reconciler}
 	register(http.MethodPost, "/v1/tenants", http.HandlerFunc(routes.createTenant))
 	register(http.MethodGet, "/v1/tenants", http.HandlerFunc(routes.listTenants))
 	register(http.MethodGet, "/v1/tenants/reachable", http.HandlerFunc(routes.reachableTenants))
+	register(http.MethodPatch, "/v1/tenants/reconcile-bootstrap-name", http.HandlerFunc(routes.reconcileBootstrapName))
 }
 
 // listTenants returns every tenant for an operations-scoped caller, or a
@@ -101,6 +111,53 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, created)
+}
+
+// reconcileBootstrapName renames the caller's own tenant to this instance's
+// declared ERUN_TENANT value: the migration path for a platform whose
+// OPERATIONS tenant bootstrapped under the legacy "operations" placeholder
+// before ERUN_TENANT was read at bootstrap. It takes no request body — the
+// target name is this instance's own config, never a caller-supplied value —
+// which is what keeps this a narrow, one-way repair action rather than a
+// general tenant-rename API. Gated to an operations tenant the same way
+// createTenant is, since renaming the platform's own root tenant identity is
+// exactly the class of write createTenant already restricts.
+func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Request) {
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
+	if securityContext.TenantType != string(model.TenantTypeOperations) {
+		writeError(w, http.StatusForbidden, "reconciling the bootstrap tenant name is restricted to an operations tenant")
+		return
+	}
+	if r.reconciler == nil {
+		writeError(w, http.StatusNotImplemented, "bootstrap tenant name reconciliation is not configured")
+		return
+	}
+
+	current, err := r.tenants.Current(req.Context())
+	if err != nil {
+		writeRepositoryError(w, err)
+		return
+	}
+
+	reconciled, err := r.reconciler.ReconcileBootstrapName(req.Context(), current)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrBootstrapNameNotConfigured):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrBootstrapNameHasEnvironments):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrBootstrapNameConflict):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeRepositoryError(w, err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, reconciled)
 }
 
 // parseCreateTenantParams decodes and validates the tenant-registration body,
