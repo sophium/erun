@@ -40,7 +40,14 @@ func newReleasePublisher(execution BuildExecutionSpec, deploySpecs []DeploySpec,
 			return err
 		},
 		Verify: func(verifyCtx Context) error {
-			return verifyPublishedReleaseArtifacts(verifyCtx, execution)
+			if err := verifyPublishedReleaseArtifacts(verifyCtx, execution); err != nil {
+				return err
+			}
+			projectRoot := ""
+			if execution.release != nil {
+				projectRoot = execution.release.ProjectRoot
+			}
+			return verifyModuleReferencedImagesAnonymouslyPullable(verifyCtx, projectRoot, execution, probeAnonymousManifestPull)
 		},
 	}
 }
