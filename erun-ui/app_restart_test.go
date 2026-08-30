@@ -431,9 +431,16 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	}
 	// A refusal is not a steady state; it must never read at the same severity
 	// as a routine, successful resume.
-	for _, notice := range target.Notices {
+	assertAllNoticesAreWarnings(t, target.Notices)
+}
+
+// assertAllNoticesAreWarnings fails unless every notice given is a warning —
+// used where a refused hand-off leaves nothing routine to report.
+func assertAllNoticesAreWarnings(t *testing.T, notices []orchestratorNotice) {
+	t.Helper()
+	for _, notice := range notices {
 		if notice.Kind != orchestratorNoticeWarning {
-			t.Fatalf("expected every notice from a refused hand-off to be a warning, got %+v", notice)
+			t.Fatalf("expected every notice to be a warning, got %+v", notice)
 		}
 	}
 }
@@ -465,27 +472,36 @@ func TestMixedRestoreCarriesDistinctKindsPerOrchestrator(t *testing.T) {
 	if target.OrchestratorID != current {
 		t.Fatalf("expected %q (started last) to own the pane, got %q", current, target.OrchestratorID)
 	}
+	assertExactlyOneInfoAndOneWarning(t, target.Notices, current, stale)
+}
 
+// assertExactlyOneInfoAndOneWarning fails unless notices carries exactly one
+// info notice (belonging to wantInfoID) and one warning notice (belonging to
+// wantWarningID) — the shape a mixed restore must produce, with each kind kept
+// distinct and attributed to the right orchestrator rather than merged.
+func assertExactlyOneInfoAndOneWarning(t *testing.T, notices []orchestratorNotice, wantInfoID, wantWarningID string) {
+	t.Helper()
 	var infoCount, warningCount int
-	for _, notice := range target.Notices {
-		switch notice.Kind {
-		case orchestratorNoticeInfo:
+	for _, notice := range notices {
+		if notice.Kind == orchestratorNoticeInfo {
 			infoCount++
-			if notice.OrchestratorID != current {
-				t.Fatalf("expected the info notice to belong to %q, got %+v", current, notice)
+			if notice.OrchestratorID != wantInfoID {
+				t.Fatalf("expected the info notice to belong to %q, got %+v", wantInfoID, notice)
 			}
-		case orchestratorNoticeWarning:
-			warningCount++
-			if notice.OrchestratorID != stale {
-				t.Fatalf("expected the warning notice to belong to %q, got %+v", stale, notice)
-			}
-		default:
-			t.Fatalf("unexpected notice kind %+v", notice)
+			continue
 		}
+		if notice.Kind == orchestratorNoticeWarning {
+			warningCount++
+			if notice.OrchestratorID != wantWarningID {
+				t.Fatalf("expected the warning notice to belong to %q, got %+v", wantWarningID, notice)
+			}
+			continue
+		}
+		t.Fatalf("unexpected notice kind %+v", notice)
 	}
 	if infoCount != 1 || warningCount != 1 {
 		t.Fatalf("expected exactly one info notice (%s's resumed tracked conversation) and one warning "+
-			"notice (%s's changed scope), got %+v", current, stale, target.Notices)
+			"notice (%s's changed scope), got %+v", wantInfoID, wantWarningID, notices)
 	}
 }
 

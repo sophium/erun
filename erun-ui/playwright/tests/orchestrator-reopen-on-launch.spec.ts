@@ -31,6 +31,16 @@ function runningOrchestratorInfo(id: string, sessionId: number) {
 
 const runningOrchestrator = runningOrchestratorInfo(SEED_ORCHESTRATOR, RESTORED_SESSION_ID);
 
+// A raw notice entry the way the backend's JSON actually shapes one (see
+// orchestratorNotice, erun-ui/app_restart.go) -- kind and text untyped as
+// `string` here rather than the narrowed union the frontend normalizes to, so
+// a spec can also stage a kind the frontend does not recognise.
+interface StubNotice {
+  orchestratorId?: string;
+  kind?: string;
+  text: string;
+}
+
 // stubReopen answers the boot restore round-trip and records every method the
 // frontend invoked, so a spec can assert which start call the launch made — and
 // that it made none at all when there is nothing to reopen. `running` maps every
@@ -43,7 +53,7 @@ async function stubReopen(
     conversationId?: string;
     resumePrompt: string;
     alsoReopen?: { orchestratorId: string; conversationId?: string }[];
-    notice?: string;
+    notices?: StubNotice[];
   },
   calls: string[],
   running: Record<string, ReturnType<typeof runningOrchestratorInfo>> = {
@@ -167,11 +177,18 @@ test.describe('reopening the orchestrator that was open', () => {
       'Check RESUME-NOTE.pw-orch.md in the orchestrators working directory before telling it to carry on.';
     await stubReopen(
       page,
-      { orchestratorId: SEED_ORCHESTRATOR, conversationId: 'conv-own', resumePrompt: '', notice },
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-own',
+        resumePrompt: '',
+        notices: [{ orchestratorId: SEED_ORCHESTRATOR, kind: 'warning', text: notice }],
+      },
       calls,
     );
     await app.reboot();
 
+    // A refusal is a warning: it renders through the destructive role="alert"
+    // treatment, never the muted role="status" a routine resume gets.
     await expect(app.sidebar.orchestratorsAlert()).toContainText(notice);
     expect(calls).toContain('StartOrchestratorWithResume');
     expect(calls).not.toContain('StartOrchestrator');
@@ -198,7 +215,10 @@ test.describe('reopening the orchestrator that was open', () => {
         orchestratorId: SEED_ORCHESTRATOR,
         conversationId: 'conv-1',
         resumePrompt: 'Read RESUME-NOTE.pw-orch.md in this working directory',
-        notice,
+        // This notice names several orchestrators at once, so the backend
+        // attributes it to none in particular (erun-ui/app_restart.go's
+        // orchestratorHandoffsNotReopenedNotice).
+        notices: [{ kind: 'warning', text: notice }],
       },
       calls,
     );
@@ -273,5 +293,156 @@ test.describe('restoring every orchestrator that was open', () => {
     // restart hand-off) carries no prompt to auto-run.
     expect(calls).toContain('StartOrchestratorWithResume');
     expect(calls).not.toContain('StartOrchestrator');
+  });
+});
+
+// erun#1695: the kind orchestratorConversationNoticeKind computes on the Go
+// side (erun-ui/orchestrator_live_conversation.go) used to be discarded at the
+// frontend boundary, and every restore notice rendered through one destructive
+// role="alert" paragraph regardless of what it actually reported — so a
+// resumed tracked conversation (the mechanism working) read identically to a
+// genuine refusal. These specs assert the rendered role per kind, which prose
+// cannot substitute for.
+test.describe('orchestrator restore notices render by kind', () => {
+  test('a single info notice renders as a status, not a destructive alert', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const text =
+      'Reopened pw-orch on the conversation its session was last live on (conv-live), ' +
+      'not the one derived from its id (conv-derived). Manage the orchestrator to see every ' +
+      'conversation it can resume and attach a different one.';
+    await stubReopen(
+      page,
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-live',
+        resumePrompt: '',
+        notices: [{ orchestratorId: SEED_ORCHESTRATOR, kind: 'info', text }],
+      },
+      calls,
+    );
+    await app.reboot();
+
+    // role="status" only — never role="alert", the treatment reserved for an
+    // actual fault.
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).toContainText(text);
+    await expect(app.sidebar.orchestratorsAlert()).toHaveCount(0);
+
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-info-light.png' });
+    await app.titlebar.toggleTheme();
+    await expect(app.documentElement()).toHaveClass(/dark/);
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-info-dark.png' });
+  });
+
+  test('a single warning notice keeps the destructive alert treatment it deserves', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const text =
+      'Reopened pw-orch without continuing its task: the conversation that asked for it no longer exists. ' +
+      'Check RESUME-NOTE.pw-orch.md in the orchestrators working directory before telling it to carry on.';
+    await stubReopen(
+      page,
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-own',
+        resumePrompt: '',
+        notices: [{ orchestratorId: SEED_ORCHESTRATOR, kind: 'warning', text }],
+      },
+      calls,
+    );
+    await app.reboot();
+
+    await expect(app.sidebar.orchestratorsAlert()).toContainText(text);
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).toHaveCount(0);
+
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-warning-light.png' });
+    await app.titlebar.toggleTheme();
+    await expect(app.documentElement()).toHaveClass(/dark/);
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-warning-dark.png' });
+  });
+
+  // The heart of the bug: several orchestrators resolved on the same restore
+  // must each keep their own kind. Before the fix, this exact case (a genuine
+  // warning sitting among routine successes) rendered as one indistinguishable
+  // red paragraph — the warning was as easy to miss as it was to mistake a
+  // success for a fault.
+  test('a mixed batch renders the warning distinctly from the info notices beside it', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const infoText =
+      'Reopened pw-orch-2 on the conversation its session was last live on (conv-owner-live), ' +
+      'not the one derived from its id (conv-owner-derived).';
+    const warningText =
+      'Reopened pw-orch: its environments changed since its last session (was pw/alpha, now pw/beta). ' +
+      'Its conversation may hold context for environments it is no longer wired to; ' +
+      'check RESUME-NOTE.pw-orch.md before treating it as current.';
+    const owner = runningOrchestratorInfo(SEED_ORCHESTRATOR_2, RESTORED_SESSION_ID + 2);
+    await stubReopen(
+      page,
+      {
+        orchestratorId: SEED_ORCHESTRATOR_2,
+        conversationId: 'conv-owner-live',
+        resumePrompt: '',
+        alsoReopen: [{ orchestratorId: SEED_ORCHESTRATOR, conversationId: 'conv-also' }],
+        notices: [
+          { orchestratorId: SEED_ORCHESTRATOR, kind: 'warning', text: warningText },
+          { orchestratorId: SEED_ORCHESTRATOR_2, kind: 'info', text: infoText },
+        ],
+      },
+      calls,
+      { [SEED_ORCHESTRATOR]: runningOrchestrator, [SEED_ORCHESTRATOR_2]: owner },
+    );
+    await app.reboot();
+
+    // Two distinct list items, not one joined paragraph...
+    await expect(app.sidebar.orchestratorRestoreNotices().locator('li')).toHaveCount(2);
+    // ...each at its own role: the warning is the only one that alerts...
+    await expect(app.sidebar.orchestratorsAlert()).toHaveCount(1);
+    await expect(app.sidebar.orchestratorsAlert()).toContainText(warningText);
+    await expect(app.sidebar.orchestratorsAlert()).not.toContainText(infoText);
+    // ...and the info notice is the only one that merely reports status.
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).toHaveCount(1);
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).toContainText(infoText);
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).not.toContainText(warningText);
+
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-mixed-light.png' });
+    await app.titlebar.toggleTheme();
+    await expect(app.documentElement()).toHaveClass(/dark/);
+    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-mixed-dark.png' });
+  });
+
+  // A kind this launch does not recognise — a payload from a backend version
+  // that classified notices differently, or one missing the field — must not
+  // silently become 'info' (hiding a real problem behind a routine-looking
+  // line) or 'warning' (crying wolf over what might be entirely routine). It
+  // renders as its own visibly distinct case: role="status" like info (never
+  // interrupts like an alert would), but with its own icon and border so it
+  // reads as neither of the two known kinds.
+  test('an unrecognised kind renders as its own distinct case, never silently as info or a fault', async ({
+    app,
+    page,
+  }) => {
+    const calls: string[] = [];
+    const text = 'a notice this launch does not know how to classify';
+    await stubReopen(
+      page,
+      {
+        orchestratorId: SEED_ORCHESTRATOR,
+        conversationId: 'conv-own',
+        resumePrompt: '',
+        notices: [{ orchestratorId: SEED_ORCHESTRATOR, kind: 'mystery-kind', text }],
+      },
+      calls,
+    );
+    await app.reboot();
+
+    await expect(app.sidebar.orchestratorRestoreStatusNotices()).toContainText(text);
+    await expect(app.sidebar.orchestratorsAlert()).toHaveCount(0);
   });
 });
