@@ -40,7 +40,7 @@ import {
 } from './TenantDashboardMessage';
 
 // TenantDashboardPanels.Requests.tsx is the operator/admin queue for
-// invite-requests (issue #1682 §3): who is waiting, what they asked for, and
+// invite-requests: who is waiting, what they asked for, and
 // the Issue invitation / Decline actions. A pending count belongs on the tab
 // itself (RequestsTabLabel), visible without opening this panel — the
 // issue's own named failure mode is "an unattended queue nobody sees."
@@ -252,8 +252,8 @@ function DeclineInviteRequestDialog({
 
 // IssuedInviteLinkNotice keeps the just-minted invite link on screen after
 // Issue invitation succeeds — the transferable artefact and manual fallback
-// (issue #1682 §6.4) — since the approved row itself disappears from the
-// pending list the moment the queue refetches.
+// — since the approved row itself disappears from the pending list the
+// moment the queue refetches.
 function IssuedInviteLinkNotice(): React.ReactElement | null {
   const link = useAppSelector((state) => state.tenantDashboard.issuedInviteLink);
   if (!link) {

@@ -1,7 +1,7 @@
 // tenantInviteRequestThunks drives "Request an invitation" (NotEnrolledState's
-// second action, issue #1682 §2) and the operator/admin queue's issue/decline
-// actions (§3). Split out of tenantPlatformConnectThunks.ts/tenantDialogThunks.ts
-// since invite requests are a distinct enough workflow to own their own file.
+// second action) and the operator/admin queue's issue/decline actions.
+// Split out of tenantPlatformConnectThunks.ts/tenantDialogThunks.ts since
+// invite requests are a distinct enough workflow to own their own file.
 
 import {
   INVITE_REQUEST_KIND_JOIN_TENANT,
@@ -187,7 +187,7 @@ export const confirmDeclineInviteRequest =
 // approveInviteRequest issues the invitation directly (no confirm dialog —
 // non-destructive, the same one-click treatment "Reactivate" gets in
 // UsersPanel), and keeps the minted link on screen as the transferable
-// artefact/manual fallback (issue #1682 §6.4).
+// artefact/manual fallback.
 export const approveInviteRequest =
   (inviteRequestId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

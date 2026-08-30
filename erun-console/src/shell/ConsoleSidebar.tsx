@@ -6,11 +6,11 @@ import { BrandMark } from './BrandMark';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
 import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
 
-// NavBadge is the nav-level pending-count pill (issue #1682 §3's own
-// acceptance criterion: "a pending count must be visible without opening the
-// view"). It is console-shell-owned, not a kit widget -- a nav badge has no
-// caller outside this sidebar, and erun-kit's AGENTS.md reserves new shared
-// components for a second real consumer, not a speculative one.
+// NavBadge is the nav-level pending-count pill: a pending count must be
+// visible without opening the view. It is console-shell-owned, not a kit
+// widget -- a nav badge has no caller outside this sidebar, and erun-kit's
+// AGENTS.md reserves new shared components for a second real consumer, not
+// a speculative one.
 function NavBadge({ count }: { count: number }): React.ReactElement {
   return (
     <span

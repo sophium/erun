@@ -6,8 +6,8 @@ import { queryErrorMessage } from '../app/queryError';
 import { describeRateLimitWindow } from './describeRateLimitWindow';
 
 // RateLimitPanel is the operations-only editor for POST /v1/invite-requests'
-// admission window (issue #1682 §9): the platform's first rate limiter and
-// the first config write route. Read-only for every other tenant type --
+// admission window: the platform's first rate limiter and the first config
+// write route. Read-only for every other tenant type --
 // RequestsPanel only renders this for an OPERATIONS tenant, the same gate
 // TenantsPanel/UsersPanel use for their own operations-only actions.
 export function RateLimitPanel({

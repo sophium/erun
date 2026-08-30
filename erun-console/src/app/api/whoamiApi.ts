@@ -1,6 +1,6 @@
 // RTK Query endpoint for GET /v1/whoami: the caller's own identity and
 // effective permission set. The console had no whoami/capability plumbing
-// before the invite-requests queue (issue #1682) — its Approve/Decline
+// before the invite-requests queue — its Approve/Decline
 // actions are the first console surface gated on a per-action capability
 // rather than on tenant.type, so this is the shape that lands rather than a
 // component-local guess. See app/capabilities.ts for the matching helper and

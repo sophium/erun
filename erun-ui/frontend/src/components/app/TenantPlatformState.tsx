@@ -277,8 +277,8 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
   );
 }
 
-// RequestInvitationAction is NotEnrolledState's second option (issue #1682
-// §2): its own rendering distinguishes none-yet (offer the action) from
+// RequestInvitationAction is NotEnrolledState's second option: its own
+// rendering distinguishes none-yet (offer the action) from
 // pending/declined (show status — no cancel/withdraw exists server-side, so
 // none is offered) — never silently reusing "Try to enroll myself"'s button
 // for a fundamentally different request.

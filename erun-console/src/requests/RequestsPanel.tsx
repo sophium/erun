@@ -458,8 +458,8 @@ function RequestDialogs({
   );
 }
 
-// RequestsPanel is the operator's invite-request queue (issue #1682 §3):
-// reachable by every tenant (JOIN_TENANT requests naming your own tenant),
+// RequestsPanel is the operator's invite-request queue: reachable by every
+// tenant (JOIN_TENANT requests naming your own tenant),
 // with Approve/Decline gated on whoami's capability set rather than tenant
 // type -- see shell/sections.ts for the nav-level gate (every tenant sees
 // this panel) and this component for the finer-grained action gate.

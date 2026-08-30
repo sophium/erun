@@ -32,8 +32,8 @@ import {
 import { InlineAlert } from './InlineAlert';
 
 // RequestInvitationDialog is the "Request an invitation" action from
-// NotEnrolledState (issue #1682 §2): the requester's identity (issuer/
-// subject) is verified from the token already in hand and is never a form
+// NotEnrolledState: the requester's identity (issuer/subject) is verified
+// from the token already in hand and is never a form
 // field (recognition over recall, root AGENTS.md's onboarding rule); the
 // tenant/environment names are the local ones already known, shown read-only
 // rather than re-typed. The only genuine choices are the request's kind

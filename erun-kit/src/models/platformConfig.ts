@@ -85,9 +85,9 @@ export interface TenantConfigView {
   tenant: Tenant;
   environments: Environment[];
   contexts: CloudContext[];
-  // The platform-wide POST /v1/invite-requests admission window (issue
-  // #1682 §9), changed only through PATCH /v1/config/invite-request-rate-limit
-  // — an operations-only write. Every tenant reads it (the console's
+  // The platform-wide POST /v1/invite-requests admission window, changed
+  // only through PATCH /v1/config/invite-request-rate-limit — an
+  // operations-only write. Every tenant reads it (the console's
   // rate-limit editor is gated on tenant type, not on this field being
   // present), since a COMPANY tenant's requests panel still needs to show
   // the current window even though it cannot change it.

@@ -143,9 +143,8 @@ export function inviteRequestStatusTone(status: string): StatusBadgeTone {
 }
 
 // requestsTabLabel is the tab strip's own label for the Requests tab: the
-// pending count is visible before the operator opens the panel at all (issue
-// #1682 §3 — "an unattended queue nobody sees" is the failure this exists to
-// prevent).
+// pending count is visible before the operator opens the panel at all — an
+// unattended queue nobody sees is the failure this exists to prevent.
 export function requestsTabLabel(data: UITenantDashboard | null | undefined): string {
   const count = data?.pendingInviteRequestCount;
   return count ? `Requests (${String(count)})` : 'Requests';

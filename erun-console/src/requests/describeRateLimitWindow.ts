@@ -1,7 +1,7 @@
 // describeRateLimitWindow turns the raw admission-window seconds into the
-// consequence sentence issue #1682 §9 demands ("say what the number means,
-// not just the number") -- an operator typing 86400 should read "signup
-// freeze", not work that out from the digits.
+// consequence sentence: say what the number means, not just the number --
+// an operator typing 86400 should read "signup freeze", not work that out
+// from the digits.
 export function describeRateLimitWindow(seconds: number): string {
   if (seconds < 300) {
     const unit = seconds === 1 ? 'second' : 'seconds';

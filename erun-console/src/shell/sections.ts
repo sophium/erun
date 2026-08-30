@@ -45,7 +45,7 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // (#1482) — a COMPANY tenant needs this exactly as much as an OPERATIONS
   // one, so it belongs in the base set every tenant type sees.
   { id: 'invites', label: 'Invites', icon: UserPlus },
-  // Requests (issue #1682) is every tenant's own queue too: a COMPANY
+  // Requests is every tenant's own queue too: a COMPANY
   // tenant's admin needs to see and decide JOIN_TENANT requests naming their
   // own tenant, not just an OPERATIONS operator -- GET /v1/invite-requests is
   // TenantUserClass, and Approve/Decline are gated within the panel itself

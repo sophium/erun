@@ -124,9 +124,9 @@ describe('AppShell navigation', () => {
 });
 
 describe('AppShell nav badge', () => {
-  // The pending count must be visible without opening the Requests panel
-  // (issue #1682 §3's own acceptance criterion) -- this asserts the count
-  // renders on the nav item itself, never requiring a click into the panel.
+  // The pending count must be visible without opening the Requests panel --
+  // this asserts the count renders on the nav item itself, never requiring
+  // a click into the panel.
   it('shows the pending-request count on the Requests nav item', async () => {
     vi.stubGlobal(
       'fetch',

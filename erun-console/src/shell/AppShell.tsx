@@ -139,8 +139,8 @@ export function AppShell({
   const identity = React.useMemo(() => readTokenIdentity(token), [token]);
 
   // The pending-request count has to be visible without opening the
-  // Requests panel (issue #1682 §3's own acceptance criterion), so it's read
-  // here rather than only inside RequestsPanel -- the same query, shared
+  // Requests panel, so it's read here rather than only inside RequestsPanel
+  // -- the same query, shared
   // through RTK Query's cache, so this costs no extra request beyond the
   // panel's own poll once both are subscribed.
   const pendingRequestsQuery = useListInviteRequestsQuery(token, {

@@ -1,6 +1,6 @@
-// RTK Query endpoints for the invite-request queue (issue #1682): the
-// operator's own request/approve view, and the operations-only rate-limit
-// editor for the platform's first admission limiter.
+// RTK Query endpoints for the invite-request queue: the operator's own
+// request/approve view, and the operations-only rate-limit editor for the
+// platform's first admission limiter.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';
