@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -57,6 +58,19 @@ type EnrollIdentityParams struct {
 	FirstName string
 	LastName  string
 	Issuer    string
+	// OrgID enrolls into another organization: the identity boundary a
+	// different tenant resolves by. It is what makes a freshly created
+	// tenant reachable at all — without it every enrollment lands in the
+	// platform's own org, so a new tenant can never receive a token that
+	// resolves to it, never gets a first user, and can never own an
+	// environment.
+	//
+	// No erun-side user row is written in that case, and that is not a
+	// failure: the caller's tenant is not the new user's, and row-level
+	// security would file them under the wrong one. The target tenant's own
+	// first-user bootstrap enrolls them, with full access, on their first
+	// sign-in.
+	OrgID string
 }
 
 // EnrollIdentityResult reports what actually landed. ErunUser is the zero
@@ -77,6 +91,10 @@ type EnrollIdentityResult struct {
 	ErunUser               model.User
 	MailDeliveryConfigured bool
 	TemporaryPassword      string
+	// MappingDeferred reports that no erun user row was written because the
+	// identity was enrolled into another tenant's org, so a zero ErunUser
+	// here means "by design", not "the mapping failed".
+	MappingDeferred bool
 }
 
 // Enroll creates the IdP identity first — the erun mapping needs the
@@ -103,6 +121,7 @@ func (s *IdentityService) Enroll(ctx context.Context, params EnrollIdentityParam
 		Email:     params.Email,
 		FirstName: params.FirstName,
 		LastName:  params.LastName,
+		OrgID:     params.OrgID,
 	}
 	if !mailStatus.Configured {
 		temporaryPassword, err := generateTemporaryPassword()
@@ -115,6 +134,18 @@ func (s *IdentityService) Enroll(ctx context.Context, params EnrollIdentityParam
 	idpUser, err := s.admin.CreateHumanUser(ctx, createParams)
 	if err != nil {
 		return EnrollIdentityResult{}, fmt.Errorf("create identity provider user: %w", err)
+	}
+
+	// Enrolled into another tenant's org: stop at the IdP half. See
+	// EnrollIdentityParams.OrgID for why writing an erun user here would file
+	// them under the caller's tenant instead of their own.
+	if strings.TrimSpace(params.OrgID) != "" {
+		return EnrollIdentityResult{
+			IdPUser:                idpUser,
+			MailDeliveryConfigured: mailStatus.Configured,
+			TemporaryPassword:      createParams.InitialPassword,
+			MappingDeferred:        true,
+		}, nil
 	}
 
 	erunUser, err := s.users.Create(ctx, repository.CreateUserParams{

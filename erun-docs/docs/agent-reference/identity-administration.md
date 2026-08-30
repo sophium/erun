@@ -20,6 +20,21 @@ Every operation is a named endpoint below, mapped to one specific Zitadel Manage
 
 Zitadel's built-in `ORG_USER_MANAGER` role would scope user create/list/deactivate/reactivate more narrowly than org-owner. Org policy management (login policy, password complexity) has no built-in role short of org-owner, though. Minting a second, narrower machine-user credential for only the user-CRUD half was considered and rejected for this increment: it would shrink the blast radius for half the surface while adding a second bootstrap-managed credential to operate, and the compensating control — an enumerated, non-proxying endpoint surface (previous section) — already applies uniformly. The single org-owner credential is used for the whole surface; this is a recorded decision, not a default.
 
+## Enrolling into another organization
+
+`POST /v1/identity/users` takes an optional `orgId`. Without it the identity is created in the platform's own organization, as before. With it, the identity is created in **that** organization — the identity boundary another tenant resolves by.
+
+```jsonc
+// POST /v1/identity/users
+{ "username": "alice", "email": "alice@example.com", "orgId": "388520359030161586" }
+```
+
+This is what makes a newly created tenant usable at all. A tenant's first admin arrives through the [per-tenant first-user bootstrap](/agent-reference/api-protocol#tenant-issuers) — the first valid token that resolves to it — and a token resolves to it only when its org claim is that tenant's org. Without `orgId` every enrollment lands in the platform's own org, so a fresh tenant can never receive such a token, never gets a first user, and can never own an environment: created, and inert.
+
+**No erun user row is written for a cross-org enrollment, and that is not a failure.** The caller's tenant is not the new user's, and row-level security would file them under the wrong one. The response reports `mappingDeferred`, so a zero erun user there means "by design" rather than "the mapping failed" — the target tenant's own first-user bootstrap enrolls them, with full access, on their first sign-in.
+
+Zitadel scopes a Management API call by an `x-zitadel-orgid` header, so the same org-owner credential acts in an org it did not create; no additional IdP privilege is involved.
+
 ## `POST /v1/identity/orgs`
 
 Creates a Zitadel **organization** — the per-tenant identity boundary an org-scoped issuer resolves tenants by.

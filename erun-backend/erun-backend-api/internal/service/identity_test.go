@@ -153,3 +153,63 @@ func TestIdentityServiceEnrollReportsOrphanedIdPUserOnMappingFailure(t *testing.
 		t.Fatalf("result.ErunUser = %+v, want the zero value on a mapping failure", result.ErunUser)
 	}
 }
+
+// Enrolling into another tenant's org is what makes a freshly created tenant
+// reachable: without it every identity lands in the platform's own org, so
+// the new tenant never receives a token that resolves to it, never gets a
+// first user, and can never own an environment.
+func TestIdentityServiceEnrollTargetsAnotherOrg(t *testing.T) {
+	admin := &stubIdentityAdmin{
+		created:    zitadel.User{ID: "idp-9", Username: "bob", Email: "bob@example.com"},
+		smtpStatus: zitadel.SMTPStatus{Configured: true},
+	}
+	users := &stubIdentityUserCreator{}
+	svc := NewIdentityService(admin, users)
+
+	result, err := svc.Enroll(context.Background(), EnrollIdentityParams{
+		Username: "bob", Email: "bob@example.com", Issuer: "https://auth.example.com",
+		OrgID: "388520359030161586",
+	})
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	if admin.gotParams.OrgID != "388520359030161586" {
+		t.Fatalf("OrgID reached the IdP as %q", admin.gotParams.OrgID)
+	}
+	// The erun row would land under the caller's tenant, not the new user's,
+	// so it is deliberately not written — the target tenant's own first-user
+	// bootstrap enrols them on first sign-in.
+	if users.createCalls != 0 {
+		t.Fatalf("createCalls = %d, want no erun user written for a cross-org enrollment", users.createCalls)
+	}
+	if !result.MappingDeferred {
+		t.Fatal("MappingDeferred must say the zero ErunUser is by design, not a failure")
+	}
+	if result.IdPUser.ID != "idp-9" {
+		t.Fatalf("IdPUser = %+v", result.IdPUser)
+	}
+}
+
+// The default path is unchanged: no org means the platform's own, and the
+// erun mapping is still written.
+func TestIdentityServiceEnrollWithoutOrgStillWritesTheMapping(t *testing.T) {
+	admin := &stubIdentityAdmin{
+		created:    zitadel.User{ID: "idp-10", Username: "carol"},
+		smtpStatus: zitadel.SMTPStatus{Configured: true},
+	}
+	users := &stubIdentityUserCreator{created: model.User{UserID: "erun-10", Username: "carol"}}
+	svc := NewIdentityService(admin, users)
+
+	result, err := svc.Enroll(context.Background(), EnrollIdentityParams{
+		Username: "carol", Email: "carol@example.com", Issuer: "https://auth.example.com",
+	})
+	if err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	if admin.gotParams.OrgID != "" {
+		t.Fatalf("OrgID = %q, want the credential's own org", admin.gotParams.OrgID)
+	}
+	if users.createCalls != 1 || result.MappingDeferred {
+		t.Fatalf("createCalls = %d deferred = %v, want the mapping written", users.createCalls, result.MappingDeferred)
+	}
+}
