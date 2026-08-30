@@ -31,6 +31,8 @@ One review moves between two environments as it goes from a proposed change to a
 
 Both are ordinary agent environments. Neither is a dedicated build environment: every erun environment is already a certified build environment, and the builder's own release build runs where the change already lives.
 
+This builder/reviewer split is about **review-state ownership** — which environment does what as one review moves `OPEN → READY → MERGE → MERGED`. It sits one level above a different, orthogonal distinction an orchestrator can declare per linked environment: a `role` of `code` (writes code, pushes feature branches, no full regression) or `build` (checks branches out, runs gates, cuts releases) — see [`erun-orchestrate`](/agent-reference/skills-spec#erun-orchestrate). An environment can be a builder or a reviewer in this topology regardless of which `role`, if any, an orchestrator has declared for it.
+
 ## The reviewer must come back
 
 **Only a thread's root comment author can close it.** `PATCH /v1/reviews/{id}/comments/{commentId}/status` acts on the thread as a whole through its root, and only the root's own author may call it — see [Comments](/collaboration/comments#comment-status). This means the builder cannot resolve a reviewer's thread no matter how completely it addressed the point; the reviewer agent watching for "the author replied to my thread" and resolving it is not a nicety, it is the only thing that unblocks the merge short of an audited override.
@@ -51,3 +53,4 @@ A reviewer agent that opens threads and never returns to resolve them blocks the
 - [Reviews](/collaboration/reviews), [Comments](/collaboration/comments) — the API resources this topology operates over.
 - [Environment types](/concepts/environment-types) — why `runtime` and `host` sit outside the builder/reviewer choice.
 - [Reusable-agent spec](/agent-reference/agents-spec) — the `erun-builder` / `erun-reviewer` catalogue entries.
+- [`erun-orchestrate`](/agent-reference/skills-spec#erun-orchestrate) — the orthogonal per-environment `code`/`build` role an orchestrator declares, one level below this topology.

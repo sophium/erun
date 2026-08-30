@@ -19,6 +19,24 @@ type ListResult struct {
 	CurrentDirectory ListCurrentDirectoryResult `json:"currentDirectory"`
 	CloudProviders   []CloudProviderStatus      `json:"cloudProviders,omitempty"`
 	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
+	Orchestrators    []ListOrchestratorResult   `json:"orchestrators,omitempty"`
+}
+
+// ListOrchestratorResult is the read-model view of one persisted
+// OrchestratorConfig for `erun list`.
+type ListOrchestratorResult struct {
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+}
+
+// ListOrchestratorEnvResult is the read-model view of one
+// OrchestratorEnvConfig link, including its (possibly undeclared) Role.
+type ListOrchestratorEnvResult struct {
+	Tenant      string              `json:"tenant"`
+	Environment string              `json:"environment"`
+	Directory   string              `json:"directory,omitempty"`
+	Role        OrchestratorEnvRole `json:"role,omitempty"`
 }
 
 type ListDefaultsResult struct {
@@ -136,6 +154,12 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 		return ListResult{}, err
 	}
 	result.CloudProviders = cloudProviders
+
+	orchestrators, err := loadListOrchestrators(store)
+	if err != nil {
+		return ListResult{}, err
+	}
+	result.Orchestrators = orchestrators
 
 	for _, tenant := range tenants {
 		tenantResult, err := listTenantResult(store, tenant, defaultTenant, effectiveResult, effectiveErr, portAllocations)
@@ -354,6 +378,29 @@ func loadListDefaultTenant(store ListStore) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(config.DefaultTenant), nil
+}
+
+func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
+	config, _, err := store.LoadERunConfig()
+	if errors.Is(err, ErrNotInitialized) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ListOrchestratorResult, 0, len(config.Orchestrators))
+	for _, orchestrator := range config.Orchestrators {
+		envs := make([]ListOrchestratorEnvResult, 0, len(orchestrator.Environments))
+		for _, env := range orchestrator.Environments {
+			envs = append(envs, ListOrchestratorEnvResult(env))
+		}
+		results = append(results, ListOrchestratorResult{
+			ID:           orchestrator.ID,
+			Name:         orchestrator.Name,
+			Environments: envs,
+		})
+	}
+	return results, nil
 }
 
 func loadListDefaultEnvironment(store ListStore, tenant string) (string, error) {

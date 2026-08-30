@@ -41,4 +41,6 @@ Tenants:
           idle: none
           platform-account: enabled
           sshd: off
+Orchestrators:
+  none
 audit: erun list

@@ -14,7 +14,7 @@ erun list [flags]
 
 ## Output
 
-Sections print in order — configuration location, defaults, the effective target for the current directory, configured cloud providers, then every tenant and its environments:
+Sections print in order — configuration location, defaults, the effective target for the current directory, configured cloud providers, every tenant and its environments, then any orchestrators:
 
 ```
 Configuration:
@@ -36,9 +36,13 @@ Cloud Providers:
 Tenants:
   - my-tenant (default)
     ...
+Orchestrators:
+  none
 ```
 
 The full per-env field set (local port allocations, API URL, SSH details, …) prints under each tenant; the example abbreviates. See [Configuration](/reference/configuration) for what each value means.
+
+Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, or `role=undeclared` when nothing has been set.
 
 ## The sizing recommendation
 

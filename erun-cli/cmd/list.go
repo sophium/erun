@@ -41,7 +41,10 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 	if err := writeCloudProviders(ctx, result.CloudProviders); err != nil {
 		return err
 	}
-	return writeListTenants(ctx, result.Tenants)
+	if err := writeListTenants(ctx, result.Tenants); err != nil {
+		return err
+	}
+	return writeOrchestrators(ctx, result.Orchestrators)
 }
 
 func writeListHeaderSections(ctx common.Context, result common.ListResult) error {
@@ -102,6 +105,61 @@ func writeListTenants(ctx common.Context, tenants []common.ListTenantResult) err
 		}
 	}
 	return nil
+}
+
+func writeOrchestrators(ctx common.Context, orchestrators []common.ListOrchestratorResult) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "Orchestrators:"); err != nil {
+		return err
+	}
+	if len(orchestrators) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "  none")
+		return err
+	}
+	for _, orchestrator := range orchestrators {
+		if err := writeOrchestratorEntry(ctx, orchestrator); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestratorResult) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
+		return err
+	}
+	if len(orchestrator.Environments) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "    environments: none")
+		return err
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "    environments:"); err != nil {
+		return err
+	}
+	for _, env := range orchestrator.Environments {
+		if err := writeOrchestratorEnvEntry(ctx, env); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// orchestratorEnvRoleLabel renders "undeclared" for an empty role rather than
+// guessing a default -- unset means the operator has not stated a purpose for
+// this link, distinct from either known role.
+func orchestratorEnvRoleLabel(role common.OrchestratorEnvRole) string {
+	if role == "" {
+		return "undeclared"
+	}
+	return string(role)
+}
+
+func writeOrchestratorEnvEntry(ctx common.Context, env common.ListOrchestratorEnvResult) error {
+	line := "      - " + env.Tenant + "/" + env.Environment
+	line += " role=" + orchestratorEnvRoleLabel(env.Role)
+	if strings.TrimSpace(env.Directory) != "" {
+		line += " directory=" + env.Directory
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, line)
+	return err
 }
 
 func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryResult) error {
