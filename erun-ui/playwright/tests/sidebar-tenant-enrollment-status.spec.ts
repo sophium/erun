@@ -51,15 +51,20 @@ test.describe('sidebar tenant enrollment status icon', () => {
   });
 
   test('does not render for a tenant with zero local environments', async ({ app }) => {
+    // A zero-environment tenant never gets a sidebar row at all --
+    // state_handlers.go's stateFromListResult skips it outright ("a tenant
+    // with none has nothing to host yet" per Sidebar.TenantGroup.tsx's own
+    // comment), so there is no row to wait for becoming visible; the
+    // regression this guards is a future change teaching the icon to render
+    // independently of the row itself. Wait on the environments-changed
+    // round trip settling (via a tenant that does have one, the seeded
+    // baseline) rather than a fixed sleep, then assert absence.
     const tenant = uniqueEnvironmentName('zero-env-tenant');
     seedTenant(tenant, 'none');
     try {
-      await expect(async () => {
-        await app.reloadEnvironments();
-        await app.sidebar.tenantRow(tenant).first().waitFor({ state: 'visible', timeout: 2_000 });
-      }).toPass({ timeout: 30_000 });
-
-      await expect(app.sidebar.tenantDashboardButton(tenant)).toBeVisible();
+      await app.reloadEnvironments();
+      await app.sidebar.tenantEnrollmentStatus(SEED_TENANT).waitFor({ state: 'visible' });
+      await expect(app.sidebar.tenantRow(tenant)).toHaveCount(0);
       await expect(app.sidebar.tenantEnrollmentStatus(tenant)).toHaveCount(0);
     } finally {
       removeTenant(tenant);
