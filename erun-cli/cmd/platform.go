@@ -165,8 +165,9 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 		Long: "Enroll a user in a tenant on the erun platform.\n\n" +
 			"Writes a new user row, immediately. Pass --issuer and --subject to link the external " +
 			"identity the user signs in with; without them the user cannot sign in until an identity " +
-			"is linked. --tenant-id targets another tenant and is honored only for an " +
-			"operations-tenant caller.",
+			"is linked. If that identity is already enrolled in the target tenant, this is a no-op: " +
+			"it reports the existing user rather than failing on a username collision. --tenant-id " +
+			"targets another tenant and is honored only for an operations-tenant caller.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example:      "  erun platform user enroll --username jane --issuer https://acme.example.com --subject jane@acme.com",
@@ -181,7 +182,11 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 				return err
 			}
 			if ctx.Output != common.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "enrolled user %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID); err != nil {
+				message := fmt.Sprintf("enrolled user %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
+				if user.AlreadyEnrolled {
+					message = fmt.Sprintf("this identity is already enrolled, as %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
+				}
+				if _, err := fmt.Fprint(ctx.Stdout, message); err != nil {
 					return err
 				}
 			}
