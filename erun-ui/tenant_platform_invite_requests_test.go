@@ -161,6 +161,59 @@ func TestListTenantPlatformEnrollmentStatusesEnrolled(t *testing.T) {
 	}
 }
 
+func TestListTenantPlatformEnrollmentStatusesUnknownOnWhoamiFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
+		t.Fatalf("expected unknown when whoami fails for a reason other than unauthorized/forbidden, got %+v", statuses)
+	}
+}
+
+func TestListTenantPlatformEnrollmentStatusesUnknownOnMyInviteRequestFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/whoami":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		case "/v1/invite-requests/mine":
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
+		t.Fatalf("expected unknown when MyInviteRequest fails for a reason other than not-found, got %+v", statuses)
+	}
+}
+
+func TestListTenantPlatformEnrollmentStatusesLocalOnlyWhenNeverRequested(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/whoami":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		case "/v1/invite-requests/mine":
+			http.Error(w, "no invite request found", http.StatusNotFound)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentLocalOnly {
+		t.Fatalf("expected local-only when the identity is verified but never requested, got %+v", statuses)
+	}
+}
+
 func TestListTenantPlatformEnrollmentStatusesPendingAndDeclined(t *testing.T) {
 	cases := []struct {
 		name       string

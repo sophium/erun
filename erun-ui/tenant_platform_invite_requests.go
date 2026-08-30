@@ -28,6 +28,10 @@ const (
 	tenantEnrollmentPending   = "pending"
 	tenantEnrollmentDeclined  = "declined"
 	tenantEnrollmentEnrolled  = "enrolled"
+	// tenantEnrollmentUnknown is a genuine platform round-trip failure (not
+	// "never requested"), so it must never collapse into the confident
+	// local-only answer — the sidebar icon renders it as its own state.
+	tenantEnrollmentUnknown = "unknown"
 )
 
 // uiInviteRequest is the JSON-safe mirror of eruncommon.PlatformInviteRequest
@@ -259,7 +263,10 @@ type uiListTenantPlatformEnrollmentStatusesInput struct {
 // enrollment state for the sidebar's status icon. Best effort per tenant: one
 // tenant's resolution failure does not drop the others. A tenant with no
 // platform connection at all, or one whose identity has not requested
-// anything, reports tenantEnrollmentLocalOnly.
+// anything, reports tenantEnrollmentLocalOnly; a tenant whose platform round
+// trip genuinely failed reports tenantEnrollmentUnknown instead — the two
+// must never be conflated, or a real outage silently reads as "not on the
+// platform yet".
 func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnrollmentStatusesInput) []uiTenantPlatformEnrollmentStatus {
 	statuses := make([]uiTenantPlatformEnrollmentStatus, 0, len(input.Tenants))
 	for _, tenant := range input.Tenants {
@@ -288,13 +295,27 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 
-	if _, err := resolution.client.Whoami(requestCtx); err == nil {
+	_, whoamiErr := resolution.client.Whoami(requestCtx)
+	if whoamiErr == nil {
 		status.State = tenantEnrollmentEnrolled
+		return status
+	}
+	// Whoami failing with unauthorized/forbidden is the expected shape of
+	// "not enrolled yet, go check the invite request" — anything else (a
+	// network fault, a 5xx) means the state genuinely could not be
+	// determined.
+	if !errors.Is(whoamiErr, eruncommon.ErrPlatformUnauthorized) && !errors.Is(whoamiErr, eruncommon.ErrPlatformForbidden) {
+		status.State = tenantEnrollmentUnknown
 		return status
 	}
 
 	request, err := resolution.client.MyInviteRequest(requestCtx)
 	if err != nil {
+		if errors.Is(err, eruncommon.ErrPlatformNotFound) {
+			// Signed in, never requested: genuinely local-only.
+			return status
+		}
+		status.State = tenantEnrollmentUnknown
 		return status
 	}
 	switch request.Status {

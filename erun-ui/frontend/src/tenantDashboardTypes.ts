@@ -120,6 +120,10 @@ export const TENANT_ENROLLMENT_LOCAL_ONLY = 'local-only';
 export const TENANT_ENROLLMENT_PENDING = 'pending';
 export const TENANT_ENROLLMENT_DECLINED = 'declined';
 export const TENANT_ENROLLMENT_ENROLLED = 'enrolled';
+// TENANT_ENROLLMENT_UNKNOWN is a genuine platform round-trip failure, never
+// "never requested" — it must render as its own state rather than collapse
+// into local-only's confident answer.
+export const TENANT_ENROLLMENT_UNKNOWN = 'unknown';
 
 export interface UITenantPlatformEnrollmentStatus {
   tenant: string;

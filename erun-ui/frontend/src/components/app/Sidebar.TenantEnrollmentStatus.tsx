@@ -1,5 +1,5 @@
 import { Button, IconTooltip, Popover, PopoverContent, PopoverTrigger } from 'erun-kit';
-import { TriangleAlert } from 'lucide-react';
+import { CircleHelp, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch } from '@/app/hooks';
@@ -10,6 +10,7 @@ import {
   TENANT_ENROLLMENT_ENROLLED,
   TENANT_ENROLLMENT_LOCAL_ONLY,
   TENANT_ENROLLMENT_PENDING,
+  TENANT_ENROLLMENT_UNKNOWN,
 } from '@/types';
 
 // Sidebar.TenantEnrollmentStatus.tsx is the tenant row's platform-enrollment
@@ -25,7 +26,7 @@ import {
 // busy treatment pixel-for-pixel: "a request is being worked on" is the same
 // concept as "a command is running in there".
 
-type TenantEnrollmentGlyphState = 'local-only' | 'pending' | 'declined' | 'enrolled';
+type TenantEnrollmentGlyphState = 'local-only' | 'pending' | 'declined' | 'enrolled' | 'unknown';
 
 function EnrollmentGlyph({ state }: { state: TenantEnrollmentGlyphState }): React.ReactElement {
   if (state === 'local-only') {
@@ -49,6 +50,9 @@ function EnrollmentGlyph({ state }: { state: TenantEnrollmentGlyphState }): Reac
   if (state === 'declined') {
     return <TriangleAlert aria-hidden="true" className="size-2.5 text-amber-500" />;
   }
+  if (state === 'unknown') {
+    return <CircleHelp aria-hidden="true" className="size-2.5 text-muted-foreground" />;
+  }
   return (
     <span
       aria-hidden="true"
@@ -67,6 +71,8 @@ function enrollmentGlyphLabel(state: TenantEnrollmentGlyphState, tenant: string)
       return `${tenant}'s invitation request was declined`;
     case 'enrolled':
       return `${tenant} is enrolled in erunpaas.com`;
+    case 'unknown':
+      return `${tenant}'s platform enrollment status could not be checked`;
   }
 }
 
@@ -162,7 +168,11 @@ export function TenantEnrollmentStatusButton({
     dispatch(openTenantDashboard(tenantName));
   };
 
-  if (state === TENANT_ENROLLMENT_ENROLLED) {
+  // Enrolled has nothing left to act on, and unknown has nothing yet
+  // resolved to act on -- both render as a plain button that opens the
+  // dashboard (where a genuine failure gets a real retry path) rather than a
+  // popover with actions that would not apply.
+  if (state === TENANT_ENROLLMENT_ENROLLED || state === TENANT_ENROLLMENT_UNKNOWN) {
     return (
       <IconTooltip label={label}>
         <Button
