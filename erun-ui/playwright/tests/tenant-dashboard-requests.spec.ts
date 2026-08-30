@@ -25,6 +25,18 @@ function seedDashboardEnvironment(title: string): string {
   return environment;
 }
 
+// Applies the app's own class-based light/dark mechanism directly (root
+// AGENTS.md's Design-Language Decision Record: one shared `.dark` class
+// mechanism), the same escape hatch manage-dialog-status-badge.spec.ts uses,
+// rather than clicking the titlebar toggle -- Radix's Dialog primitive marks
+// the rest of the app aria-hidden while the decline dialog is open, so the
+// titlebar button is unreachable via an accessible role query until it closes.
+async function forceDarkTheme(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    document.documentElement.classList.add('dark');
+  });
+}
+
 interface RouteResult {
   data?: unknown;
   error?: string;
@@ -55,7 +67,10 @@ interface RequestsFixture {
   inviteRequests?: Record<string, unknown>[];
 }
 
-function requestsDashboardData(environment: string, fixture: RequestsFixture): Record<string, unknown> {
+function requestsDashboardData(
+  environment: string,
+  fixture: RequestsFixture,
+): Record<string, unknown> {
   const requests = fixture.inviteRequests ?? [];
   return {
     tenant: SEED_TENANT,
@@ -223,9 +238,13 @@ test.describe('tenant dashboard — Requests tab', () => {
           }),
         }),
         DeclineTenantInviteRequest: (request) => {
-          const body = JSON.parse(request.postData() ?? '{}') as { args: [Record<string, unknown>] };
+          const body = JSON.parse(request.postData() ?? '{}') as {
+            args: [Record<string, unknown>];
+          };
           declineBody = body.args[0];
-          return { data: { ...PENDING_REQUEST, status: 'DECLINED', declineReason: declineBody.reason } };
+          return {
+            data: { ...PENDING_REQUEST, status: 'DECLINED', declineReason: declineBody.reason },
+          };
         },
       });
 
@@ -243,13 +262,12 @@ test.describe('tenant dashboard — Requests tab', () => {
         path: 'test-results/tenant-dashboard-requests-decline-dialog-light.png',
         animations: 'disabled',
       });
-      await app.titlebar.toggleTheme();
+      await forceDarkTheme(page);
       await expect(dialog).toBeVisible();
       await page.screenshot({
         path: 'test-results/tenant-dashboard-requests-decline-dialog-dark.png',
         animations: 'disabled',
       });
-      await app.titlebar.toggleTheme();
 
       await app.tenantDashboard.declineReasonInput().fill('no room right now');
       await expect(confirm).toBeEnabled();

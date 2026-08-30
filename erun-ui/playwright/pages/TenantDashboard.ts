@@ -343,7 +343,10 @@ export class TenantDashboard {
   }
 
   requestInvitationIdentitySummary(): Locator {
-    return this.requestInvitationDialog().getByText('Your verified identity');
+    // exact: true -- the dialog's own description sentence also contains the
+    // substring "Your verified identity" ("... Your verified identity goes
+    // with the request"), so a non-exact match is ambiguous between the two.
+    return this.requestInvitationDialog().getByText('Your verified identity', { exact: true });
   }
 
   requestKindJoinTab(): Locator {
@@ -380,6 +383,20 @@ export class TenantDashboard {
 
   requestDeclinedStatus(): Locator {
     return this.page.getByText('Declined', { exact: true });
+  }
+
+  // The MyInviteRequestError branch: a transport failure reading the
+  // caller's own invite request must never render as "never requested" --
+  // see tenant_platform_invite_requests.go's loadTenantDashboardMyInviteRequest.
+  // No `name` filter: InlineAlert's role="alert" element has no aria-label,
+  // and ARIA's accname algorithm does not compute "name from content" for
+  // the alert role, so a role+name locator would never match it.
+  requestStatusCheckFailedAlert(): Locator {
+    return this.page.getByRole('alert').filter({ hasText: 'invitation request status' });
+  }
+
+  requestStatusCheckRetryButton(): Locator {
+    return this.page.getByRole('button', { name: 'Try again' });
   }
 
   // Requests tab: the operator/admin queue.

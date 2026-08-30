@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
   FieldLabel,
+  Label,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -139,16 +140,22 @@ function RequestInvitationFields({
     <div className="grid gap-4 py-2">
       <IdentitySummary data={data} />
       <div className="grid gap-2">
-        <FieldLabel htmlFor="request-kind-join">What are you asking for?</FieldLabel>
+        {/* A real <label htmlFor> associates its target's accessible name --
+            fine for a single form control, wrong here where the target is
+            one of two tabs: FieldLabel's htmlFor previously pointed at the
+            "Join an existing tenant" tab's own id, silently overriding that
+            tab's accessible name to this heading's text instead of its own
+            label. This is a tablist's group heading, not a per-control
+            label, so it uses aria-labelledby on the group instead. */}
+        <Label id="request-kind-label">What are you asking for?</Label>
         <Tabs
           value={requestKindDraft}
           onValueChange={(value) => {
             dispatch(setRequestKindDraft(value));
           }}
         >
-          <TabsList className="w-full">
+          <TabsList className="w-full" aria-labelledby="request-kind-label">
             <TabsTrigger
-              id="request-kind-join"
               value={INVITE_REQUEST_KIND_JOIN_TENANT}
               className="flex-1"
               disabled={requesting}

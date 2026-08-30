@@ -230,6 +230,42 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
+  // The bug this guards: nextEnrollmentPollingInterval used to return 0 for
+  // 'unknown' (treating a genuine round-trip failure as terminal, same as
+  // 'local-only' and 'enrolled'), so a transient outage never recovered on
+  // its own. It must keep polling exactly like 'pending'/'declined'.
+  test('unknown keeps polling rather than going silent, and recovers once the platform answers again', async ({
+    app,
+    page,
+  }) => {
+    const tenant = uniqueEnvironmentName('enrollment-unknown-recovers');
+    const environment = uniqueEnvironmentName('env');
+    seedTenant(tenant, environment);
+    seedEnvironment(tenant, environment);
+    try {
+      const stub = stubRPC(page, 'ListTenantPlatformEnrollmentStatuses', {
+        data: [{ tenant, state: 'unknown' }],
+      });
+      await page.clock.install();
+
+      await app.reloadEnvironments();
+      const icon = app.sidebar.tenantEnrollmentStatus(tenant);
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'unknown');
+
+      const callsBeforeWait = stub.calls();
+      stub.respondWith({ data: [{ tenant, state: 'enrolled' }] });
+      await page.clock.fastForward(30_000);
+
+      // Proves the poll actually fired again (not merely that the icon
+      // happens to match) -- a terminal 'unknown' would never issue this
+      // second call at all.
+      expect(stub.calls()).toBeGreaterThan(callsBeforeWait);
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
+    } finally {
+      removeTenant(tenant);
+    }
+  });
+
   test('renders nothing, not a guessed state, when the status round trip fails outright', async ({
     app,
     page,

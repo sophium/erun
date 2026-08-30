@@ -332,7 +332,16 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 		return status
 	}
 
-	request, err := resolution.client.MyInviteRequest(requestCtx)
+	return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.client, status)
+}
+
+// tenantPlatformEnrollmentStatusFromInviteRequest fills in status.State from
+// the caller's own invite request, once Whoami has already established that
+// the identity is verified but not yet enrolled — split out of
+// tenantPlatformEnrollmentStatus purely to keep that function's own branch
+// count under the module's complexity budget.
+func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *eruncommon.PlatformClient, status uiTenantPlatformEnrollmentStatus) uiTenantPlatformEnrollmentStatus {
+	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
 		if errors.Is(err, eruncommon.ErrPlatformNotFound) {
 			// Signed in, never requested: genuinely local-only.
