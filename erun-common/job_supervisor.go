@@ -647,11 +647,20 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 // could be read as the whole story: an agent job's own working tree is
 // something its exit status says nothing about at all (see job_worktree.go).
 //
-// reclaimAgentJobWorkClone runs after State is settled, using a fresh
-// snapshot so it sees this job's own final EnvironmentJobStateExited (or
-// abandoned/gate-incomplete, which it refuses) rather than the "running"
-// state the job still carried when finishEnvironmentJob was entered (see
-// work_clone_reclaim.go for why that ordering matters).
+// reclaimAgentJobWorkClone needs a snapshot that already carries this job's
+// own final EnvironmentJobStateExited (or abandoned/gate-incomplete, which it
+// refuses) rather than the "running" state the job still carried when
+// finishEnvironmentJob was entered (see work_clone_reclaim.go for why that
+// ordering matters) -- but it must also run, and any removal it decides on
+// must actually finish, before that terminal state is written anywhere a
+// caller can observe it. job.Finished() (what await/status poll on) is true
+// the instant State reaches a terminal value, so settling State and
+// CloneReclaimed/CloneKeptReason in two separate recorder.update calls left a
+// window where a poll could read "finished" off the first write while the
+// clone was still fully present on disk -- a caller-visible false success,
+// not just a stale field. settle is applied to an in-memory copy first (no
+// disk write), reclaim is decided and acted on against that settled copy, and
+// only then does the single recorder.update below make any of it durable.
 func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
@@ -659,9 +668,13 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 
 	code, signal, reason, jobState := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
 	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
-	recorder.update(func(job *EnvironmentJob) {
+	// Captured once, before the reclaim decision runs, so EndedAt reflects
+	// when the child process actually exited rather than drifting later by
+	// however long reclaim's own git plumbing and removal take.
+	endedAt := time.Now()
+	settle := func(job *EnvironmentJob) {
 		job.State = jobState
-		job.EndedAt = time.Now()
+		job.EndedAt = endedAt
 		job.OutputBytes = writer.written()
 		job.OutputTruncated = writer.truncated()
 		job.Signal = signal
@@ -671,10 +684,14 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.Reason = reason
 		job.ExitCode = &code
 		worktree.apply(job)
-	})
+	}
 
-	reclaimed, cloneReason := reclaimAgentJobWorkClone(recorder.snapshot())
+	settled := recorder.snapshot()
+	settle(&settled)
+	reclaimed, cloneReason := reclaimAgentJobWorkClone(settled)
+
 	recorder.update(func(job *EnvironmentJob) {
+		settle(job)
 		job.CloneReclaimed = reclaimed
 		job.CloneKeptReason = cloneReason
 	})

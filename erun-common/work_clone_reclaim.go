@@ -396,5 +396,16 @@ func reclaimAgentJobWorkClone(job EnvironmentJob) (reclaimed bool, reason string
 	if err := os.RemoveAll(dir); err != nil {
 		return false, fmt.Sprintf("git state allowed reclaiming %s but removing it failed: %v", dir, err)
 	}
+	// os.RemoveAll returning nil is not, by itself, proof dir is gone -- it
+	// also returns nil when a path never existed, and nothing in this package
+	// guards against a future change trusting that return value alone. Stat
+	// the path directly so "reclaimed" can never be reported while dir still
+	// resolves on disk.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		if err == nil {
+			return false, fmt.Sprintf("git state allowed reclaiming %s but it still exists on disk after removal", dir)
+		}
+		return false, fmt.Sprintf("git state allowed reclaiming %s but its post-removal state could not be confirmed: %v", dir, err)
+	}
 	return true, ""
 }
