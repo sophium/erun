@@ -179,6 +179,24 @@ var Routes = map[string]Class{
 	"POST /v1/invites":               TenantAdminOnly,
 	"GET /v1/invites":                TenantUserClass,
 	"DELETE /v1/invites/{invite_id}": TenantAdminOnly,
+
+	// invite_requests.go — reading the queue is TenantUser (a non-operations
+	// caller only ever sees JOIN_TENANT requests naming their own tenant, per
+	// the handler's own filter); deciding one is tenant administration for a
+	// JOIN_TENANT request (the handler additionally requires an operations
+	// tenant for CREATE_TENANT, the same shared-route-shared-permission shape
+	// tenant_issuers.go's PATCH already uses). POST /v1/invite-requests and
+	// GET /v1/invite-requests/mine are registered unauthenticated, directly
+	// on the mux (see server.go), so they never reach PermissionAuthorizer
+	// and are intentionally absent here — same as invites.go's accept route.
+	"GET /v1/invite-requests":                              TenantUserClass,
+	"POST /v1/invite-requests/{invite_request_id}/approve": TenantAdminOnly,
+	"POST /v1/invite-requests/{invite_request_id}/decline": TenantAdminOnly,
+
+	// platform_rate_limits.go — changing the invite-request rate-limit window
+	// is restricted to an operations tenant at the handler, the same
+	// tenant_quotas.go PUT shape.
+	"PATCH /v1/config/invite-request-rate-limit": OperationsOnly,
 }
 
 // RoutePermission is one exact (method, path) grant, matching

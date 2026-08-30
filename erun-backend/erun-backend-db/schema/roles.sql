@@ -17,9 +17,15 @@ GRANT UPDATE (name) ON tenant_issuers TO erun_tenant;
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON tenants, tenant_issuers, issuers TO erun_operations;
 
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
-  ON users, user_external_ids, roles, role_permissions, user_roles, reviews, review_merge_queue, review_reviewers, builds, releases, comments, contexts, environments, tenant_quotas, cloud_provider_aliases, context_credentials, invites
+  ON users, user_external_ids, roles, role_permissions, user_roles, reviews, review_merge_queue, review_reviewers, builds, releases, comments, contexts, environments, tenant_quotas, cloud_provider_aliases, context_credentials, invites, invite_requests
   TO erun_tenant, erun_operations;
 
 GRANT SELECT, INSERT, REFERENCES
   ON audit_events, usage_events
   TO erun_tenant, erun_operations;
+
+-- platform_rate_limits is a root, platform-scoped singleton like tenants: any
+-- authenticated tenant reads the current window (GET /v1/config), only an
+-- operations caller changes it.
+GRANT SELECT ON platform_rate_limits TO erun_tenant;
+GRANT SELECT, INSERT, UPDATE, REFERENCES ON platform_rate_limits TO erun_operations;

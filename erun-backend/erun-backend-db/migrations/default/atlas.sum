@@ -1,4 +1,4 @@
-h1:5S93pqH0/ItCqV5aVAdHNgmYLA9DOfDClc5wQmNSAaE=
+h1:pJLB1fha6jyPkw2DM1pFhPcMC992vLVAc0ydCWCiAA4=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
@@ -21,3 +21,4 @@ h1:5S93pqH0/ItCqV5aVAdHNgmYLA9DOfDClc5wQmNSAaE=
 20260824150000_builds_gate_kind.sql h1:bRWjAspfnysyJskXJdVW0Z9Uz0uhZZyg4iHlnRZr7r8=
 20260826160000_audit_events_api_parameters.sql h1:PkxXOcFiPrC8y5onZqwa+bTl7Vk+8w06Umm3U/GqZ9o=
 20260827160000_invites.sql h1:XnD2kIrdTOfbI8vC4XNhVxalVF75sCV9qHRqLiWZ+xw=
+20260830100000_invite_requests_and_rate_limits.sql h1:DhXMNt1E1+NNYtspHRMx+OV0mFS5bMZ6vcnuJSaMuZc=

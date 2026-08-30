@@ -21,6 +21,15 @@ func (r stubConfigTenantRepository) Current(context.Context) (model.Tenant, erro
 	return r.tenant, r.err
 }
 
+type stubConfigRateLimitReader struct {
+	limit model.PlatformRateLimit
+	err   error
+}
+
+func (r stubConfigRateLimitReader) Get(context.Context) (model.PlatformRateLimit, error) {
+	return r.limit, r.err
+}
+
 type stubEnvironmentRepository struct {
 	environments []model.Environment
 	environment  model.Environment
@@ -221,7 +230,9 @@ func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: environments, contexts: contexts}.getConfig(rec, req)
+	rateLimits := stubConfigRateLimitReader{limit: model.PlatformRateLimit{InviteRequestWindowSeconds: 60}}
+
+	ConfigRoutes{tenants: tenants, environments: environments, contexts: contexts, rateLimits: rateLimits}.getConfig(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -239,6 +250,9 @@ func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	if len(response.Contexts) != 1 || response.Contexts[0].Provider != "aws" {
 		t.Fatalf("unexpected contexts: %+v", response.Contexts)
 	}
+	if response.InviteRequestRateLimitWindowSeconds != 60 {
+		t.Fatalf("unexpected invite request rate limit window: %d", response.InviteRequestRateLimitWindowSeconds)
+	}
 }
 
 func TestConfigPropagatesRepositoryError(t *testing.T) {
@@ -247,7 +261,7 @@ func TestConfigPropagatesRepositoryError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: &stubEnvironmentRepository{}, contexts: &stubContextRepository{}}.getConfig(rec, req)
+	ConfigRoutes{tenants: tenants, environments: &stubEnvironmentRepository{}, contexts: &stubContextRepository{}, rateLimits: stubConfigRateLimitReader{}}.getConfig(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", rec.Code)

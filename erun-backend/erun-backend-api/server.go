@@ -123,6 +123,21 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		inviteService := service.NewInviteService(repository.NewInviteRepository(txManager), options.IdentityAdmin, repository.NewUserRepository(txManager))
 		routes.RegisterInviteAcceptRoute(mux, inviteService)
 	}
+	// Requesting an invitation also has no bearer token resolvable to a
+	// tenant — the requester is authenticated at their own IdP but enrolled
+	// nowhere, which the normal protected registrar's tenant/user resolution
+	// would reject — so like invite acceptance it registers directly on the
+	// mux. Unlike accept, it does verify a real bearer token (just not to a
+	// tenant/user), so it only needs the token verifier and a database, not
+	// Zitadel identity admin.
+	if txManager != nil {
+		routes.RegisterInviteRequestPublicRoutes(
+			mux,
+			options.TokenVerifier,
+			repository.NewInviteRequestRepository(txManager),
+			routes.NewInviteRequestRateLimiter(repository.NewPlatformRateLimitRepository(txManager)),
+		)
+	}
 	registerProtectedRoutes(mux, auth, options, txManager, authorizer)
 	return mux, nil
 }
@@ -258,6 +273,7 @@ type databaseRepositories struct {
 	usageEvents     *repository.UsageEventRepository
 	auditEvents     *repository.AuditEventRepository
 	releases        *repository.ReleaseRepository
+	rateLimits      *repository.PlatformRateLimitRepository
 }
 
 func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
@@ -274,6 +290,7 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 		usageEvents:     repository.NewUsageEventRepository(txManager),
 		auditEvents:     repository.NewAuditEventRepository(txManager),
 		releases:        repository.NewReleaseRepository(txManager),
+		rateLimits:      repository.NewPlatformRateLimitRepository(txManager),
 	}
 }
 
@@ -334,10 +351,20 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	tenantService := service.NewTenantService(repos.tenants, repos.environments, options.BootstrapTenantName)
 	routes.RegisterTenantRoutes(register, repos.tenants, tenantService)
 	routes.RegisterTenantQuotaRoute(register, repos.tenantQuotas, repos.tenantQuotas)
-	routes.RegisterConfigRoute(register, repos.tenants, repos.environments, repos.contexts)
+	routes.RegisterConfigRoute(register, repos.tenants, repos.environments, repos.contexts, repos.rateLimits)
+	routes.RegisterPlatformRateLimitRoute(register, repos.rateLimits)
 	routes.RegisterProvisionRoute(register, repos.tenants, repos.environments, repos.tenantQuotas)
 	routes.RegisterUserRoutes(register, repository.NewUserRepository(txManager))
 	routes.RegisterRoleRoutes(register, repository.NewRoleRepository(txManager))
+	// Deciding an invite request needs no Zitadel identity administration —
+	// unlike accepting an invite, the requester already has a usable external
+	// identity, so approval only enrols it (UserRepository.Create) and mints
+	// an invite (InviteRepository.Create), neither of which calls Zitadel —
+	// so this registers unconditionally rather than sharing
+	// registerIdentityAdminRoutes' IdentityAdmin gate below.
+	inviteRequests := repository.NewInviteRequestRepository(txManager)
+	inviteRequestService := service.NewInviteRequestService(inviteRequests, repos.tenants, repository.NewUserRepository(txManager), repository.NewInviteRepository(txManager))
+	routes.RegisterInviteRequestRoutes(register, inviteRequests, repos.tenants, inviteRequestService)
 	registerIdentityAdminRoutes(register, options, txManager)
 }
 

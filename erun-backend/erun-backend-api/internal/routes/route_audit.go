@@ -58,6 +58,17 @@ var InternalAPIRoutes = map[string]bool{
 // admin surface designed, not just a fetch wired up), and the DNS-01 token
 // mint (needs `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
+	// The onboarding request/approve queue's backend half. The desktop
+	// (sidebar status icon, request dialog) and console (operator queue)
+	// surfaces for these six routes are a separate, later change — landing
+	// them together with a real operator entry point is what removes this
+	// entry, not a design decision that they need none.
+	"POST /v1/invite-requests":                             true,
+	"GET /v1/invite-requests/mine":                         true,
+	"GET /v1/invite-requests":                              true,
+	"POST /v1/invite-requests/{invite_request_id}/approve": true,
+	"POST /v1/invite-requests/{invite_request_id}/decline": true,
+	"PATCH /v1/config/invite-request-rate-limit":           true,
 	// Creating an org on the platform's own IdP is what makes a second tenant
 	// possible: an org-scoped issuer resolves tenants by the org claim, so a new
 	// tenant needs an org for its mapping to point at. That makes it plainly
