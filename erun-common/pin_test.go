@@ -457,7 +457,7 @@ func TestResolvePinPlanRefusesWithoutATarget(t *testing.T) {
 	}
 }
 
-// The reported bug (#1711): an unresolved tenant/environment must never reach
+// The reported bug: an unresolved tenant/environment must never reach
 // a plan. Before this guard, ResolvePinPlan happily built one with tenant and
 // environment both "", which then emitted a runtime-version site with
 // current: "" and detail: "/" -- an unresolved reading dressed up as a real

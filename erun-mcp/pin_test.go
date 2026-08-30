@@ -20,7 +20,7 @@ func writePinTestFile(t *testing.T, path, body string) {
 	}
 }
 
-// The reported bug (#1711): a project root that cannot be resolved must
+// The reported bug: a project root that cannot be resolved must
 // refuse rather than widen to whatever directory this process happens to be
 // running in (its own cwd, a pod home directory). Unlike the CLI, there is no
 // cwd fallback here at all -- an MCP caller has no cwd to be inside of.
@@ -45,7 +45,7 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 	}
 }
 
-// An explicit projectRoot input is exactly the remedy #1711 asks for: the
+// An explicit projectRoot input is exactly the remedy asked for: the
 // caller names the repository since it has no cwd to fall back on.
 func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	root := t.TempDir()
@@ -86,8 +86,8 @@ func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
 
 // The reported bug's second half: even once a root resolves, it must never
 // widen to a sibling checkout that happens to sit beside the tenant repo (the
-// two-sibling-checkouts layout that reproduced #1711 -- a tenant repo and
-// erun's own repo checked out next to each other in the same pod).
+// two-sibling-checkouts layout that reproduced it -- a tenant repo and erun's
+// own repo checked out next to each other in the same pod).
 func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	parent := t.TempDir()
 	frsRoot := filepath.Join(parent, "frs")
@@ -122,6 +122,11 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
+	assertPlanScopedToFrsOnly(t, output, frsRoot)
+}
+
+func assertPlanScopedToFrsOnly(t *testing.T, output JobEnvelopeOutput, frsRoot string) {
+	t.Helper()
 	if output.Pin == nil {
 		t.Fatal("expected a resolved plan")
 	}

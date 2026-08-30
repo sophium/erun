@@ -17,7 +17,7 @@ type PinInput struct {
 	// the skill's own guidance can point at ("run from inside the tenant
 	// repository"); an MCP caller has no cwd to be inside of, so this is its
 	// only way to say which repository it means when the server's own bound
-	// repo path is missing or wrong (#1711).
+	// repo path is missing or wrong.
 	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"repo root holding the sites to re-pin (Terraform, umbrella charts, the build-env image tag); defaults to the runtime repo path. Required when that default is not resolvable -- there is no cwd fallback here"`
 	Version     string `json:"version,omitempty" jsonschema:"erun version to pin every reference to; omit to pin to the latest published stable release"`
 	Revert      bool   `json:"revert,omitempty" jsonschema:"when true, pin back to the version recorded before the last re-pin"`
@@ -39,40 +39,11 @@ func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 		execute := func(preview bool) (CommandOutput, error) {
 			var pinned *PinOutput
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
-				tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+				out, err := runPinToolCommand(runtime, input, runCtx)
 				if err != nil {
 					return err
 				}
-				projectRoot, err := resolvePinToolProjectRoot(runtime, input)
-				if err != nil {
-					return err
-				}
-				envConfig, _, err := runtime.Store.LoadEnvConfig(tenant, environment)
-				if err != nil {
-					return err
-				}
-				// Not the MCP call's own context: an async pin runs in a background
-				// task job that outlives this call, so tying the registry lookup to
-				// a context the request already cancelled would fail it every time.
-				target, err := resolvePinToolTarget(context.Background(), input, projectRoot, tenant, environment)
-				if err != nil {
-					return err
-				}
-				plan, err := eruncommon.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
-				if err != nil {
-					return err
-				}
-				for _, site := range plan.Sites {
-					runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
-				}
-				for _, note := range plan.Skipped {
-					runCtx.Trace("pin skipped: " + note)
-				}
-				out, err := applyPinPlanUnlessPreviewing(runCtx, plan, projectRoot, tenant, environment)
-				if err != nil {
-					return err
-				}
-				pinned = &out
+				pinned = out
 				return nil
 			})
 			if err == nil && pinned != nil {
@@ -83,6 +54,47 @@ func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 		envelope, err := runJobEnvelope(runtime, "pin", input.Wait, input.Preview, execute)
 		return nil, envelope, err
 	}
+}
+
+// runPinToolCommand resolves the plan and applies it unless previewing. Split
+// out of pinTool's execute closure so the tenant/environment/root resolution,
+// the plan build, and the apply each read as one step rather than piling into
+// a single over-complex function.
+func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.Context) (*PinOutput, error) {
+	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+	if err != nil {
+		return nil, err
+	}
+	projectRoot, err := resolvePinToolProjectRoot(runtime, input)
+	if err != nil {
+		return nil, err
+	}
+	envConfig, _, err := runtime.Store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return nil, err
+	}
+	// Not the MCP call's own context: an async pin runs in a background task
+	// job that outlives this call, so tying the registry lookup to a context
+	// the request already cancelled would fail it every time.
+	target, err := resolvePinToolTarget(context.Background(), input, projectRoot, tenant, environment)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := eruncommon.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
+	if err != nil {
+		return nil, err
+	}
+	for _, site := range plan.Sites {
+		runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
+	}
+	for _, note := range plan.Skipped {
+		runCtx.Trace("pin skipped: " + note)
+	}
+	out, err := applyPinPlanUnlessPreviewing(runCtx, plan, projectRoot, tenant, environment)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // applyPinPlanUnlessPreviewing writes the plan unless this is a preview or the
@@ -115,8 +127,7 @@ func applyPinPlanUnlessPreviewing(runCtx eruncommon.Context, plan eruncommon.Pin
 // command from inside the tenant repo, but an MCP caller has no cwd to be
 // inside of, so a directory this process happens to be running in (its own
 // cwd, a pod home directory) is never an acceptable stand-in for "the tenant's
-// repo" (#1711) — a missing root refuses instead of widening to whatever is
-// there.
+// repo" — a missing root refuses instead of widening to whatever is there.
 func resolvePinToolProjectRoot(runtime RuntimeConfig, input PinInput) (string, error) {
 	projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 	if projectRoot == "" {
