@@ -4,6 +4,13 @@ import * as React from 'react';
 
 import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
+import {
+  HOVER_CARD_CAPTION_CLASS,
+  HoverCardBadge,
+  HoverCardMuted,
+  HoverCardRow,
+  HoverCardTitle,
+} from '@/components/app/Sidebar.HoverCardRow';
 import type { UISelection, UIWorkingIssue } from '@/types';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
@@ -20,22 +27,13 @@ function EnvTypeBadge({
 }): React.ReactElement | null {
   if (isHost) {
     return (
-      <span
-        className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground"
-        aria-label="Host environment — no pod, this machine only"
-      >
-        Host
-      </span>
+      <HoverCardBadge ariaLabel="Host environment — no pod, this machine only">Host</HoverCardBadge>
     );
   }
   if (!isLocal) {
     return null;
   }
-  return (
-    <span className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground">
-      Local
-    </span>
-  );
+  return <HoverCardBadge>Local</HoverCardBadge>;
 }
 
 // EnvHoverCard shows an env row's details in a Popover rather than a tooltip
@@ -118,52 +116,37 @@ export function EnvHoverCard({
       >
         <div className="border-b border-border px-3 py-2">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate font-medium">
+            <HoverCardTitle>
               {tenantName} / {environmentName}
-            </span>
+            </HoverCardTitle>
             <EnvTypeBadge isLocal={isLocal} isHost={isHost} />
           </div>
         </div>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">
-          <HoverRow label="Version">
+          <HoverCardRow label="Version">
             {runtimeVersion ? (
-              <span className="font-mono text-[12px]">{runtimeVersion}</span>
+              <span className="font-mono tabular-nums">{runtimeVersion}</span>
             ) : (
               <Muted>Not set</Muted>
             )}
-          </HoverRow>
-          <HoverRow label="Working on">
+          </HoverCardRow>
+          <HoverCardRow label="Working on">
             <WorkingOn issue={issue} />
-          </HoverRow>
-          <HoverRow label="Activity">
+          </HoverCardRow>
+          <HoverCardRow label="Activity">
             <ActivityState activityLabel={activityLabel} indicator={indicator} />
-          </HoverRow>
-          <HoverRow label="Usage">
+          </HoverCardRow>
+          <HoverCardRow label="Usage">
             <UsageState usage={usage} />
-          </HoverRow>
+          </HoverCardRow>
         </dl>
       </PopoverContent>
     </Popover>
   );
 }
 
-function HoverRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <>
-      <dt className="text-[12px] text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-foreground">{children}</dd>
-    </>
-  );
-}
-
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <span className="text-muted-foreground">{children}</span>;
+  return <HoverCardMuted>{children}</HoverCardMuted>;
 }
 
 // ActivityState reports the desktop's own in-flight command when there is one,
@@ -211,12 +194,12 @@ function UsageState({
   }
   return (
     <span className="grid gap-0.5">
-      <span>{summary.headline}</span>
+      <span className="tabular-nums">{summary.headline}</span>
       <span
         className={
           summary.stale
-            ? 'flex items-center gap-1 text-[12px] text-amber-700 dark:text-amber-400'
-            : 'text-[12px] text-muted-foreground'
+            ? 'flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400'
+            : HOVER_CARD_CAPTION_CLASS
         }
       >
         {summary.stale && <TriangleAlert aria-hidden="true" className="size-3 shrink-0" />}
@@ -242,9 +225,9 @@ function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement 
   }
   return (
     <div className="grid gap-0.5">
-      <span className="font-mono text-[12px]">{value.branch}</span>
+      <span className="font-mono">{value.branch}</span>
       {value.issueNumber ? (
-        <span className="text-[12px]">
+        <span>
           #{value.issueNumber}
           {value.issueTitle ? ` · ${value.issueTitle}` : ''}
         </span>
