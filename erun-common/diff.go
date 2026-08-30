@@ -160,10 +160,8 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit G
 
 	scope := normalizeDiffScope(options.Scope)
 	selectedCommit := strings.TrimSpace(options.SelectedCommit)
-	if scope == "commit" && selectedCommit != "" {
-		if err := rejectOptionShapedRevision(selectedCommit); err != nil {
-			return DiffResult{}, err
-		}
+	if err := rejectOptionShapedSelectedCommit(scope, selectedCommit); err != nil {
+		return DiffResult{}, err
 	}
 
 	base, baseFound, err := resolveGitDiffReviewBase(projectRoot, runGit)
@@ -175,11 +173,9 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit G
 		return DiffResult{}, err
 	}
 
-	if scope == "commit" && selectedCommit != "" {
-		selectedCommit, err = resolveDiffCommitRevision(projectRoot, selectedCommit, runGit)
-		if err != nil {
-			return DiffResult{}, err
-		}
+	selectedCommit, err = resolveDiffSelectedCommit(projectRoot, scope, selectedCommit, runGit)
+	if err != nil {
+		return DiffResult{}, err
 	}
 
 	stdout := new(bytes.Buffer)
@@ -211,24 +207,32 @@ func normalizeDiffScope(scope string) string {
 	}
 }
 
-// rejectOptionShapedRevision refuses a value that git would parse as an
-// option rather than a revision, before any git command runs with it. exec_diff
-// is a read-scoped MCP tool, so a caller-supplied revision must never be able
-// to steer git's own flags.
-func rejectOptionShapedRevision(revision string) error {
-	if strings.HasPrefix(revision, "-") {
-		return fmt.Errorf("selectedCommit must be a commit revision, not %q", revision)
+// rejectOptionShapedSelectedCommit refuses a selectedCommit that git would
+// parse as an option rather than a revision, before any git command runs with
+// it. exec_diff is a read-scoped MCP tool, so a caller-supplied revision must
+// never be able to steer git's own flags. Only the "commit" scope ever passes
+// selectedCommit into argv, so other scopes have nothing to validate.
+func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
+	if scope != "commit" || selectedCommit == "" {
+		return nil
+	}
+	if strings.HasPrefix(selectedCommit, "-") {
+		return fmt.Errorf("selectedCommit must be a commit revision, not %q", selectedCommit)
 	}
 	return nil
 }
 
-// resolveDiffCommitRevision resolves the caller-supplied revision to a commit
-// sha via git itself, so only a value git already agreed is a commit reaches
-// the diff argv.
-func resolveDiffCommitRevision(projectRoot, revision string, runGit GitCommandRunnerFunc) (string, error) {
-	resolved, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", revision+"^{commit}")
+// resolveDiffSelectedCommit resolves a "commit" scope's selectedCommit to a
+// commit sha via git itself, so only a value git already agreed is a commit
+// reaches the diff argv. Other scopes pass selectedCommit through unresolved
+// since it never reaches argv for them.
+func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit GitCommandRunnerFunc) (string, error) {
+	if scope != "commit" || selectedCommit == "" {
+		return selectedCommit, nil
+	}
+	resolved, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", selectedCommit+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("selectedCommit %q is not a valid commit: %w", revision, err)
+		return "", fmt.Errorf("selectedCommit %q is not a valid commit: %w", selectedCommit, err)
 	}
 	return resolved, nil
 }
