@@ -199,3 +199,41 @@ describe('App not-enrolled route', () => {
     ).toBeInTheDocument();
   });
 });
+
+// erun#1721: a 401 coded TENANT_UNRESOLVED (an org-scoped issuer whose token
+// carries no matching org claim, most commonly) must render distinctly from
+// the not-enrolled card above -- the caller may already be enrolled
+// somewhere, so "an operator has to enrol you" would be wrong advice.
+describe('App tenant-unresolved route', () => {
+  it('shows the tenant-unresolved card, not the not-enrolled card, for a TENANT_UNRESOLVED 401', async () => {
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = input instanceof URL ? input.href : input;
+        if (url.includes('/v1/platform')) {
+          return Promise.resolve(jsonResponse(PLATFORM));
+        }
+        if (url.includes('/v1/config')) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () =>
+              Promise.resolve({
+                code: 'TENANT_UNRESOLVED',
+                message:
+                  'issuer "https://auth.acme.example" is org-scoped but the token carries no matching claim',
+              }),
+          } as unknown as Response);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    renderWithStore(<App />);
+
+    await screen.findByText('Could not determine your tenant');
+    expect(screen.getByText(/carries no matching claim/)).toBeInTheDocument();
+    expect(screen.queryByText('Not yet part of a tenant')).not.toBeInTheDocument();
+  });
+});

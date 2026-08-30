@@ -27,6 +27,13 @@ export interface PlatformApiRequest {
 export interface PlatformApiError {
   message: string;
   status?: number;
+  // code is the backend's machine-readable {code, message} envelope code
+  // (erun-backend-api/internal/routes/errors.go and, for the pre-route auth
+  // layer, auth.go's authErrorEnvelope) when the transport could read one —
+  // e.g. TENANT_UNRESOLVED vs NOT_ENROLLED on a 401, which a caller must
+  // render as two different messages rather than one generic "not enrolled"
+  // (erun#1721). Absent when the response carried no such envelope.
+  code?: string;
 }
 
 export type PlatformBaseQuery = BaseQueryFn<PlatformApiRequest, unknown, PlatformApiError>;

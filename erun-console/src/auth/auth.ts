@@ -26,6 +26,20 @@ import { fetchPlatformConfig } from '../config/platform';
 const TOKEN_STORAGE_KEY = 'erun.console.idToken';
 const PKCE_VERIFIER_KEY = 'erun.console.pkceVerifier';
 const PKCE_STATE_KEY = 'erun.console.oauthState';
+const ORG_SCOPE_RETRIED_KEY = 'erun.console.oidcOrgScopeRetried';
+
+// ORG_CLAIM_SCOPE asks the shipped Zitadel IdP to include the org
+// (resourceowner) claim erun's tenant resolution reads for a shared,
+// org-scoped issuer -- the same scope erun-common's CLI/desktop OIDC login
+// requests by default (see erun-common/cloud_erun_oidc.go's
+// erunOrgClaimScope). Without it, a console session's token carries no org
+// claim, so once an issuer is org-scoped, the console cannot resolve its
+// tenant even for an already-enrolled operator (erun#1721). A dedicated/BYO
+// issuer has never heard of this scope; beginLogin retries once without it
+// (see resolveToken's authCallbackError handling) when the issuer redirects
+// back with error=invalid_scope, so sign-in still succeeds exactly as it did
+// before this default was added.
+const ORG_CLAIM_SCOPE = 'urn:zitadel:iam:user:resourceowner';
 
 export interface OidcConfig {
   issuer: string;
@@ -137,17 +151,26 @@ async function pkceChallenge(verifier: string): Promise<string> {
 // so the IdP offers an account/org picker instead of silently reusing
 // whatever session it already holds, which would make "switch" a no-op for a
 // caller who is still signed into the browser as the same identity.
-export async function beginLogin(config: OidcConfig, prompt?: string): Promise<void> {
+// `includeOrgScope` defaults to true; resolveToken passes false on the
+// one-shot retry after an issuer refuses ORG_CLAIM_SCOPE.
+export async function beginLogin(
+  config: OidcConfig,
+  prompt?: string,
+  includeOrgScope = true,
+): Promise<void> {
   const discovery = await discover(config.issuer);
   const verifier = randomString();
   const state = randomString();
   sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
   sessionStorage.setItem(PKCE_STATE_KEY, state);
+  const scope = includeOrgScope
+    ? `openid profile email ${ORG_CLAIM_SCOPE}`
+    : 'openid profile email';
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: 'code',
-    scope: 'openid profile email',
+    scope,
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
     state,
@@ -163,6 +186,14 @@ export async function beginLogin(config: OidcConfig, prompt?: string): Promise<v
 export function isAuthCallback(): boolean {
   const params = new URLSearchParams(window.location.search);
   return params.has('code') && params.has('state');
+}
+
+// authCallbackError reads the OIDC error code from a failed redirect (the
+// issuer sends ?error=...&error_description=... instead of ?code=&state=
+// when it refuses the request).
+function authCallbackError(): string | undefined {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('error') ?? undefined;
 }
 
 // completeLogin finishes the callback: it validates the state, exchanges the
@@ -230,9 +261,26 @@ export function signOut(): void {
 // callback exchange when this is a redirect callback, else a token already held
 // this session, else the dev-token fallback. undefined means no token — the
 // operator must sign in (OIDC) or set a dev token.
+//
+// A callback that failed with error=invalid_scope means the issuer refused
+// ORG_CLAIM_SCOPE (a dedicated/BYO IdP that has never heard of it) — this
+// retries sign-in once without that scope, the same one-shot fallback
+// erun-common's CLI/desktop login already does, so a dedicated issuer signs
+// in exactly as it did before the org-scope default was added. The
+// sessionStorage flag bounds the retry to once per browser session.
 export async function resolveToken(config: OidcConfig | undefined): Promise<string | undefined> {
   if (config !== undefined && isAuthCallback()) {
     return completeLogin(config);
+  }
+  if (
+    config !== undefined &&
+    authCallbackError() === 'invalid_scope' &&
+    sessionStorage.getItem(ORG_SCOPE_RETRIED_KEY) === null
+  ) {
+    sessionStorage.setItem(ORG_SCOPE_RETRIED_KEY, '1');
+    cleanCallbackUrl();
+    await beginLogin(config, undefined, false);
+    return undefined;
   }
   return storedToken() ?? devBearerToken();
 }

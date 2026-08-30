@@ -11,19 +11,26 @@ import { isRecord, type PlatformApiRequest, type PlatformBaseQuery } from 'erun-
 // same auth edge that fronts the API.
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
-// errorMessage prefers the backend's own {code, message} envelope (see
-// erun-backend-api/internal/routes/errors.go) over the generic fallback, so a
-// caller sees why a request was rejected (e.g. which field failed validation)
-// rather than only its status code. Falls back when the body isn't that
-// envelope — an auth-layer 401/403 is still plain text today (see
-// erun-docs/docs/agent-reference/api-protocol.md#errors).
-async function errorMessage(response: Response, label: string | undefined): Promise<string> {
-  const fallback = `${label ?? 'request'} failed (${String(response.status)})`;
+// parsedError prefers the backend's own {code, message} envelope (see
+// erun-backend-api/internal/routes/errors.go, and auth.go's authErrorEnvelope
+// for the pre-route auth layer -- both 401 and 403 now carry it too) over the
+// generic fallback, so a caller sees why a request was rejected (e.g. which
+// field failed validation, or TENANT_UNRESOLVED vs NOT_ENROLLED) rather than
+// only its status code. Falls back to a message-only result when the body
+// isn't that envelope.
+async function parsedError(
+  response: Response,
+  label: string | undefined,
+): Promise<{ message: string; code?: string }> {
+  const fallback = { message: `${label ?? 'request'} failed (${String(response.status)})` };
   try {
     const body: unknown = await response.json();
-    return isRecord(body) && typeof body.message === 'string' && body.message.length > 0
-      ? body.message
-      : fallback;
+    if (!isRecord(body) || typeof body.message !== 'string' || body.message.length === 0) {
+      return fallback;
+    }
+    return typeof body.code === 'string' && body.code.length > 0
+      ? { message: body.message, code: body.code }
+      : { message: body.message };
   } catch {
     return fallback;
   }
@@ -61,7 +68,7 @@ export const httpBaseQuery: PlatformBaseQuery = async ({
   if (!response.ok) {
     return {
       error: {
-        message: await errorMessage(response, label),
+        ...(await parsedError(response, label)),
         status: response.status,
       },
     };
