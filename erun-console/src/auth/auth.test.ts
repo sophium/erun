@@ -4,10 +4,12 @@ import {
   beginLogin,
   completeLogin,
   devBearerToken,
+  endSessionSupported,
   isAuthCallback,
   oidcConfig,
   resolveOidcConfig,
   resolveToken,
+  signOut,
   storedToken,
 } from './auth';
 
@@ -338,5 +340,151 @@ describe('resolveOidcConfig', () => {
     );
 
     expect(await resolveOidcConfig()).toEqual({ config: undefined });
+  });
+});
+
+const TOKEN_STORAGE_KEY = 'erun.console.idToken';
+
+describe('signOut', () => {
+  it('clears the local token and redirects to the end_session_endpoint with id_token_hint and post_logout_redirect_uri', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'the.jwt.token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            ...DISCOVERY,
+            end_session_endpoint: 'http://localhost:8080/oidc/v1/end_session',
+          }),
+        ),
+      ),
+    );
+    const assign = stubLocationAssign();
+
+    const result = await signOut(config);
+
+    expect(result).toEqual({ idpSessionEnded: true });
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.origin + url.pathname).toBe('http://localhost:8080/oidc/v1/end_session');
+    expect(url.searchParams.get('id_token_hint')).toBe('the.jwt.token');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(config.redirectUri);
+    expect(storedToken()).toBeUndefined();
+  });
+
+  it('redirects with no id_token_hint when no token was held', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            ...DISCOVERY,
+            end_session_endpoint: 'http://localhost:8080/oidc/v1/end_session',
+          }),
+        ),
+      ),
+    );
+    const assign = stubLocationAssign();
+
+    const result = await signOut(config);
+
+    expect(result).toEqual({ idpSessionEnded: true });
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.has('id_token_hint')).toBe(false);
+  });
+
+  it('clears the local token but does not redirect when the IdP has no end_session_endpoint', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'the.jwt.token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    const result = await signOut(config);
+
+    expect(result).toEqual({ idpSessionEnded: false });
+    expect(assign).not.toHaveBeenCalled();
+    expect(storedToken()).toBeUndefined();
+  });
+
+  it('clears the local token but does not redirect when discovery fails', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'the.jwt.token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse('not found', 404))),
+    );
+    const assign = stubLocationAssign();
+
+    const result = await signOut(config);
+
+    expect(result).toEqual({ idpSessionEnded: false });
+    expect(assign).not.toHaveBeenCalled();
+    expect(storedToken()).toBeUndefined();
+  });
+
+  it('clears the local token but does not redirect with no OIDC config (dev-token fallback)', async () => {
+    sessionStorage.setItem(TOKEN_STORAGE_KEY, 'the.jwt.token');
+    const assign = stubLocationAssign();
+
+    const result = await signOut(undefined);
+
+    expect(result).toEqual({ idpSessionEnded: false });
+    expect(assign).not.toHaveBeenCalled();
+    expect(storedToken()).toBeUndefined();
+  });
+
+  // erun#1720/erun#1721 interaction: the org-claim scope retry is meant to
+  // bound one sign-in attempt, not survive a sign-out. Without this, a
+  // dedicated/BYO issuer that already consumed its one retry would get no
+  // retry on the next sign-in after sign-out either, and resolveToken would
+  // bounce back to the sign-in screen forever instead of retrying.
+  it('clears the org-claim scope retry flag so the next sign-in can retry again', async () => {
+    sessionStorage.setItem('erun.console.oidcOrgScopeRetried', '1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    stubLocationAssign();
+
+    await signOut(config);
+
+    expect(sessionStorage.getItem('erun.console.oidcOrgScopeRetried')).toBeNull();
+  });
+});
+
+describe('endSessionSupported', () => {
+  it('is true when discovery reports an end_session_endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            ...DISCOVERY,
+            end_session_endpoint: 'http://localhost:8080/oidc/v1/end_session',
+          }),
+        ),
+      ),
+    );
+    expect(await endSessionSupported(config)).toBe(true);
+  });
+
+  it('is false when discovery has no end_session_endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    expect(await endSessionSupported(config)).toBe(false);
+  });
+
+  it('is false when discovery fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse('not found', 404))),
+    );
+    expect(await endSessionSupported(config)).toBe(false);
+  });
+
+  it('is false with no OIDC config (dev-token fallback)', async () => {
+    expect(await endSessionSupported(undefined)).toBe(false);
   });
 });

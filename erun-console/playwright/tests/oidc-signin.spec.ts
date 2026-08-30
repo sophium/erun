@@ -66,7 +66,10 @@ test('operator signs in through Zitadel OIDC, registers an environment, and sees
   // a literal name, and the actual invariant under test (an OPERATIONS-type
   // tenant bootstrapped) is the type text on the next line.
   await expect(page.getByRole('heading', { level: 2 })).toBeVisible();
-  await expect(page.getByText('Tenant · OPERATIONS')).toBeVisible();
+  // scoped to the main region: the sidebar's TenantSwitcher (#1614) renders
+  // the same "Tenant · <type>" text as a plain label whenever only one
+  // tenant is reachable, so the unscoped locator is ambiguous.
+  await expect(page.getByRole('main').getByText('Tenant · OPERATIONS')).toBeVisible();
   // erun-kit's CardTitle renders a styled <div>, not a semantic heading
   // element, so the section title is asserted via the Card's own
   // role="region" + aria-labelledby (its accessible name), not getByRole
@@ -78,7 +81,7 @@ test('operator signs in through Zitadel OIDC, registers an environment, and sees
   // 5. The session is real, not a one-shot render: a reload resolves the held
   //    token and re-authenticates against the API without another sign-in.
   await page.reload();
-  await expect(page.getByText('Tenant · OPERATIONS')).toBeVisible();
+  await expect(page.getByRole('main').getByText('Tenant · OPERATIONS')).toBeVisible();
 
   // 6. The app shell renders exactly one section at a time (#1207): the
   //    register/deploy forms live under the "Environments" nav entry, not the
@@ -114,4 +117,21 @@ test('operator signs in through Zitadel OIDC, registers an environment, and sees
   await expect(
     page.getByText('The deploy executor is not configured on this control plane.'),
   ).toBeVisible();
+
+  // 9. Signing out must actually end the identity provider's session
+  //    (erun#1720) — clearing only the local token left the IdP's session
+  //    alive, so the next sign-in was silently re-authenticated as the same
+  //    account with no way to reach a different one. Clicking Sign out
+  //    redirects to Zitadel's discovered end_session_endpoint and back to
+  //    this origin, landing on the signed-out landing page.
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/^http:\/\/localhost:5173\/$/);
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+
+  // 10. The proof that matters: signing in again must not silently reuse the
+  //     ended IdP session. Had RP-initiated logout not actually ended it,
+  //     this would skip straight back into the console with no login prompt
+  //     at all — exactly the dead end erun#1720 reported.
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(/\/ui\/v2\/login\/loginname/);
 });

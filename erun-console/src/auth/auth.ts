@@ -20,6 +20,15 @@
 // RCE-sensitive (its `raw` tool can `kubectl exec`) and needs a deployed env
 // carrying the backend's public key to verify against. Minting the token is
 // already implemented (src/mcp/).
+//
+// signOut performs RP-initiated logout (OIDC Session Management) rather than
+// clearing the local token alone: the IdP's session otherwise outlives the
+// console's, so the next sign-in is silently re-authenticated as the same
+// account with no way to reach a different one. Not every IdP advertises
+// end_session_endpoint, so callers that state what sign-out will do (the
+// not-enrolled screen) check endSessionSupported first rather than assume it.
+// The redirect target (post_logout_redirect_uri, this origin) must be
+// registered on the IdP client the same way redirect_uri already is.
 
 import { fetchPlatformConfig } from '../config/platform';
 
@@ -105,6 +114,10 @@ function trimmed(value: string | undefined): string | undefined {
 interface Discovery {
   authorization_endpoint: string;
   token_endpoint: string;
+  // Not every IdP advertises RP-initiated logout (OIDC Session Management is
+  // an optional extension), so this is the one discovery field callers must
+  // treat as absent rather than assume present.
+  end_session_endpoint?: string;
 }
 
 async function discover(issuer: string): Promise<Discovery> {
@@ -121,7 +134,13 @@ async function discover(issuer: string): Promise<Discovery> {
   ) {
     throw new Error('OIDC discovery document is missing endpoints');
   }
-  return doc as Discovery;
+  const record = doc as Record<string, unknown>;
+  return {
+    authorization_endpoint: record.authorization_endpoint as string,
+    token_endpoint: record.token_endpoint as string,
+    end_session_endpoint:
+      typeof record.end_session_endpoint === 'string' ? record.end_session_endpoint : undefined,
+  };
 }
 
 function base64url(bytes: Uint8Array): string {
@@ -252,9 +271,68 @@ export function storedToken(): string | undefined {
   return token !== null && token.length > 0 ? token : undefined;
 }
 
-// signOut clears the held token.
-export function signOut(): void {
+export interface SignOutResult {
+  // Whether this call redirected the browser to the IdP's end_session_endpoint
+  // to end its session there too. false means only the local token was
+  // cleared — no OIDC config, no discovered end_session_endpoint, or
+  // discovery failed — so the caller (whose UI made a claim about what
+  // sign-out does) must not treat this as "the IdP session ended" silently.
+  idpSessionEnded: boolean;
+}
+
+// signOut always clears the locally-held token first, then attempts
+// RP-initiated logout: it redirects to the IdP's discovered
+// end_session_endpoint with id_token_hint (the id_token this session held, so
+// the IdP knows which session to end without prompting) and
+// post_logout_redirect_uri back to this origin. Not every IdP advertises
+// end_session_endpoint (it's an optional OIDC extension), and discovery
+// itself can fail (network, misconfigured issuer) — either case falls back
+// to the local-only clear rather than throwing, since a failed logout
+// redirect must never leave the caller signed in.
+//
+// It also clears ORG_SCOPE_RETRIED_KEY: that flag exists to bound a single
+// sign-in attempt to one retry, not to survive past a sign-out. Leaving it
+// set would mean a dedicated/BYO issuer that already consumed its one retry
+// gets no retry on the next sign-in after sign-out either — resolveToken
+// would treat the resulting invalid_scope callback as "no token" and bounce
+// back to the sign-in screen with no explanation, forever.
+export async function signOut(config: OidcConfig | undefined): Promise<SignOutResult> {
+  const idToken = storedToken();
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  sessionStorage.removeItem(ORG_SCOPE_RETRIED_KEY);
+  if (config === undefined) {
+    return { idpSessionEnded: false };
+  }
+  const endSessionEndpoint = await discoverEndSessionEndpoint(config.issuer);
+  if (endSessionEndpoint === undefined) {
+    return { idpSessionEnded: false };
+  }
+  const params = new URLSearchParams({ post_logout_redirect_uri: config.redirectUri });
+  if (idToken !== undefined) {
+    params.set('id_token_hint', idToken);
+  }
+  window.location.assign(endSessionEndpoint + '?' + params.toString());
+  return { idpSessionEnded: true };
+}
+
+async function discoverEndSessionEndpoint(issuer: string): Promise<string | undefined> {
+  try {
+    return (await discover(issuer)).end_session_endpoint;
+  } catch {
+    return undefined;
+  }
+}
+
+// endSessionSupported reports whether signOut(config) will be able to end the
+// IdP session, without performing sign-out. A screen that advises "sign out
+// to use a different account" must know this before the click — advising a
+// remedy discovery cannot back up is the same dead end as a wrong error
+// message (see root AGENTS.md § "Smooth, Seamless, No Dead Ends").
+export async function endSessionSupported(config: OidcConfig | undefined): Promise<boolean> {
+  if (config === undefined) {
+    return false;
+  }
+  return (await discoverEndSessionEndpoint(config.issuer)) !== undefined;
 }
 
 // resolveToken produces the bearer token to present to the API on load: the OIDC

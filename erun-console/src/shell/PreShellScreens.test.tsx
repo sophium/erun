@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NotEnrolledScreen, TenantUnresolvedScreen } from './PreShellScreens';
@@ -15,8 +15,23 @@ function tokenWith(payload: Record<string, unknown>): string {
   return `${encode('{"alg":"RS256"}')}.${encode(JSON.stringify(payload))}.signature`;
 }
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+const oidc = {
+  issuer: 'https://auth.example.com',
+  clientId: 'console-client',
+  redirectUri: 'http://localhost/',
+};
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('NotEnrolledScreen', () => {
@@ -29,6 +44,7 @@ describe('NotEnrolledScreen', () => {
           email: 'someone@example.com',
           iss: 'https://auth.example.com',
         })}
+        oidc={undefined}
         onSignOut={vi.fn()}
       />,
     );
@@ -44,6 +60,7 @@ describe('NotEnrolledScreen', () => {
       <NotEnrolledScreen
         brand="Acme"
         token={tokenWith({ sub: '387534471668170904', iss: 'https://auth.example.com' })}
+        oidc={undefined}
         onSignOut={vi.fn()}
       />,
     );
@@ -59,12 +76,112 @@ describe('NotEnrolledScreen', () => {
       <NotEnrolledScreen
         brand="Acme"
         token={tokenWith({ sub: '387534471668170904' })}
+        oidc={undefined}
         onSignOut={onSignOut}
       />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not claim sign-out can reach a different account with no OIDC config (dev-token fallback)', () => {
+    render(
+      <NotEnrolledScreen
+        brand="Acme"
+        token={tokenWith({ sub: '387534471668170904' })}
+        oidc={undefined}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/cannot end your identity provider's session from here/),
+    ).toBeInTheDocument();
+  });
+
+  it('does not claim sign-out can reach a different account when the IdP has no end_session_endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            authorization_endpoint: 'https://auth.example.com/authorize',
+            token_endpoint: 'https://auth.example.com/token',
+          }),
+        ),
+      ),
+    );
+    render(
+      <NotEnrolledScreen
+        brand="Acme"
+        token={tokenWith({ sub: '387534471668170904' })}
+        oidc={oidc}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/cannot end your identity provider's session from here/),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('advises that sign-out also ends the IdP session once discovery confirms end_session_endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            authorization_endpoint: 'https://auth.example.com/authorize',
+            token_endpoint: 'https://auth.example.com/token',
+            end_session_endpoint: 'https://auth.example.com/endsession',
+          }),
+        ),
+      ),
+    );
+    render(
+      <NotEnrolledScreen
+        brand="Acme"
+        token={tokenWith({ sub: '387534471668170904' })}
+        oidc={oidc}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/it also/)).toHaveTextContent(
+        'it also ends your identity provider session',
+      );
+    });
+    expect(
+      screen.queryByText(/cannot end your identity provider's session from here/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers the filled-in enroll command and copies it', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(
+      <NotEnrolledScreen
+        brand="Acme"
+        token={tokenWith({
+          sub: '387534471668170904',
+          email: 'someone@example.com',
+          iss: 'https://auth.example.com',
+        })}
+        oidc={undefined}
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    const expectedCommand =
+      'erun platform user enroll --username someone@example.com --issuer https://auth.example.com --subject 387534471668170904';
+    expect(screen.getByText(expectedCommand)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    expect(writeText).toHaveBeenCalledWith(expectedCommand);
   });
 });
 

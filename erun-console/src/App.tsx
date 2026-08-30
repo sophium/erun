@@ -195,7 +195,9 @@ function AppContent({
         />
       );
     case 'not-enrolled':
-      return <NotEnrolledScreen brand={brand} token={state.token} onSignOut={onSignOut} />;
+      return (
+        <NotEnrolledScreen brand={brand} token={state.token} oidc={oidc} onSignOut={onSignOut} />
+      );
     case 'tenant-unresolved':
       return (
         <TenantUnresolvedScreen
@@ -319,8 +321,18 @@ export function App(): React.ReactElement {
           void configQuery.refetch();
         }}
         onSignOut={() => {
-          signOut();
-          dispatch(clearAuth());
+          void (async () => {
+            // signOut clears the local token unconditionally, then redirects
+            // to the IdP to end its session too when discovery says that's
+            // possible. When it redirects, the browser is already leaving
+            // this page — dispatching clearAuth would be pointless and the
+            // reload that follows the IdP's redirect back here resolves the
+            // signed-out state fresh anyway.
+            const result = await signOut(auth.oidc);
+            if (!result.idpSessionEnded) {
+              dispatch(clearAuth());
+            }
+          })();
         }}
         onDismissSwitchMismatch={() => {
           setSwitchMismatch(undefined);
