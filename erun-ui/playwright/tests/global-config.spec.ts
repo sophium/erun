@@ -4,6 +4,20 @@ import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { test, expect } from '../fixtures/erunApp.js';
 import { SEED_TENANT } from '../fixtures/seedRoot.js';
 
+function manyCloudContexts(count: number): Record<string, unknown>[] {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `pw-ctx-${String(index)}`,
+    provider: 'aws',
+    cloudProviderAlias: 'me+aws@aws',
+    region: 'eu-west-2',
+    instanceType: 'c8gd.2xlarge',
+    diskType: 'gp3',
+    diskSizeGb: 100,
+    kubernetesContext: `pw-ctx-${String(index)}`,
+    status: 'running',
+  }));
+}
+
 interface StubbedResponse {
   data?: Record<string, unknown> | unknown[];
   error?: string;
@@ -195,5 +209,117 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
+  });
+});
+
+test.describe('global config dialog — bounded height and scroll', () => {
+  test('overflowing cloud contexts keep the title and footer reachable, and the body scrolls', async ({
+    app,
+    page,
+  }) => {
+    // 12 contexts is far more than fits in an 85vh frame at any viewport this
+    // suite uses, so the body region must be what scrolls, not the dialog
+    // growing past its cap -- the regression this guards.
+    stubRPC(page, {
+      LoadERunConfig: {
+        data: {
+          defaultTenant: SEED_TENANT,
+          cloudProviders: [
+            {
+              alias: 'me+aws@aws',
+              provider: 'aws',
+              status: 'active',
+              username: 'me',
+              accountId: '111111111111',
+            },
+            {
+              alias: 'me+cloudflare@cloudflare',
+              provider: 'cloudflare',
+              status: 'active',
+              username: 'me',
+            },
+            {
+              alias: 'erun+api.acme.test@erun',
+              provider: 'erun',
+              status: 'active',
+              username: 'erun',
+              accountId: 'api.acme.test',
+            },
+          ],
+          cloudContexts: manyCloudContexts(12),
+        },
+      },
+    });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    // The dialog's own frame (DialogContent's max-h-[85vh]) caps the whole
+    // surface regardless of how much is configured. The suite's config
+    // viewport is 1440x1200 and this test never changes it.
+    const dialog = app.globalConfigDialog.locator();
+    const dialogBox = await boundingBoxOf(dialog, 'ERun settings dialog');
+    expect(dialogBox.height).toBeLessThanOrEqual(1200 * 0.85 + 2);
+
+    // The title and the footer buttons must both land inside that bounded
+    // frame -- cut off above and cut off below is exactly the failure mode
+    // being guarded against.
+    const titleBox = await boundingBoxOf(
+      dialog.getByText('ERun settings', { exact: true }),
+      'ERun settings title',
+    );
+    expect(titleBox.y).toBeGreaterThanOrEqual(dialogBox.y - 1);
+    const cancelBox = await boundingBoxOf(
+      dialog.getByRole('button', { name: 'Cancel', exact: true }),
+      'Cancel button',
+    );
+    expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
+    const saveBox = await boundingBoxOf(
+      dialog.getByRole('button', { name: /Save settings|Saving/ }),
+      'Save settings button',
+    );
+    expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
+
+    // The body region -- not the dialog itself -- is what scrolls.
+    const bodyScroll = dialog.locator('.overflow-y-auto').first();
+    const { scrollHeight, clientHeight } = await bodyScroll.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+    expect(scrollHeight).toBeGreaterThan(clientHeight);
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
+
+  test('a short window keeps the title and footer buttons reachable without resizing', async ({
+    app,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 500 });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    const dialog = app.globalConfigDialog.locator();
+    const dialogBox = await boundingBoxOf(dialog, 'ERun settings dialog');
+    expect(dialogBox.height).toBeLessThanOrEqual(500 * 0.85 + 2);
+
+    const titleBox = await boundingBoxOf(
+      dialog.getByText('ERun settings', { exact: true }),
+      'ERun settings title',
+    );
+    expect(titleBox.y).toBeGreaterThanOrEqual(0);
+    const cancelBox = await boundingBoxOf(
+      dialog.getByRole('button', { name: 'Cancel', exact: true }),
+      'Cancel button',
+    );
+    expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(500);
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+
+    // Restore the config default viewport for later specs in the singleton backend.
+    await page.setViewportSize({ width: 1440, height: 1200 });
   });
 });

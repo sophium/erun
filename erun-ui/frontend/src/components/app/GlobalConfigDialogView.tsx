@@ -42,14 +42,18 @@ export function GlobalConfigDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        className="sm:max-w-xl"
+        // Bound the panel to the viewport and let the body scroll, same shape as
+        // EnvironmentDialogView — cloud aliases and cloud contexts grow this
+        // dialog's content without limit, so a plain centered grid overflows off
+        // both edges with nothing scrollable.
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="grid gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitGlobalConfig()).catch((error: unknown) => {
@@ -57,15 +61,21 @@ export function GlobalConfigDialogView(): React.ReactElement {
             });
           }}
         >
-          <DialogHeader>
-            <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription>
-              Default tenant, cloud aliases, and cloud contexts shared across the app.
-            </DialogDescription>
-          </DialogHeader>
-          <GlobalConfigBody />
-          <DialogError error={dialog.error} />
-          <GlobalConfigFooter dialog={dialog} />
+          <div className="shrink-0 px-6 pt-6 pb-4">
+            <DialogHeader>
+              <DialogTitle>ERun settings</DialogTitle>
+              <DialogDescription>
+                Default tenant, cloud aliases, and cloud contexts shared across the app.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
+            <GlobalConfigBody />
+            <DialogError error={dialog.error} />
+          </div>
+          <div className="shrink-0 border-t px-6 pt-4 pb-6">
+            <GlobalConfigFooter dialog={dialog} />
+          </div>
         </form>
       </DialogContent>
     </Dialog>

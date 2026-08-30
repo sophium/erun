@@ -487,10 +487,7 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
-  test('offers the hosted registry only once it is confirmed reachable', async ({
-    app,
-    page,
-  }) => {
+  test('offers the hosted registry only once it is confirmed reachable', async ({ app, page }) => {
     // The reported defect: the hosted-registry option was offered
     // unconditionally, with no check that registry.erunpaas.com was actually
     // reachable, unlike the in-cluster registry which is already gated on
