@@ -265,6 +265,11 @@ type orchestratorPacingRow struct {
 	capped           bool
 	lastNudgeAtUnix  int64
 	lastLoggedReason orchestratorPacingReason
+	// envs is this orchestrator's configured link scope (orchestrator.go's
+	// session.envs), carried through so the env-aware gate only ever consults
+	// environments this orchestrator actually linked, never whatever else
+	// happens to be running (erun#1699).
+	envs []eruncommon.OrchestratorEnvConfig
 }
 
 // reconcileOrchestratorPacing runs on the same 15s tick that already polls
@@ -300,6 +305,7 @@ func (a *App) orchestratorPacingRows() []orchestratorPacingRow {
 			capped:           session.pacingCapped,
 			lastNudgeAtUnix:  session.pacingLastNudgeAtUnix,
 			lastLoggedReason: session.pacingLastReason,
+			envs:             session.envs,
 		})
 	}
 	return rows
@@ -448,20 +454,26 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 		row.capped = false
 	}
 
+	elapsed := now.Sub(lastActiveAt)
+	envBusy := orchestratorLinkedEnvBusyStateFor(row.id, row.envs, a.envActivitySnapshot())
+	if a.orchestratorPacingSuppressedByLinkedEnv(row, explicit, envBusy, elapsed) {
+		a.logOrchestratorPacingTransition(row, orchestratorPacingReasonEnvBusy, elapsed)
+		return orchestratorPacingNone, orchestratorPacingReasonEnvBusy
+	}
+
 	candidate := orchestratorPacingCandidate{
 		alive:        row.alive,
 		lastActiveAt: lastActiveAt,
 		nudgeCount:   row.nudgeCount,
 		capped:       row.capped,
 	}
-	elapsed := now.Sub(lastActiveAt)
 	decision, reason := decideOrchestratorWhip(candidate, now, explicit)
 	a.logOrchestratorPacingTransition(row, reason, elapsed)
 
 	switch decision {
 	case orchestratorPacingNudge:
 		signal := orchestratorPacingSignalFor(ok, ok && report.activity.Busy)
-		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal)
+		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal, envBusy.stuckDetail())
 	case orchestratorPacingCap:
 		a.capOrchestratorPacing(row.id, row.serial, row.name)
 	}
@@ -508,8 +520,11 @@ func (a *App) rearmOrchestratorPacing(id string) {
 
 // sendOrchestratorPacingNudge records the attempt before writing, so a nudge
 // that fails to write still counts against the cap rather than looping forever
-// against a pty that cannot accept input.
-func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal) {
+// against a pty that cannot accept input. envStuckDetail is non-empty only
+// when a linked environment's own busy lease was still active but the
+// suppression bound was crossed anyway (erun#1699) — the ordinary case leaves
+// it empty and the marker reads exactly as it did before.
+func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
 	managed := a.sessions[orchestratorSessionKey(id)]
@@ -537,7 +552,7 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, 
 		log.Printf("erun-app: orchestrator %s pacing nudge write failed", id)
 		return
 	}
-	a.emitOrchestratorPacingMarker(serial, count, elapsed, signal)
+	a.emitOrchestratorPacingMarker(serial, count, elapsed, signal, envStuckDetail)
 }
 
 // writeOrchestratorPacingNudge writes the pacing text, then — after a short
@@ -599,9 +614,9 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string) {
 // orchestratorPacingStaleAfter constant: a session quiet for 20 minutes must
 // read as 20 minutes, not as the ten-minute contract restated back at the
 // operator as if it had been honoured (erun#1376).
-func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal) {
+func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
 	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
-		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal))
+		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal, envStuckDetail))
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
@@ -616,8 +631,16 @@ func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Du
 // dropped connection, a crash), not an orchestrator that finished and stopped
 // reporting. Without this, both look identical in the pane and the operator
 // has to go read a transcript to tell them apart (erun#1376).
-func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestratorPacingActivitySignal) string {
+//
+// envStuckDetail, when non-empty, means a linked environment was still busy on
+// this orchestrator's own dispatched work when the suppression bound ran out
+// (erun#1699): the nudge fires anyway, but the description names the lane that
+// has not moved rather than reading as an ordinary silent pane.
+func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) string {
 	quiet := elapsed.Round(time.Second)
+	if envStuckDetail != "" {
+		return fmt.Sprintf("waiting on a linked environment (%s) that has not progressed in %s", envStuckDetail, quiet)
+	}
 	switch signal {
 	case orchestratorPacingSignalDied:
 		return fmt.Sprintf("no activity report for %s — last report said mid-turn, so the turn may have died without one", quiet)
