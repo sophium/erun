@@ -125,6 +125,29 @@ var erunDevopsImagePattern = regexp.MustCompile(`(erun-devops:)([0-9][^\s"'\\]*)
 // too would report the same reference twice.
 var erunImageReferencePattern = regexp.MustCompile(`(=\s*")(ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):)([0-9][^\s"'\\]*)"`)
 
+// normalizePinPlanInputs trims and validates the inputs a plan is built from.
+// An unresolved tenant/environment must refuse here rather than flow into a
+// plan: the runtime-version site below would otherwise report a real-looking
+// row (current "", detail "/") for an environment nobody actually named,
+// which a caller could mistake for an honest reading rather than a resolution
+// failure.
+func normalizePinPlanInputs(tenant, environment, projectRoot, target string) (string, string, string, string, error) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	projectRoot = strings.TrimSpace(projectRoot)
+	target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "v"))
+	if tenant == "" || environment == "" {
+		return "", "", "", "", fmt.Errorf("pin: tenant and environment must both be resolved before a plan can be built (got tenant=%q environment=%q)", tenant, environment)
+	}
+	if projectRoot == "" {
+		return "", "", "", "", fmt.Errorf("a project root is required to resolve the pin sites")
+	}
+	if target == "" {
+		return "", "", "", "", fmt.Errorf("a target erun version is required")
+	}
+	return tenant, environment, projectRoot, target, nil
+}
+
 // ResolvePinPlan reads every pin site under projectRoot and reports what moving
 // to target would change. It never writes, so a caller can render the plan,
 // refuse it, or apply it.
@@ -132,13 +155,9 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	if env.ResolvedType() == EnvironmentTypeHost {
 		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
 	}
-	projectRoot = strings.TrimSpace(projectRoot)
-	target = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "v"))
-	if projectRoot == "" {
-		return PinPlan{}, fmt.Errorf("a project root is required to resolve the pin sites")
-	}
-	if target == "" {
-		return PinPlan{}, fmt.Errorf("a target erun version is required")
+	tenant, environment, projectRoot, target, err := normalizePinPlanInputs(tenant, environment, projectRoot, target)
+	if err != nil {
+		return PinPlan{}, err
 	}
 
 	plan := PinPlan{

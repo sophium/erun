@@ -457,6 +457,35 @@ func TestResolvePinPlanRefusesWithoutATarget(t *testing.T) {
 	}
 }
 
+// The reported bug: an unresolved tenant/environment must never reach
+// a plan. Before this guard, ResolvePinPlan happily built one with tenant and
+// environment both "", which then emitted a runtime-version site with
+// current: "" and detail: "/" -- an unresolved reading dressed up as a real
+// row a caller could apply.
+func TestResolvePinPlanRefusesAnUnresolvedTenantOrEnvironment(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	for _, tc := range []struct {
+		name        string
+		tenant      string
+		environment string
+	}{
+		{"both empty", "", ""},
+		{"tenant empty", "", "dev"},
+		{"environment empty", "acme", ""},
+		{"both whitespace", "  ", "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := ResolvePinPlan(root, tc.tenant, tc.environment, EnvConfig{}, "1.0.175")
+			if err == nil {
+				t.Fatalf("expected a refusal, got a plan: %+v", plan)
+			}
+			if !strings.Contains(err.Error(), "tenant") || !strings.Contains(err.Error(), "environment") {
+				t.Fatalf("error should name what is unresolved, got: %v", err)
+			}
+		})
+	}
+}
+
 func readPinFile(t *testing.T, root, relative string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
