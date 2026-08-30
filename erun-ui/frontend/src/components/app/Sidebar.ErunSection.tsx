@@ -30,6 +30,7 @@ import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
+import { OrchestratorNoticeList } from '@/components/app/Sidebar.OrchestratorNotice';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
@@ -135,6 +136,7 @@ function OrchestratorsArea(): React.ReactElement {
   const dispatch = useAppDispatch();
   const items = useAppSelector((state) => state.orchestrators.items);
   const error = useAppSelector((state) => state.orchestrators.error);
+  const restoreNotices = useAppSelector((state) => state.orchestrators.restoreNotices);
   const focus = useAppSelector(selectSidebarFocus);
 
   // The orchestrator a rebuild+restart returns to is restored by boot(), which
@@ -183,6 +185,7 @@ function OrchestratorsArea(): React.ReactElement {
           ))}
         </ul>
       )}
+      <OrchestratorNoticeList notices={restoreNotices} />
       {error ? (
         <p role="alert" className="px-3.5 pb-1 text-[11px] break-words text-destructive">
           {error}

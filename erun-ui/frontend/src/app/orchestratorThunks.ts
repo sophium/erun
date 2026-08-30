@@ -22,7 +22,7 @@ import { readError } from './errors';
 import type { IDEKind, OrchestratorGuidanceLayer } from './model';
 import { showNotification } from './notificationThunks';
 import { planOrchestratorBusySeed } from './orchestratorBusySeed';
-import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
+import { planOrchestratorRestore, readRestoreNotices } from './orchestratorRestore';
 import { planOrchestratorShellSeed } from './orchestratorShellActivitySeed';
 import { setAIBusyForSession } from './slices/aiActivitySlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
@@ -30,6 +30,7 @@ import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
   type OrchestratorInfo,
+  setOrchestratorRestoreNotices,
   setOrchestrators,
   setOrchestratorsBusy,
   setOrchestratorsError,
@@ -222,8 +223,9 @@ export const restartApp =
 // resume prompt, so a plain launch resumes every restored orchestrator idle; a
 // restart hand-off's prompt auto-runs for the one orchestrator it named, never
 // for the rest of the set. A refused hand-off still reopens its orchestrator
-// and surfaces the backend's notice beside the orchestrator list, so a resume
-// that declined to continue is never silent. Which conversation each
+// and surfaces the backend's notice beside the orchestrator list, each at its
+// own kind, so a resume that declined to continue is never silent and never
+// reads at the same severity as the routine case beside it. Which conversation each
 // orchestrator resumes is the backend's call, not a re-derivation here: this
 // thunk just resumes whatever conversationId the target names, or starts
 // fresh when none was resolved.
@@ -231,9 +233,9 @@ export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
       const target = await ResolveOrchestratorToReopen();
-      const notice = readRestoreNotice(target);
-      if (notice) {
-        dispatch(setOrchestratorsError(notice));
+      const notices = readRestoreNotices(target);
+      if (notices.length > 0) {
+        dispatch(setOrchestratorRestoreNotices(notices));
       }
       const { primary, alsoReopen } = planOrchestratorRestore(
         target,

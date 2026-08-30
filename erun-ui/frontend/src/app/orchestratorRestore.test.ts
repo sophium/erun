@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { planOrchestratorRestore, readRestoreNotice } from './orchestratorRestore';
+import { planOrchestratorRestore, readRestoreNotices } from './orchestratorRestore';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
 function orchestrator(id: string, transient = false): OrchestratorInfo {
@@ -196,12 +196,49 @@ test('no resolved conversation plans a fresh start, not a guessed one', () => {
 });
 
 // The target crosses a process boundary, so a payload without the field must
-// read as "no refusal" rather than throw and take the restore down with it.
-test('a missing notice reads as no refusal', () => {
-  assert.equal(readRestoreNotice({ orchestratorId: 'agent-1', resumePrompt: '' }), '');
-  assert.equal(readRestoreNotice(null), '');
-  assert.equal(
-    readRestoreNotice({ orchestratorId: 'agent-1', notice: '  scope changed  ' }),
-    'scope changed',
+// read as "nothing to report" rather than throw and take the restore down
+// with it.
+test('a missing notices list reads as nothing to report', () => {
+  assert.deepEqual(readRestoreNotices({ orchestratorId: 'agent-1', resumePrompt: '' }), []);
+  assert.deepEqual(readRestoreNotices(null), []);
+});
+
+// Each notice keeps its own kind and the orchestrator it is about, trimmed of
+// incidental whitespace; an entry with no text is dropped rather than
+// rendered as an empty line.
+test('notices carry their own kind and orchestrator, and blank text is dropped', () => {
+  assert.deepEqual(
+    readRestoreNotices({
+      orchestratorId: 'agent-1',
+      notices: [
+        { orchestratorId: 'agent-1', kind: 'info', text: '  resumed the tracked conversation  ' },
+        { orchestratorId: 'agent-2', kind: 'warning', text: 'scope changed' },
+        { kind: 'warning', text: '   ' },
+      ],
+    }),
+    [
+      { orchestratorId: 'agent-1', kind: 'info', text: 'resumed the tracked conversation' },
+      { orchestratorId: 'agent-2', kind: 'warning', text: 'scope changed' },
+    ],
+  );
+});
+
+// A kind this launch does not recognise — absent, or from a backend version
+// that classified notices differently — must not silently become 'info'
+// (hiding a real problem) or 'warning' (crying wolf over what might be
+// routine). It becomes its own 'unknown' kind instead.
+test('an unrecognised or missing kind normalizes to unknown, never info or warning', () => {
+  assert.deepEqual(
+    readRestoreNotices({
+      orchestratorId: 'agent-1',
+      notices: [
+        { orchestratorId: 'agent-1', text: 'no kind at all' },
+        { orchestratorId: 'agent-2', kind: 'critical', text: 'a kind this launch does not know' },
+      ],
+    }),
+    [
+      { orchestratorId: 'agent-1', kind: 'unknown', text: 'no kind at all' },
+      { orchestratorId: 'agent-2', kind: 'unknown', text: 'a kind this launch does not know' },
+    ],
   );
 });
