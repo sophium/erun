@@ -93,6 +93,109 @@ export interface UITenantDashboard {
   canDeployEnvironment: boolean;
   canStopEnvironment: boolean;
   canDeleteEnvironment: boolean;
+  // myInviteRequest is the caller's own most recent invite request, set
+  // whenever a bearer minted successfully — including in the not-enrolled and
+  // no-permission states, since a not-yet-enrolled caller is exactly who
+  // needs to see this. Undefined means never submitted one.
+  myInviteRequest?: UIInviteRequest;
+  // inviteRequests/pendingInviteRequestCount are the operator/admin queue
+  // (Requests tab): every pending request naming this tenant, or every
+  // tenant for an operations-scoped caller. pendingInviteRequestCount is
+  // undefined (not 0) when the caller cannot read the queue at all.
+  inviteRequests?: UIInviteRequest[];
+  pendingInviteRequestCount?: number;
+  canApproveInviteRequests: boolean;
+  canDeclineInviteRequests: boolean;
+  // inviteRequestRateLimitWindowSeconds is the platform's current
+  // per-identity invite-request submission window, best effort (0 when it
+  // could not be read).
+  inviteRequestRateLimitWindowSeconds?: number;
+}
+
+// Per-tenant platform-enrollment states the sidebar status icon renders —
+// distinct from UITenantPlatformState above (which describes why the
+// *dashboard* cannot load): these describe where a local tenant with no
+// platform registration stands in the request/approve loop.
+export const TENANT_ENROLLMENT_LOCAL_ONLY = 'local-only';
+export const TENANT_ENROLLMENT_PENDING = 'pending';
+export const TENANT_ENROLLMENT_DECLINED = 'declined';
+export const TENANT_ENROLLMENT_ENROLLED = 'enrolled';
+
+export interface UITenantPlatformEnrollmentStatus {
+  tenant: string;
+  state: string;
+  declineReason?: string;
+}
+
+export interface UIListTenantPlatformEnrollmentStatusesInput {
+  tenants: string[];
+}
+
+// Invite-request kinds and statuses mirror
+// erun-common's PlatformInviteRequestKind*/PlatformInviteRequestStatus*.
+export const INVITE_REQUEST_KIND_JOIN_TENANT = 'JOIN_TENANT';
+export const INVITE_REQUEST_KIND_CREATE_TENANT = 'CREATE_TENANT';
+export const INVITE_REQUEST_STATUS_PENDING = 'PENDING';
+export const INVITE_REQUEST_STATUS_APPROVED = 'APPROVED';
+export const INVITE_REQUEST_STATUS_DECLINED = 'DECLINED';
+
+// UIInviteRequest mirrors eruncommon.PlatformInviteRequest's JSON-safe subset
+// the desktop renders (request dialog status, operator queue rows).
+export interface UIInviteRequest {
+  inviteRequestId: string;
+  issuer: string;
+  subject: string;
+  email?: string;
+  displayName?: string;
+  kind: string;
+  tenantName: string;
+  environmentName?: string;
+  note?: string;
+  status: string;
+  declineReason?: string;
+  mintedInviteToken?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// UISubmitInviteRequestInput is "Request an invitation"'s input: names and an
+// optional note only — the requester's identity comes from the verified
+// bearer, never a form field.
+export interface UISubmitInviteRequestInput {
+  tenant: string;
+  kind: string;
+  tenantName: string;
+  environmentName?: string;
+  note?: string;
+}
+
+// UIInviteRequestRateLimited is what SubmitTenantInviteRequest returns
+// instead of a raw error when the platform's per-identity submission window
+// has not elapsed yet — a state to render (disable submit, show the
+// countdown), not a fault.
+export interface UIInviteRequestRateLimited {
+  retryAfterSeconds: number;
+}
+
+// UISubmitInviteRequestOutcome carries exactly one of request or rateLimited.
+export interface UISubmitInviteRequestOutcome {
+  request?: UIInviteRequest;
+  rateLimited?: UIInviteRequestRateLimited;
+}
+
+export interface UITenantInput {
+  tenant: string;
+}
+
+export interface UIDecideInviteRequestInput {
+  tenant: string;
+  inviteRequestId: string;
+}
+
+export interface UIDeclineInviteRequestInput {
+  tenant: string;
+  inviteRequestId: string;
+  reason: string;
 }
 
 // UIPlatformContext mirrors a hosted cloud context (managed cluster) the

@@ -37,6 +37,8 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 			_, _ = w.Write([]byte(`[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`))
 		case "/v1/environments":
 			_, _ = w.Write([]byte(`[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`))
+		case "/v1/invite-requests":
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			http.NotFound(w, req)
 		}
@@ -175,8 +177,8 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/audit-events" {
-		t.Fatalf("expected only the reads the caller may make, got %q", got)
+	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/audit-events,/v1/invite-requests/mine,/v1/config" {
+		t.Fatalf("expected only the reads the caller may make (plus the identity-scoped invite-request/config reads, which need no capability), got %q", got)
 	}
 	queue := panelFor(t, dashboard, tenantDashboardTabQueue)
 	if queue.Restricted != tenantDashboardReadMergeQueue {
@@ -204,8 +206,8 @@ func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	if got := strings.Join(requests, ","); got != "/v1/whoami" {
-		t.Fatalf("expected no read beyond identity, got %q", got)
+	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/invite-requests/mine,/v1/config" {
+		t.Fatalf("expected no read beyond identity (plus the identity-scoped invite-request/config reads, which need no capability), got %q", got)
 	}
 	for _, tab := range []string{tenantDashboardTabQueue, tenantDashboardTabBuilds, tenantDashboardTabAudit} {
 		if panel := panelFor(t, dashboard, tab); panel.Restricted == "" {
@@ -224,7 +226,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if got := strings.Join(requests, ","); got != want {
 		t.Fatalf("expected every read to be attempted, got %q, want %q", got, want)
 	}

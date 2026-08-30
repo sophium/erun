@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,6 +38,7 @@ var (
 	ErrPlatformNotFound       = errors.New("platform api: not found")
 	ErrPlatformConflict       = errors.New("platform api: conflict")
 	ErrPlatformNotImplemented = errors.New("platform api: not implemented")
+	ErrPlatformRateLimited    = errors.New("platform api: rate limited")
 )
 
 // PlatformClient talks to one erun-backend-api instance.
@@ -163,6 +165,56 @@ type PlatformConfigResponse struct {
 	Tenant       PlatformTenant        `json:"tenant"`
 	Environments []PlatformEnvironment `json:"environments"`
 	Contexts     []PlatformContext     `json:"contexts"`
+	// InviteRequestRateLimitWindowSeconds is the current per-identity
+	// invite-request submission window (see PlatformRateLimit): the number of
+	// seconds a caller must wait between two POST /v1/invite-requests calls
+	// for the same verified (issuer, subject).
+	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds"`
+}
+
+// Invite-request kinds and statuses mirror
+// erun-backend-api/internal/model.InviteRequestKind/InviteRequestStatus.
+const (
+	PlatformInviteRequestKindJoinTenant   = "JOIN_TENANT"
+	PlatformInviteRequestKindCreateTenant = "CREATE_TENANT"
+
+	PlatformInviteRequestStatusPending  = "PENDING"
+	PlatformInviteRequestStatusApproved = "APPROVED"
+	PlatformInviteRequestStatusDeclined = "DECLINED"
+)
+
+// PlatformInviteRequest mirrors model.InviteRequest's JSON shape: a
+// verified-identity request to join or create a tenant, and the platform
+// operator/admin's decision on it.
+type PlatformInviteRequest struct {
+	InviteRequestID string `json:"inviteRequestId"`
+	Issuer          string `json:"issuer"`
+	Subject         string `json:"subject"`
+	Email           string `json:"email,omitempty"`
+	DisplayName     string `json:"displayName,omitempty"`
+	Kind            string `json:"kind"`
+	TenantName      string `json:"tenantName"`
+	EnvironmentName string `json:"environmentName,omitempty"`
+	Note            string `json:"note,omitempty"`
+	Status          string `json:"status"`
+	DecidedByUserID string `json:"decidedByUserId,omitempty"`
+	DeclineReason   string `json:"declineReason,omitempty"`
+	// MintedInviteID/Token/ExpiresAt are populated once Status is APPROVED:
+	// the underlying POST /v1/invites row minted for the requester, joined
+	// live from the invites table.
+	MintedInviteID        string     `json:"mintedInviteId,omitempty"`
+	MintedInviteToken     string     `json:"mintedInviteToken,omitempty"`
+	MintedInviteExpiresAt *time.Time `json:"mintedInviteExpiresAt,omitempty"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
+}
+
+// PlatformRateLimit mirrors model.PlatformRateLimit's JSON shape: the
+// platform-wide, operator-editable invite-request submission window.
+type PlatformRateLimit struct {
+	InviteRequestWindowSeconds int       `json:"inviteRequestWindowSeconds"`
+	CreatedAt                  time.Time `json:"createdAt"`
+	UpdatedAt                  time.Time `json:"updatedAt"`
 }
 
 // Platform fetches this instance's own self-describing config. Unauthenticated:
@@ -406,6 +458,116 @@ func (c *PlatformClient) Provision(ctx context.Context, params PlatformProvision
 	return result, err
 }
 
+// PlatformSubmitInviteRequestParams is the unauthenticated-to-tenant
+// invite-request submission input (POST /v1/invite-requests). The caller
+// still authenticates with a bearer token verified against a trusted issuer
+// — it just has no tenant membership yet, which is the whole point of the
+// request. Issuer/Subject are never sent: the platform reads them from the
+// verified token itself.
+type PlatformSubmitInviteRequestParams struct {
+	Email           string `json:"email,omitempty"`
+	DisplayName     string `json:"displayName,omitempty"`
+	Kind            string `json:"kind"`
+	TenantName      string `json:"tenantName"`
+	EnvironmentName string `json:"environmentName,omitempty"`
+	Note            string `json:"note,omitempty"`
+}
+
+// SubmitInviteRequest submits (or, for a caller with an existing PENDING
+// request, updates in place) a request to join or create a tenant. Requires
+// only a verified bearer, never tenant resolution — errors
+// ErrPlatformRateLimited (with Retry-After on the returned
+// *PlatformStatusError) when the caller's identity is inside the
+// platform-configured submission window.
+func (c *PlatformClient) SubmitInviteRequest(ctx context.Context, params PlatformSubmitInviteRequestParams) (PlatformInviteRequest, error) {
+	var request PlatformInviteRequest
+	err := c.do(ctx, http.MethodPost, "/v1/invite-requests", params, true, &request)
+	return request, err
+}
+
+// MyInviteRequest returns the caller's own most recent invite request (any
+// status), resolved from the verified bearer's (issuer, subject) — the one
+// thing a requester with no tenant membership can check while waiting.
+// Errors ErrPlatformNotFound when the caller has never submitted one.
+func (c *PlatformClient) MyInviteRequest(ctx context.Context) (PlatformInviteRequest, error) {
+	var request PlatformInviteRequest
+	err := c.do(ctx, http.MethodGet, "/v1/invite-requests/mine", nil, true, &request)
+	return request, err
+}
+
+// PlatformListInviteRequestsParams filters the operator/admin queue. Kind is
+// honored only for an operations-scoped caller; a tenant-scoped caller
+// always sees only JOIN_TENANT requests naming their own tenant.
+type PlatformListInviteRequestsParams struct {
+	Status string
+	Kind   string
+}
+
+// ListInviteRequests lists invite requests visible to the caller, oldest
+// first. Requires TenantUserClass.
+func (c *PlatformClient) ListInviteRequests(ctx context.Context, params PlatformListInviteRequestsParams) ([]PlatformInviteRequest, error) {
+	query := url.Values{}
+	if strings.TrimSpace(params.Status) != "" {
+		query.Set("status", params.Status)
+	}
+	if strings.TrimSpace(params.Kind) != "" {
+		query.Set("kind", params.Kind)
+	}
+	path := "/v1/invite-requests"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var requests []PlatformInviteRequest
+	err := c.do(ctx, http.MethodGet, path, nil, true, &requests)
+	return requests, err
+}
+
+// ApproveInviteRequest approves a pending invite request: for a JOIN_TENANT
+// request, enrolls the requester into the caller's own tenant; for a
+// CREATE_TENANT request, registers the tenant (requires an operations-scoped
+// caller) and enrolls the requester as its first user. Either way, mints an
+// invite through the same path POST /v1/invites uses. Requires
+// TenantAdminOnly. Errors ErrPlatformConflict when the request was already
+// decided, ErrPlatformForbidden when the caller lacks authority over it.
+func (c *PlatformClient) ApproveInviteRequest(ctx context.Context, inviteRequestID string) (PlatformInviteRequest, error) {
+	var request PlatformInviteRequest
+	err := c.do(ctx, http.MethodPost, "/v1/invite-requests/"+url.PathEscape(inviteRequestID)+"/approve", nil, true, &request)
+	return request, err
+}
+
+// PlatformDeclineInviteRequestParams carries the required decline reason: a
+// decline with no reason reaches nobody, so the API refuses an empty one.
+type PlatformDeclineInviteRequestParams struct {
+	Reason string `json:"reason"`
+}
+
+// DeclineInviteRequest declines a pending invite request with a reason the
+// requester will see. Requires TenantAdminOnly. Errors ErrPlatformConflict
+// when the request was already decided, ErrPlatformForbidden when the caller
+// lacks authority over it.
+func (c *PlatformClient) DeclineInviteRequest(ctx context.Context, inviteRequestID string, params PlatformDeclineInviteRequestParams) (PlatformInviteRequest, error) {
+	var request PlatformInviteRequest
+	err := c.do(ctx, http.MethodPost, "/v1/invite-requests/"+url.PathEscape(inviteRequestID)+"/decline", params, true, &request)
+	return request, err
+}
+
+// PlatformSetInviteRequestRateLimitParams sets the platform-wide
+// invite-request submission window. WindowSeconds must be at least 1: the
+// limiter cannot be disabled by setting it to zero.
+type PlatformSetInviteRequestRateLimitParams struct {
+	WindowSeconds int `json:"windowSeconds"`
+}
+
+// SetInviteRequestRateLimit changes the invite-request submission window.
+// Requires an operations-scoped caller (OperationsOnly); takes effect on the
+// very next submission, no redeploy needed, and never discards requests
+// already queued.
+func (c *PlatformClient) SetInviteRequestRateLimit(ctx context.Context, params PlatformSetInviteRequestRateLimitParams) (PlatformRateLimit, error) {
+	var limit PlatformRateLimit
+	err := c.do(ctx, http.MethodPatch, "/v1/config/invite-request-rate-limit", params, true, &limit)
+	return limit, err
+}
+
 // do is the single request path every method above funnels through: build,
 // authenticate (unless authenticate is false), send, and decode — or map the
 // status to a typed error.
@@ -423,7 +585,7 @@ func (c *PlatformClient) do(ctx context.Context, method string, path string, bod
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return platformStatusError(method, path, resp.StatusCode, respBody)
+		return platformStatusError(method, path, resp.StatusCode, respBody, resp.Header)
 	}
 	return decodePlatformResponse(method, path, respBody, out)
 }
@@ -481,11 +643,30 @@ func decodePlatformResponse(method string, path string, respBody []byte, out any
 // block, for example — reaches it with errors.As against this type and
 // decodes Body itself, rather than re-parsing the formatted Error() string.
 type PlatformStatusError struct {
-	Method   string
-	Path     string
-	Status   int
-	Body     []byte
+	Method string
+	Path   string
+	Status int
+	Body   []byte
+	// Header carries the raw response headers — in particular Retry-After,
+	// RateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset on a 429 from
+	// the invite-request submission limiter.
+	Header   http.Header
 	sentinel error
+}
+
+// RetryAfter parses the response's Retry-After header (seconds, the only
+// form erun-backend-api's limiter sends) as a duration. ok is false when the
+// header is absent or unparseable.
+func (e *PlatformStatusError) RetryAfter() (delay time.Duration, ok bool) {
+	raw := strings.TrimSpace(e.Header.Get("Retry-After"))
+	if raw == "" {
+		return 0, false
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
 }
 
 func (e *PlatformStatusError) Error() string {
@@ -508,8 +689,8 @@ func (e *PlatformStatusError) Unwrap() error {
 // distinguish with errors.Is, carrying the response body (see
 // PlatformStatusError) so a caller whose endpoint returns structured detail
 // can decode it.
-func platformStatusError(method, path string, status int, body []byte) error {
-	return &PlatformStatusError{Method: method, Path: path, Status: status, Body: body, sentinel: platformStatusSentinel(status)}
+func platformStatusError(method, path string, status int, body []byte, header http.Header) error {
+	return &PlatformStatusError{Method: method, Path: path, Status: status, Body: body, Header: header, sentinel: platformStatusSentinel(status)}
 }
 
 func platformStatusSentinel(status int) error {
@@ -524,6 +705,8 @@ func platformStatusSentinel(status int) error {
 		return ErrPlatformConflict
 	case http.StatusNotImplemented:
 		return ErrPlatformNotImplemented
+	case http.StatusTooManyRequests:
+		return ErrPlatformRateLimited
 	default:
 		return nil
 	}

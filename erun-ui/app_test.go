@@ -1890,7 +1890,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
 	}
 	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}
@@ -1905,10 +1905,20 @@ func assertERunPlatformDashboardAuditEvents(t *testing.T, events []uiTenantDashb
 
 func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/whoami" {
+		switch req.URL.Path {
+		case "/v1/whoami":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		case "/v1/invite-requests/mine":
+			// Not-enrolled is exactly the identity "request an invitation"
+			// serves — the dashboard still checks this caller's own request
+			// status using the same bearer, even though whoami itself 401s.
+			http.Error(w, "no invite request found", http.StatusNotFound)
+		case "/v1/config":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+		default:
 			t.Fatalf("unexpected request path: %s", req.URL.Path)
 		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))
 	defer server.Close()
 
@@ -1935,6 +1945,12 @@ func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T)
 	}
 	if dashboard.APILog != "auth rejected token" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
+	}
+	if dashboard.MyInviteRequest != nil {
+		t.Fatalf("expected no invite request yet, got %+v", dashboard.MyInviteRequest)
+	}
+	if dashboard.InviteRequestRateLimitWindowSeconds != 60 {
+		t.Fatalf("expected the platform's current submission window to be reported, got %d", dashboard.InviteRequestRateLimitWindowSeconds)
 	}
 }
 

@@ -340,6 +340,26 @@ type uiTenantDashboard struct {
 	CanDeployEnvironment   bool `json:"canDeployEnvironment"`
 	CanStopEnvironment     bool `json:"canStopEnvironment"`
 	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
+	// MyInviteRequest is the caller's own most recent invite request, set
+	// whenever a bearer minted successfully (PlatformIssuer/PlatformSubject is
+	// set) regardless of whether the identity read itself succeeded — a
+	// not-enrolled caller is exactly who needs to see this. nil means never
+	// submitted one.
+	MyInviteRequest *uiInviteRequest `json:"myInviteRequest,omitempty"`
+	// InviteRequests/PendingInviteRequestCount are the operator/admin queue:
+	// every pending request naming this tenant (or, for an operations-scoped
+	// caller, every tenant). PendingInviteRequestCount is unset (rather than
+	// 0) when the caller cannot read the queue at all, mirroring
+	// MineReviewCount's degrade-by-permission contract above.
+	InviteRequests            []uiInviteRequest `json:"inviteRequests,omitempty"`
+	PendingInviteRequestCount *int              `json:"pendingInviteRequestCount,omitempty"`
+	CanApproveInviteRequests  bool              `json:"canApproveInviteRequests"`
+	CanDeclineInviteRequests  bool              `json:"canDeclineInviteRequests"`
+	// InviteRequestRateLimitWindowSeconds is the platform's current
+	// per-identity invite-request submission window, best effort (0 when it
+	// could not be read) — the request dialog uses it to show "you can submit
+	// once every N seconds" before a first attempt, not only after a 429.
+	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds,omitempty"`
 }
 
 // uiPlatformContext mirrors eruncommon.PlatformContext's JSON-safe subset the

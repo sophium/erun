@@ -1,4 +1,9 @@
-import type { UITenant, UITenantConfig, UITenantDashboardInput } from '@/types';
+import {
+  INVITE_REQUEST_KIND_JOIN_TENANT,
+  type UITenant,
+  type UITenantConfig,
+  type UITenantDashboardInput,
+} from '@/types';
 
 import { cloudApi } from './api/cloudApi';
 import { tenantApi } from './api/tenantApi';
@@ -15,6 +20,7 @@ import {
   defaultReviewFilter,
   defaultTenantDialog,
   type ReviewFilterState,
+  type TenantDashboardState,
   type TenantDashboardTab,
   type TenantDialogState,
 } from './state';
@@ -241,6 +247,34 @@ function applySavedTenantConfig(
   }
 }
 
+// inviteRequestDraftCarryOver keeps the request dialog's in-progress draft
+// (kind/note/rate-limit countdown) when reopening the same tenant's
+// dashboard, and resets it for a different one — split out of
+// openTenantDashboard so that thunk's own branching stays under the module's
+// complexity cap.
+function inviteRequestDraftCarryOver(
+  sameTenant: boolean,
+  currentDashboard: TenantDashboardState,
+): Pick<
+  TenantDashboardState,
+  'requestKindDraft' | 'requestNoteDraft' | 'requestRateLimitedUntil' | 'issuedInviteLink'
+> {
+  if (sameTenant) {
+    return {
+      requestKindDraft: currentDashboard.requestKindDraft,
+      requestNoteDraft: currentDashboard.requestNoteDraft,
+      requestRateLimitedUntil: currentDashboard.requestRateLimitedUntil,
+      issuedInviteLink: currentDashboard.issuedInviteLink,
+    };
+  }
+  return {
+    requestKindDraft: INVITE_REQUEST_KIND_JOIN_TENANT,
+    requestNoteDraft: '',
+    requestRateLimitedUntil: 0,
+    issuedInviteLink: null,
+  };
+}
+
 export const openTenantDashboard =
   (tenant: string): AppThunk =>
   (dispatch, getState) => {
@@ -268,6 +302,14 @@ export const openTenantDashboard =
         enrolling: false,
         enrollError: '',
         registration: sameTenant ? currentDashboard.registration : defaultRegistrationState(),
+        requestDialogOpen: false,
+        requesting: false,
+        requestError: '',
+        decliningInviteRequestId: '',
+        declineReasonDraft: '',
+        decidingInviteRequestId: '',
+        decideInviteRequestError: '',
+        ...inviteRequestDraftCarryOver(sameTenant, currentDashboard),
       }),
     );
     dispatch(setReviewOpen(false));

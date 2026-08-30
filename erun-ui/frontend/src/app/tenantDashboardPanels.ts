@@ -18,6 +18,7 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
   { tab: 'registration', label: 'Registration' },
+  { tab: 'requests', label: 'Requests' },
   { tab: 'api-log', label: 'API log' },
 ];
 
@@ -100,6 +101,19 @@ const registrationStatusTones: Record<string, StatusBadgeTone> = {
 
 export function registrationStatusTone(status: string): StatusBadgeTone {
   return registrationStatusTones[status.trim().toLowerCase()] ?? 'warning';
+}
+
+// inviteRequestStatusTones maps the invite-request queue's status vocabulary
+// (PENDING/APPROVED/DECLINED) to a StatusBadge tone. WCAG 1.4.1: every tone
+// still shows the status word, never colour alone.
+const inviteRequestStatusTones: Record<string, StatusBadgeTone> = {
+  PENDING: 'in-progress',
+  APPROVED: 'success',
+  DECLINED: 'destructive',
+};
+
+export function inviteRequestStatusTone(status: string): StatusBadgeTone {
+  return inviteRequestStatusTones[status.trim().toUpperCase()] ?? 'muted';
 }
 
 // unresolvedThreadsTone renders the count as a quantity, not just a colour:
