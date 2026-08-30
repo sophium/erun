@@ -211,6 +211,18 @@ func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing
 	if status.Status != CloudTokenStatusActive {
 		t.Fatalf("Status = %q, want active", status.Status)
 	}
+	assertDegradedScopeAttempts(t, gotScopes)
+	if cached, ok := loadCachedERunAccessToken(secrets, provider.Alias); !ok || cached != "access-degrade" {
+		t.Fatalf("cached = %q (ok=%v), want the fallback attempt's token persisted", cached, ok)
+	}
+}
+
+// assertDegradedScopeAttempts checks the two device-authorization attempts a
+// graceful scope degradation must produce: the first requests the org-claim
+// scope by default, the second (after the issuer's refusal) drops it while
+// keeping the baseline scopes.
+func assertDegradedScopeAttempts(t *testing.T, gotScopes []string) {
+	t.Helper()
 	if len(gotScopes) != 2 {
 		t.Fatalf("expected exactly 2 device-authorization attempts (with, then without, the org-claim scope), got %v", gotScopes)
 	}
@@ -224,9 +236,6 @@ func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing
 		if !strings.Contains(gotScopes[1], baseline) {
 			t.Fatalf("fallback scope = %q, want the %q baseline kept", gotScopes[1], baseline)
 		}
-	}
-	if cached, ok := loadCachedERunAccessToken(secrets, provider.Alias); !ok || cached != "access-degrade" {
-		t.Fatalf("cached = %q (ok=%v), want the fallback attempt's token persisted", cached, ok)
 	}
 }
 
