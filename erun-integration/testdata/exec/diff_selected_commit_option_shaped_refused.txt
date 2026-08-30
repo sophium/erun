@@ -1,0 +1,2 @@
+audit: erun exec diff --scope commit --selected-commit --not-a-revision
+selectedCommit must be a commit revision, not "--not-a-revision"
