@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -48,6 +49,11 @@ type runtimeUsageReadingCase struct {
 }
 
 func runtimeUsageReadingCases() []runtimeUsageReadingCase {
+	cases := runtimeUsageBaseReadingCases()
+	return append(cases, runtimeUsageMemoryObservationReadingCases()...)
+}
+
+func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 	return []runtimeUsageReadingCase{
 		{
 			name: "cgroup v2 present reports quota, usage, and disk",
@@ -65,9 +71,13 @@ func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
 			}, "\n"),
 			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
-			wantCPU:    RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
-			wantMemory: RuntimeMemoryUsage{CurrentBytes: 413589504, PeakBytes: 1027301376, LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648)},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
+			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
+				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
+				OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
 		},
 		{
 			name: "unlimited memory.max reports Unlimited, not a fabricated percentage",
@@ -84,9 +94,11 @@ func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_after_ns=2000000000",
 				"disk_workspace=",
 			}, "\n"),
-			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{CurrentBytes: 52428800, PeakBytes: 104857600, Unlimited: true},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "an empty df line should report unavailable"},
+			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
 			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
@@ -134,6 +146,51 @@ func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 	}
 }
 
+// runtimeUsageMemoryObservationReadingCases covers memory.peak and
+// memory.events' oom_kill going missing independently of the rest of the
+// memory reading -- each must stay unobserved rather than reporting a
+// fabricated zero, without the struct-level Unavailable firing, since the
+// rest of the reading is genuinely available.
+func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
+	return []runtimeUsageReadingCase{
+		{
+			name: "memory.peak missing reports unobserved, not a fabricated zero",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=413589504",
+				"memory_max=2147483648",
+				"memory_peak=",
+				"memory_oom_kill=0",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 413589504, LimitBytes: 2147483648,
+				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+		},
+		{
+			// memory.events' oom_kill counter can be as unreadable as
+			// memory.peak; OOMKillsObserved must stay false rather than
+			// reporting a confident "no kills".
+			name: "memory.events oom_kill missing reports unobserved, not a fabricated zero",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=413589504",
+				"memory_max=2147483648",
+				"memory_peak=1027301376",
+				"memory_oom_kill=",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
+				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+		},
+	}
+}
+
 // assertRuntimeCPU compares an availability marker (want.Unavailable's
 // presence, not its exact text -- the fixture table above uses the field to
 // document *why* a case is unavailable) and, only when available, the
@@ -164,12 +221,7 @@ func assertRuntimeMemory(t *testing.T, got, want RuntimeMemoryUsage) {
 	if want.Unavailable != "" {
 		return
 	}
-	if got.CurrentBytes != want.CurrentBytes {
-		t.Errorf("Memory.CurrentBytes = %d, want %d", got.CurrentBytes, want.CurrentBytes)
-	}
-	if got.PeakBytes != want.PeakBytes {
-		t.Errorf("Memory.PeakBytes = %d, want %d", got.PeakBytes, want.PeakBytes)
-	}
+	assertRuntimeMemoryPeakAndOOM(t, got, want)
 	if got.Unlimited != want.Unlimited {
 		t.Errorf("Memory.Unlimited = %t, want %t", got.Unlimited, want.Unlimited)
 	}
@@ -178,6 +230,25 @@ func assertRuntimeMemory(t *testing.T, got, want RuntimeMemoryUsage) {
 	}
 	if !want.Unlimited && got.PercentOfLimit != want.PercentOfLimit {
 		t.Errorf("Memory.PercentOfLimit = %v, want %v", got.PercentOfLimit, want.PercentOfLimit)
+	}
+}
+
+// assertRuntimeMemoryPeakAndOOM checks CurrentBytes/PeakBytes/OOMKills
+// alongside their own Observed bit: a value alone is never enough to say
+// whether it means anything.
+func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want RuntimeMemoryUsage) {
+	t.Helper()
+	if got.CurrentBytes != want.CurrentBytes {
+		t.Errorf("Memory.CurrentBytes = %d, want %d", got.CurrentBytes, want.CurrentBytes)
+	}
+	if got.PeakBytes != want.PeakBytes {
+		t.Errorf("Memory.PeakBytes = %d, want %d", got.PeakBytes, want.PeakBytes)
+	}
+	if got.PeakObserved != want.PeakObserved {
+		t.Errorf("Memory.PeakObserved = %t, want %t", got.PeakObserved, want.PeakObserved)
+	}
+	if got.OOMKillsObserved != want.OOMKillsObserved {
+		t.Errorf("Memory.OOMKillsObserved = %t, want %t", got.OOMKillsObserved, want.OOMKillsObserved)
 	}
 }
 
@@ -230,6 +301,42 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 		}
 	})
 
+	t.Run("memory.peak warning does not fire when the peak could not be read", func(t *testing.T) {
+		output := strings.Join([]string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=52428800",
+			"memory_max=2147483648",
+			"memory_peak=",
+			"memory_oom_kill=0",
+		}, "\n")
+
+		usage := parseRuntimeUsage(req, output, interval)
+		if usage.Memory.PeakObserved {
+			t.Fatalf("expected PeakObserved=false when memory.peak is unreadable, got %+v", usage.Memory)
+		}
+		if hasWarningContaining(usage.Warnings, "memory.peak reached") {
+			t.Errorf("an unread peak must not compute a percentage to warn on, got %v", usage.Warnings)
+		}
+	})
+
+	t.Run("OOM kill warning does not fire when oom_kill could not be read", func(t *testing.T) {
+		output := strings.Join([]string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=52428800",
+			"memory_max=2147483648",
+			"memory_peak=52428800",
+			"memory_oom_kill=",
+		}, "\n")
+
+		usage := parseRuntimeUsage(req, output, interval)
+		if usage.Memory.OOMKillsObserved {
+			t.Fatalf("expected OOMKillsObserved=false when memory.events is unreadable, got %+v", usage.Memory)
+		}
+		if hasWarningContaining(usage.Warnings, "OOM kill") {
+			t.Errorf("an unread oom_kill counter must not report a confident zero, got %v", usage.Warnings)
+		}
+	})
+
 	t.Run("OOM kills always warn", func(t *testing.T) {
 		output := strings.Join([]string{
 			"cgroup_type=cgroup2fs",
@@ -274,6 +381,39 @@ func hasWarningContaining(warnings []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero pins the wire
+// contract: PeakBytes/OOMKills are already omitempty, so a genuine zero and
+// an unread value marshal identically unless their own Observed bit is
+// carried alongside them.
+func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
+	unread, err := json.Marshal(RuntimeMemoryUsage{CurrentBytes: 100})
+	if err != nil {
+		t.Fatalf("marshal unread: %v", err)
+	}
+	if strings.Contains(string(unread), "peakObserved") || strings.Contains(string(unread), "peakBytes") {
+		t.Errorf("an unread peak must omit both peakBytes and peakObserved, got %s", unread)
+	}
+
+	genuineZero, err := json.Marshal(RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
+	if err != nil {
+		t.Fatalf("marshal genuine zero: %v", err)
+	}
+	if !strings.Contains(string(genuineZero), `"peakObserved":true`) {
+		t.Errorf("a genuinely-zero, observed peak must carry peakObserved:true, got %s", genuineZero)
+	}
+	if strings.Contains(string(genuineZero), "peakBytes") {
+		t.Errorf("a genuine zero peak still omits the zero-valued peakBytes key, got %s", genuineZero)
+	}
+
+	var roundTripped RuntimeMemoryUsage
+	if err := json.Unmarshal(genuineZero, &roundTripped); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
+		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
+	}
 }
 
 func TestClampRuntimeUsageInterval(t *testing.T) {

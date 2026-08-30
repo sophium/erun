@@ -8,9 +8,11 @@
   "memory": {
     "currentBytes": 1932735283,
     "peakBytes": 2100000000,
+    "peakObserved": true,
     "limitBytes": 2147483648,
     "percentOfLimit": 89.99999999068677,
-    "oomKills": 1
+    "oomKills": 1,
+    "oomKillsObserved": true
   },
   "disk": [
     {

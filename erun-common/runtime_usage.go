@@ -154,13 +154,25 @@ type RuntimeCPUUsage struct {
 // message would like to have had beforehand: current usage, the high-water
 // mark, and a real OOM-kill counter instead of "likely out of memory".
 type RuntimeMemoryUsage struct {
-	CurrentBytes   int64   `json:"currentBytes,omitempty"`
-	PeakBytes      int64   `json:"peakBytes,omitempty"`
+	CurrentBytes int64 `json:"currentBytes,omitempty"`
+	PeakBytes    int64 `json:"peakBytes,omitempty"`
+	// PeakObserved is true only when memory.peak was actually read. memory.peak
+	// is cgroup v2 and reasonably recent -- cgroup v1 exposes
+	// memory.max_usage_in_bytes instead, and older v2 kernels lack it entirely
+	// -- so a missing or unparseable memory.peak must not collapse into a
+	// reported zero indistinguishable from a genuine idle peak, and must not
+	// let a percent-of-limit warning compute against a reading that was never
+	// taken.
+	PeakObserved   bool    `json:"peakObserved,omitempty"`
 	LimitBytes     int64   `json:"limitBytes,omitempty"`
 	Unlimited      bool    `json:"unlimited,omitempty"`
 	PercentOfLimit float64 `json:"percentOfLimit,omitempty"`
 	OOMKills       int64   `json:"oomKills,omitempty"`
-	Unavailable    string  `json:"unavailable,omitempty"`
+	// OOMKillsObserved mirrors PeakObserved: memory.events' oom_kill counter
+	// can be as unreadable as memory.peak, and a caller must not read a silent
+	// zero as "no kills" when it actually means "could not tell".
+	OOMKillsObserved bool   `json:"oomKillsObserved,omitempty"`
+	Unavailable      string `json:"unavailable,omitempty"`
 }
 
 // RuntimeDiskUsage reports usage for one watched mount (the workspace path,
@@ -278,9 +290,11 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 	m.CurrentBytes = current
 	if peak, ok := parseRuntimeInt64(v["memory_peak"]); ok {
 		m.PeakBytes = peak
+		m.PeakObserved = true
 	}
 	if killed, ok := parseRuntimeInt64(v["memory_oom_kill"]); ok {
 		m.OOMKills = killed
+		m.OOMKillsObserved = true
 	}
 	maxRaw := v["memory_max"]
 	if maxRaw == "max" {
@@ -431,28 +445,35 @@ func parseRuntimeDFUsage(line string) (totalBytes, usedBytes int64, ok bool) {
 }
 
 func runtimeUsageWarnings(u RuntimeUsage) []string {
-	var warnings []string
-	if u.Memory.Unavailable == "" && !u.Memory.Unlimited && u.Memory.LimitBytes > 0 {
-		if u.Memory.PercentOfLimit >= RuntimeUsageMemoryWarnPercent {
-			warnings = append(warnings, fmt.Sprintf(
-				"memory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				u.Memory.PercentOfLimit, formatMebibytes(u.Memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
-		}
-		peakPercent := 100 * float64(u.Memory.PeakBytes) / float64(u.Memory.LimitBytes)
-		if peakPercent >= RuntimeUsageMemoryPeakWarnPercent {
-			warnings = append(warnings, fmt.Sprintf(
-				"memory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
-				peakPercent, RuntimeUsageMemoryPeakWarnPercent))
-		}
-	}
-	if u.Memory.OOMKills > 0 {
-		warnings = append(warnings, fmt.Sprintf("the cgroup recorded %d OOM kill(s)", u.Memory.OOMKills))
-	}
+	warnings := runtimeMemoryUsageWarnings(u.Memory)
 	for _, d := range u.Disk {
 		if d.Unavailable == "" && d.PercentUsed >= RuntimeUsageDiskWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%s is at %.0f%% disk usage (warns at %.0f%%)", d.Mount, d.PercentUsed, RuntimeUsageDiskWarnPercent))
 		}
+	}
+	return warnings
+}
+
+func runtimeMemoryUsageWarnings(memory RuntimeMemoryUsage) []string {
+	var warnings []string
+	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
+		if memory.PercentOfLimit >= RuntimeUsageMemoryWarnPercent {
+			warnings = append(warnings, fmt.Sprintf(
+				"memory is at %.0f%% of its %s limit (warns at %.0f%%)",
+				memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
+		}
+		if memory.PeakObserved {
+			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)
+			if peakPercent >= RuntimeUsageMemoryPeakWarnPercent {
+				warnings = append(warnings, fmt.Sprintf(
+					"memory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
+					peakPercent, RuntimeUsageMemoryPeakWarnPercent))
+			}
+		}
+	}
+	if memory.OOMKillsObserved && memory.OOMKills > 0 {
+		warnings = append(warnings, fmt.Sprintf("the cgroup recorded %d OOM kill(s)", memory.OOMKills))
 	}
 	return warnings
 }

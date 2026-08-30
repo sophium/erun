@@ -34,15 +34,36 @@ func writeUsageMemory(ctx common.Context, memory common.RuntimeMemoryUsage) erro
 		_, err := fmt.Fprintf(ctx.Stdout, "Memory: unavailable (%s)\n", memory.Unavailable)
 		return err
 	}
+	peak := formatUsagePeak(memory)
+	oomKills := formatUsageOOMKills(memory)
 	if memory.Unlimited {
-		_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s used, no limit set, peak %s, OOM kills %d\n",
-			formatUsageBytes(memory.CurrentBytes), formatUsageBytes(memory.PeakBytes), memory.OOMKills)
+		_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s used, no limit set, peak %s, OOM kills %s\n",
+			formatUsageBytes(memory.CurrentBytes), peak, oomKills)
 		return err
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s / %s (%.1f%%), peak %s, OOM kills %d\n",
+	_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s / %s (%.1f%%), peak %s, OOM kills %s\n",
 		formatUsageBytes(memory.CurrentBytes), formatUsageBytes(memory.LimitBytes), memory.PercentOfLimit,
-		formatUsageBytes(memory.PeakBytes), memory.OOMKills)
+		peak, oomKills)
 	return err
+}
+
+// formatUsagePeak and formatUsageOOMKills report "unavailable" rather than a
+// fabricated zero when memory.peak / memory.events' oom_kill counter could
+// not be read -- the same distinction the reader itself carries via
+// PeakObserved/OOMKillsObserved, so the two never collapse into a confident
+// zero here either.
+func formatUsagePeak(memory common.RuntimeMemoryUsage) string {
+	if !memory.PeakObserved {
+		return "unavailable"
+	}
+	return formatUsageBytes(memory.PeakBytes)
+}
+
+func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
+	if !memory.OOMKillsObserved {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%d", memory.OOMKills)
 }
 
 func writeUsageDisk(ctx common.Context, disks []common.RuntimeDiskUsage) error {
