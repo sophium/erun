@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -133,8 +134,17 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 	tokenURL = normalizeGHCRBaseURL(tokenURL)
 	repoPath = strings.ToLower(repoPath)
 
+	// A 401/403 here is ghcr answering the anonymous token request with "no" --
+	// a conclusive refusal, not a failure to reach the registry -- so it
+	// resolves to pullable=false with no error and lets the baseline decide.
+	// Any other failure (DNS, connection refused, timeout, a non-2xx status
+	// registryStatusError doesn't recognize as an auth refusal) is genuinely
+	// inconclusive and must keep failing the release loudly.
 	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL, registryBasicAuth{}, false)
 	if err != nil {
+		if errors.Is(err, ErrRegistryAuthRequired) {
+			return false, nil
+		}
 		return false, err
 	}
 
@@ -151,7 +161,13 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 	defer func() {
 		_ = resp.Body.Close()
 	}()
-	return resp.StatusCode >= 200 && resp.StatusCode < 300, nil
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return true, nil
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false, nil
+	}
+	return false, registryStatusError("anonymous manifest pull", resp.Status, resp.StatusCode)
 }
 
 // verifyModuleReferencedImagesAnonymouslyPullable asserts that every erun
@@ -202,6 +218,16 @@ func verifyImageAnonymouslyPullable(ctx Context, name string, image DockerImageR
 	repoPath := DockerNamespaceFromTag(tag) + "/" + name
 	pullable, probeErr := probe(context.Background(), nil, repoPath, image.Version)
 	if probeErr != nil {
+		// A genuine failure to reach the registry (not a refusal -- those come
+		// back as pullable=false, no error) tells us nothing new about an
+		// image already recorded as known-not-anonymously-pullable, so it
+		// must not block a release over network flakiness alone. For any
+		// other image, whether the probe could even run is exactly what this
+		// check exists to answer, so the release still fails loudly.
+		if anonymousPullabilityBaseline[name] {
+			ctx.Info("==> Anonymous-pullability probe for " + tag + " could not run (" + probeErr.Error() + "), but it is already baselined as not anonymously pullable (see anonymousPullabilityBaseline) -- proceeding")
+			return nil
+		}
 		return fmt.Errorf("probe anonymous pull of %s: %w", tag, probeErr)
 	}
 	if pullable {
