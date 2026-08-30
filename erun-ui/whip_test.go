@@ -479,7 +479,15 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 	if failedPush.Outcome != "failed" || failedPush.Error == "" {
 		t.Fatalf("got %+v, want a decided-but-failed push reported failed with its error", failedPush)
 	}
+}
 
+// TestWhipResultToUIRendersACallFailureAsFailed is the erun#1709 regression
+// test for the UI facade: a WhipReasonCallFailed result (the tool call itself
+// erroring out, never the tool reporting a dead session) must render as
+// "failed", not fold into whipSkipReasonText's "not alive" wording the way a
+// genuine skip does. Split out from TestWhipResultToUIRendersEveryOutcome to
+// keep that test's cyclomatic complexity under the repo's lint threshold.
+func TestWhipResultToUIRendersACallFailureAsFailed(t *testing.T) {
 	failedCall := whipResultToUI(eruncommon.WhipResult{
 		Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
 		Decision:  eruncommon.WhipDecisionNone,
