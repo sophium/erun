@@ -36,6 +36,22 @@ async function forceDarkTheme(page: import('@playwright/test').Page): Promise<vo
   });
 }
 
+// Other specs in this suite create their own orchestrators (e.g.
+// orchestrator-link-local-agent.spec.ts, orchestrator-pacing-nudge.spec.ts),
+// and backend-side sessions persist across specs within the same worker
+// (playwright/AGENTS.md) -- so the *total* live population a "select all"
+// resolves against is not under this spec's control and must never be
+// hardcoded. whipCountLabel derives the expected button text from what the
+// picker itself rendered as checked, so the assertion stays true regardless
+// of how many extra orchestrators another spec left behind.
+async function whipCountLabel(app: import('../pages/index.js').AppShell): Promise<string> {
+  const checked = await app.titlebar
+    .whipPanel()
+    .locator('[role="checkbox"][aria-checked="true"]')
+    .count();
+  return `Whip ${String(checked)} target${checked === 1 ? '' : 's'}`;
+}
+
 async function mockWhipReport(
   page: import('@playwright/test').Page,
   gate: Promise<void>,
@@ -214,30 +230,36 @@ test('select all orchestrators whips only the orchestrator population', async ({
   await app.titlebar.whipButton().click();
 
   await app.titlebar.selectAllOrchestratorsButton().click();
-  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).toBeChecked();
   await expect(
     app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_ALPHA}`),
   ).not.toBeChecked();
+  // The count matches exactly whatever the picker rendered checked -- never a
+  // hardcoded total, since another spec in this worker can leave its own
+  // orchestrator behind (playwright/AGENTS.md's worker-shared backend state).
+  await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
 
   await app.titlebar.whipRunButton().click();
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(SEED_ORCHESTRATOR)).toBeVisible();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toHaveCount(0);
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_BETA}`)).toHaveCount(0);
+  await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_GAMMA}`)).toHaveCount(0);
 });
 
 test('select all environments whips only the environment population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
   await app.titlebar.whipButton().click();
 
-  // The seeded baseline carries three environments (alpha, beta, gamma).
+  // The seeded baseline carries three environments (alpha, beta, gamma);
+  // environments are per-test-worker config, not cross-spec live state, so
+  // this population is stable -- unlike the orchestrator count below.
   await app.titlebar.selectAllEnvironmentsButton().click();
-  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 3 targets');
   await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeChecked();
   await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_BETA}`)).toBeChecked();
   await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_GAMMA}`)).toBeChecked();
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).not.toBeChecked();
+  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 3 targets');
 
   await app.titlebar.whipRunButton().click();
   const body = app.titlebar.whipReportBody();
@@ -251,9 +273,12 @@ test('select all whips the whole population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
   await app.titlebar.whipButton().click();
 
-  // Three environments (alpha, beta, gamma) plus the one seeded orchestrator.
   await app.titlebar.selectAllButton().click();
-  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 4 targets');
+  await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeChecked();
+  await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_BETA}`)).toBeChecked();
+  await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_GAMMA}`)).toBeChecked();
+  await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).toBeChecked();
+  await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
 
   await app.titlebar.whipRunButton().click();
   const body = app.titlebar.whipReportBody();
@@ -275,14 +300,19 @@ test('the selection surface is operable end to end without a mouse', async ({ ap
 
   await app.titlebar.selectAllButton().focus();
   await app.page.keyboard.press('Enter');
-  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 4 targets');
+  await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).toBeChecked();
+  // Never a hardcoded total -- another spec in this worker can leave its own
+  // orchestrator behind (playwright/AGENTS.md's worker-shared backend state).
+  const selectedAll = await whipCountLabel(app);
+  await expect(app.titlebar.whipRunButton()).toHaveText(selectedAll);
 
   // Unchecking one box by keyboard (Space, the ARIA checkbox pattern's own
-  // key) narrows the count back down.
+  // key) narrows the count back down by exactly one.
   await app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR).focus();
   await app.page.keyboard.press('Space');
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).not.toBeChecked();
-  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 3 targets');
+  await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
+  await expect(app.titlebar.whipRunButton()).not.toHaveText(selectedAll);
 
   await app.titlebar.whipRunButton().focus();
   await app.page.keyboard.press('Enter');
