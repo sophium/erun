@@ -12,8 +12,10 @@ export interface OrchestratorReopenRef {
 }
 
 // OrchestratorNoticeKind mirrors the Go side's orchestratorNoticeKind: 'info'
-// is the mechanism working (a resumed tracked conversation), 'warning' is
-// every other resolution this restore reports. 'unknown' is a frontend-only
+// is reserved for a routine notice (none is minted today — a launch resumes
+// the derived anchor with nothing to report unless an explicit attachment
+// failed, erun#1696), 'warning' is every resolution this restore actually
+// reports. 'unknown' is a frontend-only
 // value for a notice whose kind this launch could not classify — a raw
 // payload missing the field, or naming something other than the two kinds the
 // backend ever mints. It exists so that case renders as its own visibly

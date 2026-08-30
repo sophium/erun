@@ -68,7 +68,10 @@ func listedConversationIDs(listing orchestratorConversations) map[string]struct{
 
 // The operator's question is "which of these is the work?", so a row has to
 // carry what answers it: when it was last written, how big it is, where it was
-// started, how it opens, and what relationship this orchestrator has to it.
+// started, how it opens, and what relationship this orchestrator has to it. A
+// launch never adopts the live one automatically (erun#1696) -- the derived
+// row is what it resumes, and the live row is offered confirmed for the
+// operator to attach.
 func TestConversationListingSaysWhichIsLiveAndWhatEachOneIs(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
@@ -88,27 +91,28 @@ func TestConversationListingSaysWhichIsLiveAndWhatEachOneIs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOrchestratorConversations failed: %v", err)
 	}
-	if listing.Resuming != live || listing.ResumingSource != string(orchestratorConversationTracked) {
-		t.Fatalf("expected the listing to report the live conversation as what it resumes, got %+v", listing)
+	if listing.Resuming != derived || listing.ResumingSource != string(orchestratorConversationDerived) {
+		t.Fatalf("expected the listing to report the derived anchor as what it resumes, got %+v", listing)
 	}
 	// Newest first, because the operator scans for the one that was written last.
 	if listing.Conversations[0].ConversationID != live {
 		t.Fatalf("expected the most recently written conversation first, got %+v", listing.Conversations)
 	}
 	assertLiveRowDescribesTheWork(t, conversationRow(t, listing, live), now.Add(-14*time.Second))
-	if row := conversationRow(t, listing, derived); row.Role != orchestratorConversationRoleDerived || row.Resuming {
-		t.Fatalf("expected the derived row marked derived and not resuming, got %+v", row)
+	if row := conversationRow(t, listing, derived); row.Role != orchestratorConversationRoleDerived || !row.Resuming {
+		t.Fatalf("expected the derived row marked derived and resuming, got %+v", row)
 	}
 }
 
 // assertLiveRowDescribesTheWork checks the row for the tracked conversation
-// carries everything the choice is made on: that it is the live one, that it is
-// what a launch would resume, and the when/how-big/where/how-it-opens the
-// operator recognises it by.
+// carries everything the operator needs to recognise and attach it: that it is
+// confirmed live (not merely stranded), that a launch does NOT resume it on
+// its own (erun#1696), and the when/how-big/where/how-it-opens it is
+// recognised by.
 func assertLiveRowDescribesTheWork(t *testing.T, row orchestratorConversation, written time.Time) {
 	t.Helper()
-	if row.Role != orchestratorConversationRoleLive || !row.Resuming {
-		t.Fatalf("expected the live row marked live and resuming, got %+v", row)
+	if row.Role != orchestratorConversationRoleLive || row.Resuming {
+		t.Fatalf("expected the live row marked live and not resuming, got %+v", row)
 	}
 	if row.LastWrittenUnix != written.Unix() || row.SizeBytes == 0 {
 		t.Fatalf("expected last-written and size on the row, got %+v", row)

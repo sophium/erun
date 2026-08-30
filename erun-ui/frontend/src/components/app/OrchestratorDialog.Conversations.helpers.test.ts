@@ -31,8 +31,10 @@ test('each role reads as its own situation, and stranded reads as a warning', ()
 
 test('the summary says which conversation is being resumed and why', () => {
   assert.match(resumingSummary('attached'), /attached/);
-  assert.match(resumingSummary('tracked'), /last live on/);
   assert.match(resumingSummary('derived'), /name resolves to/);
+  // A tracked conversation is never adopted on its own (erun#1696); any source
+  // other than an explicit attachment reads as the derived anchor.
+  assert.match(resumingSummary('tracked'), /name resolves to/);
 });
 
 // Size is one of the two facts that separate a conversation holding hours of

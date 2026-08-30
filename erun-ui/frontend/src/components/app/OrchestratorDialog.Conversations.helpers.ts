@@ -38,13 +38,13 @@ export function roleLabel(role: string): ConversationRoleLabel {
 }
 
 // resumingSummary says, in one line, which conversation a launch resumes now and
-// why — the question the whole surface exists to answer.
+// why — the question the whole surface exists to answer. Only two sources ever
+// arrive here: an explicit attachment, or the derived anchor a launch resumes
+// by default (erun#1696) — a tracked conversation is never adopted on its own.
 export function resumingSummary(source: string): string {
   switch (source) {
     case 'attached':
       return 'Resuming the conversation you attached.';
-    case 'tracked':
-      return 'Resuming the conversation this orchestrator’s session was last live on.';
     default:
       return 'Resuming the conversation this orchestrator’s name resolves to.';
   }

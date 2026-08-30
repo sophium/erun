@@ -55,10 +55,9 @@ type orchestratorOpenEntry struct {
 	// all -- from deciding what a resume attaches to.
 	LaunchID string `json:"launchId,omitempty"`
 	// AttachedConversationID is the conversation the operator chose for this
-	// orchestrator, and it outranks both the tracked and the derived answer. An
-	// explicit choice that a later launch quietly recomputed away would be no
-	// choice at all, so it is durable and cleared only by asking for the
-	// default back.
+	// orchestrator, and it outranks the derived answer. An explicit choice that a
+	// later launch quietly recomputed away would be no choice at all, so it is
+	// durable and cleared only by asking for the default back.
 	AttachedConversationID string `json:"attachedConversationId,omitempty"`
 	// Environments is the scope (sorted tenant/environment pairs, see
 	// orchestratorScopeOf) the recorded session was actually wired to when this
@@ -69,16 +68,6 @@ type orchestratorOpenEntry struct {
 	// release wrote, which restore treats as unknown rather than a guaranteed
 	// match.
 	Environments []string `json:"environments,omitempty"`
-	// LastReportedConversationID is the tracked conversation id this
-	// orchestrator's operator was last told about (see
-	// orchestratorResumedTrackedConversationNotice). Resolving to the SAME
-	// tracked conversation again has nothing new to say and stays silent;
-	// resolving to a different one is new information and is reported, which is
-	// what stops the notice from repeating forever once a divergence has already
-	// been explained. It only tracks the "info" resolution -- a warning
-	// (unconfirmed record, refused attachment) reports on every occurrence by
-	// design and never updates this.
-	LastReportedConversationID string `json:"lastReportedConversationId,omitempty"`
 }
 
 type orchestratorOpenState struct {
@@ -124,7 +113,6 @@ func recordOpenOrchestrator(path, orchestratorID, launchID string, scope []strin
 	entries := readOpenOrchestrators(path)
 	existing := orchestratorEntryOrEmpty(entries, orchestratorID)
 	attached := strings.TrimSpace(existing.AttachedConversationID)
-	lastReported := strings.TrimSpace(existing.LastReportedConversationID)
 	out := make([]orchestratorOpenEntry, 0, len(entries)+1)
 	for _, entry := range entries {
 		if entry.OrchestratorID == orchestratorID {
@@ -133,11 +121,10 @@ func recordOpenOrchestrator(path, orchestratorID, launchID string, scope []strin
 		out = append(out, entry)
 	}
 	out = append(out, orchestratorOpenEntry{
-		OrchestratorID:             orchestratorID,
-		LaunchID:                   strings.TrimSpace(launchID),
-		AttachedConversationID:     attached,
-		Environments:               scope,
-		LastReportedConversationID: lastReported,
+		OrchestratorID:         orchestratorID,
+		LaunchID:               strings.TrimSpace(launchID),
+		AttachedConversationID: attached,
+		Environments:           scope,
 	})
 	return writeOpenOrchestrators(path, out)
 }
@@ -165,39 +152,6 @@ func setAttachedOrchestratorConversation(path, orchestratorID, conversationID st
 		entries = append(entries, orchestratorOpenEntry{
 			OrchestratorID:         orchestratorID,
 			AttachedConversationID: strings.TrimSpace(conversationID),
-		})
-	}
-	return writeOpenOrchestrators(path, entries)
-}
-
-// markOrchestratorConversationReported records the tracked conversation id an
-// orchestrator's operator was just told about, so a later launch that resolves
-// the SAME tracked conversation again finds nothing new to say. Called only for
-// the "info" resolution (see orchestratorConversationNoticeKind); a warning
-// resolution reports every occurrence and never calls this. Creates the entry
-// when none exists yet, mirroring setAttachedOrchestratorConversation.
-func markOrchestratorConversationReported(path, orchestratorID, conversationID string) error {
-	orchestratorID = strings.TrimSpace(orchestratorID)
-	if path == "" || orchestratorID == "" {
-		return nil
-	}
-	conversationID = strings.TrimSpace(conversationID)
-	entries := readOpenOrchestrators(path)
-	found := false
-	for i, entry := range entries {
-		if entry.OrchestratorID != orchestratorID {
-			continue
-		}
-		if entry.LastReportedConversationID == conversationID {
-			return nil
-		}
-		entries[i].LastReportedConversationID = conversationID
-		found = true
-	}
-	if !found {
-		entries = append(entries, orchestratorOpenEntry{
-			OrchestratorID:             orchestratorID,
-			LastReportedConversationID: conversationID,
 		})
 	}
 	return writeOpenOrchestrators(path, entries)
@@ -277,11 +231,10 @@ func dedupOrchestratorEntries(entries []orchestratorOpenEntry) []orchestratorOpe
 		}
 		seen[id] = struct{}{}
 		out = append(out, orchestratorOpenEntry{
-			OrchestratorID:             id,
-			LaunchID:                   strings.TrimSpace(entry.LaunchID),
-			AttachedConversationID:     strings.TrimSpace(entry.AttachedConversationID),
-			Environments:               entry.Environments,
-			LastReportedConversationID: strings.TrimSpace(entry.LastReportedConversationID),
+			OrchestratorID:         id,
+			LaunchID:               strings.TrimSpace(entry.LaunchID),
+			AttachedConversationID: strings.TrimSpace(entry.AttachedConversationID),
+			Environments:           entry.Environments,
 		})
 	}
 	if len(out) == 0 {

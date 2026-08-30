@@ -60,25 +60,29 @@ func writeLiveConversationRecord(t *testing.T, orchestratorID string, record orc
 	}
 }
 
-// The measured failure. An orchestrator was spawned to resume its derived
-// conversation; the harness did not adopt that id and kept writing to one of its
-// own. Ten hours later the derived transcript was untouched and the other had
-// been written seconds ago — and a restart resumed the dead one, coming back
-// apparently healthy with none of the work in it.
-func TestRestoreResumesTheConversationTheSessionIsLiveOnNotTheStaleDerivedOne(t *testing.T) {
+// The measured trade-off (erun#1696): an orchestrator's session diverged onto a
+// conversation of its own -- the derived transcript stopped growing ten hours
+// ago and the other has been written seconds ago -- and a launch resumes the
+// derived anchor anyway, every time, with nothing said about it. The tracked
+// conversation is not lost: it stays recorded and is offered in the Manage
+// dialog (erun-ui/orchestrator_conversations_test.go) for the operator to
+// attach deliberately. What it no longer does is override the anchor on its
+// own say-so, because nothing then moves a drifted record back and a launch
+// used to keep resuming it forever.
+func TestRestoreAlwaysResumesTheDerivedAnchorEvenWhenATrackedConversationDiverged(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
 	id := createAndStartOrchestrator(t, app)
 	derived := orchestratorSessionID(id)
 	// A v4 id, as the harness mints: the derivation could never produce it, which
-	// is exactly why the derivation cannot answer what is live.
-	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	// is exactly why a session can drift onto one.
+	const diverged = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
 	now := time.Now()
 	stageOrchestratorConversationAt(t, derived, now.Add(-10*time.Hour))
-	stageOrchestratorConversationAt(t, live, now.Add(-14*time.Second))
+	stageOrchestratorConversationAt(t, diverged, now.Add(-14*time.Second))
 	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: live,
+		ConversationID: diverged,
 		LaunchID:       recordedLaunchID(t, openPath, id),
 		AtUnix:         now.Unix(),
 	})
@@ -87,26 +91,18 @@ func TestRestoreResumesTheConversationTheSessionIsLiveOnNotTheStaleDerivedOne(t 
 	if target.OrchestratorID != id {
 		t.Fatalf("expected %q reopened, got %q", id, target.OrchestratorID)
 	}
-	if target.ConversationID == derived {
-		t.Fatalf("resumed the stale derived conversation %q while %q held the work", derived, live)
+	if target.ConversationID != derived {
+		t.Fatalf("expected the derived anchor %q resumed regardless of the divergence, got %q", derived, target.ConversationID)
 	}
-	if target.ConversationID != live {
-		t.Fatalf("expected the live conversation %q resumed, got %q", live, target.ConversationID)
-	}
-	// The two ids disagreed, and only the operator can tell whether the one that
-	// won is the work they expect: coming back on a different conversation with
-	// nothing said is the same defect wearing the opposite sign.
-	for _, want := range []string{id, live, derived} {
-		if !strings.Contains(noticeText(target.Notices), want) {
-			t.Fatalf("expected the notice to name %q, got %q", want, noticeText(target.Notices))
-		}
+	if noticeText(target.Notices) != "" {
+		t.Fatalf("expected an ordinary launch to say nothing about a tracked conversation it never adopts, got %q", noticeText(target.Notices))
 	}
 }
 
-// The ordinary click has to land where a restart lands. It resolved the derived
-// id straight from the orchestrator id, so opening an orchestrator by hand
-// stranded the very conversation a restart would have recovered.
-func TestStartingAnOrchestratorResumesTheConversationItIsLiveOn(t *testing.T) {
+// The ordinary click has to land where a restart lands. Both go through
+// resolveOrchestratorConversation, so both now resume the derived anchor
+// regardless of what the orchestrator's session last reported.
+func TestStartingAnOrchestratorResumesTheDerivedAnchorNotADivergedConversation(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
@@ -117,25 +113,26 @@ func TestStartingAnOrchestratorResumesTheConversationItIsLiveOn(t *testing.T) {
 	}
 
 	id := createAndStartOrchestrator(t, app)
-	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
-	stageOrchestratorConversation(t, live)
+	derived := orchestratorSessionID(id)
+	const diverged = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	stageOrchestratorConversation(t, derived)
+	stageOrchestratorConversation(t, diverged)
 	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: live,
+		ConversationID: diverged,
 		LaunchID:       recordedLaunchID(t, openPath, id),
 	})
 
 	if err := app.StopOrchestrator(id); err != nil {
 		t.Fatalf("StopOrchestrator failed: %v", err)
 	}
-	// Stopping forgets the entry, so the attach that follows is the operator
+	// Stopping forgets the entry, so the start that follows is the operator
 	// starting this orchestrator again from the sidebar.
-	writeLiveConversationRecordEntry(t, app, id, live)
+	writeLiveConversationRecordEntry(t, app, id, diverged)
 	if _, err := app.StartOrchestrator(id, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	if got := launched[len(launched)-1]; got != live {
-		t.Fatalf("expected the ordinary start to resume the live conversation %q, got %q", live, got)
+	if got := launched[len(launched)-1]; got != derived {
+		t.Fatalf("expected the ordinary start to resume the derived anchor %q, got %q", derived, got)
 	}
 }
 
@@ -154,10 +151,12 @@ func writeLiveConversationRecordEntry(t *testing.T, app *App, orchestratorID, co
 	})
 }
 
-// A conversation belongs to one orchestrator. A record that names another
-// orchestrator's conversation is the failure that made the previous recorder
-// worse than having none: it handed over somebody else's history and then
-// confirmed the mistake on every later launch.
+// A conversation belongs to one orchestrator. A tracked record that names
+// another orchestrator's conversation is never even consulted by an ordinary
+// resolve any more, so it cannot hand it over -- the ownership check still
+// matters for the Manage dialog's listing and for an explicit attach
+// (erun-ui/orchestrator_conversations_test.go), never for automatic
+// resolution.
 func TestRestoreNeverResumesAnotherOrchestratorsConversation(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
@@ -182,8 +181,8 @@ func TestRestoreNeverResumesAnotherOrchestratorsConversation(t *testing.T) {
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected its own derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(noticeText(target.Notices), other.ID) {
-		t.Fatalf("expected the notice to name the orchestrator that owns it, got %q", noticeText(target.Notices))
+	if noticeText(target.Notices) != "" {
+		t.Fatalf("expected an ordinary launch to say nothing, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -206,129 +205,14 @@ func TestAFirstLaunchWithNothingTrackedResumesTheDerivedConversation(t *testing.
 }
 
 // A record from a launch that has been replaced — or from a writer that no
-// longer exists at all, which is how a deleted recorder's files went on deciding
-// resumes for days — is not this orchestrator's live conversation. It falls back
-// to the anchor and NAMES the unconfirmed id, because that id is the operator's
-// way back to the work.
-func TestATrackedConversationFromAnotherLaunchIsNotSilentlyAuthoritative(t *testing.T) {
-	app, _, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	const stranded = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
-	stageOrchestratorConversation(t, stranded)
-	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: stranded,
-		LaunchID:       "a-launch-that-is-not-this-one",
-	})
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
-	}
-	if !strings.Contains(noticeText(target.Notices), stranded) {
-		t.Fatalf("expected the notice to name the unconfirmed conversation, got %q", noticeText(target.Notices))
-	}
-}
-
-// The habituation failure this whole notice family exists to avoid: a launch
-// that resumes the SAME tracked conversation it already told the operator about
-// has nothing new to say, and must say nothing. A notice that fires on every
-// launch forever trains the operator to stop reading it -- including the three
-// warning notices that share its surface and still need to be believed every
-// time they fire.
-func TestRestoreReportsARepeatedTrackedConversationOnlyOnce(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
-	stageOrchestratorConversation(t, live)
-	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: live,
-		LaunchID:       recordedLaunchID(t, openPath, id),
-	})
-
-	first := app.ResolveOrchestratorToReopen()
-	if first.ConversationID != live {
-		t.Fatalf("expected the first launch to resume the live conversation %q, got %q", live, first.ConversationID)
-	}
-	if noticeText(first.Notices) == "" {
-		t.Fatal("expected the first divergence between tracked and derived to be reported")
-	}
-	// The mechanism working correctly is information, not a fault: a resumed
-	// tracked conversation must never be reported at the same severity as a
-	// refusal or an unconfirmed record.
-	if len(first.Notices) != 1 || first.Notices[0].Kind != orchestratorNoticeInfo {
-		t.Fatalf("expected exactly one info-kind notice for the resumed tracked conversation, got %+v", first.Notices)
-	}
-
-	second := app.ResolveOrchestratorToReopen()
-	if second.ConversationID != live {
-		t.Fatalf("expected the second launch to resume the same live conversation %q, got %q", live, second.ConversationID)
-	}
-	if noticeText(second.Notices) != "" {
-		t.Fatalf("expected a launch that resumes the conversation already reported to say nothing, got %q", noticeText(second.Notices))
-	}
-
-	// The record still resolves the same tracked conversation; only the notice
-	// about it is quiet the second time.
-	third := app.ResolveOrchestratorToReopen()
-	if noticeText(third.Notices) != "" {
-		t.Fatalf("expected a third repeat launch to stay silent too, got %q", noticeText(third.Notices))
-	}
-}
-
-// A tracked conversation that changes AFTER already being reported is new
-// information again and must be reported, even though the orchestrator has
-// already been told about a previous divergence.
-func TestRestoreReportsAChangeToADifferentTrackedConversation(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	id := createAndStartOrchestrator(t, app)
-	const firstLive = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	const secondLive = "22222222-3333-4444-8555-666666666666"
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
-	stageOrchestratorConversation(t, firstLive)
-	stageOrchestratorConversation(t, secondLive)
-	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: firstLive,
-		LaunchID:       recordedLaunchID(t, openPath, id),
-	})
-
-	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) == "" || target.ConversationID != firstLive {
-		t.Fatalf("expected the first divergence reported and resumed, got conversation %q notice %q", target.ConversationID, noticeText(target.Notices))
-	}
-	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) != "" {
-		t.Fatalf("expected the repeat of the same tracked conversation to say nothing, got %q", noticeText(target.Notices))
-	}
-
-	// A new launch under the SAME entry's launch id, whose session now reports a
-	// different conversation than the one already reported.
-	writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-		ConversationID: secondLive,
-		LaunchID:       recordedLaunchID(t, openPath, id),
-	})
-	target := app.ResolveOrchestratorToReopen()
-	if target.ConversationID != secondLive {
-		t.Fatalf("expected the changed tracked conversation %q resumed, got %q", secondLive, target.ConversationID)
-	}
-	if noticeText(target.Notices) == "" {
-		t.Fatal("expected a change to a different tracked conversation to be reported")
-	}
-	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) != "" {
-		t.Fatalf("expected the repeat of the newly reported conversation to say nothing, got %q", noticeText(target.Notices))
-	}
-}
-
-// A warning resolution is not a steady state to acclimatise to; it is
-// something that just went wrong, and it must say so on every occurrence, not
-// only the first. A record from an earlier, replaced launch stays wrong on
-// every later launch too.
-func TestAnUnconfirmedTrackedConversationIsReportedOnEveryLaunch(t *testing.T) {
+// longer exists at all, which is how a deleted recorder's files went on
+// deciding resumes for days — is just as silently ignored by an ordinary
+// resolve as a confirmed one: neither is consulted for automatic resumption
+// any more (erun#1696). Its confirmation status still matters to the Manage
+// dialog's listing (erun-ui/orchestrator_conversations_test.go), which is
+// where an unconfirmed record is distinguished from a confirmed one, but an
+// ordinary launch resumes the anchor either way with nothing to say.
+func TestAnUnconfirmedTrackedConversationIsNeverConsultedByAnOrdinaryResolve(t *testing.T) {
 	app, _, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
@@ -344,15 +228,19 @@ func TestAnUnconfirmedTrackedConversationIsReportedOnEveryLaunch(t *testing.T) {
 	first := app.ResolveOrchestratorToReopen()
 	second := app.ResolveOrchestratorToReopen()
 	for _, target := range []relaunchTarget{first, second} {
-		if !strings.Contains(noticeText(target.Notices), stranded) {
-			t.Fatalf("expected every launch to report the unconfirmed conversation, got %q", noticeText(target.Notices))
+		if target.ConversationID != orchestratorSessionID(id) {
+			t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
+		}
+		if noticeText(target.Notices) != "" {
+			t.Fatalf("expected every ordinary launch to say nothing, got %q", noticeText(target.Notices))
 		}
 	}
 }
 
-// The same refusal for a record whose conversation is gone: resuming nothing is
-// safer than resuming the wrong thing, and either way the operator hears it.
-func TestATrackedConversationWithNoTranscriptFallsBackAndSaysSo(t *testing.T) {
+// The same silence for a tracked record whose conversation is gone: an
+// ordinary resolve never looks at the tracked record at all, so it neither
+// resumes it nor reports on its absence.
+func TestATrackedConversationWithNoTranscriptIsAlsoIgnoredByAnOrdinaryResolve(t *testing.T) {
 	app, openPath, _ := openStateTestApp(t)
 	defer app.shutdown(context.Background())
 
@@ -367,8 +255,8 @@ func TestATrackedConversationWithNoTranscriptFallsBackAndSaysSo(t *testing.T) {
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(noticeText(target.Notices), "no longer on disk") {
-		t.Fatalf("expected the notice to say the transcript is gone, got %q", noticeText(target.Notices))
+	if noticeText(target.Notices) != "" {
+		t.Fatalf("expected an ordinary launch to say nothing, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -415,10 +303,13 @@ func TestRestartHandoffNamesTheConversationTheSessionIsLiveOn(t *testing.T) {
 
 // The structural gate, and the reason this record is not the deleted one coming
 // back: the writer is exercised, not asserted about. The hook erun installs is
-// RUN, and what the resolver then resolves is what that run left behind. A
-// reader whose writer disappears fails here rather than in a month of quietly
-// resuming the wrong conversation.
-func TestTheLiveConversationRecorderWritesWhatTheResolverReads(t *testing.T) {
+// RUN, and what the Manage dialog's listing then shows confirmed is what that
+// run left behind. A reader whose writer disappears fails here rather than in
+// a month of a stranded conversation nobody could find. Reading through
+// ListOrchestratorConversations rather than ResolveOrchestratorToReopen is
+// itself the point of erun#1696: the tracked record is confirmable, but no
+// longer resumed automatically.
+func TestTheLiveConversationRecorderWritesWhatTheListingReadsConfirmed(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no POSIX shell on this host")
@@ -427,14 +318,15 @@ func TestTheLiveConversationRecorderWritesWhatTheResolverReads(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	id := createAndStartOrchestrator(t, app)
-	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
-	stageOrchestratorConversation(t, live)
+	derived := orchestratorSessionID(id)
+	const diverged = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	stageOrchestratorConversation(t, derived)
+	stageOrchestratorConversation(t, diverged)
 
 	// Exactly what a hook invocation carries on stdin, and exactly the two
 	// environment values the launch hands the session.
 	payload, err := json.Marshal(map[string]any{
-		"session_id":      live,
+		"session_id":      diverged,
 		"transcript_path": "/does/not/matter.jsonl",
 		"hook_event_name": "SessionStart",
 	})
@@ -450,8 +342,27 @@ func TestTheLiveConversationRecorderWritesWhatTheResolverReads(t *testing.T) {
 		t.Fatalf("run recorder hook: %v\n%s", runErr, out)
 	}
 
-	if target := app.ResolveOrchestratorToReopen(); target.ConversationID != live {
-		t.Fatalf("the recorder wrote %q but the resolver resumed %q", live, target.ConversationID)
+	listing, err := app.ListOrchestratorConversations(id)
+	if err != nil {
+		t.Fatalf("ListOrchestratorConversations failed: %v", err)
+	}
+	found := false
+	for _, row := range listing.Conversations {
+		if row.ConversationID != diverged {
+			continue
+		}
+		found = true
+		if row.Role != orchestratorConversationRoleLive {
+			t.Fatalf("the recorder wrote %q under a confirmed launch, expected it listed as confirmed, got %+v", diverged, row)
+		}
+	}
+	if !found {
+		t.Fatalf("the recorder wrote %q but the listing never surfaced it: %+v", diverged, listing.Conversations)
+	}
+
+	// Confirmable, but still not what an ordinary launch resumes.
+	if target := app.ResolveOrchestratorToReopen(); target.ConversationID != derived {
+		t.Fatalf("expected the derived anchor resumed regardless of the recorded conversation, got %q", target.ConversationID)
 	}
 }
 
