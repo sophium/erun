@@ -40,4 +40,6 @@ Tenants:
           claude: use-mantle=true use-bedrock=true models=opus,sonnet,haiku max-output-tokens=16384
           idle: none
           sshd: off
+Orchestrators:
+  none
 audit: erun list

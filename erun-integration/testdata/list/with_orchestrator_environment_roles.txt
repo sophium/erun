@@ -13,5 +13,11 @@ Cloud Providers:
 Tenants:
   none
 Orchestrators:
-  none
+  - eng-1 "Eng One"
+    environments:
+      - team/dev role=code directory=/repo/team-dev
+      - team/staging role=undeclared directory=/repo/team-staging
+  - eng-2 "Eng Two"
+    environments:
+      - other/build role=build directory=/repo/other-build
 audit: erun list

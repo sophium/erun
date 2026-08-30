@@ -41,4 +41,6 @@ Tenants:
           claude: none
           idle: timeout=10m working-hours=09:00-18:00 timezone=Europe/Riga idle-traffic-bytes=2048
           sshd: off
+Orchestrators:
+  none
 audit: erun list

@@ -71,6 +71,35 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/platform_account_env_shows_enabled", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_orchestrator_environment_roles", func(t *testing.T) {
+		// Locks erun#1688's contract: erun list shows each orchestrator's
+		// linked environments with their role, and an undeclared role
+		// renders distinctly ("undeclared") rather than guessing a default.
+		setup := env.New(t)
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "eng-1",
+				name: "Eng One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "team", environment: "dev", directory: "/repo/team-dev", role: "code"},
+					{tenant: "team", environment: "staging", directory: "/repo/team-staging"},
+				},
+			},
+			{
+				id:   "eng-2",
+				name: "Eng Two",
+				environments: []orchestratorEnvSeed{
+					{tenant: "other", environment: "build", directory: "/repo/other-build", role: "build"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_orchestrator_environment_roles", normalize.Apply(result.Combined))
+	})
+
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
 		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)
@@ -569,5 +598,55 @@ func mustWrite(t testing.TB, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+type orchestratorEnvSeed struct {
+	tenant      string
+	environment string
+	directory   string
+	role        string
+}
+
+type orchestratorSeed struct {
+	id           string
+	name         string
+	environments []orchestratorEnvSeed
+}
+
+// seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
+// including each linked environment's role, to the isolated root config. It
+// writes every orchestrator in one "orchestrators:" block (unlike
+// whip_test.go's seedOrchestrator, calling it more than once would overwrite
+// rather than append, since YAML only keeps the last of a repeated top-level
+// key).
+func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators []orchestratorSeed) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	path := filepath.Join(root, "config.yaml")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read root config %s: %v", path, err)
+	}
+	var sb strings.Builder
+	sb.WriteString("orchestrators:\n")
+	for _, orchestrator := range orchestrators {
+		sb.WriteString("  - id: " + orchestrator.id + "\n")
+		sb.WriteString("    name: " + orchestrator.name + "\n")
+		sb.WriteString("    environments:\n")
+		for _, e := range orchestrator.environments {
+			sb.WriteString("      - tenant: " + e.tenant + "\n")
+			sb.WriteString("        environment: " + e.environment + "\n")
+			sb.WriteString("        directory: " + e.directory + "\n")
+			if e.role != "" {
+				sb.WriteString("        role: " + e.role + "\n")
+			}
+		}
+	}
+	if err := os.WriteFile(path, append(existing, []byte(sb.String())...), 0o644); err != nil {
+		t.Fatalf("write root config %s: %v", path, err)
 	}
 }

@@ -52,6 +52,36 @@ type OrchestratorEnvConfig struct {
 	Tenant      string `yaml:"tenant" json:"tenant"`
 	Environment string `yaml:"environment" json:"environment"`
 	Directory   string `yaml:"directory" json:"directory"`
+	// Role states what this orchestrator uses the environment for. It is
+	// orthogonal to EnvironmentType: type is where the worktree lives, role is
+	// what this orchestrator asks the environment to do, and several
+	// orchestrators can link the same environment with different roles. Empty
+	// means undeclared, never a default of either OrchestratorEnvRoleCode or
+	// OrchestratorEnvRoleBuild.
+	Role OrchestratorEnvRole `yaml:"role,omitempty" json:"role,omitempty"`
+}
+
+// OrchestratorEnvRole is what an orchestrator uses a linked environment for.
+type OrchestratorEnvRole string
+
+const (
+	// OrchestratorEnvRoleCode is an environment that writes code, iterates
+	// fast, and pushes feature branches. It does not run full regressions.
+	OrchestratorEnvRoleCode OrchestratorEnvRole = "code"
+	// OrchestratorEnvRoleBuild is an environment that checks out pushed
+	// feature branches, runs the gates, fixes what the gates surface, and cuts
+	// releases.
+	OrchestratorEnvRoleBuild OrchestratorEnvRole = "build"
+)
+
+// IsValid reports whether r is either undeclared (empty) or a known role.
+func (r OrchestratorEnvRole) IsValid() bool {
+	switch r {
+	case "", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild:
+		return true
+	default:
+		return false
+	}
 }
 
 // RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`
