@@ -114,3 +114,13 @@ CREATE TRIGGER invites_set_timestamps
   BEFORE INSERT OR UPDATE ON invites
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER invite_requests_set_timestamps
+  BEFORE INSERT OR UPDATE ON invite_requests
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER platform_rate_limits_set_timestamps
+  BEFORE INSERT OR UPDATE ON platform_rate_limits
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
