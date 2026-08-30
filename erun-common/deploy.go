@@ -713,9 +713,65 @@ func projectDirReachable(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// parallelDeployCapture is one goroutine's private output destination for a
+// parallel deploy step. Context.Stdout/Stderr and a Logger's own stdout/stderr
+// are io.Writer values copied by value into every goroutine's Context, so
+// concurrent RunDeploySpec calls would otherwise write them from more than one
+// goroutine at once -- a data race when the underlying writer is a
+// *bytes.Buffer, as it is on the MCP edge (erun-mcp/runtime.go builds its
+// Context from plain bytes.Buffer values). Even where the destination
+// tolerates concurrent writers, unsynchronized parallel components interleave
+// mid-line into something unreadable. Each goroutine captures its own output
+// here; runDeployStep replays every capture back onto the real ctx, in spec
+// order, only after wg.Wait() has joined every goroutine.
+type parallelDeployCapture struct {
+	loggerStdout *bytes.Buffer
+	loggerStderr *bytes.Buffer
+	ctxStdout    *bytes.Buffer
+	ctxStderr    *bytes.Buffer
+}
+
+// isolateContextForParallelDeploy returns the Context one parallel-step
+// goroutine writes through in place of ctx, plus the buffers to replay
+// afterward. A writer left nil on ctx stays nil -- there is nothing to
+// isolate or replay for it.
+func isolateContextForParallelDeploy(ctx Context) (Context, *parallelDeployCapture) {
+	capture := &parallelDeployCapture{
+		loggerStdout: new(bytes.Buffer),
+		loggerStderr: new(bytes.Buffer),
+	}
+	ctx.Logger.stdout = capture.loggerStdout
+	ctx.Logger.stderr = capture.loggerStderr
+	if ctx.Stdout != nil {
+		capture.ctxStdout = new(bytes.Buffer)
+		ctx.Stdout = capture.ctxStdout
+	}
+	if ctx.Stderr != nil {
+		capture.ctxStderr = new(bytes.Buffer)
+		ctx.Stderr = capture.ctxStderr
+	}
+	return ctx, capture
+}
+
+// replayParallelDeployCapture writes one goroutine's captured output onto
+// ctx's real destinations. Called only after wg.Wait() has joined every
+// goroutine, so every capture buffer is done being written to and no
+// synchronization is needed for the replay itself.
+func replayParallelDeployCapture(ctx Context, capture *parallelDeployCapture) {
+	_, _ = io.Copy(ctx.Logger.stdoutWriter(), capture.loggerStdout)
+	_, _ = io.Copy(ctx.Logger.stderrWriter(), capture.loggerStderr)
+	if ctx.Stdout != nil && capture.ctxStdout != nil {
+		_, _ = io.Copy(ctx.Stdout, capture.ctxStdout)
+	}
+	if ctx.Stderr != nil && capture.ctxStderr != nil {
+		_, _ = io.Copy(ctx.Stderr, capture.ctxStderr)
+	}
+}
+
 // runDeployStep runs every spec in the group. Single-spec steps and dry-run
 // invocations execute serially so traces stay deterministic; a real multi-spec
-// step runs them in parallel and joins their errors.
+// step runs them in parallel, each against its own isolated Context, and joins
+// their errors and their output once every goroutine has finished.
 func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmChartDeployerFunc) error {
 	if len(specs) == 0 {
 		return nil
@@ -737,14 +793,20 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, deploy HelmCh
 	}
 	var wg sync.WaitGroup
 	errs := make([]error, len(specs))
+	captures := make([]*parallelDeployCapture, len(specs))
 	for i, spec := range specs {
 		wg.Add(1)
-		go func(i int, spec DeploySpec) {
+		specCtx, capture := isolateContextForParallelDeploy(ctx)
+		captures[i] = capture
+		go func(i int, spec DeploySpec, specCtx Context) {
 			defer wg.Done()
-			errs[i] = RunDeploySpec(ctx, spec, deploy)
-		}(i, spec)
+			errs[i] = RunDeploySpec(specCtx, spec, deploy)
+		}(i, spec, specCtx)
 	}
 	wg.Wait()
+	for _, capture := range captures {
+		replayParallelDeployCapture(ctx, capture)
+	}
 	return errors.Join(errs...)
 }
 
@@ -3191,26 +3253,45 @@ func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpe
 	return spec.command()
 }
 
+// helmOutputCapture holds helm's stdout and stderr on separate buffers. os/exec
+// runs one copier goroutine per stream it wires up, and Cmd.stderr() only reuses
+// the stdout descriptor (making the two safe to alias) when cmd.Stderr is the
+// same interface value as cmd.Stdout via interfaceEqual -- here cmd.Stdout is a
+// *bytes.Buffer (or a tee) and cmd.Stderr is an io.MultiWriter, so that check
+// never fires and a single combined buffer would be written by both copier
+// goroutines at once. combined() is read only from classifyHelmDeployResult,
+// which runs after runHelmDeployWithPodWatch has already waited out cmd.Wait()
+// -- the point os/exec guarantees both copier goroutines have finished -- so no
+// further synchronization is needed there.
+type helmOutputCapture struct {
+	stdout *bytes.Buffer
+	stderr *bytes.Buffer
+}
+
+// combined joins the captured streams for the classify error text.
+func (c *helmOutputCapture) combined() string {
+	return c.stdout.String() + c.stderr.String()
+}
+
 // configureHelmDeployCmdOutput wires the command's stdout/stderr and returns
-// the capture buffers used for error classification. At VerbosityInfo helm
-// output is captured silently so a successful run is quiet; the buffer feeds
-// back into the returned error on failure. At VerbosityDebug or higher the
-// output is also teed to params.Stdout/Stderr so the user sees the live --debug
-// stream.
-func configureHelmDeployCmdOutput(cmd *exec.Cmd, params HelmDeployParams) (*bytes.Buffer, *strings.Builder) {
-	helmOutput := new(bytes.Buffer)
+// the capture used for error classification. At VerbosityInfo helm output is
+// captured silently so a successful run is quiet; the capture feeds back into
+// the returned error on failure. At VerbosityDebug or higher the output is
+// also teed to params.Stdout/Stderr so the user sees the live --debug stream.
+func configureHelmDeployCmdOutput(cmd *exec.Cmd, params HelmDeployParams) (*helmOutputCapture, *strings.Builder) {
+	capture := &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}
 	if params.Verbosity >= VerbosityDebug {
-		cmd.Stdout = teeWriter(params.Stdout, helmOutput)
+		cmd.Stdout = teeWriter(params.Stdout, capture.stdout)
 	} else {
-		cmd.Stdout = helmOutput
+		cmd.Stdout = capture.stdout
 	}
 	stderr := new(strings.Builder)
-	stderrWriters := []io.Writer{stderr, helmOutput}
+	stderrWriters := []io.Writer{stderr, capture.stderr}
 	if params.Verbosity >= VerbosityDebug && params.Stderr != nil {
 		stderrWriters = append(stderrWriters, params.Stderr)
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
-	return helmOutput, stderr
+	return capture, stderr
 }
 
 // runHelmDeployWithPodWatch runs the already-started helm command alongside the
@@ -3289,7 +3370,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 // pending-operation and published-chart-not-found stderr cases are recognized,
 // and otherwise the helm error is returned with its captured output appended
 // (at non-debug verbosity, where the stream was silenced).
-func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *bytes.Buffer, stderr *strings.Builder) error {
+func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *helmOutputCapture, stderr *strings.Builder) error {
 	if watchOutcome.Failure != nil {
 		failure := watchOutcome.Failure
 		failure.Err = helmErr
@@ -3299,8 +3380,9 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 		return nil
 	}
 	// The string matches below read the dedicated stderr capture, not
-	// helmOutput: helm errors land on stderr, and helmOutput doubles as
-	// cmd.Stdout so a stderr-only failure can race to empty there.
+	// helmOutput: helm errors land on stderr, and the classification patterns
+	// below are stderr-specific messages that helmOutput's combined stdout
+	// content would never match.
 	if isHelmReleasePendingOperationMessage(stderr.String()) {
 		return &HelmReleasePendingOperationError{
 			ReleaseName:       params.ReleaseName,
@@ -3325,7 +3407,7 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 		}
 	}
 	if params.Verbosity < VerbosityDebug {
-		if output := strings.TrimSpace(helmOutput.String()); output != "" {
+		if output := strings.TrimSpace(helmOutput.combined()); output != "" {
 			return fmt.Errorf("%w\n%s", helmErr, output)
 		}
 	}
