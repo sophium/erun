@@ -1,0 +1,5 @@
+deleted environment: team/dev
+audit: erun delete --yes team dev
+warning: failed to delete namespace "team-dev" in context "test-context": namespace "team-dev" was not deleted: the cluster refused the request:
+Error from server (Forbidden): namespaces "team-dev" is forbidden: User "jane" cannot delete resource "namespaces" in API group "" at the cluster scope
+this kubeconfig's user is not permitted to delete this namespace; grant it delete on namespaces (RBAC) and retry. The namespace is not terminating, so its finalizers are not the cause.

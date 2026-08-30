@@ -1,0 +1,6 @@
+deleted environment: team/dev
+audit: erun delete --yes team dev
+warning: failed to delete namespace "team-dev" in context "test-context": namespace "team-dev" did not finish terminating within 20m0s:
+NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances
+NamespaceFinalizersRemaining=True  acme.cert-manager.io/finalizer in 1 resource instances
+the pre-teardown ACME challenge retraction could not run (exit status 1: Error from server (Forbidden): challenges.acme.cert-manager.io is forbidden: User "jane" cannot list resource "challenges"); if a challenge is still finalizing it will hold this namespace until the namespace delete times out

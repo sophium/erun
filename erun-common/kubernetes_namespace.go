@@ -29,6 +29,26 @@ func (e *NamespaceTerminationBlockedError) Error() string {
 	return fmt.Sprintf("namespace %q did not finish terminating within %s:\n%s", e.Namespace, NamespaceDeleteTimeout, e.Detail)
 }
 
+// NamespaceDeleteRefusedError names a namespace delete the cluster never
+// accepted -- RBAC, an admission webhook, an API server that answered the
+// request with anything but "accepted". It is a distinct type from
+// NamespaceTerminationBlockedError because the two are different situations
+// with different remedies, and reporting the first as the second is
+// confidently wrong twice over: no wait happened, and the namespace's own
+// termination conditions describe a teardown that never started, sending an
+// operator to investigate finalizers when the fault is a missing grant.
+type NamespaceDeleteRefusedError struct {
+	Namespace string
+	Detail    string
+}
+
+func (e *NamespaceDeleteRefusedError) Error() string {
+	if e.Detail == "" {
+		return fmt.Sprintf("namespace %q was not deleted: the cluster refused the request", e.Namespace)
+	}
+	return fmt.Sprintf("namespace %q was not deleted: the cluster refused the request:\n%s", e.Namespace, e.Detail)
+}
+
 // TraceEnsureKubernetesNamespace traces the namespace check EnsureKubernetesNamespace
 // performs and, only when the create that would follow is actually going to run,
 // traces that too. A dry run cannot read the cluster to know which way the check
@@ -133,9 +153,11 @@ func traceRetractACMEChallenges(ctx Context, contextName, namespace string) {
 // namespace still present after the timeout returns
 // *NamespaceTerminationBlockedError naming its own conditions, so a caller can
 // tell "still terminating, here is why" apart from every other kubectl
-// failure. A namespace that has actually disappeared by the time the timeout
-// is checked (a benign race between the wait and the finalizer clearing)
-// still reports success.
+// failure; a delete the cluster never accepted returns
+// *NamespaceDeleteRefusedError carrying kubectl's refusal, because that one is
+// not a termination problem at all. A namespace that has actually disappeared
+// by the time the timeout is checked (a benign race between the wait and the
+// finalizer clearing) still reports success.
 func DeleteKubernetesNamespace(contextName, namespace string) error {
 	contextName = strings.TrimSpace(contextName)
 	namespace = strings.TrimSpace(namespace)
@@ -171,6 +193,15 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		if !exists {
 			return nil
 		}
+		if namespaceDeleteWasRefused(message) {
+			// Neither the namespace's conditions nor the retraction note belong
+			// here: both describe a teardown in progress, and this one never
+			// started. kubectl's own refusal is the only fact that explains it.
+			return &NamespaceDeleteRefusedError{
+				Namespace: namespace,
+				Detail:    namespaceDeleteRefusalDetail(message),
+			}
+		}
 		return &NamespaceTerminationBlockedError{
 			Namespace: namespace,
 			// The retraction note rides along here rather than being logged: if
@@ -184,6 +215,41 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
 	}
 	return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
+}
+
+// namespaceDeleteWasRefused reports whether kubectl's failure means the delete
+// was never accepted, as opposed to accepted and then not finishing. The wait
+// expiring is the one failure that genuinely is a termination problem, and
+// kubectl names it; everything else it reports ended the request before the
+// namespace could enter Terminating. An empty message says nothing either way
+// and keeps the termination reading, where the namespace's own conditions are
+// the only evidence left to go on.
+func namespaceDeleteWasRefused(message string) bool {
+	if strings.TrimSpace(message) == "" {
+		return false
+	}
+	lowered := strings.ToLower(message)
+	return !strings.Contains(lowered, "timed out") && !strings.Contains(lowered, "deadline exceeded")
+}
+
+// namespaceDeleteRefusalDetail carries kubectl's own refusal and, when that
+// refusal is a permission problem, names the grant that resolves it. An
+// operator handed only "forbidden" still has to work out that the fix is an
+// RBAC rule -- and that the finalizers a termination message would have sent
+// them to are not involved at all.
+func namespaceDeleteRefusalDetail(message string) string {
+	if !kubernetesRequestForbidden(message) {
+		return message
+	}
+	return message + "\nthis kubeconfig's user is not permitted to delete this namespace; grant it delete on namespaces (RBAC) and retry. The namespace is not terminating, so its finalizers are not the cause."
+}
+
+// kubernetesRequestForbidden matches kubectl's own wording for a request the
+// cluster refused on credentials or permissions, so a refusal can name its
+// remedy instead of only quoting the server.
+func kubernetesRequestForbidden(message string) bool {
+	lowered := strings.ToLower(message)
+	return strings.Contains(lowered, "forbidden") || strings.Contains(lowered, "unauthorized")
 }
 
 // acmeRetractTimeout bounds the pre-teardown challenge retraction. Short on
