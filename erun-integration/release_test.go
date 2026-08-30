@@ -250,6 +250,26 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_main_with_all_packaging_artifacts_syncs_them", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_main_traces_anonymous_pullability_probe_for_terraform_referenced_image", func(t *testing.T) {
+		// A Terraform module under erun-devops/terraform-erun can reference a
+		// released image directly (terraform-erun-cluster-edge's real
+		// dns01_webhook_image is exactly this shape). verify-publication's
+		// anonymous-pullability check must discover that reference and trace
+		// probing it even in dry-run, where the real network probe is
+		// skipped -- discovery and the per-image decision are not gated on
+		// !DryRun, only the live registry call is.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedTerraformModuleImageReference(t, setup.Cwd, "erun-webhook")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add terraform module image reference")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_traces_anonymous_pullability_probe_for_terraform_referenced_image", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_main_with_invalid_scoop_manifest_fails", func(t *testing.T) {
 		// An invalid Scoop manifest must fail the release during resolution,
 		// before any git mutation, naming every violated invariant — the guard
