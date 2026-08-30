@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -68,9 +69,20 @@ func (p RolePermissionInput) validatePattern() error {
 }
 
 // List returns the caller's tenant's roles, each with its permissions.
+// Ensures TenantUser/TenantAdmin exist (and carry every route routeroles
+// currently classifies for them) before reading, so a tenant that bootstrapped
+// before these roles shipped — or before a later route reclassification —
+// still sees them here without a migration backfill.
 func (r *RoleRepository) List(ctx context.Context) ([]model.Role, error) {
 	var roles []model.Role
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
+		if err := ensureNarrowerRolesExist(ctx, tx, securityContext.TenantID); err != nil {
+			return err
+		}
 		if err := tx.NewRaw(`
 			SELECT role_id, tenant_id, name, created_at, updated_at
 			  FROM roles

@@ -26,7 +26,7 @@ func NewUserRepository(txs *TxManager) *UserRepository {
 // CreateUserParams is the enrollment input. TenantID, when set, targets a
 // tenant other than the caller's own resolved tenant — honored only for an
 // operations-scoped caller (enforced by the route, not here). RoleIDs, when
-// given, are granted to the new user instead of the zero-role default; each
+// given, are granted to the new user instead of the TenantUser default; each
 // must already exist in the target tenant.
 type CreateUserParams struct {
 	Username string
@@ -40,12 +40,12 @@ type CreateUserParams struct {
 // identity that lets them actually sign in — otherwise the row exists but no
 // token can ever resolve to it.
 //
-// Role assignment: a caller-named RoleIDs list is granted as given. Otherwise,
-// the tenant's first user still gets the predefined ReadAll/WriteAll roles —
-// without them nobody could ever grant a role at all, since granting is
-// itself permission-gated — but every later enrollment defaults to zero
-// roles, granted only once someone with grant access chooses what to give
-// them.
+// Role assignment: a caller-named RoleIDs list is granted as given.
+// Otherwise, the tenant's first user gets TenantAdmin — without a
+// grant-capable role nobody could ever grant a role at all, since granting is
+// itself permission-gated — and every later enrollment defaults to
+// TenantUser, so an invited colleague can use erun immediately rather than
+// sitting fully capability-less until someone grants a role by hand.
 func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (model.User, error) {
 	username := strings.TrimSpace(params.Username)
 	issuer := strings.TrimSpace(params.Issuer)
@@ -129,8 +129,9 @@ func insertUserExternalID(ctx context.Context, tx bun.Tx, tenantID string, userI
 }
 
 // assignEnrollmentRoles is Create's role-assignment decision: an explicit
-// roleIDs list wins outright, the tenant's first user falls back to the
-// predefined roles, and everyone else gets none.
+// roleIDs list wins outright, the tenant's first user falls back to
+// TenantAdmin (grantFirstTenantUserRole), and everyone else defaults to
+// TenantUser (grantDefaultEnrollmentRole).
 func assignEnrollmentRoles(ctx context.Context, tx bun.Tx, tenantID string, userID string, roleIDs []string, isFirstUser bool) error {
 	if len(roleIDs) > 0 {
 		for _, roleID := range roleIDs {
@@ -144,14 +145,14 @@ func assignEnrollmentRoles(ctx context.Context, tx bun.Tx, tenantID string, user
 		return nil
 	}
 	if isFirstUser {
-		return grantPredefinedRoles(ctx, tx, tenantID, userID)
+		return grantFirstTenantUserRole(ctx, tx, tenantID, userID)
 	}
-	return nil
+	return grantDefaultEnrollmentRole(ctx, tx, tenantID, userID)
 }
 
 // tenantHasNoUsers reports whether the target tenant currently has zero
 // users, which makes the user about to be created its first — the one case
-// that still needs the predefined roles rather than the zero-role default.
+// that gets TenantAdmin rather than the ordinary TenantUser default.
 // TenantID, when set, is an operations-scoped caller's explicit override: its
 // session bypasses RLS, so an unfiltered count would see every tenant's users
 // rather than being scoped implicitly.

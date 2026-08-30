@@ -35,9 +35,11 @@ func usersDatabase(t *testing.T) (*sql.DB, string) {
 }
 
 // TestUserRepositoryFirstUserGetsPredefinedRoles proves the one case that must
-// keep its old behavior: a tenant's first enrolled user still gets full
-// control, since granting a role is itself permission-gated and a zero-role
-// first user could never be granted anything.
+// keep full control: a tenant's first enrolled user gets TenantAdmin, since
+// granting a role is itself permission-gated and a non-grant-capable first
+// user could never be granted anything. TenantAdmin (not ReadAll/WriteAll)
+// is deliberate: this is a COMPANY tenant, and the platform-operator reach
+// only ever belongs to the OPERATIONS tenant's own first user.
 func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -50,14 +52,15 @@ func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 
 	names, err := users.RoleNames(rolesContext(tenantID, created.UserID), created.UserID)
 	mustNoErr(t, err, "list role names")
-	if !containsAll(names, "ReadAll", "WriteAll") {
-		t.Fatalf("expected the first user to hold ReadAll and WriteAll, got %v", names)
+	if !containsAll(names, "TenantAdmin") {
+		t.Fatalf("expected the first user to hold TenantAdmin, got %v", names)
 	}
 
 	userCtx := rolesContext(tenantID, created.UserID)
 	for _, permitted := range []struct{ method, path string }{
 		{"GET", "/v1/reviews"},
 		{"POST", "/v1/reviews"},
+		{"POST", "/v1/users/{user_id}/roles"},
 	} {
 		if err := authorizer.Authorize(userCtx, permitted.method, permitted.path); err != nil {
 			t.Fatalf("%s %s: expected the first user to be permitted, got %v", permitted.method, permitted.path, err)
@@ -65,11 +68,13 @@ func TestUserRepositoryFirstUserGetsPredefinedRoles(t *testing.T) {
 	}
 }
 
-// TestUserRepositoryLaterUserGetsZeroRolesByDefault is the regression this
-// change fixes: every enrolled user used to get ReadAll+WriteAll
-// unconditionally. A second (non-first) user enrolled with no explicit roles
-// must hold none and be refused both a read and a write.
-func TestUserRepositoryLaterUserGetsZeroRolesByDefault(t *testing.T) {
+// TestUserRepositoryLaterUserGetsTenantUserByDefault is the regression this
+// change fixes twice over: every enrolled user used to get ReadAll+WriteAll
+// unconditionally, and then briefly nothing at all. A second (non-first)
+// user enrolled with no explicit roles must hold exactly TenantUser: able to
+// read and drive reviews, refused an administrative write such as creating
+// an environment.
+func TestUserRepositoryLaterUserGetsTenantUserByDefault(t *testing.T) {
 	db, tenantID := usersDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
 	users := &UserRepository{txs: txs}
@@ -84,18 +89,21 @@ func TestUserRepositoryLaterUserGetsZeroRolesByDefault(t *testing.T) {
 
 	names, err := users.RoleNames(rolesContext(tenantID, first), created.UserID)
 	mustNoErr(t, err, "list role names")
-	if len(names) != 0 {
-		t.Fatalf("expected the second enrolled user to hold no roles, got %v", names)
+	if len(names) != 1 || names[0] != "TenantUser" {
+		t.Fatalf("expected the second enrolled user to hold exactly TenantUser, got %v", names)
 	}
 
 	newUserCtx := rolesContext(tenantID, created.UserID)
-	for _, refused := range []struct{ method, path string }{
+	for _, permitted := range []struct{ method, path string }{
 		{"GET", "/v1/reviews"},
 		{"POST", "/v1/reviews"},
 	} {
-		if err := authorizer.Authorize(newUserCtx, refused.method, refused.path); !errors.Is(err, ErrForbidden) {
-			t.Fatalf("%s %s: expected the zero-role user to be refused, got %v", refused.method, refused.path, err)
+		if err := authorizer.Authorize(newUserCtx, permitted.method, permitted.path); err != nil {
+			t.Fatalf("%s %s: expected TenantUser to be permitted, got %v", permitted.method, permitted.path, err)
 		}
+	}
+	if err := authorizer.Authorize(newUserCtx, "POST", "/v1/environments"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("POST /v1/environments: expected TenantUser to be refused, got %v", err)
 	}
 }
 

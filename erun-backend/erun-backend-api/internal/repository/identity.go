@@ -351,9 +351,10 @@ func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenan
 	return user, nil
 }
 
-// insertFirstTenantUser enrols the subject as the tenant's first user with the
-// predefined roles. A tenant that already has a user gets no implicit enrolment,
-// which is ErrNotFound so the caller rejects the unknown subject.
+// insertFirstTenantUser enrols the subject as the tenant's first user (see
+// insertTenantFirstUserAccess for which access it gets, which depends on the
+// tenant's type). A tenant that already has a user gets no implicit
+// enrolment, which is ErrNotFound so the caller rejects the unknown subject.
 func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.Tx, tenant model.Tenant, claims security.Claims) (model.User, error) {
 	var userCount int
 	if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
@@ -381,7 +382,7 @@ func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.T
 	}); err != nil {
 		return model.User{}, err
 	}
-	if err := r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertTenantFirstUserAccess(ctx, tx, tenant, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.User{}, err
 	}
 	return user, nil
@@ -481,26 +482,72 @@ func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username
 }
 
 // insertDefaultUserAccess links the bootstrapped user's external identity and
-// grants it the predefined roles. tenantID must always be the enrolling
-// tenant's own ID explicitly: findOrCreateRole's untenanted lookup mode
-// relies on the active transaction's own RLS scoping to stay tenant-safe, but
-// that scoping only holds for the erun_tenant role. An OPERATIONS-type
-// tenant's own per-tenant-first-user bootstrap runs as erun_operations, whose
-// RLS policy is deliberately cross-tenant (USING (true), the same reach the
-// operations gate depends on elsewhere), so an untenanted "WHERE name = ?"
-// there can match a *different* tenant's already-created ReadAll/WriteAll
-// role — a real FK violation on role_permissions, since registering a second
-// OPERATIONS tenant (a documented, legitimate action) is exactly what
-// exposes it.
+// grants it ReadAll/WriteAll. Two callers need exactly this wildcard
+// operator reach rather than TenantAdmin: insertFirstIdentity (the
+// platform's own empty-database genesis bootstrap, creating the very first
+// OPERATIONS tenant) and insertTenantFirstUserAccess's OPERATIONS-tenant
+// case (any other OPERATIONS tenant's first user) — both have no other user
+// yet to administer even the platform's own tenant registration, IdP, or
+// bootstrap-name repair, which live only behind this wildcard. A COMPANY
+// tenant's first user goes through insertTenantFirstUserAccess's TenantAdmin
+// grant instead. tenantID must always be the enrolling tenant's own ID
+// explicitly: findOrCreateRole's
+// untenanted lookup mode relies on the active transaction's own RLS scoping
+// to stay tenant-safe, but that scoping only holds for the erun_tenant role.
+// An OPERATIONS-type tenant's own per-tenant-first-user bootstrap runs as
+// erun_operations, whose RLS policy is deliberately cross-tenant (USING
+// (true), the same reach the operations gate depends on elsewhere), so an
+// untenanted "WHERE name = ?" there can match a *different* tenant's
+// already-created ReadAll/WriteAll role — a real FK violation on
+// role_permissions, since registering a second OPERATIONS tenant (a
+// documented, legitimate action) is exactly what exposes it.
 func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
-	if _, err := tx.NewRaw(`INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`, userID, issuer, subject).Exec(ctx); err != nil {
+	if err := insertUserExternalIdentity(ctx, tx, userID, issuer, subject); err != nil {
 		return err
 	}
-	return grantPredefinedRoles(ctx, tx, tenantID, userID)
+	if err := grantPredefinedRoles(ctx, tx, tenantID, userID); err != nil {
+		return err
+	}
+	// Also make TenantUser/TenantAdmin assignable in the platform's very
+	// first tenant immediately, rather than waiting for someone to first
+	// read GET /v1/roles (RoleRepository.List ensures them lazily too, the
+	// same self-healing path an already-bootstrapped tenant relies on).
+	return ensureNarrowerRolesExist(ctx, tx, tenantID)
 }
 
-// grantPredefinedRoles grants a user the two predefined roles every enrolled
-// user gets today (there is no finer-grained role assignment surface yet).
+// insertTenantFirstUserAccess links the bootstrapped user's external
+// identity and grants access for a tenant that already exists but has never
+// had a user sign in. For a COMPANY tenant this is the ordinary "a tenant
+// needs an admin" case: TenantAdmin, full administration of this tenant
+// including granting further roles, without the platform-operator reach
+// ReadAll/WriteAll would also carry inside an OPERATIONS tenant. For an
+// OPERATIONS tenant it defers to insertDefaultUserAccess instead — the same
+// ReadAll/WriteAll grant the platform's own genesis bootstrap uses — because
+// this tenant's root-resolution capabilities (registering another tenant,
+// administering the platform's own IdP, the one-time bootstrap-name repair)
+// live only behind that wildcard reach, and no other user exists yet in this
+// tenant to grant it later.
+func (r *IdentityRepository) insertTenantFirstUserAccess(ctx context.Context, tx bun.Tx, tenant model.Tenant, userID string, issuer string, subject string) error {
+	if tenant.Type == model.TenantTypeOperations {
+		return r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, userID, issuer, subject)
+	}
+	if err := insertUserExternalIdentity(ctx, tx, userID, issuer, subject); err != nil {
+		return err
+	}
+	return grantFirstTenantUserRole(ctx, tx, tenant.TenantID, userID)
+}
+
+// insertUserExternalIdentity links the external identity that lets the
+// bootstrapped user actually sign in. tenant_id is left to the table's own
+// default (erun_current_tenant_id(), bound by the transaction's security
+// context already set before this runs), matching the original call site
+// this was factored out of.
+func insertUserExternalIdentity(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
+	_, err := tx.NewRaw(`INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`, userID, issuer, subject).Exec(ctx)
+	return err
+}
+
+// grantPredefinedRoles grants a user the two wildcard predefined roles.
 // tenantID is always the enrolling tenant's own ID, explicit rather than
 // relying on the active transaction's RLS scoping — see
 // insertDefaultUserAccess for why that scoping cannot be trusted for every
