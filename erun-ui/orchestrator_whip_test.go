@@ -74,10 +74,11 @@ func TestRefreshOrchestratorWhipConfigOverrideWins(t *testing.T) {
 	}
 }
 
-// TestWhipAllOrchestratorsNowNamesEveryOutcome is the section-level whip's
-// visible-record contract: every orchestrator appears in the result, named
-// with its own decision and reason -- not just an aggregate "ran" signal.
-func TestWhipAllOrchestratorsNowNamesEveryOutcome(t *testing.T) {
+// TestWhipOrchestratorsNowNamesEveryOutcome is the section-level whip's
+// visible-record contract: every requested orchestrator appears in the
+// result, named with its own decision and reason -- not just an aggregate
+// "ran" signal.
+func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
 
@@ -91,9 +92,9 @@ func TestWhipAllOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	// Not alive: no managed session registered for this orchestrator at all.
 	app.orchestrators["gone"] = &orchestratorSession{id: "gone", serial: 2, name: "gone", startedAt: time.Now()}
 
-	outcomes := app.whipAllOrchestratorsNow()
+	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"alive": {}, "gone": {}})
 	if len(outcomes) != 2 {
-		t.Fatalf("expected an outcome for every orchestrator, got %d: %+v", len(outcomes), outcomes)
+		t.Fatalf("expected an outcome for every requested orchestrator, got %d: %+v", len(outcomes), outcomes)
 	}
 	byID := map[string]orchestratorWhipOutcome{}
 	for _, outcome := range outcomes {
@@ -111,7 +112,7 @@ func TestWhipAllOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 // orchestratorPacingRows only enumerates sessions. Naming it anyway is the
 // whole contract of an explicit whip: an omitted target reads as "not
 // considered", where a skip names a reason the operator can act on.
-func TestWhipAllOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testing.T) {
+func TestWhipOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *testing.T) {
 	isolateOrchestratorWhipConfig(t)
 	orchestratorPacingNudgeSettle = 0
 
@@ -127,7 +128,7 @@ func TestWhipAllOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *tes
 	app.orchestrators["opened"] = &orchestratorSession{id: "opened", serial: 1, name: "opened", startedAt: time.Now()}
 
 	byID := map[string]orchestratorWhipOutcome{}
-	for _, outcome := range app.whipAllOrchestratorsNow() {
+	for _, outcome := range app.whipOrchestratorsNow(map[string]struct{}{"opened": {}, "never-opened": {}}) {
 		byID[outcome.id] = outcome
 	}
 
@@ -140,5 +141,72 @@ func TestWhipAllOrchestratorsNowNamesAConfiguredOrchestratorWithNoSession(t *tes
 	}
 	if _, named := byID["opened"]; !named {
 		t.Fatalf("the orchestrator holding a live session went missing, got %+v", byID)
+	}
+}
+
+// TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators is the regression
+// test for the desktop's own blast-radius bug (erun#1700): an orchestrator not
+// in the requested set must not be nudged at all -- not merely omitted from
+// the report after being pushed anyway. It asserts against the recording
+// session's own write, not just the returned outcome list, so a filter that
+// only trimmed the report (while still pushing everyone) would still fail
+// this test.
+func TestWhipOrchestratorsNowOnlyPushesRequestedOrchestrators(t *testing.T) {
+	isolateOrchestratorWhipConfig(t)
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{})
+
+	wantedSession := newCallRecordingSession()
+	wantedKey := orchestratorSessionKey("wanted")
+	app.sessions[wantedKey] = &managedTerminal{session: wantedSession, key: wantedKey, serial: 1, kind: sessionKindOrchestrator}
+	app.orchestrators["wanted"] = &orchestratorSession{id: "wanted", serial: 1, name: "wanted", startedAt: time.Now()}
+
+	unwantedSession := newCallRecordingSession()
+	unwantedKey := orchestratorSessionKey("unwanted")
+	app.sessions[unwantedKey] = &managedTerminal{session: unwantedSession, key: unwantedKey, serial: 2, kind: sessionKindOrchestrator}
+	app.orchestrators["unwanted"] = &orchestratorSession{id: "unwanted", serial: 2, name: "unwanted", startedAt: time.Now()}
+
+	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"wanted": {}})
+	if len(outcomes) != 1 || outcomes[0].id != "wanted" {
+		t.Fatalf("expected only the requested orchestrator in the report, got %+v", outcomes)
+	}
+	if outcomes[0].decision != orchestratorPacingNudge {
+		t.Fatalf("expected the requested orchestrator to actually be nudged, got %+v", outcomes[0])
+	}
+	if len(wantedSession.Calls()) == 0 {
+		t.Fatal("expected the requested orchestrator's session to have been written to")
+	}
+	if calls := unwantedSession.Calls(); len(calls) != 0 {
+		t.Fatalf("an orchestrator outside the requested set was written to -- got %d write(s): %v", len(calls), calls)
+	}
+}
+
+// TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs is WhipTargets'
+// population contract for orchestrators: a live session and a configured-but-
+// never-opened orchestrator both appear, deduplicated by id, so "select all
+// orchestrators" can offer every orchestrator the operator could otherwise
+// pick individually.
+func TestListWhipOrchestratorTargetsUnionsSessionsAndConfigs(t *testing.T) {
+	app := NewApp(erunUIDeps{store: stubUIStore{config: &eruncommon.ERunConfig{
+		Orchestrators: []eruncommon.OrchestratorConfig{
+			{ID: "opened", Name: "opened"},
+			{ID: "never-opened", Name: "never-opened"},
+		},
+	}}})
+	key := orchestratorSessionKey("opened")
+	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+	app.orchestrators["opened"] = &orchestratorSession{id: "opened", serial: 1, name: "opened", startedAt: time.Now()}
+
+	targets := app.listWhipOrchestratorTargets()
+	ids := map[string]bool{}
+	for _, target := range targets {
+		ids[target.id] = true
+	}
+	if !ids["opened"] || !ids["never-opened"] {
+		t.Fatalf("expected both the live session and the configured-only orchestrator, got %+v", targets)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("expected exactly one row per orchestrator id, got %+v", targets)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -58,8 +59,8 @@ const orchestratorPacingNudgeText = eruncommon.DefaultWhipMessage
 // config once per reconciler tick (refreshOrchestratorWhipConfig) so an edit to
 // ~/.erun/config.yaml takes effect on the next tick without a rebuild or
 // restart. Guarded by a mutex because the manual whip-now entrypoints
-// (whipOrchestratorNow/whipAllOrchestratorsNow) can read it from a different
-// goroutine than the reconciler tick.
+// (whipOrchestratorsNow) can read it from a different goroutine than the
+// reconciler tick.
 var (
 	orchestratorWhipConfigMu sync.RWMutex
 	orchestratorWhipConfig   = eruncommon.ResolveWhipConfig(nil)
@@ -314,24 +315,62 @@ type orchestratorWhipOutcome struct {
 	reason   orchestratorPacingReason
 }
 
-// whipAllOrchestratorsNow is the section-level explicit whip: every live,
-// non-transient orchestrator, pushed now regardless of staleness, each still
-// bound by its own cap. Named per orchestrator in the return so a caller can
-// report exactly who was pushed and who was skipped, and why skipped.
-func (a *App) whipAllOrchestratorsNow() []orchestratorWhipOutcome {
+// orchestratorWhipTarget is one orchestrator the whip selection surface can
+// offer -- id plus the name a human-facing row renders, gathered without
+// deciding or pushing anything.
+type orchestratorWhipTarget struct{ id, name string }
+
+// listWhipOrchestratorTargets enumerates every orchestrator eligible to be
+// whipped -- every live session plus every persisted config with no session
+// yet, deduplicated by id -- the same union whipOrchestratorsNow decides
+// against, so "select all orchestrators" and "push the selected
+// orchestrators" can never disagree about who exists.
+func (a *App) listWhipOrchestratorTargets() []orchestratorWhipTarget {
+	rows := a.orchestratorPacingRows()
+	seen := make(map[string]struct{}, len(rows))
+	targets := make([]orchestratorWhipTarget, 0, len(rows))
+	for _, row := range rows {
+		targets = append(targets, orchestratorWhipTarget{id: row.id, name: row.name})
+		seen[row.id] = struct{}{}
+	}
+	if configs, err := a.loadOrchestratorConfigs(); err == nil {
+		for _, config := range configs {
+			if _, ok := seen[config.ID]; ok {
+				continue
+			}
+			targets = append(targets, orchestratorWhipTarget{id: config.ID, name: config.Name})
+		}
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].name != targets[j].name {
+			return targets[i].name < targets[j].name
+		}
+		return targets[i].id < targets[j].id
+	})
+	return targets
+}
+
+// whipOrchestratorsNow pushes only the requested orchestrators (by id), each
+// still bound by its own cap and pushed now regardless of staleness. Named
+// per orchestrator in the return so a caller can report exactly who was
+// pushed and who was skipped, and why skipped.
+func (a *App) whipOrchestratorsNow(want map[string]struct{}) []orchestratorWhipOutcome {
 	refreshOrchestratorWhipConfig()
 	now := time.Now()
 	rows := a.orchestratorPacingRows()
-	outcomes := make([]orchestratorWhipOutcome, 0, len(rows))
+	outcomes := make([]orchestratorWhipOutcome, 0, len(want))
 	whipped := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
+		if _, ok := want[row.id]; !ok {
+			continue
+		}
 		decision, reason := a.reconcileOrchestratorPacingOne(row, now, true)
 		outcomes = append(outcomes, orchestratorWhipOutcome{id: row.id, name: row.name, decision: decision, reason: reason})
 		whipped[row.id] = struct{}{}
 	}
 	// orchestratorPacingRows enumerates the sessions this desktop holds, so on
 	// its own it answers "who could be nudged", not "who was considered". A
-	// configured orchestrator that was never opened has no session and would
+	// requested orchestrator that was never opened has no session and would
 	// therefore be absent from the report entirely -- and an omission reads as
 	// "not a target", where a skip names its reason. The environment half
 	// already lists configs for this reason, as does ListWhipOrchestratorCandidates
@@ -344,6 +383,9 @@ func (a *App) whipAllOrchestratorsNow() []orchestratorWhipOutcome {
 		return outcomes
 	}
 	for _, config := range configs {
+		if _, ok := want[config.ID]; !ok {
+			continue
+		}
 		if _, ok := whipped[config.ID]; ok {
 			continue
 		}

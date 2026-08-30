@@ -10,34 +10,58 @@ import (
 )
 
 // WhipNow is the desktop's own operator-triggered whip pass -- the control
-// the CLI and MCP surfaces already carried and the desktop did not. It reaches both
-// populations `erun whip` reaches, over the two channels the desktop already
-// holds open: each configured environment's own MCP edge, and each live
-// orchestrator's own PTY. Every target lands in the returned report, pushed
-// or skipped with its reason, so a click answers "did it run" without the
-// operator hunting for a refresh.
-func (a *App) WhipNow() (uiWhipReport, error) {
-	results, err := a.whipAllEnvironmentsNow(a.backgroundContext())
+// the CLI and MCP surfaces already carried and the desktop did not. Unlike
+// those transports (which whip everything configured when given no target), a
+// desktop click always resolves an explicit target list first -- the focused
+// environment/orchestrator by default, or whatever the operator checked in the
+// selection surface -- and passes it here. An empty list is refused rather
+// than read as "every target": fanning a live-session write across every
+// configured environment and orchestrator on a single click is exactly the
+// blast radius this replaces (erun#1700). Every requested target still lands
+// in the returned report, pushed or skipped with its reason, so a click
+// answers "did it run" without the operator hunting for a refresh.
+func (a *App) WhipNow(targets []uiWhipTargetRef) (uiWhipReport, error) {
+	if len(targets) == 0 {
+		return uiWhipReport{}, fmt.Errorf("whip: no targets selected")
+	}
+	wantEnvironments := make(map[string]struct{}, len(targets))
+	wantOrchestrators := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		switch target.Kind {
+		case uiWhipTargetKindEnvironment:
+			wantEnvironments[target.ID] = struct{}{}
+		case uiWhipTargetKindOrchestrator:
+			wantOrchestrators[target.ID] = struct{}{}
+		default:
+			return uiWhipReport{}, fmt.Errorf("whip: unknown target kind %q", target.Kind)
+		}
+	}
+
+	results, err := a.whipEnvironmentsNow(a.backgroundContext(), wantEnvironments)
 	if err != nil {
 		return uiWhipReport{}, err
 	}
-	for _, outcome := range a.whipAllOrchestratorsNow() {
+	for _, outcome := range a.whipOrchestratorsNow(wantOrchestrators) {
 		results = append(results, orchestratorWhipOutcomeToResult(outcome))
 	}
 	return whipReportToUI(results), nil
 }
 
-// whipAllEnvironmentsNow whips every configured environment, one WhipResult
-// each. An environment with no MCP edge currently open in the desktop reports
-// skipped as not-alive -- the same semantics erun-cli's own
-// `whipOneEnvironment` reports for an environment nobody has opened.
-func (a *App) whipAllEnvironmentsNow(ctx context.Context) ([]eruncommon.WhipResult, error) {
+// whipEnvironmentTarget is one environment the whip selection surface can
+// offer -- tenant/name gathered without deciding or pushing anything.
+type whipEnvironmentTarget struct{ tenant, environment string }
+
+// listWhipEnvironmentTargets enumerates every environment eligible to be
+// whipped, sorted for stable rendering. It is the single source both
+// WhipTargets (the selection surface's population) and whipEnvironmentsNow
+// (the actual push) enumerate from, so "select all environments" and "push
+// the selected environments" can never disagree about what is eligible.
+func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
 		return nil, fmt.Errorf("whip: listing tenants: %w", err)
 	}
-	type whipTarget struct{ tenant, environment string }
-	var targets []whipTarget
+	var targets []whipEnvironmentTarget
 	for _, tenant := range tenants {
 		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
 		if err != nil {
@@ -46,12 +70,13 @@ func (a *App) whipAllEnvironmentsNow(ctx context.Context) ([]eruncommon.WhipResu
 		for _, env := range envs {
 			// A host-type env has no pod and no cluster contact at all
 			// (EnvConfig.HasPod's doc comment), so it can never carry an AI
-			// session to push -- reporting it every pass is pure noise, not a
-			// skip the operator can act on.
+			// session to push -- listing it as a selectable target, or
+			// reporting it every pass, is pure noise, not a skip the operator
+			// can act on.
 			if !env.HasPod() {
 				continue
 			}
-			targets = append(targets, whipTarget{tenant: tenant.Name, environment: env.Name})
+			targets = append(targets, whipEnvironmentTarget{tenant: tenant.Name, environment: env.Name})
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool {
@@ -60,9 +85,27 @@ func (a *App) whipAllEnvironmentsNow(ctx context.Context) ([]eruncommon.WhipResu
 		}
 		return targets[i].environment < targets[j].environment
 	})
+	return targets, nil
+}
 
-	results := make([]eruncommon.WhipResult, 0, len(targets))
+// whipEnvironmentsNow pushes only the requested environments (keyed
+// "tenant/environment"), one WhipResult each. An environment with no MCP edge
+// currently open in the desktop reports skipped as not-alive -- the same
+// semantics erun-cli's own `whipOneEnvironment` reports for an environment
+// nobody has opened. A requested id that no longer resolves against the
+// configured population is silently excluded rather than attempted, since
+// there is nothing real behind it to push.
+func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]eruncommon.WhipResult, error) {
+	targets, err := a.listWhipEnvironmentTargets()
+	if err != nil {
+		return nil, err
+	}
+	results := make([]eruncommon.WhipResult, 0, len(want))
 	for _, target := range targets {
+		id := target.tenant + "/" + target.environment
+		if _, ok := want[id]; !ok {
+			continue
+		}
 		results = append(results, a.whipOneEnvironmentNow(ctx, target.tenant, target.environment))
 	}
 	return results, nil

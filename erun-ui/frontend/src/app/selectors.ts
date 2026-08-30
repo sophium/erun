@@ -2,7 +2,7 @@ import { createSelector } from '@reduxjs/toolkit';
 
 import type { UISelection } from '@/types';
 
-import type { SidebarFocus } from './model';
+import type { SidebarFocus, WhipDefaultTarget } from './model';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
@@ -174,6 +174,28 @@ export const selectSidebarFocus = (state: RootState): SidebarFocus => {
     return { kind: 'environment', tenant: selected.tenant, environment: selected.environment };
   }
   return { kind: 'none' };
+};
+
+// selectWhipDefaultTarget resolves the one target Whip preselects: the same
+// orchestrator-session-over-sidebar-selection precedence selectSidebarFocus
+// already established, translated into the id/name a whip target row uses.
+// The tenant dashboard and "nothing focused" both resolve to null rather than
+// falling back to any environment or orchestrator -- an unfocused whip must
+// have no default, never "everything" (erun#1700).
+export const selectWhipDefaultTarget = (state: RootState): WhipDefaultTarget => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', id: orchestrator.id, name: orchestrator.name };
+  }
+  if (state.tenantDashboard.tenant) {
+    return null;
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    const id = `${selected.tenant}/${selected.environment}`;
+    return { kind: 'environment', id, name: id };
+  }
+  return null;
 };
 
 export interface ReviewEnvTarget {
