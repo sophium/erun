@@ -392,12 +392,7 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 	for _, orchestrator := range config.Orchestrators {
 		envs := make([]ListOrchestratorEnvResult, 0, len(orchestrator.Environments))
 		for _, env := range orchestrator.Environments {
-			envs = append(envs, ListOrchestratorEnvResult{
-				Tenant:      env.Tenant,
-				Environment: env.Environment,
-				Directory:   env.Directory,
-				Role:        env.Role,
-			})
+			envs = append(envs, ListOrchestratorEnvResult(env))
 		}
 		results = append(results, ListOrchestratorResult{
 			ID:           orchestrator.ID,

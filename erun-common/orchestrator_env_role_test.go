@@ -22,44 +22,49 @@ func TestOrchestratorEnvConfigRoleRoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := ERunConfig{
-				Orchestrators: []OrchestratorConfig{
-					{
-						ID:   "orch-1",
-						Name: "Orchestrator One",
-						Environments: []OrchestratorEnvConfig{
-							{Tenant: "team", Environment: "dev", Directory: "/repo", Role: tt.role},
-						},
-					},
-				},
-			}
-
-			data, err := yaml.Marshal(config)
-			if err != nil {
-				t.Fatalf("Marshal() error = %v", err)
-			}
-
-			hasRoleKey := strings.Contains(string(data), "role:")
-			if tt.role == "" && hasRoleKey {
-				t.Fatalf("unset role must not be written, got:\n%s", data)
-			}
-			if tt.role != "" && !hasRoleKey {
-				t.Fatalf("declared role %q must be written, got:\n%s", tt.role, data)
-			}
-
-			var roundTripped ERunConfig
-			if err := yaml.Unmarshal(data, &roundTripped); err != nil {
-				t.Fatalf("Unmarshal() error = %v", err)
-			}
-
-			if len(roundTripped.Orchestrators) != 1 || len(roundTripped.Orchestrators[0].Environments) != 1 {
-				t.Fatalf("round trip lost structure: %+v", roundTripped)
-			}
-			got := roundTripped.Orchestrators[0].Environments[0].Role
-			if got != tt.role {
-				t.Fatalf("round-tripped role = %q, want %q", got, tt.role)
-			}
+			assertOrchestratorEnvRoleRoundTrips(t, tt.role)
 		})
+	}
+}
+
+func assertOrchestratorEnvRoleRoundTrips(t *testing.T, role OrchestratorEnvRole) {
+	t.Helper()
+	config := ERunConfig{
+		Orchestrators: []OrchestratorConfig{
+			{
+				ID:   "orch-1",
+				Name: "Orchestrator One",
+				Environments: []OrchestratorEnvConfig{
+					{Tenant: "team", Environment: "dev", Directory: "/repo", Role: role},
+				},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	hasRoleKey := strings.Contains(string(data), "role:")
+	if role == "" && hasRoleKey {
+		t.Fatalf("unset role must not be written, got:\n%s", data)
+	}
+	if role != "" && !hasRoleKey {
+		t.Fatalf("declared role %q must be written, got:\n%s", role, data)
+	}
+
+	var roundTripped ERunConfig
+	if err := yaml.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	if len(roundTripped.Orchestrators) != 1 || len(roundTripped.Orchestrators[0].Environments) != 1 {
+		t.Fatalf("round trip lost structure: %+v", roundTripped)
+	}
+	got := roundTripped.Orchestrators[0].Environments[0].Role
+	if got != role {
+		t.Fatalf("round-tripped role = %q, want %q", got, role)
 	}
 }
 
