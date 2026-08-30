@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 
@@ -56,12 +57,13 @@ func TestBootstrapFirstIdentityEnrolsPlatformTenantWhenERUNTenantSet(t *testing.
 	assertHasReadAllAndWriteAll(t, db, user.UserID)
 }
 
-// TestFirstTenantUserBootstrapGrantsBothPredefinedRoles proves the
+// TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant proves the
 // per-tenant-first-user path (a token resolving to an already-registered
-// tenant with zero users) grants the same ReadAll+WriteAll shape as
-// empty-database bootstrap, so the role-assignment API added alongside it
-// changes nothing about how a new tenant gets its first admin.
-func TestFirstTenantUserBootstrapGrantsBothPredefinedRoles(t *testing.T) {
+// tenant with zero users) grants a COMPANY tenant's first user TenantAdmin --
+// full administration of that tenant, without the platform-operator reach
+// ReadAll/WriteAll would also carry inside an OPERATIONS tenant (see
+// insertTenantFirstUserAccess).
+func TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
@@ -95,7 +97,7 @@ func TestFirstTenantUserBootstrapGrantsBothPredefinedRoles(t *testing.T) {
 	if tenant.TenantID != secondTenantID {
 		t.Fatalf("expected the second tenant, got %q", tenant.TenantID)
 	}
-	assertHasReadAllAndWriteAll(t, db, user.UserID)
+	assertHasExactlyRoles(t, db, user.UserID, "TenantAdmin")
 }
 
 // TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles is the
@@ -152,10 +154,11 @@ func TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles(t *testing.T)
 	}
 }
 
-// assertHasReadAllAndWriteAll locks in that bootstrap keeps granting exactly
-// the predefined ReadAll+WriteAll shape, so the fine-grained role-assignment
-// API added alongside it stays additive rather than changing the default.
-func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
+// assertHasExactlyRoles locks in exactly which predefined roles a bootstrap
+// path granted a user, so a fine-grained role-assignment API added alongside
+// it stays additive rather than changing the default. want must already be in
+// the alphabetical order the underlying query sorts by.
+func assertHasExactlyRoles(t *testing.T, db *sql.DB, userID string, want ...string) {
 	t.Helper()
 	var names []string
 	rows, err := db.Query(`
@@ -173,9 +176,22 @@ func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
 		names = append(names, name)
 	}
 	mustNoErr(t, rows.Err(), "iterate role names")
-	if len(names) != 2 || names[0] != "ReadAll" || names[1] != "WriteAll" {
-		t.Fatalf("expected exactly [ReadAll WriteAll], got %v", names)
+	if len(names) != len(want) {
+		t.Fatalf("expected exactly %v, got %v", want, names)
 	}
+	for i, name := range names {
+		if name != want[i] {
+			t.Fatalf("expected exactly %v, got %v", want, names)
+		}
+	}
+}
+
+// assertHasReadAllAndWriteAll locks in that bootstrap keeps granting exactly
+// the predefined ReadAll+WriteAll shape, so the fine-grained role-assignment
+// API added alongside it stays additive rather than changing the default.
+func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
+	t.Helper()
+	assertHasExactlyRoles(t, db, userID, "ReadAll", "WriteAll")
 }
 
 // TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping
@@ -298,6 +314,177 @@ func TestBootstrapFirstIdentityLeavesAlreadyBootstrappedDatabaseAlone(t *testing
 	mustNoErr(t, db.QueryRow(`SELECT name FROM tenants WHERE tenant_id = $1`, original.TenantID).Scan(&name), "read seeded tenant name")
 	if name != defaultBootstrapTenantName {
 		t.Fatalf("expected the seeded tenant's name untouched at %q, got %q", defaultBootstrapTenantName, name)
+	}
+}
+
+// TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution is the
+// regression test for erun#1721: an OPERATIONS-tenant user (rihards@frs.lv on
+// frs-prod) stopped resolving after a second tenant was registered on the
+// same issuer, despite tenant_issuers and user_external_ids both being
+// intact. The suspected mechanism was that org-scoping an issuer silently
+// leaves the first tenant's mapping behind; TenantIssuerRepository.UpdateOrgScope
+// instead backfills it atomically as one explicit, operations-only step (see
+// TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills), and this
+// proves that backfill is what keeps the first tenant's already-enrolled user
+// resolving once a second tenant shares the issuer -- registering tenant B
+// must never change how tenant A resolves.
+func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	const issuer = "https://auth.erunpaas.example/1721"
+	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
+	const firstOrg = "386994597030592700"
+	const secondOrg = "388520359030161586"
+
+	// The first tenant bootstraps single-tenant (no org claim on this token) --
+	// the state a platform's own OPERATIONS tenant is in before any other
+	// tenant ever shares its issuer.
+	firstTenant, firstUser, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  issuer,
+		Subject: "rihards@frs.lv",
+	})
+	mustNoErr(t, err, "bootstrap the first tenant single-tenant")
+
+	// Convert the issuer to org-scoped, backfilling the first tenant's own
+	// mapping to its org value -- the documented, explicit remedy
+	// (PATCH /v1/tenant-issuers), never a silent side effect of registering
+	// the second tenant below.
+	issuers := NewTenantIssuerRepository(NewTxManager(db, DialectPostgres))
+	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: firstTenant.TenantID, TenantType: string(model.TenantTypeOperations)})
+	_, err = issuers.UpdateOrgScope(opsCtx, issuer, orgClaimKey, firstOrg)
+	mustNoErr(t, err, "convert the issuer to org-scoped and backfill the first tenant's mapping")
+
+	// Register a second tenant on the same issuer under a different org --
+	// the action the issue reports as breaking the first tenant.
+	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	_, err = tenants.Create(opsCtx, CreateTenantParams{
+		Name:          "validationagent",
+		Type:          model.TenantTypeCompany,
+		Issuer:        issuer,
+		OrgFieldKey:   orgClaimKey,
+		OrgFieldValue: secondOrg,
+	})
+	mustNoErr(t, err, "register the second tenant on the shared issuer")
+
+	// The first tenant's already-enrolled user must still resolve, presenting
+	// the org claim their token actually carries.
+	resolvedTenant, resolvedUser, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  issuer,
+		Subject: "rihards@frs.lv",
+		Raw:     map[string]any{orgClaimKey: firstOrg},
+	})
+	mustNoErr(t, err, "resolve the first tenant's existing user after a second tenant shares the issuer")
+	if resolvedTenant.TenantID != firstTenant.TenantID {
+		t.Fatalf("resolved tenant %q, want the first tenant %q", resolvedTenant.TenantID, firstTenant.TenantID)
+	}
+	if resolvedUser.UserID != firstUser.UserID {
+		t.Fatalf("resolved user %q, want the first tenant's original user %q", resolvedUser.UserID, firstUser.UserID)
+	}
+}
+
+// TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim proves the
+// erun#1721 root cause is reported distinctly: once an issuer is org-scoped,
+// a token that simply carries no matching org claim (exactly what erun-console
+// presented before requesting the org scope) must not be confused with "not
+// enrolled" -- the caller may be a genuine member of a tenant this one token
+// cannot resolve to.
+func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	const issuer = "https://auth.erunpaas.example/1721-unresolved"
+	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
+
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  issuer,
+		Subject: "operator-subject",
+		Raw:     map[string]any{orgClaimKey: "111111111111111111"},
+	})
+	mustNoErr(t, err, "bootstrap an org-scoped issuer")
+
+	_, err = repo.ResolveTenantByIssuer(context.Background(), security.Claims{
+		Issuer: issuer,
+		// No org claim -- exactly what an OIDC client that never requested the
+		// org scope presents.
+	})
+	if !errors.Is(err, security.ErrTenantUnresolved) {
+		t.Fatalf("err = %v, want security.ErrTenantUnresolved", err)
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, must not also satisfy plain ErrNotFound -- ResolveIdentity must not attempt empty-database bootstrap for an issuer it already knows", err)
+	}
+}
+
+// TestResolveIdentityDistinguishesNotEnrolledFromUnresolved locks in the
+// erun#1721 acceptance criterion directly: a genuinely-unenrolled identity (a
+// real tenant exists, this subject simply isn't one of its users) must report
+// differently from an identity whose tenant could not be resolved at all --
+// even when, in the second case, the very same already-enrolled subject
+// presents a token this one time cannot resolve.
+func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	const singleTenantIssuer = "https://issuer.example/1721-not-enrolled"
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  singleTenantIssuer,
+		Subject: "first-operator",
+	})
+	mustNoErr(t, err, "bootstrap the tenant's first user")
+
+	_, _, notEnrolledErr := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  singleTenantIssuer,
+		Subject: "a-stranger",
+	})
+	if notEnrolledErr == nil {
+		t.Fatal("expected a stranger to an already-populated tenant to be rejected")
+	}
+	if errors.Is(notEnrolledErr, security.ErrTenantUnresolved) {
+		t.Fatalf("not-enrolled err = %v, must not be classified as tenant-unresolved -- the tenant resolved fine", notEnrolledErr)
+	}
+	if !errors.Is(notEnrolledErr, ErrNotFound) {
+		t.Fatalf("not-enrolled err = %v, want ErrNotFound", notEnrolledErr)
+	}
+
+	// A tenant already exists at this point (seeded above), so registering the
+	// org-scoped issuer's tenant explicitly through TenantRepository.Create --
+	// not empty-database bootstrap, which only ever fires once -- mirrors how
+	// a second tenant is actually added to a platform.
+	const orgScopedIssuer = "https://auth.erunpaas.example/1721-unresolved-vs-enrolled"
+	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
+	const org = "222222222222222222"
+	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	opsCtx := security.WithContext(context.Background(), security.Context{TenantType: string(model.TenantTypeOperations)})
+	_, err = tenants.Create(opsCtx, CreateTenantParams{
+		Name:          "org-scoped-tenant",
+		Type:          model.TenantTypeCompany,
+		Issuer:        orgScopedIssuer,
+		OrgFieldKey:   orgClaimKey,
+		OrgFieldValue: org,
+	})
+	mustNoErr(t, err, "register the org-scoped tenant")
+
+	_, _, err = repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  orgScopedIssuer,
+		Subject: "operator-subject",
+		Raw:     map[string]any{orgClaimKey: org},
+	})
+	mustNoErr(t, err, "bootstrap the org-scoped tenant's first user")
+
+	_, _, unresolvedErr := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  orgScopedIssuer,
+		Subject: "operator-subject", // the same, already-enrolled subject
+		// No org claim this time.
+	})
+	if unresolvedErr == nil {
+		t.Fatal("expected a missing org claim to be rejected")
+	}
+	if !errors.Is(unresolvedErr, security.ErrTenantUnresolved) {
+		t.Fatalf("unresolved err = %v, want security.ErrTenantUnresolved even though this exact subject is enrolled", unresolvedErr)
 	}
 }
 

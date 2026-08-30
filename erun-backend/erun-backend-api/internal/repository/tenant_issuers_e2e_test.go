@@ -91,3 +91,41 @@ func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) 
 		t.Fatalf("tenant_issuers.org_field_value = %+v, want the existing tenant's mapping backfilled to %q, not left NULL", storedValue, orgFieldValue)
 	}
 }
+
+// TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping proves the
+// erun#1721 acceptance criterion that ambiguity between two candidate
+// tenant_issuers rows for the same (issuer, org) is impossible by
+// construction, not a runtime coin flip: the UNIQUE NULLS NOT DISTINCT
+// (issuer, org_field_value) constraint refuses a second row before
+// ResolveTenantByIssuer's exact-match query could ever see two candidates for
+// the same resolution key.
+func TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping(t *testing.T) {
+	db := tenantIssuersDatabase(t)
+	const issuer = "https://auth.erunpaas.example/1721-ambiguity"
+	const org = "999999999999999999"
+
+	var firstTenantID, secondTenantID string
+	mustNoErr(t, db.QueryRow(`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`, "ambiguity-first").Scan(&firstTenantID), "seed first tenant")
+	mustNoErr(t, db.QueryRow(`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`, "ambiguity-second").Scan(&secondTenantID), "seed second tenant")
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM tenant_issuers WHERE tenant_id IN ($1, $2)`, firstTenantID, secondTenantID)
+		_, _ = db.Exec(`DELETE FROM tenants WHERE tenant_id IN ($1, $2)`, firstTenantID, secondTenantID)
+		_, _ = db.Exec(`DELETE FROM issuers WHERE issuer = $1`, issuer)
+	})
+
+	_, err := db.Exec(`INSERT INTO issuers (issuer, org_field_key) VALUES ($1, $2)`, issuer, "urn:zitadel:iam:user:resourceowner:id")
+	mustNoErr(t, err, "seed an org-scoped issuer")
+	_, err = db.Exec(`INSERT INTO tenant_issuers (tenant_id, issuer, org_field_value, name) VALUES ($1, $2, $3, $4)`, firstTenantID, issuer, org, "first")
+	mustNoErr(t, err, "seed the first mapping")
+
+	_, err = db.Exec(`INSERT INTO tenant_issuers (tenant_id, issuer, org_field_value, name) VALUES ($1, $2, $3, $4)`, secondTenantID, issuer, org, "second")
+	if err == nil {
+		t.Fatal("expected a second tenant_issuers row for the same (issuer, org_field_value) to be rejected by the unique constraint")
+	}
+
+	var rowCount int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM tenant_issuers WHERE issuer = $1 AND org_field_value = $2`, issuer, org).Scan(&rowCount), "count mappings")
+	if rowCount != 1 {
+		t.Fatalf("expected exactly one mapping to survive the rejected duplicate insert, got %d", rowCount)
+	}
+}

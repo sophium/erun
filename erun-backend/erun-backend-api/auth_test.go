@@ -2,12 +2,28 @@ package backendapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
+
+// decodedAuthError reads the {code, message} envelope every auth-layer error
+// response now carries (erun#1721), failing the test if the body isn't that shape.
+func decodedAuthError(t *testing.T, rec *httptest.ResponseRecorder) authErrorEnvelope {
+	t.Helper()
+	var envelope authErrorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode error envelope: %v (body: %s)", err, rec.Body.String())
+	}
+	return envelope
+}
 
 // mustEqual fails when a value the middleware passed through differs from the one
 // it resolved from.
@@ -250,6 +266,9 @@ func TestAuthMiddlewareRejectsUnknownTenantIssuer(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
+	if code := decodedAuthError(t, rec).Code; code != "TENANT_UNRESOLVED" {
+		t.Fatalf("code = %q, want TENANT_UNRESOLVED -- an unknown issuer means no tenant matched this token, not that the caller isn't enrolled", code)
+	}
 }
 
 func TestAuthMiddlewareRejectsUnknownExternalUser(t *testing.T) {
@@ -277,6 +296,136 @@ func TestAuthMiddlewareRejectsUnknownExternalUser(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if code := decodedAuthError(t, rec).Code; code != "NOT_ENROLLED" {
+		t.Fatalf("code = %q, want NOT_ENROLLED -- the tenant resolved fine, this external id just isn't a member", code)
+	}
+}
+
+// TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing is the erun#1721
+// regression test at the middleware boundary: a combined IdentityResolver
+// (the production wiring) reporting security.ErrTenantUnresolved -- an
+// org-scoped issuer whose token carries no matching org claim -- must render
+// as TENANT_UNRESOLVED, never the generic "not enrolled" message that sends
+// an already-enrolled operator to ask for an enrolment that already exists.
+func TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing(t *testing.T) {
+	underlying := fmt.Errorf("%w: issuer %q is org-scoped but the token carries no matching claim", security.ErrTenantUnresolved, "https://auth.example/shared")
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://auth.example/shared", Subject: "rihards@frs.lv"}, nil
+		}),
+		IdentityResolver: IdentityResolverFunc(func(ctx context.Context, claims Claims) (Tenant, User, error) {
+			return Tenant{}, User{}, underlying
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rec := httptest.NewRecorder()
+	middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if code := decodedAuthError(t, rec).Code; code != "TENANT_UNRESOLVED" {
+		t.Fatalf("code = %q, want TENANT_UNRESOLVED", code)
+	}
+}
+
+// TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound mirrors the
+// same distinction through the combined IdentityResolver wiring: a tenant
+// that resolved fine but reports a plain repository.ErrNotFound (this
+// external identity is not one of its users) must render as NOT_ENROLLED,
+// not TENANT_UNRESOLVED.
+func TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound(t *testing.T) {
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://issuer.example", Subject: "a-stranger"}, nil
+		}),
+		IdentityResolver: IdentityResolverFunc(func(ctx context.Context, claims Claims) (Tenant, User, error) {
+			return Tenant{}, User{}, repository.ErrNotFound
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rec := httptest.NewRecorder()
+	middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if code := decodedAuthError(t, rec).Code; code != "NOT_ENROLLED" {
+		t.Fatalf("code = %q, want NOT_ENROLLED", code)
+	}
+}
+
+func TestAuthMiddlewareReportsUnauthenticatedForMissingBearerToken(t *testing.T) {
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			t.Fatal("verifier should not be called")
+			return Claims{}, nil
+		}),
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
+			t.Fatal("tenant resolver should not be called")
+			return Tenant{}, nil
+		}),
+		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
+			t.Fatal("user resolver should not be called")
+			return User{}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/whoami", nil))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	if code := decodedAuthError(t, rec).Code; code != "UNAUTHENTICATED" {
+		t.Fatalf("code = %q, want UNAUTHENTICATED", code)
+	}
+}
+
+func TestClassifyIdentityErrorMapsTenantUnresolved(t *testing.T) {
+	err := classifyIdentityError(fmt.Errorf("%w: issuer unknown", security.ErrTenantUnresolved))
+	if !errors.Is(err, ErrTenantNotResolved) {
+		t.Fatalf("err = %v, want ErrTenantNotResolved", err)
+	}
+	if errors.Is(err, ErrUserNotResolved) {
+		t.Fatalf("err = %v, must not also satisfy ErrUserNotResolved", err)
+	}
+}
+
+func TestClassifyIdentityErrorMapsNotEnrolled(t *testing.T) {
+	err := classifyIdentityError(repository.ErrNotFound)
+	if !errors.Is(err, ErrUserNotResolved) {
+		t.Fatalf("err = %v, want ErrUserNotResolved", err)
+	}
+	if errors.Is(err, ErrTenantNotResolved) {
+		t.Fatalf("err = %v, must not also satisfy ErrTenantNotResolved", err)
+	}
+}
+
+func TestClassifyIdentityErrorPassesThroughUnexpectedErrors(t *testing.T) {
+	unexpected := errors.New("database connection reset")
+	if got := classifyIdentityError(unexpected); !errors.Is(got, unexpected) {
+		t.Fatalf("err = %v, want the unexpected error passed through unclassified", got)
 	}
 }
 
