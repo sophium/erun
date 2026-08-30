@@ -158,6 +158,14 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit G
 		runGit = GitCommandRunner
 	}
 
+	scope := normalizeDiffScope(options.Scope)
+	selectedCommit := strings.TrimSpace(options.SelectedCommit)
+	if scope == "commit" && selectedCommit != "" {
+		if err := rejectOptionShapedRevision(selectedCommit); err != nil {
+			return DiffResult{}, err
+		}
+	}
+
 	base, baseFound, err := resolveGitDiffReviewBase(projectRoot, runGit)
 	if err != nil {
 		return DiffResult{}, err
@@ -167,8 +175,13 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit G
 		return DiffResult{}, err
 	}
 
-	scope := normalizeDiffScope(options.Scope)
-	selectedCommit := strings.TrimSpace(options.SelectedCommit)
+	if scope == "commit" && selectedCommit != "" {
+		selectedCommit, err = resolveDiffCommitRevision(projectRoot, selectedCommit, runGit)
+		if err != nil {
+			return DiffResult{}, err
+		}
+	}
+
 	stdout := new(bytes.Buffer)
 	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit)
 	stderr := new(bytes.Buffer)
@@ -196,6 +209,28 @@ func normalizeDiffScope(scope string) string {
 	default:
 		return "current"
 	}
+}
+
+// rejectOptionShapedRevision refuses a value that git would parse as an
+// option rather than a revision, before any git command runs with it. exec_diff
+// is a read-scoped MCP tool, so a caller-supplied revision must never be able
+// to steer git's own flags.
+func rejectOptionShapedRevision(revision string) error {
+	if strings.HasPrefix(revision, "-") {
+		return fmt.Errorf("selectedCommit must be a commit revision, not %q", revision)
+	}
+	return nil
+}
+
+// resolveDiffCommitRevision resolves the caller-supplied revision to a commit
+// sha via git itself, so only a value git already agreed is a commit reaches
+// the diff argv.
+func resolveDiffCommitRevision(projectRoot, revision string, runGit GitCommandRunnerFunc) (string, error) {
+	resolved, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", revision+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("selectedCommit %q is not a valid commit: %w", revision, err)
+	}
+	return resolved, nil
 }
 
 func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit string) []string {

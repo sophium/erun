@@ -1,0 +1,3 @@
+audit: erun exec diff --scope commit --selected-commit not-a-real-commit
+selectedCommit "not-a-real-commit" is not a valid commit: exit status 128
+fatal: Needed a single revision

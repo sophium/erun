@@ -360,6 +360,67 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/diff_selected_commit_without_scope_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("diff_selected_commit_option_shaped_refused", func(t *testing.T) {
+		// exec_diff is a read-scoped capability: git reads a value starting
+		// with "-" as an option rather than a revision, so a selectedCommit in
+		// that shape must be refused before it ever reaches git's argv. Stub
+		// git to fail loudly so the assertion proves the refusal happens
+		// before any git invocation, not just that the command errors.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "git", fixture.StubBinarySpec{Stderr: "stub-git-must-not-run", ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
+		result := erun.Run(t, []string{"exec", "diff", "--scope=commit", "--selected-commit=--not-a-revision"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "stub-git-must-not-run") {
+			t.Fatalf("git ran even though the option-shaped selectedCommit should have been refused first: %s", result.Combined)
+		}
+		golden.Equal(t, "exec/diff_selected_commit_option_shaped_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("diff_selected_commit_malformed_revision_errors", func(t *testing.T) {
+		// A revision that is not option-shaped but does not resolve to any
+		// commit (typo, unknown ref) must fail with a clear message naming the
+		// value, not git's raw "fatal: ..." text.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "diff", "--scope=commit", "--selected-commit=not-a-real-commit"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/diff_selected_commit_malformed_revision_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("diff_scope_commit_resolves_abbreviated_commit", func(t *testing.T) {
+		// The fix resolves selectedCommit to a full sha via `git rev-parse
+		// --verify` before it reaches the diff argv, so an abbreviated hash
+		// must still produce the same diff and echo the resolved full sha.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "second.txt"), "second\n")
+		fixture.RunGit(t, setup.Cwd, "add", "second.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "second commit")
+		fullHash := strings.TrimSpace(captureGit(t, setup.Cwd, "rev-parse", "HEAD"))
+		shortHash := strings.TrimSpace(captureGit(t, setup.Cwd, "rev-parse", "--short", "HEAD"))
+		result := erun.Run(t, []string{"exec", "diff", "--json", "--scope=commit", "--selected-commit=" + shortHash}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if parsed.SelectedCommit != fullHash {
+			t.Errorf("expected resolved SelectedCommit=%s, got %q", fullHash, parsed.SelectedCommit)
+		}
+		if parsed.Summary.FileCount == 0 {
+			t.Errorf("expected non-zero FileCount across selected commit, got 0")
+		}
+	})
+
 	t.Run("dry_run_with_time_flag_prints_elapsed_on_error", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "diff", "--dry-run", "--time"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
