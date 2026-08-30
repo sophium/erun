@@ -1,4 +1,0 @@
-  team/dev: skipped — not-alive: no desktop identity at <DESKTOP_IDENTITY>; open an environment from the ERun desktop app once so the identity exists and deployed runtimes trust it
-audit: erun whip --dry-run --environment dev --tenant team
-mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
-mcp tools/call http://<LOOPBACK>:26100/mcp whip preview=true

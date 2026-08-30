@@ -15,7 +15,14 @@ import (
 // and pushes exactly as it would for any other transport; the desktop never
 // re-derives that decision locally. Not idle-probed: pushing a nudge is a
 // real write, not a diagnostic read.
-func whipEnvironmentViaMCP(ctx context.Context, endpoint, bearer string) (eruncommon.WhipResult, error) {
+//
+// tenant/environment are the target whipOneEnvironmentNow already resolved
+// and used to pick endpoint -- restating them in the call itself, rather than
+// leaving the tool to infer them from the server's own bound context, is the
+// stronger assertion the resolveLocalTarget contract (erun-mcp/runtime.go)
+// asks callers to make: a stale edge pointed at the wrong environment then
+// surfaces as a named mismatch instead of a silent act on the wrong one.
+func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (eruncommon.WhipResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
@@ -27,7 +34,7 @@ func whipEnvironmentViaMCP(ctx context.Context, endpoint, bearer string) (erunco
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "whip",
-		Arguments: map[string]any{"preview": false},
+		Arguments: map[string]any{"preview": false, "tenant": tenant, "environment": environment},
 	})
 	if err != nil {
 		return eruncommon.WhipResult{}, formatWhipMCPError(err)

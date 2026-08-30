@@ -130,6 +130,16 @@ func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
 		ui.Reason = "stopped nudging after repeated silence — reply in its pane or restart it"
 		return ui
 	default:
+		if result.Reason == eruncommon.WhipReasonCallFailed {
+			// A call that was actually attempted and failed is a write that was
+			// refused, not a benign skip -- same InlineAlert-territory distinction
+			// the decided-but-refused-nudge case above already draws, so it must
+			// not collapse into whipSkipReasonText's "not alive" wording.
+			ui.Outcome = "failed"
+			ui.Reason = "call failed"
+			ui.Error = result.Error
+			return ui
+		}
 		ui.Outcome = "skipped"
 		ui.Reason = whipSkipReasonText(result.Reason)
 		ui.Error = result.Error

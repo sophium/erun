@@ -105,6 +105,11 @@ type fakeMCPRequest struct {
 	// Tool is the tool a tools/call named, which is what proves a caller reached
 	// the intended surface rather than some other one.
 	Tool string
+	// Arguments is the tools/call arguments object the caller actually sent, so
+	// a scenario can assert what a host-side command forwarded into the payload
+	// (e.g. that it restated the tenant/environment it already resolved) rather
+	// than only that a call reached the edge at all.
+	Arguments map[string]any
 	// IdleProbe reports whether the request carried the header that exempts it
 	// from the environment's activity accounting — set by a diagnostic read, and
 	// never by a call that can mutate the environment.
@@ -138,7 +143,8 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
 		Params struct {
-			Name string `json:"name"`
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
 		} `json:"params"`
 	}
 	_ = json.Unmarshal(body, &request)
@@ -149,6 +155,7 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Authbearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "),
 		SessionID:  r.Header.Get("Mcp-Session-Id"),
 		Tool:       request.Params.Name,
+		Arguments:  request.Params.Arguments,
 		IdleProbe:  r.Header.Get(common.MCPIdleProbeHeader) == "true",
 	})
 	e.mu.Unlock()
@@ -269,6 +276,21 @@ func (e *fakeMCPEdge) requestFor(t *testing.T, method string) fakeMCPRequest {
 	}
 	t.Fatalf("edge never received %s; got %+v", method, e.recorded())
 	return fakeMCPRequest{}
+}
+
+// assertToolArgumentsNameTarget asserts a tools/call request restated the
+// tenant/environment the host already resolved to reach this edge, rather
+// than leaving the tool to infer them from the server's own bound context
+// (erun#1709). Every off-environment idle/job/activity-lease call must carry
+// its own tenant/environment on the wire.
+func assertToolArgumentsNameTarget(t *testing.T, request fakeMCPRequest, tenant, environment string) {
+	t.Helper()
+	if got, _ := request.Arguments["tenant"].(string); got != tenant {
+		t.Errorf("%s call: got tenant argument %q, want %q -- arguments: %+v", request.Tool, got, tenant, request.Arguments)
+	}
+	if got, _ := request.Arguments["environment"].(string); got != environment {
+		t.Errorf("%s call: got environment argument %q, want %q -- arguments: %+v", request.Tool, got, environment, request.Arguments)
+	}
 }
 
 type mcpTokenClaims struct {

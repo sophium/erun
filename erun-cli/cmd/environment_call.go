@@ -41,6 +41,13 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	if err != nil {
 		return decoded, false, err
 	}
+	// This host already resolved the target to pick target.endpoint above --
+	// restating it in the call itself, rather than leaving the tool to infer it
+	// from the server's own bound context, is what turns a stale edge pointed at
+	// the wrong environment into a named refusal instead of a silent act on the
+	// wrong one (resolveLocalTarget, erun-mcp/runtime.go).
+	arguments["tenant"] = target.tenant
+	arguments["environment"] = target.environment
 	commandCtx.TraceCommand("", "mcp", "tools/call", target.endpoint, tool, compactMCPArguments(arguments))
 	if commandCtx.DryRun {
 		return decoded, false, nil

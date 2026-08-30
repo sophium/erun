@@ -137,6 +137,14 @@ func TestJobOffEnvironment(t *testing.T) {
 		if calls[1].Tool != "exec_job_status" {
 			t.Fatalf("the environment was asked for %q second, want exec_job_status", calls[1].Tool)
 		}
+		// erun#1709: this host already resolved team/dev to reach this edge, and
+		// must restate it in the call itself rather than leaving the tool to
+		// infer it from the server's own bound context -- the plumbing gap that
+		// let a bare "tenant and environment are required" reach an operator
+		// even though the flags were parsed correctly.
+		for _, call := range calls {
+			assertToolArgumentsNameTarget(t, call, "team", "dev")
+		}
 	})
 
 	t.Run("start_dry_run_traces_the_environment_call", func(t *testing.T) {
@@ -217,6 +225,7 @@ func TestJobOffEnvironment(t *testing.T) {
 		if !call.IdleProbe {
 			t.Errorf("expected job_status to carry the idle-probe header so polling it does not reset the environment's idle timer")
 		}
+		assertToolArgumentsNameTarget(t, call, "team", "dev")
 	})
 
 	t.Run("output_reads_the_environments_captured_output", func(t *testing.T) {
@@ -242,6 +251,39 @@ func TestJobOffEnvironment(t *testing.T) {
 		}
 		if !call.IdleProbe {
 			t.Errorf("expected job_output to carry the idle-probe header so polling it does not reset the environment's idle timer")
+		}
+		assertToolArgumentsNameTarget(t, call, "team", "dev")
+	})
+
+	// A genuinely unresolved target (the edge's own runtime image predates the
+	// tenant/environment plumbing fix, or the pod was started with no bound
+	// context of its own) must still error -- and the message an operator
+	// actually sees has to name which tool refused and what would satisfy it,
+	// not the bare "tenant and environment are required" dead end erun#1709
+	// reported (that phrasing named no tool, no caller, and no recovery).
+	t.Run("status_reports_the_tool_and_the_remedy_when_the_target_is_unresolved", func(t *testing.T) {
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ToolResults: map[string]string{
+			"exec_job_status": `{"content":[{"type":"text","text":"tenant/environment not resolved: this MCP server was not started bound to a tenant/environment, and the call did not supply tenant/environment either -- pass tenant and environment explicitly in the call, or run this edge for an environment that has it configured"}],"isError":true}`,
+		}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "suite"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an unresolved target, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "exec_job_status") {
+			t.Errorf("error must name the refusing tool (exec_job_status), got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "pass tenant and environment explicitly") {
+			t.Errorf("error must name the remedy, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "tenant and environment are required") {
+			t.Errorf("error regressed to the bare required-input dead end, got:\n%s", result.Combined)
 		}
 	})
 }
