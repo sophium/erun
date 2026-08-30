@@ -75,18 +75,21 @@ func discoverModuleReferencedImageNames(root string) ([]string, error) {
 // anonymously pullable yet. It is a record of a known gap, not a design
 // decision: an entry here means the ghcr.io package is currently private, a
 // visibility setting on the sophium org this repository cannot flip on its
-// own, not that the image is meant to stay private. Once the package is made
-// public, TestAnonymousPullabilityBaselineIsCurrent fails until the stale
-// entry is removed -- the same shrink-only enforcement the two precedents
-// above use -- which is what proves the visibility fix actually landed rather
-// than being asserted in a PR description.
-var anonymousPullabilityBaseline = map[string]bool{
-	// ghcr.io/sophium/erun-dns01-webhook is private, so an anonymous pull
-	// fails; terraform-erun-cluster-edge's dns01_webhook_image references it
-	// directly, which is what makes a cluster following that module's
-	// documented powerdns-broker path end at ImagePullBackOff.
-	"erun-dns01-webhook": true,
-}
+// own, not that the image is meant to stay private.
+//
+// This baseline retires itself at release time, not at test time.
+// TestAnonymousPullabilityBaselineIsCurrent only checks that a baselined name
+// still corresponds to an image some module references -- it never touches
+// the network, so it cannot see whether the underlying package went public.
+// verifyImageAnonymouslyPullable does: when a baselined image's release-time
+// probe comes back pullable, the release fails and names the stale entry to
+// delete, instead of reporting success while a baseline that no longer
+// describes reality quietly disables the very check it exists to perform.
+//
+// Empty right now: ghcr.io/sophium/erun-dns01-webhook was the only entry and
+// the package has since been made public, so it was removed rather than left
+// as a stale example.
+var anonymousPullabilityBaseline = map[string]bool{}
 
 // anonymousManifestAcceptHeaders is every manifest media type a multi-arch
 // pull negotiates, mirroring what `docker manifest inspect` itself sends.
@@ -174,9 +177,10 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 // image a Terraform module references resolves with no credential at all, at
 // the version this release just published. A name absent from
 // anonymousPullabilityBaseline must resolve anonymously or the release fails;
-// a baselined name is reported and let through, so today's known-private
-// erun-dns01-webhook does not block every release until the sophium org's
-// package visibility changes.
+// a baselined name is reported and let through instead, so a known-private
+// image does not block every release until the sophium org's package
+// visibility changes -- unless it turns out to already be pullable, in which
+// case the baseline entry itself is the defect (see verifyImageAnonymouslyPullable).
 func verifyModuleReferencedImagesAnonymouslyPullable(ctx Context, projectRoot string, execution BuildExecutionSpec, probe anonymousPullProbeFunc) error {
 	names, err := discoverModuleReferencedImageNames(filepath.Join(strings.TrimSpace(projectRoot), "erun-devops", "terraform-erun"))
 	if err != nil {
@@ -206,6 +210,9 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx Context, projectRoot st
 // verifyImageAnonymouslyPullable is the per-image half of
 // verifyModuleReferencedImagesAnonymouslyPullable: probe name's tag with no
 // credential at all, then apply anonymousPullabilityBaseline to the result.
+// A baselined name that probes as pullable fails the release rather than
+// passing silently -- see anonymousPullabilityBaseline's doc comment for why
+// this enforcement has to live here and not in a unit test.
 func verifyImageAnonymouslyPullable(ctx Context, name string, image DockerImageReference, probe anonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
 	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
@@ -231,6 +238,11 @@ func verifyImageAnonymouslyPullable(ctx Context, name string, image DockerImageR
 		return fmt.Errorf("probe anonymous pull of %s: %w", tag, probeErr)
 	}
 	if pullable {
+		if anonymousPullabilityBaseline[name] {
+			return fmt.Errorf(
+				"image %s is baselined in anonymousPullabilityBaseline as not anonymously pullable, but it just probed as pullable -- the entry is now stale and would silently disable this check every release from here on; remove %q from anonymousPullabilityBaseline in release_anonymous_pullability.go",
+				tag, name)
+		}
 		ctx.Info("==> Verified anonymously pullable: " + tag)
 		return nil
 	}
