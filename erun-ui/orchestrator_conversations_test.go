@@ -254,8 +254,8 @@ func TestAnAttachedConversationThatIsGoneIsReportedNotIgnored(t *testing.T) {
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(target.Notice, gone) || !strings.Contains(target.Notice, "no longer on disk") {
-		t.Fatalf("expected the notice to name the attachment it could not honour, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), gone) || !strings.Contains(noticeText(target.Notices), "no longer on disk") {
+		t.Fatalf("expected the notice to name the attachment it could not honour, got %q", noticeText(target.Notices))
 	}
 }
 

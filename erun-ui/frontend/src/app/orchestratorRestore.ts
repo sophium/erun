@@ -11,20 +11,53 @@ export interface OrchestratorReopenRef {
   conversationId?: string;
 }
 
+// OrchestratorNoticeKind mirrors the Go side's orchestratorNoticeKind: 'info'
+// is the mechanism working (a resumed tracked conversation), 'warning' is
+// every other resolution this restore reports. 'unknown' is a frontend-only
+// value for a notice whose kind this launch could not classify — a raw
+// payload missing the field, or naming something other than the two kinds the
+// backend ever mints. It exists so that case renders as its own visibly
+// distinct thing rather than defaulting to 'info' (which would hide a real
+// problem behind a routine-looking notice) or to 'warning' (which would cry
+// wolf over what might be entirely routine).
+export type OrchestratorNoticeKind = 'info' | 'warning' | 'unknown';
+
+// OrchestratorNotice is one operator-facing notice about a reopened
+// orchestrator: which one it is about (absent when it names several, such as
+// the hand-offs-not-reopened summary), how loudly it reads, and the text
+// itself.
+export interface OrchestratorNotice {
+  orchestratorId?: string;
+  kind: OrchestratorNoticeKind;
+  text: string;
+}
+
+// RawOrchestratorNotice is the wire shape one entry in the backend's notices
+// list can actually carry: kind and text are typed as optional/untrusted here
+// even though the Go side always sets them, because the payload crosses a
+// process boundary and a stale or hand-crafted one must degrade rather than
+// throw.
+interface RawOrchestratorNotice {
+  orchestratorId?: string;
+  kind?: string;
+  text?: string;
+}
+
 // What the backend answers when boot asks which orchestrators to reopen:
 // orchestratorId is the one that OWNS THE TERMINAL PANE — the pane is single,
 // so exactly one orchestrator gets it — and alsoReopen lists every other
 // orchestrator that was open too, restored alongside it but idle. Only the
 // pane owner can carry a resume PROMPT; that is why resumePrompt lives on the
-// target itself rather than per id in alsoReopen. A notice means a hand-off
-// was refused: the pane owner still reopens, idle, and the notice says why
-// nothing is being continued.
+// target itself rather than per id in alsoReopen. notices carries one entry
+// per surprising resolution — the pane owner's, or another reopened
+// orchestrator's — each with its own kind, rather than one joined string that
+// would flatten several different severities together.
 export interface OrchestratorReopenTarget {
   orchestratorId?: string;
   conversationId?: string;
   resumePrompt?: string;
   alsoReopen?: OrchestratorReopenRef[];
-  notice?: string;
+  notices?: RawOrchestratorNotice[];
 }
 
 // How boot should reopen one orchestrator: which one, which of its
@@ -46,12 +79,37 @@ export interface OrchestratorRestoreOutcome {
 
 const trimmed = (value: string | undefined): string => value?.trim() ?? '';
 
-// readRestoreNotice is the refusal the backend attached to the target, if any.
-// It reads tolerantly because the target crosses a process boundary: a payload
-// that omits the field must degrade to "no notice" rather than throw and take
-// the whole restore down with it.
-export function readRestoreNotice(target: OrchestratorReopenTarget | null | undefined): string {
-  return trimmed(target?.notice);
+// normalizeOrchestratorNoticeKind maps the raw wire value to one of the two
+// kinds the backend actually mints, or 'unknown' for anything else -- absent,
+// misspelled, or from a payload written by a backend version that classified
+// notices differently. See OrchestratorNoticeKind for why 'unknown' is its own
+// case rather than folded into either of the other two.
+function normalizeOrchestratorNoticeKind(kind: string | undefined): OrchestratorNoticeKind {
+  if (kind === 'info' || kind === 'warning') {
+    return kind;
+  }
+  return 'unknown';
+}
+
+// readRestoreNotices is every notice the backend attached to the target, each
+// with its own kind. It reads tolerantly because the target crosses a process
+// boundary: a payload that omits the field, or one entry within it, must
+// degrade rather than throw and take the whole restore down with it.
+export function readRestoreNotices(
+  target: OrchestratorReopenTarget | null | undefined,
+): OrchestratorNotice[] {
+  return (target?.notices ?? []).reduce<OrchestratorNotice[]>((kept, raw) => {
+    const text = trimmed(raw.text);
+    if (text === '') {
+      return kept;
+    }
+    kept.push({
+      orchestratorId: trimmed(raw.orchestratorId) || undefined,
+      kind: normalizeOrchestratorNoticeKind(raw.kind),
+      text,
+    });
+    return kept;
+  }, []);
 }
 
 // planOrchestratorRestore decides what a launch actually restores, given the

@@ -231,9 +231,25 @@ export class Sidebar {
 
   // The persistent alert under the orchestrator list: how the operator learns an
   // orchestrator action failed, or that a restart hand-off was refused and the
-  // reopened session is idle rather than continuing.
+  // reopened session is idle rather than continuing. A 'warning'-kind restore
+  // notice (Sidebar.OrchestratorNotice.tsx) renders through this same role, but
+  // an 'info' or 'unknown'-kind one does not -- see orchestratorRestoreNotices()
+  // and orchestratorRestoreStatusNotices() for those.
   orchestratorsAlert(): Locator {
     return this.erunSection().getByRole('alert');
+  }
+
+  // Every notice a restore had to say about how it resolved this launch's
+  // reopened orchestrators, one list item per notice at its own severity.
+  orchestratorRestoreNotices(): Locator {
+    return this.erunSection().getByRole('list', { name: 'Orchestrator restore notices' });
+  }
+
+  // A non-alert restore notice ('info' or 'unknown' kind): role="status" so it
+  // is announced politely rather than interrupting the way orchestratorsAlert()
+  // does.
+  orchestratorRestoreStatusNotices(): Locator {
+    return this.orchestratorRestoreNotices().getByRole('status');
   }
 
   // A persisted orchestrator's row is identified by its "…" details button,

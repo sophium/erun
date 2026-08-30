@@ -97,8 +97,8 @@ func TestRestoreResumesTheConversationTheSessionIsLiveOnNotTheStaleDerivedOne(t 
 	// won is the work they expect: coming back on a different conversation with
 	// nothing said is the same defect wearing the opposite sign.
 	for _, want := range []string{id, live, derived} {
-		if !strings.Contains(target.Notice, want) {
-			t.Fatalf("expected the notice to name %q, got %q", want, target.Notice)
+		if !strings.Contains(noticeText(target.Notices), want) {
+			t.Fatalf("expected the notice to name %q, got %q", want, noticeText(target.Notices))
 		}
 	}
 }
@@ -182,8 +182,8 @@ func TestRestoreNeverResumesAnotherOrchestratorsConversation(t *testing.T) {
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected its own derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(target.Notice, other.ID) {
-		t.Fatalf("expected the notice to name the orchestrator that owns it, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), other.ID) {
+		t.Fatalf("expected the notice to name the orchestrator that owns it, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -200,8 +200,8 @@ func TestAFirstLaunchWithNothingTrackedResumesTheDerivedConversation(t *testing.
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the derived conversation %q, got %q", orchestratorSessionID(id), target.ConversationID)
 	}
-	if target.Notice != "" {
-		t.Fatalf("expected a first launch to say nothing, got %q", target.Notice)
+	if noticeText(target.Notices) != "" {
+		t.Fatalf("expected a first launch to say nothing, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -227,8 +227,8 @@ func TestATrackedConversationFromAnotherLaunchIsNotSilentlyAuthoritative(t *test
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(target.Notice, stranded) {
-		t.Fatalf("expected the notice to name the unconfirmed conversation, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), stranded) {
+		t.Fatalf("expected the notice to name the unconfirmed conversation, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -255,23 +255,29 @@ func TestRestoreReportsARepeatedTrackedConversationOnlyOnce(t *testing.T) {
 	if first.ConversationID != live {
 		t.Fatalf("expected the first launch to resume the live conversation %q, got %q", live, first.ConversationID)
 	}
-	if first.Notice == "" {
+	if noticeText(first.Notices) == "" {
 		t.Fatal("expected the first divergence between tracked and derived to be reported")
+	}
+	// The mechanism working correctly is information, not a fault: a resumed
+	// tracked conversation must never be reported at the same severity as a
+	// refusal or an unconfirmed record.
+	if len(first.Notices) != 1 || first.Notices[0].Kind != orchestratorNoticeInfo {
+		t.Fatalf("expected exactly one info-kind notice for the resumed tracked conversation, got %+v", first.Notices)
 	}
 
 	second := app.ResolveOrchestratorToReopen()
 	if second.ConversationID != live {
 		t.Fatalf("expected the second launch to resume the same live conversation %q, got %q", live, second.ConversationID)
 	}
-	if second.Notice != "" {
-		t.Fatalf("expected a launch that resumes the conversation already reported to say nothing, got %q", second.Notice)
+	if noticeText(second.Notices) != "" {
+		t.Fatalf("expected a launch that resumes the conversation already reported to say nothing, got %q", noticeText(second.Notices))
 	}
 
 	// The record still resolves the same tracked conversation; only the notice
 	// about it is quiet the second time.
 	third := app.ResolveOrchestratorToReopen()
-	if third.Notice != "" {
-		t.Fatalf("expected a third repeat launch to stay silent too, got %q", third.Notice)
+	if noticeText(third.Notices) != "" {
+		t.Fatalf("expected a third repeat launch to stay silent too, got %q", noticeText(third.Notices))
 	}
 }
 
@@ -293,11 +299,11 @@ func TestRestoreReportsAChangeToADifferentTrackedConversation(t *testing.T) {
 		LaunchID:       recordedLaunchID(t, openPath, id),
 	})
 
-	if target := app.ResolveOrchestratorToReopen(); target.Notice == "" || target.ConversationID != firstLive {
-		t.Fatalf("expected the first divergence reported and resumed, got conversation %q notice %q", target.ConversationID, target.Notice)
+	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) == "" || target.ConversationID != firstLive {
+		t.Fatalf("expected the first divergence reported and resumed, got conversation %q notice %q", target.ConversationID, noticeText(target.Notices))
 	}
-	if target := app.ResolveOrchestratorToReopen(); target.Notice != "" {
-		t.Fatalf("expected the repeat of the same tracked conversation to say nothing, got %q", target.Notice)
+	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) != "" {
+		t.Fatalf("expected the repeat of the same tracked conversation to say nothing, got %q", noticeText(target.Notices))
 	}
 
 	// A new launch under the SAME entry's launch id, whose session now reports a
@@ -310,11 +316,11 @@ func TestRestoreReportsAChangeToADifferentTrackedConversation(t *testing.T) {
 	if target.ConversationID != secondLive {
 		t.Fatalf("expected the changed tracked conversation %q resumed, got %q", secondLive, target.ConversationID)
 	}
-	if target.Notice == "" {
+	if noticeText(target.Notices) == "" {
 		t.Fatal("expected a change to a different tracked conversation to be reported")
 	}
-	if target := app.ResolveOrchestratorToReopen(); target.Notice != "" {
-		t.Fatalf("expected the repeat of the newly reported conversation to say nothing, got %q", target.Notice)
+	if target := app.ResolveOrchestratorToReopen(); noticeText(target.Notices) != "" {
+		t.Fatalf("expected the repeat of the newly reported conversation to say nothing, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -338,8 +344,8 @@ func TestAnUnconfirmedTrackedConversationIsReportedOnEveryLaunch(t *testing.T) {
 	first := app.ResolveOrchestratorToReopen()
 	second := app.ResolveOrchestratorToReopen()
 	for _, target := range []relaunchTarget{first, second} {
-		if !strings.Contains(target.Notice, stranded) {
-			t.Fatalf("expected every launch to report the unconfirmed conversation, got %q", target.Notice)
+		if !strings.Contains(noticeText(target.Notices), stranded) {
+			t.Fatalf("expected every launch to report the unconfirmed conversation, got %q", noticeText(target.Notices))
 		}
 	}
 }
@@ -361,8 +367,8 @@ func TestATrackedConversationWithNoTranscriptFallsBackAndSaysSo(t *testing.T) {
 	if target.ConversationID != orchestratorSessionID(id) {
 		t.Fatalf("expected the derived conversation, got %q", target.ConversationID)
 	}
-	if !strings.Contains(target.Notice, "no longer on disk") {
-		t.Fatalf("expected the notice to say the transcript is gone, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), "no longer on disk") {
+		t.Fatalf("expected the notice to say the transcript is gone, got %q", noticeText(target.Notices))
 	}
 }
 
