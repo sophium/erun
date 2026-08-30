@@ -26,6 +26,29 @@ import { fetchPlatformConfig } from '../config/platform';
 const TOKEN_STORAGE_KEY = 'erun.console.idToken';
 const PKCE_VERIFIER_KEY = 'erun.console.pkceVerifier';
 const PKCE_STATE_KEY = 'erun.console.oauthState';
+const SCOPE_FALLBACK_KEY = 'erun.console.scopeFallback';
+
+// BASE_SCOPE is what every login asks for. ORG_CLAIM_SCOPE is asked for on top,
+// so a shared, org-scoped issuer's tokens carry the discriminator erun's tenant
+// resolution reads (erun-backend-api's orgClaimValue): without it the API sees
+// no org claim and resolves the caller to no tenant at all, however correctly
+// they are enrolled. erun-common/cloud_erun.go has requested it by default for
+// every CLI login since org-scoping existed; the console was the one client
+// that never did, so converting an issuer to org-scoped silently locked it out.
+const BASE_SCOPE = 'openid profile email';
+const ORG_CLAIM_SCOPE = 'urn:zitadel:iam:user:resourceowner';
+
+// loginScope adds the org-claim scope unless this session already had it
+// refused. An issuer that has never heard of it — a dedicated or BYO IdP, the
+// common case — rejects the authorize request outright rather than ignoring the
+// unknown scope, so login must still work without it. This is the browser-side
+// equivalent of erun-common's fallbackScope: asked for by default, dropped once
+// on refusal, never retried in a loop.
+function loginScope(): string {
+  return sessionStorage.getItem(SCOPE_FALLBACK_KEY) === '1'
+    ? BASE_SCOPE
+    : BASE_SCOPE + ' ' + ORG_CLAIM_SCOPE;
+}
 
 export interface OidcConfig {
   issuer: string;
@@ -147,7 +170,7 @@ export async function beginLogin(config: OidcConfig, prompt?: string): Promise<v
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: 'code',
-    scope: 'openid profile email',
+    scope: loginScope(),
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: 'S256',
     state,
@@ -226,6 +249,33 @@ export function signOut(): void {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
 }
 
+// authCallbackError returns the OIDC error code when the redirect came back as
+// a failure instead of a code. Distinct from isAuthCallback, which only reports
+// the success shape (?code=&state=) — an error redirect carries neither, so
+// without this the failure is silently indistinguishable from never having
+// signed in.
+export function authCallbackError(): string | undefined {
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get('error');
+  return error !== null && error.length > 0 ? error : undefined;
+}
+
+// isOrgScopeRefusal reports whether a failed callback is the issuer rejecting
+// the org-claim scope. Issuers differ on which code they use for an unknown
+// scope, so both spellings the spec allows are treated as a refusal.
+function isOrgScopeRefusal(error: string): boolean {
+  return error === 'invalid_scope' || error === 'invalid_request';
+}
+
+// retryLoginWithoutOrgScope arms the fallback and restarts the flow, once. The
+// marker lives in sessionStorage, so a second refusal in the same session
+// cannot loop, and a new session asks for the scope again — an issuer that
+// gains org-claim support is picked up without anyone clearing state by hand.
+async function retryLoginWithoutOrgScope(config: OidcConfig): Promise<void> {
+  sessionStorage.setItem(SCOPE_FALLBACK_KEY, '1');
+  await beginLogin(config);
+}
+
 // resolveToken produces the bearer token to present to the API on load: the OIDC
 // callback exchange when this is a redirect callback, else a token already held
 // this session, else the dev-token fallback. undefined means no token — the
@@ -233,6 +283,16 @@ export function signOut(): void {
 export async function resolveToken(config: OidcConfig | undefined): Promise<string | undefined> {
   if (config !== undefined && isAuthCallback()) {
     return completeLogin(config);
+  }
+  const callbackError = authCallbackError();
+  if (
+    config !== undefined &&
+    callbackError !== undefined &&
+    isOrgScopeRefusal(callbackError) &&
+    sessionStorage.getItem(SCOPE_FALLBACK_KEY) !== '1'
+  ) {
+    await retryLoginWithoutOrgScope(config);
+    return undefined;
   }
   return storedToken() ?? devBearerToken();
 }
