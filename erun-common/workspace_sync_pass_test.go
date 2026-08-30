@@ -66,25 +66,34 @@ func runWorkspaceSyncSSHStub(args []string) int {
 	case strings.Contains(script, "git ls-files -sz"):
 		return 0
 	case strings.Contains(script, "find . -type f"):
-		if code := strings.TrimSpace(os.Getenv(workspaceSyncStubOutputsExitEnv)); code != "" {
-			n, convErr := strconv.Atoi(code)
-			if convErr != nil {
-				return 1
-			}
-			return n
-		}
-		outputs := os.Getenv(workspaceSyncStubOutputsEnv)
-		if outputs == "" {
-			// `cd` into a not-yet-created outputs dir: the script's own sentinel
-			// for "confirmed absent" (see remoteOutputsDirAbsentExitCode).
-			return remoteOutputsDirAbsentExitCode
-		}
-		writeNULList(outputs)
-		return 0
+		return runWorkspaceSyncSSHStubOutputsListing()
 	case strings.Contains(script, "tar --null"):
 		return streamWorkspaceSyncStubArchive()
 	}
 	return 1
+}
+
+// runWorkspaceSyncSSHStubOutputsListing answers the outputs-dir `find`
+// listing. workspaceSyncStubOutputsExitEnv overrides the exit code outright,
+// letting a test simulate the ssh connection itself failing (255) or `find`
+// failing once inside the dir (any other non-zero, non-sentinel code) --
+// otherwise an empty workspaceSyncStubOutputsEnv reports the script's own
+// "confirmed absent" sentinel (remoteOutputsDirAbsentExitCode), matching a
+// `cd` into a not-yet-created outputs dir.
+func runWorkspaceSyncSSHStubOutputsListing() int {
+	if code := strings.TrimSpace(os.Getenv(workspaceSyncStubOutputsExitEnv)); code != "" {
+		n, convErr := strconv.Atoi(code)
+		if convErr != nil {
+			return 1
+		}
+		return n
+	}
+	outputs := os.Getenv(workspaceSyncStubOutputsEnv)
+	if outputs == "" {
+		return remoteOutputsDirAbsentExitCode
+	}
+	writeNULList(outputs)
+	return 0
 }
 
 // streamWorkspaceSyncStubArchive plays back a prepared archive so a pass reaches
