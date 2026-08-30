@@ -4,6 +4,7 @@ import {
   KeyRound,
   Link2,
   LoaderCircle,
+  RefreshCw,
   Send,
   ShieldAlert,
   UserPlus,
@@ -15,7 +16,11 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import { showNotification } from '@/app/notificationThunks';
 import { tenantDashboardEnvironmentName } from '@/app/tenantDashboardPanels';
-import { chooseTenantPlatformAlias, loadTenantDashboard } from '@/app/tenantDialogThunks';
+import {
+  chooseTenantPlatformAlias,
+  loadTenantDashboard,
+  refreshTenantDashboard,
+} from '@/app/tenantDialogThunks';
 import { openRequestInvitationDialog } from '@/app/tenantInviteRequestThunks';
 import {
   connectTenantPlatform,
@@ -286,6 +291,31 @@ function RequestInvitationAction({ data }: { data: UITenantDashboard }): React.R
   const dispatch = useAppDispatch();
   const request = data.myInviteRequest;
   if (!request) {
+    // A failed read is never presented as "never requested" -- the caller
+    // could already have a pending or approved request this load just
+    // couldn't see, and offering the submit action would let them resubmit
+    // into whatever the platform actually holds.
+    if (data.myInviteRequestError) {
+      return (
+        <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3">
+          <InlineAlert>
+            Your invitation request status could not be checked: {data.myInviteRequestError}
+          </InlineAlert>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="justify-self-start"
+            onClick={() => {
+              void dispatch(refreshTenantDashboard());
+            }}
+          >
+            <RefreshCw aria-hidden="true" />
+            Try again
+          </Button>
+        </div>
+      );
+    }
     return (
       <Button
         type="button"

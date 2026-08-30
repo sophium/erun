@@ -128,13 +128,36 @@ func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSub
 	if err != nil {
 		var statusErr *eruncommon.PlatformStatusError
 		if errors.Is(err, eruncommon.ErrPlatformRateLimited) && errors.As(err, &statusErr) {
-			retryAfter, _ := statusErr.RetryAfter()
-			return uiSubmitInviteRequestOutcome{RateLimited: &uiInviteRequestRateLimited{RetryAfterSeconds: int(retryAfter.Seconds())}}, nil
+			seconds := inviteRequestRetryAfterSeconds(ctx, client, statusErr)
+			return uiSubmitInviteRequestOutcome{RateLimited: &uiInviteRequestRateLimited{RetryAfterSeconds: seconds}}, nil
 		}
 		return uiSubmitInviteRequestOutcome{}, err
 	}
 	ui := inviteRequestToUI(request)
 	return uiSubmitInviteRequestOutcome{Request: &ui}, nil
+}
+
+// defaultInviteRequestRetryAfterSeconds is the fallback used when a 429's
+// Retry-After cannot be resolved to a duration at all (missing header, or
+// the RFC 9110 HTTP-date form this client does not parse). The caller was
+// genuinely rate limited; reporting 0 seconds would read as "try again now"
+// and hide that outcome entirely, which is worse than an approximate wait.
+const defaultInviteRequestRetryAfterSeconds = 60
+
+// inviteRequestRetryAfterSeconds resolves how long to tell the caller to
+// wait: the header's own value when it parsed, otherwise the platform's
+// configured submission window (best effort), otherwise the fallback above.
+// A parsed value of exactly zero (the backend rounds a sub-second remainder
+// down to "0") is trusted as-is -- that case is a real ok=true, not a
+// missing header, and an almost-immediate retry is the correct answer.
+func inviteRequestRetryAfterSeconds(ctx context.Context, client *eruncommon.PlatformClient, statusErr *eruncommon.PlatformStatusError) int {
+	if retryAfter, ok := statusErr.RetryAfter(); ok {
+		return int(retryAfter.Seconds())
+	}
+	if config, err := client.Config(ctx); err == nil && config.InviteRequestRateLimitWindowSeconds > 0 {
+		return config.InviteRequestRateLimitWindowSeconds
+	}
+	return defaultInviteRequestRetryAfterSeconds
 }
 
 // uiTenantInput is the minimal shape shared by the read-only invite-request
@@ -339,11 +362,19 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 // submission window (for the request dialog's pre-submit hint) — both need
 // only the bearer already minted for this resolution, not tenant membership,
 // so this runs regardless of what loadTenantDashboardData classified
-// PlatformState as.
+// PlatformState as. A genuine round-trip failure is reported via
+// MyInviteRequestError rather than left indistinguishable from "never
+// submitted one" (both would otherwise collapse to a nil MyInviteRequest).
 func loadTenantDashboardMyInviteRequest(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard) {
-	if request, err := client.MyInviteRequest(ctx); err == nil {
+	request, err := client.MyInviteRequest(ctx)
+	switch {
+	case err == nil:
 		ui := inviteRequestToUI(request)
 		dashboard.MyInviteRequest = &ui
+	case errors.Is(err, eruncommon.ErrPlatformNotFound):
+		// Genuinely never submitted one.
+	default:
+		dashboard.MyInviteRequestError = err.Error()
 	}
 	if config, err := client.Config(ctx); err == nil {
 		dashboard.InviteRequestRateLimitWindowSeconds = config.InviteRequestRateLimitWindowSeconds

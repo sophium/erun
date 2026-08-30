@@ -408,30 +408,6 @@ func TestPlatformClientSubmitInviteRequestRateLimitedExposesRetryAfter(t *testin
 	}
 }
 
-func TestPlatformClientSetInviteRequestRateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/config/invite-request-rate-limit" || r.Method != http.MethodPatch {
-			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
-		}
-		var body PlatformSetInviteRequestRateLimitParams
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.WindowSeconds != 3600 {
-			t.Fatalf("body = %+v", body)
-		}
-		_ = json.NewEncoder(w).Encode(PlatformRateLimit{InviteRequestWindowSeconds: 3600})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	limit, err := client.SetInviteRequestRateLimit(context.Background(), PlatformSetInviteRequestRateLimitParams{WindowSeconds: 3600})
-	if err != nil {
-		t.Fatalf("SetInviteRequestRateLimit: %v", err)
-	}
-	if limit.InviteRequestWindowSeconds != 3600 {
-		t.Fatalf("limit = %+v", limit)
-	}
-}
-
 func TestPlatformClientTrimsTrailingSlashFromBaseURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/platform" {

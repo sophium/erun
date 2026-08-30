@@ -267,6 +267,13 @@ var apiRouteWailsBindings = map[string]string{
 	"POST /v1/reviews/merge-queue/override-advance":              "OverrideAdvanceMergeQueue",
 	"POST /v1/provision":                                         "PreviewPlatformProvision",
 	"POST /v1/environments/{environment_id}/stop":                "StopPlatformEnvironment",
+	// GetMyTenantInviteRequest -> client.MyInviteRequest -> "GET
+	// /v1/invite-requests/mine" in erun-common/platform_client.go, called
+	// from erun-ui/frontend/src/app/api/tenantInviteRequestApi.ts (which
+	// tenantEnrollmentPoll.ts and the tenant dashboard's NotEnrolledState
+	// both read through) -- the real desktop entry point this route's own
+	// literal path never appears in TypeScript for.
+	"GET /v1/invite-requests/mine": "GetMyTenantInviteRequest",
 }
 
 // apiRouteCapabilities parses every non-test .go file in

@@ -63,6 +63,66 @@ func TestSubmitTenantInviteRequestRateLimited(t *testing.T) {
 	}
 }
 
+// TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWindow
+// covers a 429 with no usable Retry-After (missing entirely here; the RFC
+// 9110 HTTP-date form hits the same statusErr.RetryAfter() ok=false path).
+// Reporting 0 seconds would read as "try again now" and hide that the
+// caller was rate limited at all, so this must fall back to a real,
+// non-zero wait rather than discarding the ok bool.
+func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/invite-requests":
+			http.Error(w, "too many requests, try again later", http.StatusTooManyRequests)
+		case "/v1/config":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":45}`))
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
+	})
+	if err != nil {
+		t.Fatalf("SubmitTenantInviteRequest: %v", err)
+	}
+	if outcome.RateLimited == nil || outcome.RateLimited.RetryAfterSeconds != 45 {
+		t.Fatalf("expected the configured 45s window as the fallback, got %+v", outcome.RateLimited)
+	}
+}
+
+// TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterOrConfigUsesDefault
+// covers the case where even the configured-window fallback read fails: the
+// caller must still see a sane non-zero wait, never 0.
+func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterOrConfigUsesDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/invite-requests":
+			http.Error(w, "too many requests, try again later", http.StatusTooManyRequests)
+		case "/v1/config":
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	outcome, err := app.SubmitTenantInviteRequest(uiSubmitInviteRequestInput{
+		Tenant: "frs", Kind: "JOIN_TENANT", TenantName: "acme",
+	})
+	if err != nil {
+		t.Fatalf("SubmitTenantInviteRequest: %v", err)
+	}
+	if outcome.RateLimited == nil || outcome.RateLimited.RetryAfterSeconds != defaultInviteRequestRetryAfterSeconds {
+		t.Fatalf("expected the hardcoded default fallback, got %+v", outcome.RateLimited)
+	}
+}
+
 func TestGetMyTenantInviteRequestNoneYet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "no invite request found", http.StatusNotFound)

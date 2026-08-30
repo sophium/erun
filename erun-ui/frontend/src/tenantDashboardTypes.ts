@@ -96,8 +96,14 @@ export interface UITenantDashboard {
   // myInviteRequest is the caller's own most recent invite request, set
   // whenever a bearer minted successfully — including in the not-enrolled and
   // no-permission states, since a not-yet-enrolled caller is exactly who
-  // needs to see this. Undefined means never submitted one.
+  // needs to see this. Undefined means either never submitted one, or the
+  // read failed — myInviteRequestError distinguishes the two.
   myInviteRequest?: UIInviteRequest;
+  // myInviteRequestError is set when the platform round trip for
+  // myInviteRequest failed for a reason other than "none exists". Must never
+  // be treated as "never requested": the caller could have a request already
+  // pending or approved that this dashboard load just failed to read.
+  myInviteRequestError?: string;
   // inviteRequests/pendingInviteRequestCount are the operator/admin queue
   // (Requests tab): every pending request naming this tenant, or every
   // tenant for an operations-scoped caller. pendingInviteRequestCount is

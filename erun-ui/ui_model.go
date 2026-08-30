@@ -343,9 +343,17 @@ type uiTenantDashboard struct {
 	// MyInviteRequest is the caller's own most recent invite request, set
 	// whenever a bearer minted successfully (PlatformIssuer/PlatformSubject is
 	// set) regardless of whether the identity read itself succeeded — a
-	// not-enrolled caller is exactly who needs to see this. nil means never
-	// submitted one.
+	// not-enrolled caller is exactly who needs to see this. nil means either
+	// never submitted one, or the read itself failed — MyInviteRequestError
+	// distinguishes the two; a nil MyInviteRequest with no
+	// MyInviteRequestError is the genuine "never submitted" case.
 	MyInviteRequest *uiInviteRequest `json:"myInviteRequest,omitempty"`
+	// MyInviteRequestError is set when the platform round trip for
+	// MyInviteRequest failed for a reason other than "none exists" (a
+	// transport fault, a 5xx) — it must never be presented as "never
+	// requested", since the caller could already have a pending or approved
+	// request the dashboard just failed to read.
+	MyInviteRequestError string `json:"myInviteRequestError,omitempty"`
 	// InviteRequests/PendingInviteRequestCount are the operator/admin queue:
 	// every pending request naming this tenant (or, for an operations-scoped
 	// caller, every tenant). PendingInviteRequestCount is unset (rather than

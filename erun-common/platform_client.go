@@ -166,9 +166,12 @@ type PlatformConfigResponse struct {
 	Environments []PlatformEnvironment `json:"environments"`
 	Contexts     []PlatformContext     `json:"contexts"`
 	// InviteRequestRateLimitWindowSeconds is the current per-identity
-	// invite-request submission window (see PlatformRateLimit): the number of
-	// seconds a caller must wait between two POST /v1/invite-requests calls
-	// for the same verified (issuer, subject).
+	// invite-request submission window: the number of seconds a caller must
+	// wait between two POST /v1/invite-requests calls for the same verified
+	// (issuer, subject). Operator-editable only from erun-console (PATCH
+	// /v1/config/invite-request-rate-limit, called directly over RTK Query) --
+	// there is no Go transport for that write, so PlatformClient has no
+	// corresponding method.
 	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds"`
 }
 
@@ -207,14 +210,6 @@ type PlatformInviteRequest struct {
 	MintedInviteExpiresAt *time.Time `json:"mintedInviteExpiresAt,omitempty"`
 	CreatedAt             time.Time  `json:"createdAt"`
 	UpdatedAt             time.Time  `json:"updatedAt"`
-}
-
-// PlatformRateLimit mirrors model.PlatformRateLimit's JSON shape: the
-// platform-wide, operator-editable invite-request submission window.
-type PlatformRateLimit struct {
-	InviteRequestWindowSeconds int       `json:"inviteRequestWindowSeconds"`
-	CreatedAt                  time.Time `json:"createdAt"`
-	UpdatedAt                  time.Time `json:"updatedAt"`
 }
 
 // Platform fetches this instance's own self-describing config. Unauthenticated:
@@ -549,23 +544,6 @@ func (c *PlatformClient) DeclineInviteRequest(ctx context.Context, inviteRequest
 	var request PlatformInviteRequest
 	err := c.do(ctx, http.MethodPost, "/v1/invite-requests/"+url.PathEscape(inviteRequestID)+"/decline", params, true, &request)
 	return request, err
-}
-
-// PlatformSetInviteRequestRateLimitParams sets the platform-wide
-// invite-request submission window. WindowSeconds must be at least 1: the
-// limiter cannot be disabled by setting it to zero.
-type PlatformSetInviteRequestRateLimitParams struct {
-	WindowSeconds int `json:"windowSeconds"`
-}
-
-// SetInviteRequestRateLimit changes the invite-request submission window.
-// Requires an operations-scoped caller (OperationsOnly); takes effect on the
-// very next submission, no redeploy needed, and never discards requests
-// already queued.
-func (c *PlatformClient) SetInviteRequestRateLimit(ctx context.Context, params PlatformSetInviteRequestRateLimitParams) (PlatformRateLimit, error) {
-	var limit PlatformRateLimit
-	err := c.do(ctx, http.MethodPatch, "/v1/config/invite-request-rate-limit", params, true, &limit)
-	return limit, err
 }
 
 // do is the single request path every method above funnels through: build,

@@ -1962,6 +1962,39 @@ func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path s
 	}
 }
 
+// TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault
+// guards against the failure a round trip other than "not found" must not
+// silently collapse into "never submitted one": a caller with an already
+// pending or approved request would be shown "Request an invitation" again.
+func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/whoami":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		case "/v1/invite-requests/mine":
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		case "/v1/config":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.MyInviteRequest != nil {
+		t.Fatalf("expected no invite request on a transport fault, got %+v", dashboard.MyInviteRequest)
+	}
+	if dashboard.MyInviteRequestError == "" {
+		t.Fatal("expected MyInviteRequestError to be set rather than silently nil on a transport fault")
+	}
+}
+
 // TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform is the "red" half
 // of the erun-vs-AWS seam: on a machine configured exactly like the
 // operator's own (only an AWS cloud alias, no erun platform alias at all),

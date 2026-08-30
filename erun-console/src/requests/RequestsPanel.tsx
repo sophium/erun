@@ -28,6 +28,7 @@ import type { InviteRequest } from '../app/api/requestsApi';
 import type { PlatformCapability } from '../app/api/whoamiApi';
 import { useGetWhoamiQuery } from '../app/api/whoamiApi';
 import { capabilityAllows } from '../app/capabilities';
+import { queryErrorMessage } from '../app/queryError';
 import type { RequestActionState, RequestsState } from './controller';
 import { useRequestsController } from './controller';
 import { RateLimitPanel } from './RateLimitPanel';
@@ -410,17 +411,25 @@ interface CapabilityFlags {
   actionsRestricted: boolean;
 }
 
-// capabilityFlags is split out of RequestsPanel purely to keep that
-// component's own branch count under the module's complexity budget --
-// `known` is `whoamiQuery.data !== undefined`, distinct from an empty/denying
-// capability set (see capabilities.ts's own doc on that distinction).
-function capabilityFlags(
-  capabilities: PlatformCapability[] | undefined,
-  known: boolean,
-): CapabilityFlags {
-  const canApprove = known && capabilityAllows(capabilities, 'POST', APPROVE_PATH_TEMPLATE);
-  const canDecline = known && capabilityAllows(capabilities, 'POST', DECLINE_PATH_TEMPLATE);
-  return { canApprove, canDecline, actionsRestricted: known && !canApprove && !canDecline };
+// capabilityFlags mirrors erun-common's PlatformCapabilities.Known()/Allows()
+// contract (see erun-ui's restrictedTenantDashboardRead, the same rule
+// applied to the desktop's own invite-request actions): `known` is whether
+// the capability *set itself* resolved to a real array, never whether the
+// whoami query merely returned some response -- a 200 with `capabilities:
+// null` (the platform reporting it could not resolve a set) is exactly as
+// unknown as a query that is still loading or has errored outright. An
+// unknown set must never render as "you may not do this": that hides a
+// surface the caller can in fact use. It stays attemptable, and the
+// server's own check on the real approve/decline call is what actually
+// refuses it, same as every other capability-gated read/write in the repo.
+function capabilityFlags(capabilities: PlatformCapability[] | undefined): CapabilityFlags {
+  const known = capabilities !== undefined;
+  if (!known) {
+    return { canApprove: true, canDecline: true, actionsRestricted: false };
+  }
+  const canApprove = capabilityAllows(capabilities, 'POST', APPROVE_PATH_TEMPLATE);
+  const canDecline = capabilityAllows(capabilities, 'POST', DECLINE_PATH_TEMPLATE);
+  return { canApprove, canDecline, actionsRestricted: !canApprove && !canDecline };
 }
 
 // RequestDialogs holds the two dialogs RequestsPanel can show, split out
@@ -477,7 +486,6 @@ export function RequestsPanel({
   const whoamiQuery = useGetWhoamiQuery(token);
   const { canApprove, canDecline, actionsRestricted } = capabilityFlags(
     whoamiQuery.data?.capabilities,
-    whoamiQuery.data !== undefined,
   );
   const [pendingDecline, setPendingDecline] = React.useState<InviteRequest | undefined>(undefined);
 
@@ -491,6 +499,13 @@ export function RequestsPanel({
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {whoamiQuery.isError && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not check your permissions for this queue:{' '}
+              {queryErrorMessage(whoamiQuery.error)}. Approve/Decline are still shown below; the
+              platform will confirm on its own if either is genuinely restricted.
+            </p>
+          )}
           {actionsRestricted && (
             <p className="text-sm text-muted-foreground" role="status">
               You do not have permission to issue invitations or decline requests. You can still see

@@ -28,8 +28,16 @@ test('enrolled stops polling permanently', () => {
   assert.equal(nextEnrollmentPollingInterval('enrolled'), 0);
 });
 
-test('an unknown/undefined state is not polled', () => {
+test('no status yet observed (undefined) is not polled', () => {
   assert.equal(nextEnrollmentPollingInterval(undefined), 0);
+});
+
+test('a genuine round-trip failure (unknown) keeps polling rather than going silent', () => {
+  assert.equal(nextEnrollmentPollingInterval('unknown'), TENANT_ENROLLMENT_POLL_INTERVAL_MS);
+});
+
+test('unknown -> enrolled is an approval worth notifying about (a failure that resolved)', () => {
+  assert.equal(enrollmentApproved('unknown', 'enrolled'), true);
 });
 
 test('pending -> enrolled is an approval worth notifying about', () => {

@@ -17,7 +17,9 @@
 // nothing to observe changing on its own); 'pending'/'declined' ARE polled
 // (both can change via an operator action elsewhere); 'enrolled' stops
 // polling for that tenant permanently -- this state changes at most a few
-// times in a tenant's life and then never again.
+// times in a tenant's life and then never again. 'unknown' is also polled: it
+// means the platform round trip itself failed (not "nothing pending"), so the
+// only way to recover is to keep trying rather than going silent forever.
 //
 // There is no backend-supplied interval for this the way GET /v1/config
 // threads other values, and a hard-coded frontend interval has previously
@@ -37,6 +39,7 @@ import {
   TENANT_ENROLLMENT_DECLINED,
   TENANT_ENROLLMENT_ENROLLED,
   TENANT_ENROLLMENT_PENDING,
+  TENANT_ENROLLMENT_UNKNOWN,
   type UITenantPlatformEnrollmentStatus,
 } from '@/types';
 
@@ -52,7 +55,11 @@ import type { AppDispatch } from './store';
 export const TENANT_ENROLLMENT_POLL_INTERVAL_MS = 30_000;
 
 function isNonTerminalEnrollmentState(state: string): boolean {
-  return state === TENANT_ENROLLMENT_PENDING || state === TENANT_ENROLLMENT_DECLINED;
+  return (
+    state === TENANT_ENROLLMENT_PENDING ||
+    state === TENANT_ENROLLMENT_DECLINED ||
+    state === TENANT_ENROLLMENT_UNKNOWN
+  );
 }
 
 // buildInviteAcceptLink mirrors erun-console's InvitesPanel.acceptURL route
@@ -90,9 +97,9 @@ export function nextEnrollmentPollingInterval(state: string | undefined): number
 }
 
 // enrollmentApproved reports whether `previous -> current` is the one
-// transition worth notifying about: leaving a non-terminal state (pending or
-// declined -- a declined request can be retried and later approved) and
-// landing on enrolled.
+// transition worth notifying about: leaving a non-terminal state (pending,
+// declined -- a declined request can be retried and later approved, or
+// unknown -- a prior failed round trip) and landing on enrolled.
 export function enrollmentApproved(previous: string | undefined, current: string): boolean {
   if (previous === undefined || !isNonTerminalEnrollmentState(previous)) {
     return false;

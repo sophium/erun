@@ -209,6 +209,52 @@ describe('RequestsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
   });
 
+  it('keeps Issue invitation/Decline attemptable when whoami reports no capability set at all (null)', async () => {
+    // capabilities: null means the platform could not resolve a set, not
+    // that it resolved to "nothing" -- distinct from the [] case above,
+    // which is a real, known refusal of both actions.
+    mockFetch((req) => {
+      if (req.url.startsWith('/v1/invite-requests')) {
+        return jsonResponse([PENDING_REQUEST]);
+      }
+      if (req.url === '/v1/whoami') {
+        return jsonResponse(whoami(null));
+      }
+      return jsonResponse({}, 404);
+    });
+    renderPanel();
+
+    expect(await screen.findByText('Join acme')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Issue invitation/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/You do not have permission to issue invitations or decline/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reports a whoami failure and still leaves Issue invitation/Decline attemptable', async () => {
+    mockFetch((req) => {
+      if (req.url.startsWith('/v1/invite-requests')) {
+        return jsonResponse([PENDING_REQUEST]);
+      }
+      if (req.url === '/v1/whoami') {
+        return jsonResponse({ message: 'internal error' }, 500);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderPanel();
+
+    expect(await screen.findByText('Join acme')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Could not check your permissions for this queue/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Issue invitation/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/You do not have permission to issue invitations or decline/),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows the rate-limit editor for an OPERATIONS tenant', async () => {
     mockFetch(() => jsonResponse([]));
     renderWithStore(
