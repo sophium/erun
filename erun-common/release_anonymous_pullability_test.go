@@ -160,100 +160,98 @@ func fakeExecutionForImage(imageName, tag, version string) BuildExecutionSpec {
 	}
 }
 
-func TestVerifyModuleReferencedImagesAnonymouslyPullable(t *testing.T) {
-	t.Run("anonymously pullable image passes and is reported", func(t *testing.T) {
-		root := t.TempDir()
-		writeModuleFixture(t, root, "erun-example-webhook")
-		execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-		var logBuf strings.Builder
-		ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+func TestVerifyModuleReferencedImagesAnonymouslyPullablePasses(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFixture(t, root, "erun-example-webhook")
+	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
+	var logBuf strings.Builder
+	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
 
-		probe := func(context.Context, *http.Client, string, string) (bool, error) { return true, nil }
-		if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(logBuf.String(), "Verified anonymously pullable: ghcr.io/sophium/erun-example-webhook:1.2.3") {
-			t.Fatalf("expected a verified-pullable report, got log:\n%s", logBuf.String())
-		}
-	})
+	probe := func(context.Context, *http.Client, string, string) (bool, error) { return true, nil }
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(logBuf.String(), "Verified anonymously pullable: ghcr.io/sophium/erun-example-webhook:1.2.3") {
+		t.Fatalf("expected a verified-pullable report, got log:\n%s", logBuf.String())
+	}
+}
 
-	t.Run("not pullable and not baselined fails the release", func(t *testing.T) {
-		root := t.TempDir()
-		writeModuleFixture(t, root, "erun-example-webhook")
-		execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-		ctx := Context{Logger: NewLogger(0)}
+func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselined(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFixture(t, root, "erun-example-webhook")
+	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
+	ctx := Context{Logger: NewLogger(0)}
 
-		probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
-		err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
-		if err == nil {
-			t.Fatal("expected an error: a fresh, unbaselined gap must fail the release")
-		}
-		if !strings.Contains(err.Error(), "ghcr.io/sophium/erun-example-webhook:1.2.3") {
-			t.Fatalf("error should name the offending image, got: %v", err)
-		}
-	})
+	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
+	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
+	if err == nil {
+		t.Fatal("expected an error: a fresh, unbaselined gap must fail the release")
+	}
+	if !strings.Contains(err.Error(), "ghcr.io/sophium/erun-example-webhook:1.2.3") {
+		t.Fatalf("error should name the offending image, got: %v", err)
+	}
+}
 
-	t.Run("not pullable but baselined passes and is reported", func(t *testing.T) {
-		root := t.TempDir()
-		// erun-dns01-webhook is the real, current anonymousPullabilityBaseline
-		// entry, so this exercises the baseline as it stands today, not a
-		// fixture-only name.
-		writeModuleFixture(t, root, "erun-dns01-webhook")
-		execution := fakeExecutionForImage("erun-dns01-webhook", "ghcr.io/sophium/erun-dns01-webhook:1.0.217", "1.0.217")
-		var logBuf strings.Builder
-		ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *testing.T) {
+	root := t.TempDir()
+	// erun-dns01-webhook is the real, current anonymousPullabilityBaseline
+	// entry, so this exercises the baseline as it stands today, not a
+	// fixture-only name.
+	writeModuleFixture(t, root, "erun-dns01-webhook")
+	execution := fakeExecutionForImage("erun-dns01-webhook", "ghcr.io/sophium/erun-dns01-webhook:1.0.217", "1.0.217")
+	var logBuf strings.Builder
+	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
 
-		probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
-		if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
-			t.Fatalf("a baselined gap must not fail the release: %v", err)
-		}
-		if !strings.Contains(logBuf.String(), "Not anonymously pullable (baselined") {
-			t.Fatalf("expected the baselined gap to be reported, got log:\n%s", logBuf.String())
-		}
-	})
+	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
+		t.Fatalf("a baselined gap must not fail the release: %v", err)
+	}
+	if !strings.Contains(logBuf.String(), "Not anonymously pullable (baselined") {
+		t.Fatalf("expected the baselined gap to be reported, got log:\n%s", logBuf.String())
+	}
+}
 
-	t.Run("dry run never probes the network", func(t *testing.T) {
-		root := t.TempDir()
-		writeModuleFixture(t, root, "erun-example-webhook")
-		execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-		ctx := Context{DryRun: true, Logger: NewLogger(0)}
+func TestVerifyModuleReferencedImagesAnonymouslyPullableSkipsProbeInDryRun(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFixture(t, root, "erun-example-webhook")
+	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
+	ctx := Context{DryRun: true, Logger: NewLogger(0)}
 
-		probe := func(context.Context, *http.Client, string, string) (bool, error) {
-			t.Fatal("dry run must not invoke the probe")
-			return false, nil
-		}
-		if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+	probe := func(context.Context, *http.Client, string, string) (bool, error) {
+		t.Fatal("dry run must not invoke the probe")
+		return false, nil
+	}
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
-	t.Run("a module reference with no matching publish fails", func(t *testing.T) {
-		root := t.TempDir()
-		writeModuleFixture(t, root, "erun-orphaned-webhook")
-		execution := BuildExecutionSpec{}
-		ctx := Context{Logger: NewLogger(0)}
+func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenUnpublished(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFixture(t, root, "erun-orphaned-webhook")
+	execution := BuildExecutionSpec{}
+	ctx := Context{Logger: NewLogger(0)}
 
-		probe := func(context.Context, *http.Client, string, string) (bool, error) {
-			t.Fatal("must not probe an image nothing publishes")
-			return false, nil
-		}
-		err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
-		if err == nil || !strings.Contains(err.Error(), "erun-orphaned-webhook") {
-			t.Fatalf("expected an error naming the unpublished reference, got: %v", err)
-		}
-	})
+	probe := func(context.Context, *http.Client, string, string) (bool, error) {
+		t.Fatal("must not probe an image nothing publishes")
+		return false, nil
+	}
+	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
+	if err == nil || !strings.Contains(err.Error(), "erun-orphaned-webhook") {
+		t.Fatalf("expected an error naming the unpublished reference, got: %v", err)
+	}
+}
 
-	t.Run("no module references any image is a no-op", func(t *testing.T) {
-		root := t.TempDir()
-		ctx := Context{Logger: NewLogger(0)}
-		probe := func(context.Context, *http.Client, string, string) (bool, error) {
-			t.Fatal("must not probe when nothing is referenced")
-			return false, nil
-		}
-		if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, BuildExecutionSpec{}, probe); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
+func TestVerifyModuleReferencedImagesAnonymouslyPullableNoOpWhenNothingReferenced(t *testing.T) {
+	root := t.TempDir()
+	ctx := Context{Logger: NewLogger(0)}
+	probe := func(context.Context, *http.Client, string, string) (bool, error) {
+		t.Fatal("must not probe when nothing is referenced")
+		return false, nil
+	}
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, BuildExecutionSpec{}, probe); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestAnonymousPullabilityBaselineIsCurrent(t *testing.T) {

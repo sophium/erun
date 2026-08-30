@@ -180,31 +180,40 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx Context, projectRoot st
 		if !ok {
 			return fmt.Errorf("a terraform module references image %s but this release does not publish it -- anonymous pullability cannot be asserted for an image nothing publishes", name)
 		}
-		tag := strings.TrimSpace(image.Tag)
-		if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
-			continue
+		if err := verifyImageAnonymouslyPullable(ctx, name, image, probe); err != nil {
+			return err
 		}
-		ctx.Trace("release: anonymous-pullability probing " + tag + " with a fresh, credential-free token")
-		if ctx.DryRun {
-			continue
-		}
-		repoPath := DockerNamespaceFromTag(tag) + "/" + name
-		pullable, probeErr := probe(context.Background(), nil, repoPath, image.Version)
-		if probeErr != nil {
-			return fmt.Errorf("probe anonymous pull of %s: %w", tag, probeErr)
-		}
-		if pullable {
-			ctx.Info("==> Verified anonymously pullable: " + tag)
-			continue
-		}
-		if anonymousPullabilityBaseline[name] {
-			ctx.Info("==> Not anonymously pullable (baselined, see anonymousPullabilityBaseline): " + tag)
-			continue
-		}
-		return fmt.Errorf(
-			"image %s resolves for the publishing credential but not anonymously -- a cluster with no pull secret for it cannot pull this image.\n"+
-				"Either make the ghcr.io/sophium/%s package public, or add %q to anonymousPullabilityBaseline in release_anonymous_pullability.go with a comment explaining why",
-			tag, name, name)
 	}
 	return nil
+}
+
+// verifyImageAnonymouslyPullable is the per-image half of
+// verifyModuleReferencedImagesAnonymouslyPullable: probe name's tag with no
+// credential at all, then apply anonymousPullabilityBaseline to the result.
+func verifyImageAnonymouslyPullable(ctx Context, name string, image DockerImageReference, probe anonymousPullProbeFunc) error {
+	tag := strings.TrimSpace(image.Tag)
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return nil
+	}
+	ctx.Trace("release: anonymous-pullability probing " + tag + " with a fresh, credential-free token")
+	if ctx.DryRun {
+		return nil
+	}
+	repoPath := DockerNamespaceFromTag(tag) + "/" + name
+	pullable, probeErr := probe(context.Background(), nil, repoPath, image.Version)
+	if probeErr != nil {
+		return fmt.Errorf("probe anonymous pull of %s: %w", tag, probeErr)
+	}
+	if pullable {
+		ctx.Info("==> Verified anonymously pullable: " + tag)
+		return nil
+	}
+	if anonymousPullabilityBaseline[name] {
+		ctx.Info("==> Not anonymously pullable (baselined, see anonymousPullabilityBaseline): " + tag)
+		return nil
+	}
+	return fmt.Errorf(
+		"image %s resolves for the publishing credential but not anonymously -- a cluster with no pull secret for it cannot pull this image.\n"+
+			"Either make the ghcr.io/sophium/%s package public, or add %q to anonymousPullabilityBaseline in release_anonymous_pullability.go with a comment explaining why",
+		tag, name, name)
 }
