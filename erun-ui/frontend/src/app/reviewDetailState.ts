@@ -2,7 +2,11 @@
 // file crossed eslint's 500-line max-lines cap. Nothing here changes shape;
 // state.ts re-exports the whole module so every existing `from './state'`
 // import keeps working.
-import { INVITE_REQUEST_KIND_JOIN_TENANT, type UIReviewDetail, type UITenantDashboard } from '@/types';
+import {
+  INVITE_REQUEST_KIND_JOIN_TENANT,
+  type UIReviewDetail,
+  type UITenantDashboard,
+} from '@/types';
 
 import { defaultRegistrationState, type RegistrationState } from './tenantRegistrationState';
 

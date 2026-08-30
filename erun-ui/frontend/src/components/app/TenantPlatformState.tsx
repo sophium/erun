@@ -1,11 +1,22 @@
-import { Button, EmptyState, FieldLabel, Input } from 'erun-kit';
-import { Copy, KeyRound, Link2, LoaderCircle, ShieldAlert, UserPlus, Users } from 'lucide-react';
+import { Button, EmptyState, FieldLabel, Input, StatusBadge } from 'erun-kit';
+import {
+  Copy,
+  KeyRound,
+  Link2,
+  LoaderCircle,
+  Send,
+  ShieldAlert,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import { showNotification } from '@/app/notificationThunks';
+import { tenantDashboardEnvironmentName } from '@/app/tenantDashboardPanels';
 import { chooseTenantPlatformAlias, loadTenantDashboard } from '@/app/tenantDialogThunks';
+import { openRequestInvitationDialog } from '@/app/tenantInviteRequestThunks';
 import {
   connectTenantPlatform,
   enrollTenantPlatformUser,
@@ -13,6 +24,9 @@ import {
   setEnrollUsernameDraft,
 } from '@/app/tenantPlatformConnectThunks';
 import {
+  INVITE_REQUEST_KIND_CREATE_TENANT,
+  INVITE_REQUEST_STATUS_DECLINED,
+  INVITE_REQUEST_STATUS_PENDING,
   TENANT_PLATFORM_STATE_CHOOSE_ALIAS,
   TENANT_PLATFORM_STATE_NO_PERMISSION,
   TENANT_PLATFORM_STATE_NOT_CONNECTED,
@@ -24,6 +38,7 @@ import {
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 import { InlineAlert } from './InlineAlert';
 import { SignInAction } from './PlatformSignInAlert';
+import { RequestInvitationDialog } from './RequestInvitationDialog';
 
 // TenantPlatformState.tsx renders the tenant dashboard's four/five platform-
 // readiness states: not-connected, choose-alias, not-signed-in,
@@ -187,6 +202,10 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
   const usernameDraft = useAppSelector((state) => state.tenantDashboard.enrollUsernameDraft);
   const enrolling = useAppSelector((state) => state.tenantDashboard.enrolling);
   const enrollError = useAppSelector((state) => state.tenantDashboard.enrollError);
+  const tenant = useAppSelector((state) =>
+    state.tenants.tenants.find((candidate) => candidate.name === data.tenant),
+  );
+  const localEnvironmentName = tenantDashboardEnvironmentName(tenant, data.environment);
   const issuer = data.platformIssuer ?? '';
   const subject = data.platformSubject ?? '';
   const command = `erun platform user enroll --username ${usernameDraft.trim() || '<username>'} --issuer ${issuer} --subject ${subject}`;
@@ -198,8 +217,8 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
         <div className="grid gap-2 text-left">
           <p>
             Signing in again will not help — the platform does not recognize this identity for this
-            tenant. An administrator can enroll it, or you can try if you already hold
-            user-management access.
+            tenant. An administrator can enroll it, you can try if you already hold user-management
+            access, or you can ask an operator for an invitation below.
           </p>
           <PlatformContactLine data={data} />
         </div>
@@ -232,6 +251,7 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
             </Button>
             {enrollError && <InlineAlert>{enrollError}</InlineAlert>}
           </div>
+          <RequestInvitationAction data={data} />
           <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3 text-left">
             <div className="flex items-baseline justify-between gap-2">
               <FieldLabel htmlFor="enroll-admin-command">Or ask an administrator to run</FieldLabel>
@@ -250,9 +270,82 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
               {command}
             </code>
           </div>
+          <RequestInvitationDialog data={data} localEnvironmentName={localEnvironmentName} />
         </div>
       }
     />
+  );
+}
+
+// RequestInvitationAction is NotEnrolledState's second option (issue #1682
+// §2): its own rendering distinguishes none-yet (offer the action) from
+// pending/declined (show status — no cancel/withdraw exists server-side, so
+// none is offered) — never silently reusing "Try to enroll myself"'s button
+// for a fundamentally different request.
+function RequestInvitationAction({ data }: { data: UITenantDashboard }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const request = data.myInviteRequest;
+  if (!request) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => {
+          dispatch(openRequestInvitationDialog());
+        }}
+      >
+        <Send aria-hidden="true" />
+        Request an invitation
+      </Button>
+    );
+  }
+  if (request.status === INVITE_REQUEST_STATUS_PENDING) {
+    return (
+      <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3">
+        <div className="flex items-center gap-2">
+          <StatusBadge tone="in-progress" label="Pending" />
+          <span className="text-[13px] text-muted-foreground">
+            Your request to{' '}
+            {request.kind === INVITE_REQUEST_KIND_CREATE_TENANT ? 'register' : 'join'}{' '}
+            {request.tenantName} is waiting on an operator.
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (request.status === INVITE_REQUEST_STATUS_DECLINED) {
+    return (
+      <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3">
+        <div className="flex items-center gap-2">
+          <StatusBadge tone="destructive" label="Declined" />
+        </div>
+        <p className="text-[13px] text-muted-foreground">
+          {request.declineReason ?? 'No reason was given.'}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="justify-self-start"
+          onClick={() => {
+            dispatch(openRequestInvitationDialog());
+          }}
+        >
+          <Send aria-hidden="true" />
+          Request again
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3">
+      <div className="flex items-center gap-2">
+        <StatusBadge tone="success" label="Approved" />
+        <span className="text-[13px] text-muted-foreground">
+          Refresh the dashboard to finish signing in.
+        </span>
+      </div>
+    </div>
   );
 }
 
