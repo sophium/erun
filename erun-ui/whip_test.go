@@ -45,7 +45,7 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return false
 		},
-		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (eruncommon.WhipResult, error) {
 			called = true
 			return eruncommon.WhipResult{}, nil
 		},
@@ -100,7 +100,7 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, endpoint, _ string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (eruncommon.WhipResult, error) {
 			gotEndpoint = endpoint
 			return eruncommon.WhipResult{
 				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
@@ -133,7 +133,7 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (eruncommon.WhipResult, error) {
 			return eruncommon.WhipResult{
 				Decision: eruncommon.WhipDecisionNudge,
 				Reason:   eruncommon.WhipReasonNudge,
@@ -151,24 +151,59 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 	}
 }
 
-// TestWhipOneEnvironmentNowSurfacesACallFailureAsNotAlive covers the MCP call
-// itself failing (e.g. an old runtime image without the "whip" tool): the
-// environment is reported not-alive with the failure attached, rather than
-// the report silently omitting this target.
-func TestWhipOneEnvironmentNowSurfacesACallFailureAsNotAlive(t *testing.T) {
+// TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive covers the
+// MCP call itself failing (e.g. an old runtime image without the "whip" tool,
+// or -- since the fix below now forwards a real target -- a tenant/
+// environment mismatch the pod's own resolveLocalTarget refused): the
+// environment must be reported as a genuine failure, never folded into
+// WhipReasonNotAlive. The whip tool itself already reports a dead session as
+// a *successful* result carrying that reason, so an error at this call site
+// can only mean the call itself did not work -- erun#1709's "a reason that
+// contradicts the error" defect (a not-alive skip citing an unrelated
+// call-level error, e.g. a missing target) is exactly what this guards.
+func TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: whipTestStore(t),
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (eruncommon.WhipResult, error) {
 			return eruncommon.WhipResult{}, errors.New("tool not found")
 		},
 	})
 
 	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
-	if result.Reason != eruncommon.WhipReasonNotAlive || result.Error == "" {
-		t.Fatalf("expected a not-alive result naming the failure, got %+v", result)
+	if result.Reason != eruncommon.WhipReasonCallFailed || result.Error == "" {
+		t.Fatalf("expected a call-failed result naming the failure, got %+v", result)
+	}
+	if result.Reason == eruncommon.WhipReasonNotAlive {
+		t.Fatal("a call-level failure must never be reported as not-alive")
+	}
+}
+
+// TestWhipOneEnvironmentNowForwardsTheResolvedTarget is the plumbing
+// regression test for erun#1709: the desktop used to call the "whip" MCP tool
+// with only {"preview": false}, relying entirely on the pod defaulting to its
+// own bound context. whipOneEnvironmentNow already resolved tenant/environment
+// to reach this edge in the first place, so it must restate them in the call
+// -- the stronger assertion that turns a stale edge pointed at the wrong
+// environment into a named mismatch instead of a silent act on the wrong one.
+func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
+	var gotTenant, gotEnvironment string
+	app := NewApp(erunUIDeps{
+		store: whipTestStore(t),
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
+		whipEnvironment: func(_ context.Context, tenant, environment, _, _ string) (eruncommon.WhipResult, error) {
+			gotTenant, gotEnvironment = tenant, environment
+			return eruncommon.WhipResult{Decision: eruncommon.WhipDecisionNudge, Pushed: true}, nil
+		},
+	})
+
+	app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
+	if gotTenant != "erun" || gotEnvironment != "ux" {
+		t.Fatalf("expected the resolved target to be forwarded, got tenant=%q environment=%q", gotTenant, gotEnvironment)
 	}
 }
 
@@ -185,7 +220,7 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (eruncommon.WhipResult, error) {
 			return eruncommon.WhipResult{
 				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
 				Decision:  eruncommon.WhipDecisionNudge,
@@ -242,7 +277,7 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (eruncommon.WhipResult, error) {
 			return eruncommon.WhipResult{
 				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
 				Decision:  eruncommon.WhipDecisionNudge,
@@ -282,7 +317,7 @@ func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, endpoint, _ string) (eruncommon.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (eruncommon.WhipResult, error) {
 			pushedEndpoints = append(pushedEndpoints, endpoint)
 			return eruncommon.WhipResult{Decision: eruncommon.WhipDecisionNudge, Pushed: true}, nil
 		},
@@ -443,5 +478,15 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 	})
 	if failedPush.Outcome != "failed" || failedPush.Error == "" {
 		t.Fatalf("got %+v, want a decided-but-failed push reported failed with its error", failedPush)
+	}
+
+	failedCall := whipResultToUI(eruncommon.WhipResult{
+		Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  eruncommon.WhipDecisionNone,
+		Reason:    eruncommon.WhipReasonCallFailed,
+		Error:     "tenant/environment not resolved",
+	})
+	if failedCall.Outcome != "failed" || failedCall.Error == "" {
+		t.Fatalf("got %+v, want a call failure reported failed with its error, never folded into skipped", failedCall)
 	}
 }

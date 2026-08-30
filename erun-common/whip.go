@@ -71,6 +71,14 @@ const (
 	WhipReasonAlreadyCapped WhipReason = "already-capped"
 	WhipReasonCapCrossed    WhipReason = "cap-crossed"
 	WhipReasonNudge         WhipReason = "nudge"
+	// WhipReasonCallFailed marks a whip tool call that was actually attempted
+	// against a reachable edge and failed there (a target-resolution refusal, a
+	// transport error, a malformed response) -- never the tool reporting a dead
+	// session, which comes back as WhipReasonNotAlive in a successful result.
+	// Callers must not fold this into WhipReasonNotAlive: "no live session to
+	// push" and "the call itself failed" describe different problems and call
+	// for different operator action.
+	WhipReasonCallFailed WhipReason = "call-failed"
 )
 
 // DefaultWhipMessage restates the pacing contract verbatim, plus the one

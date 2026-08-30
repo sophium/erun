@@ -150,21 +150,41 @@ func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveO
 		notAlive.Error = err.Error()
 		return notAlive
 	}
-	commandCtx.TraceCommand("", "mcp", "tools/call", target.endpoint, "whip", fmt.Sprintf("preview=%v", commandCtx.DryRun))
+	// Restate the tenant/environment this host already resolved rather than
+	// leaving the tool to infer them from the server's own bound context: it is
+	// the stronger assertion the issue this fixes asked for, and it is what lets
+	// a stale edge pointed at the wrong environment surface as a named mismatch
+	// instead of a silent act on the wrong one (resolveLocalTarget,
+	// erun-mcp/runtime.go).
+	arguments := map[string]any{"preview": commandCtx.DryRun, "tenant": target.tenant, "environment": target.environment}
+	commandCtx.TraceCommand("", "mcp", "tools/call", target.endpoint, "whip", compactMCPArguments(arguments))
 
-	result, err := callMCPToolWithReattach(ctx, commandCtx, target, "whip", map[string]any{"preview": commandCtx.DryRun}, false)
+	// A failed attempt (network error, target refusal, malformed response) is
+	// reported as failed(), not folded into notAlive: the whip tool itself
+	// already reports a dead session as a *successful* result carrying
+	// WhipReasonNotAlive, so an error here never means "no live session" --
+	// it means the call itself did not work, which is a different problem
+	// asking for different operator action (root AGENTS.md's "Smooth,
+	// Seamless, No Dead Ends" -- distinguish causes before writing copy).
+	failed := func(detail string) common.WhipResult {
+		return common.WhipResult{
+			Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  common.WhipDecisionNone,
+			Reason:    common.WhipReasonCallFailed,
+			Error:     detail,
+		}
+	}
+
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
 	if err != nil {
-		notAlive.Error = err.Error()
-		return notAlive
+		return failed(err.Error())
 	}
 	var decoded common.WhipResult
 	if len(result.Structured) == 0 {
-		notAlive.Error = fmt.Sprintf("%s/%s returned no result for whip", tenant, environment)
-		return notAlive
+		return failed(fmt.Sprintf("%s/%s returned no result for whip", tenant, environment))
 	}
 	if err := json.Unmarshal(result.Structured, &decoded); err != nil {
-		notAlive.Error = fmt.Sprintf("decode the whip result from %s/%s: %v", tenant, environment, err)
-		return notAlive
+		return failed(fmt.Sprintf("decode the whip result from %s/%s: %v", tenant, environment, err))
 	}
 	return decoded
 }
@@ -204,6 +224,9 @@ func whipResultValue(result common.WhipResult) string {
 	case common.WhipDecisionCap:
 		return "capped: stopped nudging after repeated silence"
 	default:
+		if result.Reason == common.WhipReasonCallFailed {
+			return "call failed: " + result.Error
+		}
 		value := "skipped — " + string(result.Reason)
 		if result.Error != "" {
 			value += ": " + result.Error

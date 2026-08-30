@@ -149,12 +149,19 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 		}
 	}
 
-	decoded, err := a.deps.whipEnvironment(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
+	decoded, err := a.deps.whipEnvironment(ctx, tenant, environment, mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
 	if err != nil {
+		// A failed call is not the same claim as WhipReasonNotAlive: the whip
+		// tool itself already reports a dead session as a *successful* result
+		// carrying that reason, so an error here always means the call itself
+		// did not work (a target mismatch, a stale runtime image, a transport
+		// failure) -- a different problem asking for different operator action
+		// than "go start the session" (root AGENTS.md's "Smooth, Seamless, No
+		// Dead Ends" -- distinguish causes before writing copy).
 		return eruncommon.WhipResult{
 			Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
 			Decision:  eruncommon.WhipDecisionNone,
-			Reason:    eruncommon.WhipReasonNotAlive,
+			Reason:    eruncommon.WhipReasonCallFailed,
 			Error:     err.Error(),
 		}
 	}
