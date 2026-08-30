@@ -124,6 +124,79 @@ func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
 	}
 }
 
+// TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping
+// proves the fix for erun#1605's first defect: bootstrapping against a token
+// that carries the shipped Zitadel org claim must register the issuer
+// org-scoped (issuers.org_field_key set), with the bootstrap caller's own org
+// as the first tenant_issuers mapping's org_field_value — not single-tenant,
+// which would permanently block every later tenant on that issuer.
+func TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+
+	const issuer = "https://auth.erunpaas.example/shared"
+	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
+	const callerOrg = "386994597030592700"
+
+	tenant, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  issuer,
+		Subject: "operator-subject",
+		Raw:     map[string]any{orgClaimKey: callerOrg},
+	})
+	mustNoErr(t, err, "bootstrap with a shared-issuer org claim")
+
+	var orgFieldKey sql.NullString
+	mustNoErr(t, db.QueryRow(`SELECT org_field_key FROM issuers WHERE issuer = $1`, issuer).Scan(&orgFieldKey), "read issuers row")
+	if !orgFieldKey.Valid || orgFieldKey.String != orgClaimKey {
+		t.Fatalf("issuers.org_field_key = %+v, want %q (org-scoped, not single-tenant)", orgFieldKey, orgClaimKey)
+	}
+
+	var orgFieldValue sql.NullString
+	mustNoErr(t, db.QueryRow(
+		`SELECT org_field_value FROM tenant_issuers WHERE tenant_id = $1 AND issuer = $2`,
+		tenant.TenantID, issuer,
+	).Scan(&orgFieldValue), "read tenant_issuers row")
+	if !orgFieldValue.Valid || orgFieldValue.String != callerOrg {
+		t.Fatalf("tenant_issuers.org_field_value = %+v, want the bootstrap caller's own org %q as the first mapping", orgFieldValue, callerOrg)
+	}
+}
+
+// TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict proves
+// the fix for erun#1605's compounding case: once bootstrap has registered a
+// shared issuer org-scoped (previous test), a second tenant created on that
+// same issuer with a different org value must succeed — the 409 the issue
+// reported no longer fires for this legitimate case.
+func TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+
+	const issuer = "https://auth.erunpaas.example/shared-second"
+	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
+
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  issuer,
+		Subject: "first-operator-subject",
+		Raw:     map[string]any{orgClaimKey: "111111111111111111"},
+	})
+	mustNoErr(t, err, "bootstrap the first (platform) tenant on the shared issuer")
+
+	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	ctx := security.WithContext(context.Background(), security.Context{TenantType: string(model.TenantTypeOperations)})
+	second, err := tenants.Create(ctx, CreateTenantParams{
+		Name:          "second-org-tenant",
+		Type:          model.TenantTypeCompany,
+		Issuer:        issuer,
+		OrgFieldKey:   orgClaimKey,
+		OrgFieldValue: "222222222222222222",
+	})
+	mustNoErr(t, err, "create a second tenant on the shared issuer with a different org value")
+	if second.TenantID == "" {
+		t.Fatal("expected the second tenant to be created")
+	}
+}
+
 func TestBootstrapFirstIdentityFallsBackWhenERUNTenantAbsent(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	repo := NewIdentityRepository(db, DialectPostgres, "")

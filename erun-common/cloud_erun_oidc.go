@@ -48,6 +48,16 @@ type ERunTokens struct {
 // CLI/agent session needs to outlive one access token's short lifetime.
 const erunOAuthScope = "openid offline_access"
 
+// erunOrgClaimScope asks the shipped Zitadel IdP to include the org
+// (resourceowner) claim erun's tenant resolution reads for a shared,
+// org-scoped issuer. Requested by default on every erun login so a token
+// actually carries the discriminator, rather than requiring an operator to
+// know to pass --scope by hand. A dedicated/BYO issuer (the common case) has
+// never heard of this scope; erunCloudProviderLogin retries once without it
+// when the issuer refuses the request, so login still succeeds exactly as it
+// did before this default was added.
+const erunOrgClaimScope = "urn:zitadel:iam:user:resourceowner"
+
 // erunLoginScope appends any operator-requested scopes to the baseline. A
 // provider's reserved scopes are frequently absent from its discovery
 // document's scopes_supported (Zitadel's urn:zitadel:* family is), so there is
@@ -76,7 +86,18 @@ var (
 	errERunSlowDown             = errors.New("slow_down")
 	errERunExpiredToken         = errors.New("expired_token")
 	errERunAccessDenied         = errors.New("access_denied")
+	errERunInvalidScope         = errors.New("invalid_scope")
 )
+
+// isERunInvalidScopeError reports whether a login attempt failed because the
+// issuer rejected a requested scope. The device/token-endpoint path surfaces
+// this through oauthTokenError's errERunInvalidScope sentinel; the
+// Authorization Code + PKCE path instead learns it from the redirect's own
+// error query parameter (erunCallbackHandler), which is a plain wrapped
+// string rather than that sentinel.
+func isERunInvalidScopeError(err error) bool {
+	return err != nil && (errors.Is(err, errERunInvalidScope) || strings.Contains(err.Error(), "invalid_scope"))
+}
 
 // defaultFetchPlatformInfo delegates to PlatformClient — the same
 // unauthenticated GET /v1/platform call a caller makes once it has a
@@ -425,6 +446,8 @@ func oauthTokenError(status int, body []byte) error {
 		return errERunExpiredToken
 	case "access_denied":
 		return errERunAccessDenied
+	case "invalid_scope":
+		return errERunInvalidScope
 	}
 	message := strings.TrimSpace(payload.ErrorDescription)
 	if message == "" {

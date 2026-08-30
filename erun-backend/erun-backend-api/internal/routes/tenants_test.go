@@ -132,6 +132,13 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	}
 }
 
+// TestCreateTenantDuplicateIssuerReturnsConflict proves the erun#1605 fix for
+// the 409's remedy text: retrying this same create call with
+// --org-field-key/--org-field-value can never work (ON CONFLICT DO NOTHING
+// leaves the existing issuer row's org_field_key untouched), so the message
+// must instead point at the operations-only PATCH /v1/tenant-issuers
+// conversion that actually rewrites it and backfills the existing mapping —
+// not repeat the advice the issue reported as a dead end.
 func TestCreateTenantDuplicateIssuerReturnsConflict(t *testing.T) {
 	tenants := &stubTenantRepository{err: repository.ErrConflict}
 	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations), `{
@@ -145,6 +152,9 @@ func TestCreateTenantDuplicateIssuerReturnsConflict(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte("https://idp.example")) {
 		t.Fatalf("expected the conflict message to name the issuer, got %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("PATCH /v1/tenant-issuers")) {
+		t.Fatalf("expected the conflict message to name the conversion endpoint that actually works, got %s", rec.Body.String())
 	}
 }
 

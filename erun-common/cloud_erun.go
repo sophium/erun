@@ -138,12 +138,20 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 		return CloudProviderStatus{}, err
 	}
 	hasDeviceEndpoint := strings.TrimSpace(discovery.DeviceAuthorizationEndpoint) != ""
-	scope := erunLoginScope(extraScopes)
+	// The org-claim scope is requested by default so a shared, org-scoped
+	// issuer's tokens carry the discriminator erun's tenant resolution reads.
+	// fallbackScope is what acquireERunLoginTokens retries with when an
+	// issuer that has never heard of it (a dedicated/BYO IdP, the common
+	// case) refuses the request — login still succeeds exactly as it did
+	// before this default was added, instead of breaking on an unrecognized
+	// scope.
+	scope := erunLoginScope(append([]string{erunOrgClaimScope}, extraScopes...))
+	fallbackScope := erunLoginScope(extraScopes)
 	if scope != erunOAuthScope {
 		ctx.Trace("cloud login erun: requesting scope " + scope)
 	}
 
-	tokens, err := acquireERunLoginTokens(ctx, discovery, provider.ERun.ClientID, scope, flow, hasDeviceEndpoint, deps)
+	tokens, err := acquireERunLoginTokens(ctx, discovery, provider.ERun.ClientID, scope, fallbackScope, flow, hasDeviceEndpoint, deps)
 	if err != nil {
 		return CloudProviderStatus{}, err
 	}
@@ -162,27 +170,46 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 // redirect reuses the browser session that same operator may already hold.
 //
 // Split out of erunCloudProviderLogin to keep that function under the cyclop
-// threshold; the selection and its ordering are unchanged.
-func acquireERunLoginTokens(ctx Context, discovery OIDCDiscovery, clientID, scope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
+// threshold; the selection and its ordering are unchanged. Each flow attempt
+// is wrapped by runERunLoginAttempt so a scope the issuer refuses is retried
+// once, on the same flow, with fallbackScope — before falling back to a
+// different flow at all, since a different flow against the same issuer would
+// likely refuse the same scope for the same reason.
+func acquireERunLoginTokens(ctx Context, discovery OIDCDiscovery, clientID, scope, fallbackScope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
+	device := func(s string) (ERunTokens, error) { return erunDeviceFlowLogin(ctx, discovery, clientID, s, deps) }
+	authCode := func(s string) (ERunTokens, error) { return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, s) }
+
 	switch {
 	case flow == ERunLoginFlowAuthCode:
 		ctx.Trace("cloud login erun: authorization code + PKCE requested explicitly")
-		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+		return runERunLoginAttempt(ctx, scope, fallbackScope, authCode)
 	case flow == ERunLoginFlowDevice:
 		if !hasDeviceEndpoint {
 			return ERunTokens{}, fmt.Errorf("issuer %s does not advertise a device authorization endpoint; retry with --flow %s", discovery.Issuer, ERunLoginFlowAuthCode)
 		}
-		return erunDeviceFlowLogin(ctx, discovery, clientID, scope, deps)
+		return runERunLoginAttempt(ctx, scope, fallbackScope, device)
 	case hasDeviceEndpoint:
-		tokens, err := erunDeviceFlowLogin(ctx, discovery, clientID, scope, deps)
+		tokens, err := runERunLoginAttempt(ctx, scope, fallbackScope, device)
 		if err == nil {
 			return tokens, nil
 		}
 		ctx.Trace("cloud login erun: device flow did not complete (" + err.Error() + "); falling back to authorization code + PKCE")
-		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+		return runERunLoginAttempt(ctx, scope, fallbackScope, authCode)
 	default:
-		return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, scope)
+		return runERunLoginAttempt(ctx, scope, fallbackScope, authCode)
 	}
+}
+
+// runERunLoginAttempt runs run(scope), retrying once with fallbackScope when
+// the issuer's refusal is specifically an invalid_scope response — never for
+// any other failure, which is returned to the caller unchanged.
+func runERunLoginAttempt(ctx Context, scope, fallbackScope string, run func(string) (ERunTokens, error)) (ERunTokens, error) {
+	tokens, err := run(scope)
+	if err == nil || scope == fallbackScope || !isERunInvalidScopeError(err) {
+		return tokens, err
+	}
+	ctx.Trace("cloud login erun: issuer rejected scope " + scope + "; retrying with " + fallbackScope)
+	return run(fallbackScope)
 }
 
 // persistERunLoginTokens saves a fresh refresh token (when the grant returned
