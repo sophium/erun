@@ -96,17 +96,26 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 // would renew a claim the same holder id already has, in which case the
 // operator-presence gate does not apply. A best-effort read: if it cannot
 // tell, the take proceeds to the gate rather than skipping it.
+//
+// params.ID is still the caller's raw, unsanitized input at this point — the
+// store only sanitizes it inside TakeEnvironmentActivityLease, which has not
+// run yet — so it is resolved through the same normalisation the store uses
+// before comparing against the stored, already-sanitized lease.ID. Comparing
+// the raw value directly is how erun#1652 happened: a lease id needing
+// sanitisation (a space, a slash, a colon) never matched its stored form, so
+// every renewal misread as a fresh claim.
 func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params eruncommon.TakeEnvironmentActivityLeaseParams) bool {
-	scope := params.Scope
-	if strings.TrimSpace(scope) == "" {
-		scope = "worktree"
+	id, err := eruncommon.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
+	if err != nil {
+		return false
 	}
+	scope := eruncommon.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
 	held, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return false
 	}
 	for _, lease := range held {
-		if lease.Exclusive && lease.Scope == scope && lease.ID == params.ID {
+		if lease.Exclusive && lease.Scope == scope && lease.ID == id {
 			return true
 		}
 	}

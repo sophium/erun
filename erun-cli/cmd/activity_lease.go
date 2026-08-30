@@ -120,10 +120,7 @@ func takeLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenR
 	}
 	if commandCtx.DryRun {
 		if params.Exclusive {
-			scope := params.Scope
-			if strings.TrimSpace(scope) == "" {
-				scope = "worktree"
-			}
+			scope := common.NormalizeExclusiveEnvironmentActivityLeaseScope(params.Scope)
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name, "--exclusive", "--scope", scope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-take", params.Tenant, params.Environment, params.Name)
@@ -187,10 +184,7 @@ func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen Op
 	}
 	if commandCtx.DryRun {
 		if exclusive {
-			resolvedScope := scope
-			if strings.TrimSpace(resolvedScope) == "" {
-				resolvedScope = "worktree"
-			}
+			resolvedScope := common.NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id, "--exclusive", "--scope", resolvedScope)
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
