@@ -12,9 +12,11 @@
   block is configured, or must be set explicitly via console.externalDomain.
 
   apex/www redirect: platform.baseDomain and "www.<baseDomain>" otherwise
-  resolve to nothing — only the console host is served. When a base
-  domain is known, this chart also renders a second Ingress for the apex and
-  www hosts carrying a Traefik redirect Middleware to the canonical console
+  resolve to nothing — only the console host is served. When an apex host is
+  known (platform.baseDomain, or console.apexHost for a tenant with no
+  platform-wide domain but a specific apex to redirect), this chart also
+  renders a second Ingress for the apex and www hosts carrying a Traefik
+  redirect Middleware to the canonical console
   origin, so a visitor who types the bare domain lands on the console instead
   of a dead end, while sign-in (Authorization Code + PKCE) still has exactly
   one origin. The redirect target is platform.consoleUrl when configured
@@ -22,9 +24,10 @@
   externalDomain — never a literal. console.apexRedirectEnabled overrides the
   default for a platform whose apex is used for something else.
 
-  An unset platform.baseDomain is not a misconfiguration by itself — most
-  deploys (local, dev, any tenant with no public apex) never set it and never
-  want the redirect — so this can't fail loudly the way the required host
+  An unresolved apex host is not a misconfiguration by itself — most
+  deploys (local, dev, any tenant with no public apex) never set
+  platform.baseDomain or console.apexHost and never want the redirect —
+  so this can't fail loudly the way the required host
   checks below do without breaking every one of them. Instead, the resolved
   on/off decision and its reason always render as a ConfigMap (below), so
   whoever inspects the release (kubectl, helm get manifest, or a --dry-run)
@@ -49,17 +52,23 @@
 {{- if hasKey $console "tlsSecretName" -}}
 {{- $tlsSecretName = $console.tlsSecretName -}}
 {{- end -}}
+{{- /* Gate on the resolved apex host, not platform.baseDomain alone: an
+       operator who sets console.apexHost without platform.baseDomain (e.g.
+       a tenant with no platform-wide domain but a specific apex to redirect)
+       has clearly configured the feature, and gating on baseDomain alone
+       both left it off and made the status ConfigMap's "not configured"
+       reason lie about a host that was, in fact, configured. */ -}}
+{{- $apexHost := default $baseDomain $console.apexHost -}}
 {{- /* hasKey rather than `default`: an operator with a marketing site on the
        apex must be able to set apexRedirectEnabled=false even though
        baseDomain is set (default() would otherwise treat "false" fine, but
        keeping the same hasKey idiom as tlsSecretName/adminPasswordChangeRequired
        above avoids relying on default()'s "" handling here too). */ -}}
-{{- $apexRedirectEnabled := ne $baseDomain "" -}}
+{{- $apexRedirectEnabled := ne $apexHost "" -}}
 {{- $apexRedirectExplicit := hasKey $console "apexRedirectEnabled" -}}
 {{- if $apexRedirectExplicit -}}
 {{- $apexRedirectEnabled = $console.apexRedirectEnabled -}}
 {{- end -}}
-{{- $apexHost := default $baseDomain $console.apexHost -}}
 {{- $wwwHost := default (ternary (printf "www.%s" $apexHost) "" (ne $apexHost "")) $console.wwwHost -}}
 {{- if $apexRedirectEnabled -}}
 {{- $apexHost = required "erun-console: console.apexRedirectEnabled is true but no apex host could be resolved — set platform.baseDomain, or console.apexHost, or console.apexRedirectEnabled=false" $apexHost -}}
