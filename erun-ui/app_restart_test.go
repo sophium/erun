@@ -70,6 +70,17 @@ func readRestoreState(t *testing.T, dir, orchestratorID string) orchestratorRest
 	return state
 }
 
+// noticeText joins every notice's text with a space, so a test that only cares
+// whether some notice named a given substring can keep asserting on one
+// string rather than searching a slice by hand.
+func noticeText(notices []orchestratorNotice) string {
+	texts := make([]string, 0, len(notices))
+	for _, notice := range notices {
+		texts = append(texts, notice.Text)
+	}
+	return strings.Join(texts, " ")
+}
+
 // stagedRestoreIDs lists the orchestrators with a hand-off still on disk, so a
 // test can assert that consuming one did not silently take another with it.
 func stagedRestoreIDs(t *testing.T, dir string) []string {
@@ -166,7 +177,7 @@ func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
 	if target.OrchestratorID != id || target.ConversationID != state.ConversationID {
 		t.Fatalf("expected the recorded conversation to be resumed, got %+v", target)
 	}
-	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || target.Notice != "" {
+	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || noticeText(target.Notices) != "" {
 		t.Fatalf("expected the task to be delivered with no notice, got %+v", target)
 	}
 	// The resume prompt has to name the note it means: the working directory is
@@ -297,10 +308,10 @@ func TestTheHandOffThatIsNotReopenedIsReported(t *testing.T) {
 		t.Fatalf("expected %s's own conversation to be resumed, got %+v", delivered, target)
 	}
 	assertNamesOwnNote(t, "the resume prompt", delivered, target.ResumePrompt)
-	if !strings.Contains(target.Notice, notReopened) {
-		t.Fatalf("expected the notice to name %s, got %q", notReopened, target.Notice)
+	if !strings.Contains(noticeText(target.Notices), notReopened) {
+		t.Fatalf("expected the notice to name %s, got %q", notReopened, noticeText(target.Notices))
 	}
-	assertNamesOwnNote(t, "the notice", notReopened, target.Notice)
+	assertNamesOwnNote(t, "the notice", notReopened, noticeText(target.Notices))
 	assertNoHandOffsLeftStaged(t, restoreDir)
 }
 
@@ -410,13 +421,71 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	if target.ConversationID != liveConversation {
 		t.Fatalf("expected the orchestrator's own conversation to still be resumed idle, got %+v", target)
 	}
-	if !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
-		t.Fatalf("expected the notice to name both scopes, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), "frs/dev") || !strings.Contains(noticeText(target.Notices), "frs/laptop") {
+		t.Fatalf("expected the notice to name both scopes, got %q", noticeText(target.Notices))
 	}
 	// A refusal points at the note it declined to act on, by name — the operator
 	// is reading it in a directory holding every orchestrator's.
-	if !strings.Contains(target.Notice, orchestratorReturnNoteName(id)) {
-		t.Fatalf("expected the notice to name %q, got %q", orchestratorReturnNoteName(id), target.Notice)
+	if !strings.Contains(noticeText(target.Notices), orchestratorReturnNoteName(id)) {
+		t.Fatalf("expected the notice to name %q, got %q", orchestratorReturnNoteName(id), noticeText(target.Notices))
+	}
+	// A refusal is not a steady state; it must never read at the same severity
+	// as a routine, successful resume.
+	for _, notice := range target.Notices {
+		if notice.Kind != orchestratorNoticeWarning {
+			t.Fatalf("expected every notice from a refused hand-off to be a warning, got %+v", notice)
+		}
+	}
+}
+
+// The heart of the bug this fixes: several orchestrators resolving on the same
+// restore must each carry their own kind. A genuine warning sitting among
+// routine successes must stay distinguishable from them rather than being
+// flattened into one string that reads uniformly as either.
+func TestMixedRestoreCarriesDistinctKindsPerOrchestrator(t *testing.T) {
+	app, openPath, _ := openStateTestApp(t)
+	defer app.shutdown(context.Background())
+
+	stale := createAndStartOrchestrator(t, app)
+	stageOrchestratorConversation(t, orchestratorSessionID(stale))
+	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}); err != nil {
+		t.Fatalf("UpdateOrchestrator failed: %v", err)
+	}
+
+	current := createAndStartNamedOrchestrator(t, app, "other", "laptop")
+	const live = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
+	stageOrchestratorConversation(t, orchestratorSessionID(current))
+	stageOrchestratorConversation(t, live)
+	writeLiveConversationRecord(t, current, orchestratorLiveConversation{
+		ConversationID: live,
+		LaunchID:       recordedLaunchID(t, openPath, current),
+	})
+
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != current {
+		t.Fatalf("expected %q (started last) to own the pane, got %q", current, target.OrchestratorID)
+	}
+
+	var infoCount, warningCount int
+	for _, notice := range target.Notices {
+		switch notice.Kind {
+		case orchestratorNoticeInfo:
+			infoCount++
+			if notice.OrchestratorID != current {
+				t.Fatalf("expected the info notice to belong to %q, got %+v", current, notice)
+			}
+		case orchestratorNoticeWarning:
+			warningCount++
+			if notice.OrchestratorID != stale {
+				t.Fatalf("expected the warning notice to belong to %q, got %+v", stale, notice)
+			}
+		default:
+			t.Fatalf("unexpected notice kind %+v", notice)
+		}
+	}
+	if infoCount != 1 || warningCount != 1 {
+		t.Fatalf("expected exactly one info notice (%s's resumed tracked conversation) and one warning "+
+			"notice (%s's changed scope), got %+v", current, stale, target.Notices)
 	}
 }
 
@@ -434,7 +503,7 @@ func TestResumeIsRefusedWhenTheConversationIsGone(t *testing.T) {
 	if target.OrchestratorID != id {
 		t.Fatalf("expected the orchestrator to still be reopened, got %+v", target)
 	}
-	if target.ResumePrompt != "" || target.Notice == "" {
+	if target.ResumePrompt != "" || noticeText(target.Notices) == "" {
 		t.Fatalf("expected the task withheld with a visible reason, got %+v", target)
 	}
 }

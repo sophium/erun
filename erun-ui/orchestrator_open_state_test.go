@@ -341,8 +341,8 @@ func TestPlainReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 	if target.ResumePrompt != "" {
 		t.Fatalf("expected no task delivered on a plain reopen, got %+v", target)
 	}
-	if !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
-		t.Fatalf("expected the notice to name both scopes, got %q", target.Notice)
+	if !strings.Contains(noticeText(target.Notices), "frs/dev") || !strings.Contains(noticeText(target.Notices), "frs/laptop") {
+		t.Fatalf("expected the notice to name both scopes, got %q", noticeText(target.Notices))
 	}
 }
 
@@ -374,8 +374,8 @@ func TestAlsoReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 	if target.AlsoReopen[0].ConversationID != staleConversation {
 		t.Fatalf("expected %q to still resume its own conversation idle, got %q", stale, target.AlsoReopen[0].ConversationID)
 	}
-	if !strings.Contains(target.Notice, stale) || !strings.Contains(target.Notice, "frs/dev") || !strings.Contains(target.Notice, "frs/laptop") {
-		t.Fatalf("expected the notice to name %q and both scopes, got %q", stale, target.Notice)
+	if !strings.Contains(noticeText(target.Notices), stale) || !strings.Contains(noticeText(target.Notices), "frs/dev") || !strings.Contains(noticeText(target.Notices), "frs/laptop") {
+		t.Fatalf("expected the notice to name %q and both scopes, got %q", stale, noticeText(target.Notices))
 	}
 }
 

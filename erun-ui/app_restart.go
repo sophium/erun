@@ -70,6 +70,45 @@ type orchestratorRestoreState struct {
 	ResumePrompt string `json:"resumePrompt,omitempty"`
 }
 
+// orchestratorNoticeKind classifies how loudly an operator-facing notice about
+// a reopened orchestrator should read. Only two kinds are ever minted here:
+// resuming the tracked conversation is the mechanism working (info); every
+// other resolution this file reports — an unconfirmed record, a claimed
+// conversation, a refused hand-off, a changed scope, a hand-off left
+// mid-task — means something the operator asked for, or something a session
+// recorded, could not be honoured (warning). Mirrors
+// orchestratorConversationNoticeKind's rule for the notices that originate
+// there.
+type orchestratorNoticeKind string
+
+const (
+	orchestratorNoticeInfo    orchestratorNoticeKind = "info"
+	orchestratorNoticeWarning orchestratorNoticeKind = "warning"
+)
+
+// orchestratorNotice is one operator-facing notice about a reopened
+// orchestrator: which one it is about (empty when it names several, such as
+// the hand-offs-not-reopened summary), how loudly it reads, and the text
+// itself. Several orchestrators can each produce their own notice on the same
+// restore, and each keeps its own kind rather than being flattened into one
+// joined string — a warning sitting among several successes must stay
+// visually distinct from them, not disappear into the same paragraph.
+type orchestratorNotice struct {
+	OrchestratorID string                 `json:"orchestratorId,omitempty"`
+	Kind           orchestratorNoticeKind `json:"kind"`
+	Text           string                 `json:"text"`
+}
+
+// appendOrchestratorNotice appends notice to notices when it carries text, so
+// a producer that found nothing to report need not be special-cased at every
+// call site.
+func appendOrchestratorNotice(notices []orchestratorNotice, notice orchestratorNotice) []orchestratorNotice {
+	if strings.TrimSpace(notice.Text) == "" {
+		return notices
+	}
+	return append(notices, notice)
+}
+
 // relaunchTarget is the JSON-safe view the frontend reads on boot. OrchestratorID
 // is the one this launch resumes and that OWNS THE TERMINAL PANE — the pane is
 // single, so exactly one orchestrator gets it. AlsoReopen lists every other
@@ -78,14 +117,16 @@ type orchestratorRestoreState struct {
 // because ResumePrompt is a field of this one target, not of each entry in
 // AlsoReopen — but every entry, owner included, carries the conversation id it
 // should resume: see resolveReopenSessionID for how that id is decided, which
-// is never a re-derivation from the orchestrator id. Notice explains,
-// when non-empty, why the pane owner is not continuing a task it asked to.
+// is never a re-derivation from the orchestrator id. Notices carries one entry
+// per surprising resolution — the pane owner's, or another reopened
+// orchestrator's — each with its own kind, rather than one joined string that
+// would flatten several different severities into one paragraph.
 type relaunchTarget struct {
 	OrchestratorID string                  `json:"orchestratorId"`
 	ConversationID string                  `json:"conversationId"`
 	ResumePrompt   string                  `json:"resumePrompt"`
 	AlsoReopen     []orchestratorReopenRef `json:"alsoReopen,omitempty"`
-	Notice         string                  `json:"notice"`
+	Notices        []orchestratorNotice    `json:"notices,omitempty"`
 }
 
 // orchestratorReopenRef is one orchestrator in AlsoReopen: its id and the
@@ -244,54 +285,58 @@ func readAndClearOrchestratorRestoreTarget(path string) (orchestratorRestoreStat
 // it.
 func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 	state, notReopened := consumeOrchestratorRestoreTargets(a.deps.orchestratorRestoreDir, time.Now())
-	notice := orchestratorHandoffsNotReopenedNotice(notReopened)
+	var notices []orchestratorNotice
+	notices = appendOrchestratorNotice(notices, orchestratorHandoffsNotReopenedNotice(notReopened))
 	openEntries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
 
 	if state.OrchestratorID == "" {
 		if len(openEntries) == 0 {
-			return relaunchTarget{Notice: notice}
+			return relaunchTarget{Notices: notices}
 		}
 		owner := openEntries[len(openEntries)-1]
 		alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, owner.OrchestratorID))
 		conversationID, conversationNotice := a.resolveReopenSessionID(owner)
-		notices := append([]string{orchestratorScopeChangedNoticeIfAny(owner, a.currentOrchestratorScope(owner.OrchestratorID))}, alsoNotices...)
-		notices = append(notices, conversationNotice, notice)
+		notices = appendOrchestratorNotice(notices, orchestratorScopeChangedNoticeIfAny(owner, a.currentOrchestratorScope(owner.OrchestratorID)))
+		notices = append(notices, alsoNotices...)
+		notices = appendOrchestratorNotice(notices, conversationNotice)
 		return relaunchTarget{
 			OrchestratorID: owner.OrchestratorID,
 			ConversationID: conversationID,
 			AlsoReopen:     alsoRefs,
-			Notice:         joinOrchestratorNotices(notices...),
+			Notices:        notices,
 		}
 	}
 
 	alsoRefs, alsoNotices := a.reopenRefs(removeOrchestratorEntry(openEntries, state.OrchestratorID))
+	notices = append(notices, alsoNotices...)
 	target := relaunchTarget{
 		OrchestratorID: state.OrchestratorID,
 		AlsoReopen:     alsoRefs,
-		Notice:         joinOrchestratorNotices(append(alsoNotices, notice)...),
 	}
 	entry := orchestratorEntryOrEmpty(openEntries, state.OrchestratorID)
 	if state.ResumePrompt != "" {
 		refusal := a.resumeRefusal(state)
-		if refusal == "" {
+		if refusal.Text == "" {
 			target.ConversationID = state.ConversationID
 			target.ResumePrompt = state.ResumePrompt
+			target.Notices = notices
 			return target
 		}
 		// The refusal above already covers a scope mismatch (it compares the
 		// hand-off's own recorded scope against the orchestrator's current one),
 		// so the durable-record scope check below is skipped here to avoid saying
 		// the same thing twice.
-		target.Notice = joinOrchestratorNotices(refusal, target.Notice)
-	} else if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(state.OrchestratorID)); n != "" {
-		target.Notice = joinOrchestratorNotices(n, target.Notice)
+		notices = appendOrchestratorNotice(notices, refusal)
+	} else {
+		notices = appendOrchestratorNotice(notices, orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(state.OrchestratorID)))
 	}
 	// No prompt to deliver, or the hand-off was refused: still resume the exact
 	// conversation this orchestrator is on, rather than leaving it for a
 	// re-derivation that can land on a different, older one.
 	conversationID, conversationNotice := a.resolveReopenSessionID(entry)
 	target.ConversationID = conversationID
-	target.Notice = joinOrchestratorNotices(target.Notice, conversationNotice)
+	notices = appendOrchestratorNotice(notices, conversationNotice)
+	target.Notices = notices
 	return target
 }
 
@@ -303,13 +348,20 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 // to vouch for it and why an unconfirmed one falls back loudly instead of
 // quietly. A transient orchestrator has no id to derive from and gets a fresh
 // conversation.
-func (a *App) resolveReopenSessionID(entry orchestratorOpenEntry) (string, string) {
+func (a *App) resolveReopenSessionID(entry orchestratorOpenEntry) (string, orchestratorNotice) {
 	if strings.TrimSpace(entry.OrchestratorID) == "" {
-		return uuid.NewString(), ""
+		return uuid.NewString(), orchestratorNotice{}
 	}
 	choice := a.resolveOrchestratorConversation(entry)
 	a.markConversationChoiceReported(entry.OrchestratorID, choice)
-	return choice.ConversationID, choice.Notice
+	if choice.Notice == "" {
+		return choice.ConversationID, orchestratorNotice{}
+	}
+	return choice.ConversationID, orchestratorNotice{
+		OrchestratorID: entry.OrchestratorID,
+		Kind:           orchestratorNoticeKind(orchestratorConversationNoticeKind(choice.Source)),
+		Text:           choice.Notice,
+	}
 }
 
 // orchestratorEntryOrEmpty finds id's entry in entries, or a zero-value entry
@@ -345,24 +397,20 @@ func removeOrchestratorEntry(entries []orchestratorOpenEntry, id string) []orche
 // means an AlsoReopen entry is exactly the no-note, no-task case a re-scoped
 // id can silently resume into, so it gets the same scope check as the pane
 // owner rather than a silent pass.
-func (a *App) reopenRefs(entries []orchestratorOpenEntry) ([]orchestratorReopenRef, []string) {
+func (a *App) reopenRefs(entries []orchestratorOpenEntry) ([]orchestratorReopenRef, []orchestratorNotice) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
 	out := make([]orchestratorReopenRef, 0, len(entries))
-	var notices []string
+	var notices []orchestratorNotice
 	for _, entry := range entries {
 		conversationID, conversationNotice := a.resolveReopenSessionID(entry)
 		out = append(out, orchestratorReopenRef{
 			OrchestratorID: entry.OrchestratorID,
 			ConversationID: conversationID,
 		})
-		if conversationNotice != "" {
-			notices = append(notices, conversationNotice)
-		}
-		if n := orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(entry.OrchestratorID)); n != "" {
-			notices = append(notices, n)
-		}
+		notices = appendOrchestratorNotice(notices, conversationNotice)
+		notices = appendOrchestratorNotice(notices, orchestratorScopeChangedNoticeIfAny(entry, a.currentOrchestratorScope(entry.OrchestratorID)))
 	}
 	return out, notices
 }
@@ -381,14 +429,19 @@ func (a *App) currentOrchestratorScope(id string) []string {
 }
 
 // orchestratorScopeChangedNoticeIfAny reports, for one reopened entry, that its
-// recorded scope no longer matches the orchestrator's current one — or "" when
-// it does, or when the entry predates scope recording (Environments empty,
-// read as unknown rather than a guaranteed match).
-func orchestratorScopeChangedNoticeIfAny(entry orchestratorOpenEntry, currentScope []string) string {
+// recorded scope no longer matches the orchestrator's current one — or a zero
+// value when it does, or when the entry predates scope recording (Environments
+// empty, read as unknown rather than a guaranteed match). A caution to verify
+// stale context rather than a fault, so it reports as a warning.
+func orchestratorScopeChangedNoticeIfAny(entry orchestratorOpenEntry, currentScope []string) orchestratorNotice {
 	if len(entry.Environments) == 0 || equalOrchestratorScope(entry.Environments, currentScope) {
-		return ""
+		return orchestratorNotice{}
 	}
-	return orchestratorScopeChangedNotice(entry.OrchestratorID, entry.Environments, currentScope)
+	return orchestratorNotice{
+		OrchestratorID: entry.OrchestratorID,
+		Kind:           orchestratorNoticeWarning,
+		Text:           orchestratorScopeChangedNotice(entry.OrchestratorID, entry.Environments, currentScope),
+	}
 }
 
 // orchestratorScopeChangedNotice explains that a reopened orchestrator's
@@ -404,36 +457,32 @@ func orchestratorScopeChangedNotice(id string, was, now []string) string {
 
 // orchestratorHandoffsNotReopenedNotice names the orchestrators that restarted
 // mid-task and are not being reopened. Their work is only recoverable if the
-// operator learns which sessions stopped and which note each left behind.
-func orchestratorHandoffsNotReopenedNotice(states []orchestratorRestoreState) string {
+// operator learns which sessions stopped and which note each left behind. It
+// names several orchestrators at once, so it carries no single OrchestratorID;
+// each of those sessions being left mid-task is not the healthy case, so this
+// reports as a warning.
+func orchestratorHandoffsNotReopenedNotice(states []orchestratorRestoreState) orchestratorNotice {
 	if len(states) == 0 {
-		return ""
+		return orchestratorNotice{}
 	}
 	described := make([]string, 0, len(states))
 	for _, state := range states {
 		described = append(described, fmt.Sprintf("%s (%s)", state.OrchestratorID, orchestratorReturnNoteName(state.OrchestratorID)))
 	}
 	sort.Strings(described)
-	return fmt.Sprintf("Also restarted mid-task but not reopened: %s. "+
-		"A launch reopens one orchestrator, so start each of these and have it read its return note "+
-		"in the orchestrators working directory.", strings.Join(described, ", "))
-}
-
-func joinOrchestratorNotices(parts ...string) string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if strings.TrimSpace(part) != "" {
-			kept = append(kept, part)
-		}
+	return orchestratorNotice{
+		Kind: orchestratorNoticeWarning,
+		Text: fmt.Sprintf("Also restarted mid-task but not reopened: %s. "+
+			"A launch reopens one orchestrator, so start each of these and have it read its return note "+
+			"in the orchestrators working directory.", strings.Join(described, ", ")),
 	}
-	return strings.Join(kept, " ")
 }
 
-// resumeRefusal reports why a restart hand-off must not be delivered, or "" when
-// it may. A resume prompt is a first turn telling the woken session to CONTINUE,
-// so it is only safe against the conversation that asked for it, in the scope
-// that conversation knew — an id alone names neither.
-func (a *App) resumeRefusal(state orchestratorRestoreState) string {
+// resumeRefusal reports why a restart hand-off must not be delivered, or a zero
+// value when it may. A resume prompt is a first turn telling the woken session
+// to CONTINUE, so it is only safe against the conversation that asked for it,
+// in the scope that conversation knew — an id alone names neither.
+func (a *App) resumeRefusal(state orchestratorRestoreState) orchestratorNotice {
 	if state.ConversationID == "" {
 		return orchestratorResumeRefusedNotice(state.OrchestratorID,
 			"the conversation that asked for it was not identified")
@@ -452,17 +501,22 @@ func (a *App) resumeRefusal(state orchestratorRestoreState) string {
 			"its environments changed (was %s, now %s)",
 			describeOrchestratorScope(state.Environments), describeOrchestratorScope(current)))
 	}
-	return ""
+	return orchestratorNotice{}
 }
 
 // orchestratorResumeRefusedNotice is what the operator reads when a restart
 // hand-off was withheld. It names the orchestrator, the reason, and where the
 // unfinished work is described, because the session came back idle and nothing
-// else will say so.
-func orchestratorResumeRefusedNotice(id, reason string) string {
-	return fmt.Sprintf("Reopened %s without continuing its task: %s. "+
-		"Check %s in the orchestrators working directory before telling it to carry on.",
-		id, reason, orchestratorReturnNoteName(id))
+// else will say so. A refusal is always a warning: something the operator
+// asked for could not be honoured.
+func orchestratorResumeRefusedNotice(id, reason string) orchestratorNotice {
+	return orchestratorNotice{
+		OrchestratorID: id,
+		Kind:           orchestratorNoticeWarning,
+		Text: fmt.Sprintf("Reopened %s without continuing its task: %s. "+
+			"Check %s in the orchestrators working directory before telling it to carry on.",
+			id, reason, orchestratorReturnNoteName(id)),
+	}
 }
 
 // describeOrchestratorScope renders an environment set for an operator-facing
