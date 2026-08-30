@@ -6,10 +6,20 @@ import (
 	"strings"
 )
 
-// DeployDiagnosisResult holds the deploy-failure diagnosis for the caller to interpret.
+// DeployDiagnosisResult holds the deploy-failure diagnosis for the caller to
+// interpret. HelmStatus always carries the raw `helm status` output — including
+// stderr on a failed read, which is itself diagnostic — but a caller deciding
+// whether to recommend a mutating recovery must consult HelmReadError first:
+// it is non-empty exactly when the read itself could not be trusted (RBAC, no
+// helm on PATH, an API-server timeout), as opposed to a confirmed answer such
+// as "no release exists" or "release failed". A caller must never derive the
+// same "nothing to recover" answer for both a confirmed-healthy release and a
+// read that could not tell (mirrors ObservedHelmRelease's Found/Error contract
+// in observe_helm_release.go).
 type DeployDiagnosisResult struct {
-	HelmStatus string
-	Pods       string
+	HelmStatus    string
+	HelmReadError string
+	Pods          string
 }
 
 func helmStatusArgs(req ShellLaunchParams) []string {
@@ -39,22 +49,26 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 	if ctx.DryRun {
 		return DeployDiagnosisResult{}
 	}
-	return DeployDiagnosisResult{
-		HelmStatus: runDoctorDiagnosisCommand("helm", helmArgs),
-		Pods:       runDoctorDiagnosisCommand("kubectl", podArgs),
+	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
+	pods, _ := runDoctorDiagnosisCommand("kubectl", podArgs)
+	result := DeployDiagnosisResult{HelmStatus: helmStatus, Pods: pods}
+	if helmErr != nil && !isHelmReleaseNotFound(helmStatus) {
+		result.HelmReadError = observeHelmReadErrorMessage(RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
 	}
+	return result
 }
 
 // runDoctorDiagnosisCommand folds command errors into the returned output —
 // `helm status` stderr on a missing release is itself diagnostic — so the
-// caller always has something to show.
-func runDoctorDiagnosisCommand(name string, args []string) string {
+// caller always has something to show, while still returning the command's own
+// error so a caller that needs to know whether the read succeeded can tell.
+func runDoctorDiagnosisCommand(name string, args []string) (string, error) {
 	cmd := Command(name, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	_ = cmd.Run()
-	return strings.TrimSpace(out.String())
+	err := cmd.Run()
+	return strings.TrimSpace(out.String()), err
 }
 
 // DeployRecoveryAction names a mutating recovery `erun doctor` can run against a
@@ -78,9 +92,15 @@ const (
 // alternative fixes for different failure modes, not additive steps: clearing
 // pending leaves the release at its last deployed revision, so a rollback run
 // straight after would step back a further revision. The bool is false when no
-// helm-level recovery applies — a healthy release, or no release to act on (a
-// missing release is recovered by `erun deploy --force`, not by helm).
+// helm-level recovery applies — a healthy release, no release to act on (a
+// missing release is recovered by `erun deploy --force`, not by helm), or a
+// release the read could not confirm one way or the other: recommending the
+// destructive rollback for a read failure would act on a guess, not a
+// diagnosis, so HelmReadError is checked before any HelmStatus text.
 func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryAction, bool) {
+	if strings.TrimSpace(diagnosis.HelmReadError) != "" {
+		return "", false
+	}
 	status := strings.ToLower(strings.TrimSpace(diagnosis.HelmStatus))
 	switch {
 	case status == "":
