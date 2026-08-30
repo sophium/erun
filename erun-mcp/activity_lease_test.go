@@ -154,6 +154,104 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 	}
 }
 
+// The lease id defaults to the name and is never sanitized by the caller,
+// but the store sanitizes it before persisting. A renewal must normalize the
+// raw id the same way before comparing against the stored lease, or a name
+// needing sanitization (a space, here) always misreads as a fresh claim.
+func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.T) {
+	isolateLeaseCache(t)
+	runtime := RuntimeConfig{
+		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
+		Store: listToolStore{
+			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+		},
+	}
+
+	_, first, err := activityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
+		Name: "release 1.4.2", Exclusive: true,
+	})
+	if err != nil {
+		t.Fatalf("first take: %v", err)
+	}
+	if first.Lease == nil || first.Lease.ID != "release_1.4.2" {
+		t.Fatalf("expected the stored lease id to be sanitized, got %+v", first.Lease)
+	}
+
+	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+	}); err != nil {
+		t.Fatalf("seed ssh activity: %v", err)
+	}
+
+	if _, _, err := activityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
+		Name: "release 1.4.2", Exclusive: true,
+	}); err != nil {
+		t.Fatalf("expected the same caller's renewal of a sanitized id to proceed despite ssh activity, got %v", err)
+	}
+}
+
+// The presence gate must still catch a genuinely fresh claim even when its id
+// happens to need sanitization - the fix must normalize both sides of the
+// comparison, not simply stop comparing.
+func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresent(t *testing.T) {
+	isolateLeaseCache(t)
+	runtime := RuntimeConfig{
+		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
+		Store: listToolStore{
+			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+		},
+	}
+	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+	}); err != nil {
+		t.Fatalf("seed ssh activity: %v", err)
+	}
+
+	_, _, err := activityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
+		Name: "release 1.4.2", Exclusive: true,
+	})
+	var operatorPresent *eruncommon.EnvironmentOperatorPresentError
+	if !errors.As(err, &operatorPresent) {
+		t.Fatalf("expected a fresh exclusive claim with a sanitized id to still be refused while an ssh session is active, got %v", err)
+	}
+}
+
+// The lease's persisted Scope is only trimmed and defaulted, never run
+// through the id's filename sanitisation, so an untrimmed scope - not a
+// sanitized one - is the analogous mismatch on this field: the renewal check
+// must trim it the same way the store does before comparing.
+func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *testing.T) {
+	isolateLeaseCache(t)
+	runtime := RuntimeConfig{
+		Context: RuntimeContext{Tenant: "erun", Environment: "ux"},
+		Store: listToolStore{
+			envConfigs: map[string]eruncommon.EnvConfig{"erun/ux": {Name: "ux"}},
+		},
+	}
+
+	_, first, err := activityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
+		Name: "clone-a", Exclusive: true, Scope: " clone-a ",
+	})
+	if err != nil {
+		t.Fatalf("first take: %v", err)
+	}
+	if first.Lease == nil || first.Lease.Scope != "clone-a" {
+		t.Fatalf("expected the stored lease scope to be trimmed, got %+v", first.Lease)
+	}
+
+	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant: "erun", Environment: "ux", Kind: eruncommon.ActivityKindSSH,
+	}); err != nil {
+		t.Fatalf("seed ssh activity: %v", err)
+	}
+
+	if _, _, err := activityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
+		Name: "clone-a", Exclusive: true, Scope: " clone-a ",
+	}); err != nil {
+		t.Fatalf("expected the same caller's renewal of an untrimmed scope to proceed despite ssh activity, got %v", err)
+	}
+}
+
 func TestActivityLeaseToolsRejectIncompleteInput(t *testing.T) {
 	isolateLeaseCache(t)
 	// No server context and none supplied: an MCP path must fail clearly rather

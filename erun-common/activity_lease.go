@@ -142,14 +142,15 @@ func (p TakeEnvironmentActivityLeaseParams) normalize() (TakeEnvironmentActivity
 	if p.Name == "" {
 		return p, fmt.Errorf("lease name is required")
 	}
-	id, err := resolveEnvironmentActivityLeaseID(p.ID, p.Name)
+	id, err := ResolveEnvironmentActivityLeaseID(p.ID, p.Name)
 	if err != nil {
 		return p, err
 	}
 	p.ID = id
-	p.Scope = strings.TrimSpace(p.Scope)
-	if p.Exclusive && p.Scope == "" {
-		p.Scope = defaultEnvironmentActivityLeaseScope
+	if p.Exclusive {
+		p.Scope = NormalizeExclusiveEnvironmentActivityLeaseScope(p.Scope)
+	} else {
+		p.Scope = strings.TrimSpace(p.Scope)
 	}
 	if p.TTL == 0 {
 		if p.Exclusive {
@@ -398,7 +399,7 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 // success, so a wrapper's exit trap never fails a job that already finished
 // cleanly.
 func ReleaseEnvironmentActivityLease(tenant, environment, id string) error {
-	resolved, err := resolveEnvironmentActivityLeaseID(id, id)
+	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
 		return err
 	}
@@ -423,7 +424,7 @@ func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id str
 	if scope == "" {
 		scope = defaultEnvironmentActivityLeaseScope
 	}
-	resolvedID, err := resolveEnvironmentActivityLeaseID(id, id)
+	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
 		return err
 	}
@@ -553,7 +554,12 @@ func capEnvironmentActivityLeaseExpiry(startedAt, expiresAt time.Time) time.Time
 	return expiresAt
 }
 
-func resolveEnvironmentActivityLeaseID(id, fallback string) (string, error) {
+// ResolveEnvironmentActivityLeaseID resolves a caller-supplied lease id (or
+// its fallback, typically the lease name) to the sanitized form the store
+// persists and keys files by. A caller that needs to compare a raw id against
+// a stored lease's ID must resolve it through here first — comparing the raw
+// value against the sanitized one is how erun#1652 happened.
+func ResolveEnvironmentActivityLeaseID(id, fallback string) (string, error) {
 	value := strings.TrimSpace(id)
 	if value == "" {
 		value = strings.TrimSpace(fallback)
@@ -566,6 +572,18 @@ func resolveEnvironmentActivityLeaseID(id, fallback string) (string, error) {
 		return "", fmt.Errorf("lease id %q has no usable characters", value)
 	}
 	return sanitized, nil
+}
+
+// NormalizeExclusiveEnvironmentActivityLeaseScope trims scope and defaults it
+// to "worktree" when empty, exactly as an exclusive take's own params
+// normalisation does before persisting — so a caller comparing against a
+// stored lease's Scope agrees with what will actually be written.
+func NormalizeExclusiveEnvironmentActivityLeaseScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = defaultEnvironmentActivityLeaseScope
+	}
+	return scope
 }
 
 func environmentActivityLeaseDir(tenant, environment string) (string, error) {
