@@ -8,6 +8,8 @@ import {
   type ActivityRecoveryResult,
   useActivityQueue,
 } from '@/app/activityQueueState';
+import { useAppDispatch } from '@/app/hooks';
+import { removeActivityEntry } from '@/app/slices/activitySlice';
 import { ActivityCard } from '@/components/app/ActivityCard';
 import {
   activityStatusLabel,
@@ -52,12 +54,17 @@ function useActivityStatusAnnouncement(entries: ActivityQueueEntry[]): string {
 
 // ActivityQueueDrawer is the slide-in activity queue drawer. The queue is
 // rebuilt from live cluster and host state on every launch and never persists
-// across restarts, so failures from a previous session don't reappear.
+// across restarts, so failures from a previous session don't reappear. The
+// one exception is a synthetic 'invite-approval' entry (activityQueueState.ts'
+// pushInviteApprovalActivityEntry): nothing to rebuild it from on relaunch,
+// so it simply does not survive one either -- same non-persistence, just for
+// a different reason.
 export function ActivityQueueDrawer({
   open,
   onClose,
   restoreFocusRef,
 }: ActivityQueueDrawerProps): React.ReactElement {
+  const dispatch = useAppDispatch();
   const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } =
     useActivityQueue();
   const nowEntries = entries.filter((entry) => entry.status === 'running');
@@ -68,6 +75,24 @@ export function ActivityQueueDrawer({
   );
   const statusAnnouncement = useActivityStatusAnnouncement(entries);
 
+  // A synthetic 'invite-approval' entry has no backend deploy record behind
+  // it, so the ordinary dismiss RPC (DismissDeploy)
+  // would find nothing to dismiss and leave the row stuck on screen after a
+  // click that reported success -- exactly the dead end root AGENTS.md's
+  // "Smooth, Seamless, No Dead Ends" forbids. Dismiss it locally instead;
+  // every other entry keeps going through the real backend dismiss.
+  const dismissHistoryEntry = React.useCallback(
+    async (id: string) => {
+      const entry = entries.find((candidate) => candidate.id === id);
+      if (entry?.origin === 'invite-approval') {
+        dispatch(removeActivityEntry(id));
+        return;
+      }
+      await dismiss(id);
+    },
+    [entries, dispatch, dismiss],
+  );
+
   const dismissAllNow = React.useCallback(async () => {
     await Promise.all(nowEntries.map((entry) => forceDismiss(entry.id)));
   }, [nowEntries, forceDismiss]);
@@ -75,8 +100,8 @@ export function ActivityQueueDrawer({
     await Promise.all(nextEntries.map((entry) => cancelWaiting(entry.id)));
   }, [nextEntries, cancelWaiting]);
   const dismissAllHistory = React.useCallback(async () => {
-    await Promise.all(historyEntries.map((entry) => dismiss(entry.id)));
-  }, [historyEntries, dismiss]);
+    await Promise.all(historyEntries.map((entry) => dismissHistoryEntry(entry.id)));
+  }, [historyEntries, dismissHistoryEntry]);
   const onRecoverPendingHelm = React.useCallback(
     async (id: string) => {
       const result = await recoverPendingHelm(id);
@@ -121,7 +146,7 @@ export function ActivityQueueDrawer({
             historyEntries={historyEntries}
             recoveryFeedback={recoveryFeedback}
             setRecoveryFeedback={setRecoveryFeedback}
-            dismiss={dismiss}
+            dismiss={dismissHistoryEntry}
             forceDismiss={forceDismiss}
             cancelWaiting={cancelWaiting}
             killSession={killSession}

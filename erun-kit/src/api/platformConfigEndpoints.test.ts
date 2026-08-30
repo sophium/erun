@@ -68,6 +68,7 @@ const EXPECTED: TenantConfigView = {
       provisionError: undefined,
     },
   ],
+  inviteRequestRateLimitWindowSeconds: 0,
 };
 
 function buildTestApi(reducerPath: string, baseQuery: PlatformBaseQuery) {

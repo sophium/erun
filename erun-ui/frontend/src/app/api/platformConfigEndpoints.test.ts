@@ -51,6 +51,7 @@ const EXPECTED = {
     },
   ],
   contexts: [],
+  inviteRequestRateLimitWindowSeconds: 0,
 };
 
 // wailsStyleBaseQuery is what a real desktop implementation would look like:

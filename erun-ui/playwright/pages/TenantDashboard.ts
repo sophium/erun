@@ -7,6 +7,7 @@ export type TenantDashboardTab =
   | 'Builds'
   | 'Audit log'
   | 'Registration'
+  | 'Requests'
   | 'API log';
 
 // TenantDashboard POM. Unlike the dialogs, this view replaces the main pane
@@ -324,5 +325,128 @@ export class TenantDashboard {
   // deploy already in flight — rendered role="status", never role="alert".
   recoverableNote(text: string): Locator {
     return this.activePanel().getByText(text, { exact: false });
+  }
+
+  // RequestInvitationDialog: the "Request an invitation" action off
+  // NotEnrolledState. The dialog's accessible name comes from
+  // aria-labelledby -> DialogTitle "Request an invitation".
+  requestInvitationButton(): Locator {
+    return this.page.getByRole('button', { name: 'Request an invitation' });
+  }
+
+  requestAgainButton(): Locator {
+    return this.page.getByRole('button', { name: 'Request again' });
+  }
+
+  requestInvitationDialog(): Locator {
+    return this.page.getByRole('dialog', { name: 'Request an invitation' });
+  }
+
+  requestInvitationIdentitySummary(): Locator {
+    // exact: true -- the dialog's own description sentence also contains the
+    // substring "Your verified identity" ("... Your verified identity goes
+    // with the request"), so a non-exact match is ambiguous between the two.
+    return this.requestInvitationDialog().getByText('Your verified identity', { exact: true });
+  }
+
+  requestKindJoinTab(): Locator {
+    return this.requestInvitationDialog().getByRole('tab', { name: 'Join an existing tenant' });
+  }
+
+  requestKindCreateTab(): Locator {
+    return this.requestInvitationDialog().getByRole('tab', { name: 'Register a new tenant' });
+  }
+
+  requestNoteInput(): Locator {
+    return this.requestInvitationDialog().getByLabel('Note to the operator (optional)');
+  }
+
+  requestSubmitButton(): Locator {
+    return this.requestInvitationDialog().getByRole('button', { name: /Send request|Sending/ });
+  }
+
+  requestCancelButton(): Locator {
+    return this.requestInvitationDialog().getByRole('button', { name: 'Cancel' });
+  }
+
+  requestSubmitDisabledReason(): Locator {
+    return this.requestInvitationDialog().locator('#request-invitation-submit-reason');
+  }
+
+  requestErrorAlert(): Locator {
+    return this.requestInvitationDialog().getByRole('alert');
+  }
+
+  requestPendingStatus(): Locator {
+    return this.page.getByText('Pending', { exact: true });
+  }
+
+  requestDeclinedStatus(): Locator {
+    return this.page.getByText('Declined', { exact: true });
+  }
+
+  // The MyInviteRequestError branch: a transport failure reading the
+  // caller's own invite request must never render as "never requested" --
+  // see tenant_platform_invite_requests.go's loadTenantDashboardMyInviteRequest.
+  // No `name` filter: InlineAlert's role="alert" element has no aria-label,
+  // and ARIA's accname algorithm does not compute "name from content" for
+  // the alert role, so a role+name locator would never match it.
+  requestStatusCheckFailedAlert(): Locator {
+    return this.page.getByRole('alert').filter({ hasText: 'invitation request status' });
+  }
+
+  requestStatusCheckRetryButton(): Locator {
+    return this.page.getByRole('button', { name: 'Try again' });
+  }
+
+  // Requests tab: the operator/admin queue.
+  requestsTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  requestsEmptyState(): Locator {
+    return this.activePanel().getByText('No pending requests', { exact: true });
+  }
+
+  requestsPermissionNotice(): Locator {
+    return this.activePanel().getByText(
+      'You can see this queue, but issuing invitations or declining requests needs additional access.',
+    );
+  }
+
+  requestRowFor(subject: string): Locator {
+    return this.requestsTable().locator('tbody tr').filter({ hasText: subject });
+  }
+
+  issueInvitationButtonFor(subject: string): Locator {
+    return this.requestRowFor(subject).getByRole('button', { name: /Issue invitation/ });
+  }
+
+  declineButtonFor(subject: string): Locator {
+    return this.requestRowFor(subject).getByRole('button', { name: 'Decline' });
+  }
+
+  requestRowErrorAlert(subject: string): Locator {
+    return this.requestRowFor(subject).getByRole('alert');
+  }
+
+  declineRequestDialog(): Locator {
+    return this.page.getByRole('dialog', { name: 'Decline this request?' });
+  }
+
+  declineReasonInput(): Locator {
+    return this.declineRequestDialog().getByPlaceholder('Why is this request being declined?');
+  }
+
+  declineConfirmButton(): Locator {
+    return this.declineRequestDialog().getByRole('button', { name: 'Decline' });
+  }
+
+  declineCancelButton(): Locator {
+    return this.declineRequestDialog().getByRole('button', { name: 'Cancel' });
+  }
+
+  issuedInviteLinkNotice(): Locator {
+    return this.activePanel().getByText('Invitation issued:', { exact: false });
   }
 }

@@ -151,7 +151,25 @@ export function commandSubtitle(entry: ActivityQueueEntry): string {
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
+// activitySubtitle is commandSubtitle's caller-facing wrapper: an
+// 'invite-approval' entry carries no command/release/namespace to
+// summarize, only its own message, so it branches here rather
+// than growing commandSubtitleParts a case for a field type that isn't a
+// cluster/host command at all.
+export function activitySubtitle(entry: ActivityQueueEntry): string {
+  if (entry.origin === 'invite-approval') {
+    return entry.message ?? '';
+  }
+  return commandSubtitle(entry);
+}
+
 export function activityTargetLabel(entry: ActivityQueueEntry): string {
+  // An invite-approval entry may carry no environment (the request may not
+  // have named one) -- "tenant/" with nothing after the slash reads as a
+  // truncated label, so fall back to the tenant alone.
+  if (!entry.environment) {
+    return entry.tenant;
+  }
   const target = `${entry.tenant}/${entry.environment}`.trim();
   if (entry.version) {
     return `${target} ${entry.version}`;

@@ -7,6 +7,7 @@ import { selectSidebarFocus } from '@/app/selectors';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
 import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
 import { EnvironmentRow, PendingEnvironmentRow } from '@/components/app/Sidebar.EnvironmentRow';
+import { TenantEnrollmentStatusButton } from '@/components/app/Sidebar.TenantEnrollmentStatus';
 import type { UISelection, UITenant } from '@/types';
 
 export function TenantGroup({
@@ -35,6 +36,12 @@ export function TenantGroup({
       >
         <TenantToggleButton tenantName={tenant.name} collapsed={collapsed} active={active} />
         <TenantSelectButton tenantName={tenant.name} active={active} related={related} />
+        {/* Only once a tenant has at least one local environment -- a tenant
+            with none has nothing to host yet, so the icon would have no
+            local work to describe. */}
+        {tenant.environments.length > 0 && (
+          <TenantEnrollmentStatusButton tenantName={tenant.name} />
+        )}
         <TenantManageButton tenantName={tenant.name} active={active} />
       </div>
       {!collapsed && (

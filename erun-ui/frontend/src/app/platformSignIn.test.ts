@@ -42,6 +42,8 @@ const dashboard: UITenantDashboard = {
   canDeployEnvironment: false,
   canStopEnvironment: false,
   canDeleteEnvironment: false,
+  canApproveInviteRequests: false,
+  canDeclineInviteRequests: false,
   platformAlias: 'erun+api.frs-prod.services.erunpaas.com@erun',
 };
 

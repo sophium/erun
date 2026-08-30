@@ -2,6 +2,7 @@ import type { TenantConfigView } from 'erun-kit';
 import {
   Building2,
   Cloud,
+  Inbox,
   KeyRound,
   LayoutDashboard,
   Mail,
@@ -22,6 +23,7 @@ export type ConsoleSectionId =
   | 'provisioning'
   | 'mcp-access'
   | 'invites'
+  | 'requests'
   | 'tenants'
   | 'users'
   | 'org-settings'
@@ -43,6 +45,13 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // (#1482) — a COMPANY tenant needs this exactly as much as an OPERATIONS
   // one, so it belongs in the base set every tenant type sees.
   { id: 'invites', label: 'Invites', icon: UserPlus },
+  // Requests is every tenant's own queue too: a COMPANY
+  // tenant's admin needs to see and decide JOIN_TENANT requests naming their
+  // own tenant, not just an OPERATIONS operator -- GET /v1/invite-requests is
+  // TenantUserClass, and Approve/Decline are gated within the panel itself
+  // on whoami's capability set rather than at the nav level (see
+  // requests/RequestsPanel.tsx).
+  { id: 'requests', label: 'Requests', icon: Inbox },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [

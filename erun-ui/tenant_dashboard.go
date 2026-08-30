@@ -52,6 +52,11 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 	loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
+	// The caller's own invite-request status needs only the bearer this
+	// resolution already minted, never tenant membership — read it even when
+	// loadTenantDashboardData above downgraded PlatformState to not-enrolled/
+	// no-permission, since that is exactly the caller this status is for.
+	loadTenantDashboardMyInviteRequest(requestCtx, resolution.client, &dashboard)
 	return dashboard, nil
 }
 
@@ -65,25 +70,29 @@ const (
 	tenantDashboardTabBuilds       = "builds"
 	tenantDashboardTabAudit        = "audit"
 	tenantDashboardTabRegistration = "registration"
+	tenantDashboardTabRequests     = "requests"
 )
 
 // The API reads each panel is made of, in canonical route-template form — the
 // same form the platform reports capabilities in.
 const (
-	tenantDashboardReadWhoami       = "GET /v1/whoami"
-	tenantDashboardReadReviews      = "GET /v1/reviews"
-	tenantDashboardReadReview       = "GET /v1/reviews/{review_id}"
-	tenantDashboardReadMergeQueue   = "GET /v1/reviews/merge-queue"
-	tenantDashboardReadBuilds       = "GET /v1/reviews/{review_id}/builds"
-	tenantDashboardReadComments     = "GET /v1/reviews/{review_id}/comments"
-	tenantDashboardWriteComment     = "POST /v1/reviews/{review_id}/comments"
-	tenantDashboardReadReviewers    = "GET /v1/reviews/{review_id}/reviewers"
-	tenantDashboardWriteReviewers   = "POST /v1/reviews/{review_id}/reviewers"
-	tenantDashboardRemoveReviewers  = "DELETE /v1/reviews/{review_id}/reviewers/{user_id}"
-	tenantDashboardReadAuditEvents  = "GET /v1/audit-events"
-	tenantDashboardReadUsers        = "GET /v1/users"
-	tenantDashboardReadContexts     = "GET /v1/contexts"
-	tenantDashboardReadEnvironments = "GET /v1/environments"
+	tenantDashboardReadWhoami         = "GET /v1/whoami"
+	tenantDashboardReadReviews        = "GET /v1/reviews"
+	tenantDashboardReadReview         = "GET /v1/reviews/{review_id}"
+	tenantDashboardReadMergeQueue     = "GET /v1/reviews/merge-queue"
+	tenantDashboardReadBuilds         = "GET /v1/reviews/{review_id}/builds"
+	tenantDashboardReadComments       = "GET /v1/reviews/{review_id}/comments"
+	tenantDashboardWriteComment       = "POST /v1/reviews/{review_id}/comments"
+	tenantDashboardReadReviewers      = "GET /v1/reviews/{review_id}/reviewers"
+	tenantDashboardWriteReviewers     = "POST /v1/reviews/{review_id}/reviewers"
+	tenantDashboardRemoveReviewers    = "DELETE /v1/reviews/{review_id}/reviewers/{user_id}"
+	tenantDashboardReadAuditEvents    = "GET /v1/audit-events"
+	tenantDashboardReadUsers          = "GET /v1/users"
+	tenantDashboardReadContexts       = "GET /v1/contexts"
+	tenantDashboardReadEnvironments   = "GET /v1/environments"
+	tenantDashboardReadInviteRequests = "GET /v1/invite-requests"
+	tenantDashboardWriteApproveInvite = "POST /v1/invite-requests/{invite_request_id}/approve"
+	tenantDashboardWriteDeclineInvite = "POST /v1/invite-requests/{invite_request_id}/decline"
 )
 
 // loadTenantDashboardData resolves every panel independently. One panel the
@@ -122,9 +131,41 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	loadTenantDashboardReviewFilterCounts(ctx, client, capabilities, dashboard, whoami.UserID)
 	loadTenantDashboardAuditEvents(ctx, client, capabilities, dashboard)
 	loadTenantDashboardRegistration(ctx, client, capabilities, dashboard)
+	loadTenantDashboardInviteRequests(ctx, client, capabilities, dashboard)
 	dashboard.CanCreateReview = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateReview) == ""
 	dashboard.CanAdvanceMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteAdvanceMergeQueue) == ""
 	dashboard.CanOverrideMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
+	dashboard.CanApproveInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteApproveInvite) == ""
+	dashboard.CanDeclineInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeclineInvite) == ""
+}
+
+// loadTenantDashboardInviteRequests loads the operator/admin queue: every
+// pending request the caller may see (their own tenant's JOIN_TENANT
+// requests, or every request for an operations-scoped caller). Degrades like
+// every other panel here — a caller who cannot read the queue gets a named
+// restriction, never a false "nothing pending".
+func loadTenantDashboardInviteRequests(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabRequests}
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadInviteRequests); restricted != "" {
+		panel.Restricted = restricted
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return
+	}
+	requests, err := client.ListInviteRequests(ctx, eruncommon.PlatformListInviteRequestsParams{
+		Status: eruncommon.PlatformInviteRequestStatusPending,
+	})
+	if err != nil {
+		panel.Error = tenantDashboardReadError(tenantDashboardReadInviteRequests, err)
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return
+	}
+	dashboard.InviteRequests = make([]uiInviteRequest, 0, len(requests))
+	for _, request := range requests {
+		dashboard.InviteRequests = append(dashboard.InviteRequests, inviteRequestToUI(request))
+	}
+	count := len(dashboard.InviteRequests)
+	dashboard.PendingInviteRequestCount = &count
+	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
 // tenantDashboardUsernames resolves every tenant user id to its display

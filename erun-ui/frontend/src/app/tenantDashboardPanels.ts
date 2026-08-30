@@ -1,8 +1,34 @@
 import type { StatusBadgeTone } from 'erun-kit';
 
-import type { UITenantDashboard, UITenantDashboardPanel } from '@/types';
+import type { UITenant, UITenantDashboard, UITenantDashboardPanel } from '@/types';
 
 import type { TenantDashboardTab } from './state';
+
+// tenantDashboardEnvironmentName resolves which of tenant's local
+// environments the dashboard header (and the request-invitation dialog's
+// prefill) names: the environment the dashboard actually loaded against when
+// set, else the first one with a resolvable apiUrl (preferring the tenant's
+// own default). Lives here (not in a component file) so both
+// TenantDashboardView.tsx and TenantPlatformState.tsx can import it without
+// creating a circular dependency between the two.
+export function tenantDashboardEnvironmentName(
+  tenant: UITenant | undefined,
+  loadedEnvironment: string | undefined,
+): string {
+  const environmentName = loadedEnvironment?.trim();
+  if (environmentName) {
+    return environmentName;
+  }
+  if (!tenant) {
+    return '';
+  }
+  const defaultEnvironment = tenant.defaultEnvironment?.trim();
+  const environment =
+    tenant.environments.find(
+      (candidate) => candidate.name === defaultEnvironment && candidate.apiUrl,
+    ) ?? tenant.environments.find((candidate) => candidate.apiUrl);
+  return environment?.name.trim() ?? '';
+}
 
 export interface TenantDashboardTabDescriptor {
   tab: TenantDashboardTab;
@@ -18,6 +44,7 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
   { tab: 'registration', label: 'Registration' },
+  { tab: 'requests', label: 'Requests' },
   { tab: 'api-log', label: 'API log' },
 ];
 
@@ -100,6 +127,27 @@ const registrationStatusTones: Record<string, StatusBadgeTone> = {
 
 export function registrationStatusTone(status: string): StatusBadgeTone {
   return registrationStatusTones[status.trim().toLowerCase()] ?? 'warning';
+}
+
+// inviteRequestStatusTones maps the invite-request queue's status vocabulary
+// (PENDING/APPROVED/DECLINED) to a StatusBadge tone. WCAG 1.4.1: every tone
+// still shows the status word, never colour alone.
+const inviteRequestStatusTones: Record<string, StatusBadgeTone> = {
+  PENDING: 'in-progress',
+  APPROVED: 'success',
+  DECLINED: 'destructive',
+};
+
+export function inviteRequestStatusTone(status: string): StatusBadgeTone {
+  return inviteRequestStatusTones[status.trim().toUpperCase()] ?? 'muted';
+}
+
+// requestsTabLabel is the tab strip's own label for the Requests tab: the
+// pending count is visible before the operator opens the panel at all — an
+// unattended queue nobody sees is the failure this exists to prevent.
+export function requestsTabLabel(data: UITenantDashboard | null | undefined): string {
+  const count = data?.pendingInviteRequestCount;
+  return count ? `Requests (${String(count)})` : 'Requests';
 }
 
 // unresolvedThreadsTone renders the count as a quantity, not just a colour:

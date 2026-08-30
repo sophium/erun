@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clipboard,
   Clock,
+  Copy,
   LoaderCircle,
   Sparkles,
   Stethoscope,
@@ -16,23 +17,26 @@ import * as React from 'react';
 
 import type { ActivityQueueEntry } from '@/app/activityQueueState';
 import { useAppDispatch } from '@/app/hooks';
+import { showNotification } from '@/app/notificationThunks';
 import { investigateFailure } from '@/app/orchestratorThunks';
 import { startDoctorSelection, startForceDeploySelection } from '@/app/recoveryThunks';
 import { ContainerStatusList } from '@/components/app/ActivityCard.ContainerStatus';
 import {
   activityElapsedLabel,
   activityStatusLabel,
+  activitySubtitle,
   activityTargetLabel,
   buildFailureReport,
   cardBorderClassName,
   commandBadgeClassName,
-  commandSubtitle,
   copyToClipboard,
   deployUiSelection,
   dismissAffordance,
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
 } from '@/components/app/ActivityQueueDrawer.helpers';
+
+import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
 export interface ActivityCardProps {
   entry: ActivityQueueEntry;
@@ -101,7 +105,7 @@ export const ActivityCard = React.memo(function ActivityCard({
             <CommandBadge command={entry.command} />
             <span className="truncate">{activityTargetLabel(entry)}</span>
           </div>
-          <div className="text-xs text-muted-foreground truncate">{commandSubtitle(entry)}</div>
+          <div className="text-xs text-muted-foreground truncate">{activitySubtitle(entry)}</div>
         </div>
         <div className="flex flex-none items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono tabular-nums">{elapsed}</span>
@@ -129,6 +133,7 @@ export const ActivityCard = React.memo(function ActivityCard({
       {entry.status === 'failed' && (
         <FailedDeployActions entry={entry} onRecoverPendingHelm={onRecoverPendingHelm} />
       )}
+      <InviteApprovalLinkAction entry={entry} />
       <RecoveryActionRow
         entry={entry}
         onRecoverPendingHelm={onRecoverPendingHelm}
@@ -342,6 +347,45 @@ function RecoveryActionRow({
           Kill shell
         </Button>
       )}
+    </div>
+  );
+}
+
+// InviteApprovalLinkAction is the invite link's copyable, durable home:
+// the desktop signs the requester in automatically, but the link stays
+// visible here as the transferable artefact for a different
+// machine, a colleague, or the manual fallback if that automatic step ever
+// fails. Mirrors TenantPlatformState.tsx's CopyCommandButton's
+// ClipboardSetText + toast pattern. Its own branch on entry.origin/
+// entry.inviteLink is kept out of ActivityCard's render body so that
+// function's own complexity doesn't grow with every entry-kind addition.
+function InviteApprovalLinkAction({
+  entry,
+}: {
+  entry: ActivityQueueEntry;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  if (entry.origin !== 'invite-approval' || !entry.inviteLink) {
+    return null;
+  }
+  const inviteLink = entry.inviteLink;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        size="xs"
+        className="h-6 gap-1 text-[11px]"
+        onClick={() => {
+          void (async () => {
+            await ClipboardSetText(inviteLink);
+            dispatch(showNotification('success', 'Copied the invite link.'));
+          })();
+        }}
+      >
+        <Copy aria-hidden="true" className="size-3" />
+        Copy invite link
+      </Button>
     </div>
   );
 }

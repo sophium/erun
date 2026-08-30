@@ -1,4 +1,9 @@
-import type { UITenant, UITenantConfig, UITenantDashboardInput } from '@/types';
+import {
+  INVITE_REQUEST_KIND_JOIN_TENANT,
+  type UITenant,
+  type UITenantConfig,
+  type UITenantDashboardInput,
+} from '@/types';
 
 import { cloudApi } from './api/cloudApi';
 import { tenantApi } from './api/tenantApi';
@@ -15,11 +20,13 @@ import {
   defaultReviewFilter,
   defaultTenantDialog,
   type ReviewFilterState,
+  type TenantDashboardState,
   type TenantDashboardTab,
   type TenantDialogState,
 } from './state';
-import type { AppThunk } from './store';
-import { defaultRegistrationState } from './tenantRegistrationState';
+import type { AppDispatch, AppThunk, RootState } from './store';
+import { defaultRegistrationState, type RegistrationState } from './tenantRegistrationState';
+import { updateRegistrationDraft } from './tenantRegistrationThunks';
 import { requireController } from './thunkExtra';
 
 export const openTenantDialog =
@@ -241,6 +248,34 @@ function applySavedTenantConfig(
   }
 }
 
+// inviteRequestDraftCarryOver keeps the request dialog's in-progress draft
+// (kind/note/rate-limit countdown) when reopening the same tenant's
+// dashboard, and resets it for a different one — split out of
+// openTenantDashboard so that thunk's own branching stays under the module's
+// complexity cap.
+function inviteRequestDraftCarryOver(
+  sameTenant: boolean,
+  currentDashboard: TenantDashboardState,
+): Pick<
+  TenantDashboardState,
+  'requestKindDraft' | 'requestNoteDraft' | 'requestRateLimitedUntil' | 'issuedInviteLink'
+> {
+  if (sameTenant) {
+    return {
+      requestKindDraft: currentDashboard.requestKindDraft,
+      requestNoteDraft: currentDashboard.requestNoteDraft,
+      requestRateLimitedUntil: currentDashboard.requestRateLimitedUntil,
+      issuedInviteLink: currentDashboard.issuedInviteLink,
+    };
+  }
+  return {
+    requestKindDraft: INVITE_REQUEST_KIND_JOIN_TENANT,
+    requestNoteDraft: '',
+    requestRateLimitedUntil: 0,
+    issuedInviteLink: null,
+  };
+}
+
 export const openTenantDashboard =
   (tenant: string): AppThunk =>
   (dispatch, getState) => {
@@ -268,6 +303,14 @@ export const openTenantDashboard =
         enrolling: false,
         enrollError: '',
         registration: sameTenant ? currentDashboard.registration : defaultRegistrationState(),
+        requestDialogOpen: false,
+        requesting: false,
+        requestError: '',
+        decliningInviteRequestId: '',
+        declineReasonDraft: '',
+        decidingInviteRequestId: '',
+        decideInviteRequestError: '',
+        ...inviteRequestDraftCarryOver(sameTenant, currentDashboard),
       }),
     );
     dispatch(setReviewOpen(false));
@@ -277,9 +320,38 @@ export const openTenantDashboard =
 
 export const setTenantDashboardTab =
   (tab: TenantDashboardTab): AppThunk =>
-  (dispatch) => {
+  (dispatch, getState) => {
     dispatch(patchTenantDashboard({ tab }));
+    if (tab === 'registration') {
+      prefillRegistrationFromInviteRequest(dispatch, getState());
+    }
   };
+
+// prefillRegistrationFromInviteRequest arrives at the Registration tab
+// already knowing the tenant/environment names the operator is about to
+// register — the same ones the invite request already carried, whether it
+// is still pending, was declined and retried, or is long since approved.
+// Never overwrites a name the operator has already typed (only fills a
+// still-blank draft), and applies to both forms since either could be the
+// one the operator reaches for first.
+function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: RootState): void {
+  const request = state.tenantDashboard.data?.myInviteRequest;
+  const environmentName = request?.environmentName?.trim();
+  if (!environmentName) {
+    return;
+  }
+  const registration = state.tenantDashboard.registration;
+  const patch: Partial<RegistrationState> = {};
+  if (!registration.registerName.trim()) {
+    patch.registerName = environmentName;
+  }
+  if (!registration.previewEnvName.trim()) {
+    patch.previewEnvName = environmentName;
+  }
+  if (Object.keys(patch).length > 0) {
+    dispatch(updateRegistrationDraft(patch));
+  }
+}
 
 // setReviewFilter applies a Reviews-tab discovery filter and reloads the
 // dashboard so the new filter reaches the platform read, not just local

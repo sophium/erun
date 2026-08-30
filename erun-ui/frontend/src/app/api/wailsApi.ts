@@ -26,6 +26,7 @@ export const wailsApi = createApi({
     'IdleStatus',
     'Deploys',
     'ReviewDetail',
+    'TenantEnrollment',
   ],
   endpoints: () => ({}),
 });

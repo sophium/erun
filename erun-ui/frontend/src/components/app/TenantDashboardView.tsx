@@ -6,7 +6,9 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import {
   activeTenantDashboardTab,
+  requestsTabLabel,
   restrictedTenantDashboardReads,
+  tenantDashboardEnvironmentName,
   visibleTenantDashboardTabs,
 } from '@/app/tenantDashboardPanels';
 import {
@@ -194,7 +196,7 @@ function TenantDashboardReadyBody({
         <TabsList className="h-auto w-full flex-wrap justify-start">
           {visibleTabs.map((descriptor) => (
             <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
-              {descriptor.label}
+              {descriptor.tab === 'requests' ? requestsTabLabel(dashboard.data) : descriptor.label}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -229,23 +231,4 @@ function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: 
     `${String(environmentCount)} environment${environmentCount === 1 ? '' : 's'}`,
   ].filter(Boolean);
   return parts.join(', ');
-}
-
-function tenantDashboardEnvironmentName(
-  tenant: UITenant | undefined,
-  loadedEnvironment: string | undefined,
-): string {
-  const environmentName = loadedEnvironment?.trim();
-  if (environmentName) {
-    return environmentName;
-  }
-  if (!tenant) {
-    return '';
-  }
-  const defaultEnvironment = tenant.defaultEnvironment?.trim();
-  const environment =
-    tenant.environments.find(
-      (candidate) => candidate.name === defaultEnvironment && candidate.apiUrl,
-    ) ?? tenant.environments.find((candidate) => candidate.apiUrl);
-  return environment?.name.trim() ?? '';
 }

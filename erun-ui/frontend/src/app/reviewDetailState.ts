@@ -2,7 +2,11 @@
 // file crossed eslint's 500-line max-lines cap. Nothing here changes shape;
 // state.ts re-exports the whole module so every existing `from './state'`
 // import keeps working.
-import type { UIReviewDetail, UITenantDashboard } from '@/types';
+import {
+  INVITE_REQUEST_KIND_JOIN_TENANT,
+  type UIReviewDetail,
+  type UITenantDashboard,
+} from '@/types';
 
 import { defaultRegistrationState, type RegistrationState } from './tenantRegistrationState';
 
@@ -13,6 +17,7 @@ export type TenantDashboardTab =
   | 'builds'
   | 'audit'
   | 'registration'
+  | 'requests'
   | 'api-log';
 
 // ReviewFilterState backs the Reviews tab's one-click discovery filters.
@@ -47,6 +52,30 @@ export interface TenantDashboardState {
   // action state — split into its own module (tenantRegistrationState.ts)
   // since it is sizable on its own.
   registration: RegistrationState;
+  // requestDialogOpen/requestKindDraft/requestNoteDraft/requesting/
+  // requestError/requestRateLimitedUntil back the "Request an invitation"
+  // dialog (NotEnrolledState's second action). requestRateLimitedUntil is an
+  // epoch-ms deadline (0 when not rate-limited) so the dialog can render a
+  // live countdown and keep submit disabled for the rest of the window
+  // without a raw error — root AGENTS.md's "blocked, not broken" distinction.
+  requestDialogOpen: boolean;
+  requestKindDraft: string;
+  requestNoteDraft: string;
+  requesting: boolean;
+  requestError: string;
+  requestRateLimitedUntil: number;
+  // decliningInviteRequestId/declineReasonDraft/decliningInviteRequest/
+  // decideInviteRequestError back the Requests tab's per-row decline dialog
+  // and the (non-dialog) issue-invitation action; '' means no row's decline
+  // dialog is open.
+  decliningInviteRequestId: string;
+  declineReasonDraft: string;
+  decidingInviteRequestId: string;
+  decideInviteRequestError: string;
+  // issuedInviteLink is the most recently minted invite link (tenant, token),
+  // kept on screen after Issue invitation succeeds as the transferable
+  // artefact/manual fallback the issue's onboarding flow calls for.
+  issuedInviteLink: { inviteRequestId: string; token: string } | null;
 }
 
 // ReviewDetailState backs the dialog a Reviews-tab row opens. draftBody
@@ -131,6 +160,17 @@ export const defaultTenantDashboard = (): TenantDashboardState => ({
   enrolling: false,
   enrollError: '',
   registration: defaultRegistrationState(),
+  requestDialogOpen: false,
+  requestKindDraft: INVITE_REQUEST_KIND_JOIN_TENANT,
+  requestNoteDraft: '',
+  requesting: false,
+  requestError: '',
+  requestRateLimitedUntil: 0,
+  decliningInviteRequestId: '',
+  declineReasonDraft: '',
+  decidingInviteRequestId: '',
+  decideInviteRequestError: '',
+  issuedInviteLink: null,
 });
 
 export const defaultReviewDetail = (): ReviewDetailState => ({

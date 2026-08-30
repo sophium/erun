@@ -1,6 +1,7 @@
 import type { TenantConfigView } from 'erun-kit';
 import * as React from 'react';
 
+import { PENDING_REQUESTS_POLL_MS, useListInviteRequestsQuery } from '../app/api/requestsApi';
 import type { OidcConfig } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
@@ -12,6 +13,7 @@ import { UsersPanel } from '../identity/UsersPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
 import { QuotaPanel } from '../quota/QuotaPanel';
+import { RequestsPanel } from '../requests/RequestsPanel';
 import { TenantsPanel } from '../tenants/TenantsPanel';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ConsoleSidebar } from './ConsoleSidebar';
@@ -21,6 +23,31 @@ import {
   TenantSwitchMismatchBanner,
 } from './TenantSwitchMismatchBanner';
 import { useTheme } from './useTheme';
+
+// OperationsSectionContent renders the operations-only identity/tenant
+// sections -- split out of SectionContent below purely to keep either
+// function's switch under the module's complexity budget as sections keep
+// being added (each case is its own branch for eslint's `complexity` rule).
+function OperationsSectionContent({
+  active,
+  token,
+  docsUrl,
+}: {
+  active: 'tenants' | 'users' | 'org-settings' | 'smtp-settings';
+  token: string;
+  docsUrl: string | undefined;
+}): React.ReactElement {
+  switch (active) {
+    case 'tenants':
+      return <TenantsPanel token={token} docsUrl={docsUrl} />;
+    case 'users':
+      return <UsersPanel token={token} />;
+    case 'org-settings':
+      return <OrgSettingsPanel token={token} />;
+    case 'smtp-settings':
+      return <SmtpSettingsPanel token={token} />;
+  }
+}
 
 // SectionContent renders exactly one panel for the active section — the main
 // pane switches wholesale rather than stacking every panel, per #1207. Split
@@ -62,14 +89,16 @@ function SectionContent({
       return <MCPAccessPanel token={token} environments={config.environments} />;
     case 'invites':
       return <InvitesPanel token={token} />;
-    case 'tenants':
-      return <TenantsPanel token={token} docsUrl={docsUrl} />;
-    case 'users':
-      return <UsersPanel token={token} />;
-    case 'org-settings':
-      return <OrgSettingsPanel token={token} />;
-    case 'smtp-settings':
-      return <SmtpSettingsPanel token={token} />;
+    case 'requests':
+      return (
+        <RequestsPanel
+          token={token}
+          tenantType={config.tenant.type}
+          rateLimitWindowSeconds={config.inviteRequestRateLimitWindowSeconds}
+        />
+      );
+    default:
+      return <OperationsSectionContent active={active} token={token} docsUrl={docsUrl} />;
   }
 }
 
@@ -109,6 +138,19 @@ export function AppShell({
   const { theme, toggleTheme } = useTheme();
   const identity = React.useMemo(() => readTokenIdentity(token), [token]);
 
+  // The pending-request count has to be visible without opening the
+  // Requests panel, so it's read here rather than only inside RequestsPanel
+  // -- the same query, shared
+  // through RTK Query's cache, so this costs no extra request beyond the
+  // panel's own poll once both are subscribed.
+  const pendingRequestsQuery = useListInviteRequestsQuery(token, {
+    pollingInterval: PENDING_REQUESTS_POLL_MS,
+  });
+  const counts = React.useMemo<Partial<Record<ConsoleSectionId, number>>>(
+    () => ({ requests: pendingRequestsQuery.data?.length }),
+    [pendingRequestsQuery.data],
+  );
+
   return (
     <div className="flex h-dvh min-h-0 w-full bg-background text-foreground">
       <ConsoleSidebar
@@ -118,6 +160,7 @@ export function AppShell({
         oidc={oidc}
         sections={sections}
         active={active}
+        counts={counts}
         onSelect={setActive}
       />
       <div className="flex min-w-0 flex-1 flex-col">
