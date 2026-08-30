@@ -24,6 +24,7 @@ import {
 import { reportFailure, restartOrchestrator } from '@/app/orchestratorThunks';
 import type { AppNotification, AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
+import { openTenantDashboard } from '@/app/tenantDialogThunks';
 import { buildTitlebarFailureReport } from '@/app/titlebarFailureReport';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
@@ -300,9 +301,45 @@ function StatusEnvAction({ status }: { status: TitlebarStatusValue }): React.Rea
           <StatusRestartOrchestratorAction status={status} orchestratorId={status.orchestratorId} />
         </>
       ) : null;
+    case 'invite-approved':
+      return status.envTenant ? (
+        <StatusInviteApprovedAction status={status} tenant={status.envTenant} />
+      ) : null;
     default:
       return null;
   }
+}
+
+// StatusInviteApprovedAction navigates to the tenant dashboard rather than
+// acting inline -- mirroring StatusDeployAction's "navigate to the real
+// recovery surface" pattern. There is nothing to do here beyond looking at
+// the now-enrolled tenant; the invite link itself (the fallback/transferable
+// artefact) is copyable from the durable Activity Queue entry the same
+// approval pushed.
+function StatusInviteApprovedAction({
+  status,
+  tenant,
+}: {
+  status: TitlebarStatusValue;
+  tenant: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        dispatch(openTenantDashboard(tenant));
+        if (status.notificationId) {
+          dispatch(dismissNotification(status.notificationId));
+        }
+      }}
+    >
+      Open dashboard
+    </Button>
+  );
 }
 
 // StatusDeployAction is the toast's own version of #1390's rule: a runtime-

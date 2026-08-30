@@ -25,6 +25,7 @@ import type {
 } from '@/uiDiagnosticsTypes';
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
+import type { AppNotificationAction } from './model/appNotificationAction';
 import type { ReachabilityKind } from './reconnectCopy';
 import type { TenantDashboardState } from './reviewDetailState';
 
@@ -299,12 +300,9 @@ export interface AppNotification {
   // (e.g. restarting it) rather than a specific env.
   orchestratorId?: string;
   // Action names a control TitlebarStatus can render beside the message that
-  // performs the message's own remedy directly: 'deploy' opens the tagged
-  // env's deploy dialog; 'restart-orchestrator' restarts the tagged
-  // orchestrator; 'install-and-restart-orchestrator' additionally links the
-  // install docs, for the cause where the erun CLI itself could not be
-  // resolved. Undefined means no action.
-  action?: 'deploy' | 'restart-orchestrator' | 'install-and-restart-orchestrator';
+  // performs the message's own remedy directly -- see AppNotificationAction.
+  // Undefined means no action.
+  action?: AppNotificationAction;
 }
 
 export type TerminalStatusKind = 'info' | 'warning' | 'error';

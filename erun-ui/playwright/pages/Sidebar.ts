@@ -369,6 +369,26 @@ export class Sidebar {
     return names;
   }
 
+  // The tenant row's platform-enrollment status icon -- matched by its
+  // accessible name, which names the state in words (WCAG 1.4.1, never
+  // colour alone). local-only/pending/declined render a popover trigger;
+  // enrolled is a plain button -- both share this one locator.
+  tenantEnrollmentStatus(tenant: string): Locator {
+    return this.page
+      .getByTestId('tenant-enrollment-status')
+      .and(this.page.locator(`[aria-label*="${tenant}"]`));
+  }
+
+  async openTenantEnrollmentStatusPopover(tenant: string): Promise<void> {
+    await this.tenantEnrollmentStatus(tenant).click();
+  }
+
+  // The popover content is portal'd to document.body, mirroring
+  // cloudAliasPopover() above.
+  tenantEnrollmentStatusPopover(): Locator {
+    return this.page.locator('[data-radix-popper-content-wrapper]').first();
+  }
+
   async environmentsFor(tenant: string): Promise<string[]> {
     // Make sure the tenant is expanded so its env rows are mounted; the
     // edit buttons only exist while the group is open.
