@@ -1,4 +1,5 @@
-import { LoaderCircle } from 'lucide-react';
+import { Button } from 'erun-kit';
+import { LoaderCircle, LogOut } from 'lucide-react';
 import type * as React from 'react';
 
 import { readTokenIdentity } from '../auth/identity';
@@ -18,14 +19,18 @@ export function LoadingScreen({ brand }: { brand: string | undefined }): React.R
 // NotEnrolledScreen is the dead end a self-signed-up user hits: OIDC
 // succeeded, so a token is held, but the API rejects the identity because it
 // is enrolled in no tenant. This says what actually has to happen (an
-// operator must enrol them) and names the identity an operator needs in order
-// to do it — signing in again just returns here (#1167).
+// operator must enrol them), names the identity an operator needs in order to
+// do it, and offers a sign-out — signing in again as the *same* identity just
+// returns here, but signing in as a different one is the actual escape, so
+// this screen must not be a true dead end for that case.
 export function NotEnrolledScreen({
   brand,
   token,
+  onSignOut,
 }: {
   brand: string | undefined;
   token: string;
+  onSignOut: () => void;
 }): React.ReactElement {
   const identity = readTokenIdentity(token);
   const named = identity.email ?? identity.subject;
@@ -35,8 +40,8 @@ export function NotEnrolledScreen({
         You are signed in, but your account is not yet part of a tenant on this platform.
       </p>
       <p className="text-sm text-muted-foreground">
-        An operator has to enrol you before you can see any environments. Signing in again will not
-        change this.
+        An operator has to enrol you before you can see any environments. Signing in again as this
+        same account will not change that — sign out below if you meant to use a different one.
       </p>
       {named !== undefined && (
         <p className="text-xs text-muted-foreground">
@@ -47,6 +52,16 @@ export function NotEnrolledScreen({
           {identity.issuer !== undefined ? ` from ${identity.issuer}` : ''}
         </p>
       )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-self-start"
+        onClick={onSignOut}
+      >
+        <LogOut aria-hidden="true" />
+        Sign out
+      </Button>
     </CenteredCard>
   );
 }
