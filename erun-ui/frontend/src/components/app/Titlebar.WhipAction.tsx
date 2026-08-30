@@ -165,7 +165,7 @@ function WhipPopoverBody({
   onClose: () => void;
 }): React.ReactElement {
   return (
-    <div className="flex max-h-[70vh] flex-col">
+    <div role="region" aria-label="Whip" className="flex max-h-[70vh] flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-sm font-semibold">Whip</h2>
         <Button type="button" variant="ghost" size="icon" aria-label="Close whip" onClick={onClose}>

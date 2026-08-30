@@ -68,6 +68,15 @@ export class Titlebar {
     return this.page.getByRole('heading', { name: 'Whip' });
   }
 
+  // Scoped to the popover's own landmark: several seeded rows (the sidebar
+  // row, the terminal tab) already render the same env/orchestrator name
+  // elsewhere on the page, so an unscoped getByText(name)/getByRole(...) is
+  // ambiguous. Titlebar.WhipAction.tsx's WhipPopoverBody carries this
+  // role/name on its outermost element for exactly this reason.
+  whipPanel(): Locator {
+    return this.page.getByRole('region', { name: 'Whip' });
+  }
+
   // Scoped to the popover's own live region: several seeded rows (the
   // sidebar row, the terminal tab) already render the same env/orchestrator
   // name elsewhere on the page, so an unscoped getByText(name) is ambiguous.
@@ -76,7 +85,34 @@ export class Titlebar {
   }
 
   async closeWhipReport(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Close whip report' }).click();
+    await this.page.getByRole('button', { name: 'Close whip' }).click();
+  }
+
+  // The selection surface's own checkable rows -- one per environment
+  // ("tenant/environment") or orchestrator (its configured name) -- an
+  // implicit <label> wraps each Checkbox, so its accessible name is the row's
+  // visible text with no separate aria-label to keep in sync.
+  whipTargetCheckbox(name: string): Locator {
+    return this.whipPanel().getByRole('checkbox', { name });
+  }
+
+  selectAllOrchestratorsButton(): Locator {
+    return this.whipPanel().getByRole('button', { name: 'Select all orchestrators' });
+  }
+
+  selectAllEnvironmentsButton(): Locator {
+    return this.whipPanel().getByRole('button', { name: 'Select all environments' });
+  }
+
+  selectAllButton(): Locator {
+    return this.whipPanel().getByRole('button', { name: 'Select all', exact: true });
+  }
+
+  // The primary action's own label states the resolved count before it acts
+  // (erun#1700), so it has no fixed accessible name -- match the shared
+  // prefix instead.
+  whipRunButton(): Locator {
+    return this.whipPanel().getByRole('button', { name: /^Whip(ping…| \d+ target)/ });
   }
 
   async toggleTheme(): Promise<void> {
