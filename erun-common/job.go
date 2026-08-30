@@ -270,6 +270,22 @@ type EnvironmentJob struct {
 	// pushed. Empty when WorktreeDirty is false, or when a commit was made and
 	// pushed cleanly.
 	WorktreeReason string `json:"worktreeReason,omitempty"`
+
+	// CloneReclaimed reports whether the supervisor removed this agent job's
+	// own Dir after it finished, because its working tree was clean and every
+	// commit reachable from HEAD was already reachable from a remote. False
+	// for a command job, a job that did not finish cleanly (see
+	// EnvironmentJobStateExited), a job whose Dir sat outside the work root,
+	// or one the supervisor judged unsafe to remove (see CloneKeptReason).
+	// See work_clone_reclaim.go.
+	CloneReclaimed bool `json:"cloneReclaimed,omitempty"`
+	// CloneKeptReason explains why an agent job's Dir was left in place: a
+	// dirty tree, unpushed commits with no proof they landed elsewhere under
+	// a different commit, a detached HEAD that is not provably pushed, or no
+	// upstream at all. Empty when CloneReclaimed is true, or when the job was
+	// never a candidate for reclaim (a command job, one outside the work
+	// root, or one that did not finish cleanly).
+	CloneKeptReason string `json:"cloneKeptReason,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.

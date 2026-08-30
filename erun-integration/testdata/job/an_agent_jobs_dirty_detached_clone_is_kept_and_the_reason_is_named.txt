@@ -1,0 +1,5 @@
+exited 0: lane, agent claude, no events yet, working tree was dirty and left uncommitted: the working tree had uncommitted changes when the job ended, but HEAD was detached; a checkpoint commit there would be unreachable the moment HEAD moves, so none was made, clone kept: working tree has 1 uncommitted change(s) (e.g. uncommitted.txt), tracked or untracked, 0 bytes of output
+audit: erun job status --environment dev --id lane --tenant team
+exited 0: lane, agent claude, no events yet, working tree was dirty and left uncommitted: the working tree had uncommitted changes when the job ended, but HEAD was detached; a checkpoint commit there would be unreachable the moment HEAD moves, so none was made, clone kept: working tree has 1 uncommitted change(s) (e.g. uncommitted.txt), tracked or untracked, 0 bytes of output
+audit: erun job await --environment dev --id lane --tenant team --timeout 1s
+job "lane" ended with an uncommitted working tree: working tree was dirty and left uncommitted: the working tree had uncommitted changes when the job ended, but HEAD was detached; a checkpoint commit there would be unreachable the moment HEAD moves, so none was made

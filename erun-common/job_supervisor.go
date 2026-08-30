@@ -646,6 +646,12 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 // captureAgentJobWorktreeOutcome runs here too, before the exit code alone
 // could be read as the whole story: an agent job's own working tree is
 // something its exit status says nothing about at all (see job_worktree.go).
+//
+// reclaimAgentJobWorkClone runs after State is settled, using a fresh
+// snapshot so it sees this job's own final EnvironmentJobStateExited (or
+// abandoned/gate-incomplete, which it refuses) rather than the "running"
+// state the job still carried when finishEnvironmentJob was entered (see
+// work_clone_reclaim.go for why that ordering matters).
 func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
@@ -665,6 +671,12 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.Reason = reason
 		job.ExitCode = &code
 		worktree.apply(job)
+	})
+
+	reclaimed, cloneReason := reclaimAgentJobWorkClone(recorder.snapshot())
+	recorder.update(func(job *EnvironmentJob) {
+		job.CloneReclaimed = reclaimed
+		job.CloneKeptReason = cloneReason
 	})
 	return nil
 }
