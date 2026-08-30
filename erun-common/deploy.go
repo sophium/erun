@@ -1217,10 +1217,8 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 	if err != nil {
 		return nil, err
 	}
-	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
-	traceDeployComponentSelection(ctx, selected, selectionSource)
-	missingFromSelection := traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
-	if err := guardSavedSelectionShadowingPlan(missingFromSelection, selected, resolvedTarget.Tenant, resolvedTarget.Environment); err != nil {
+	selected, err := resolveGuardedDeploySelection(ctx, target, resolvedTarget, plan)
+	if err != nil {
 		return nil, err
 	}
 	traceConfiguredDeployPaths(ctx, resolvedTarget.RepoPath)
@@ -1256,6 +1254,20 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a chart name, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
 	}
 	return specs, nil
+}
+
+// resolveGuardedDeploySelection resolves the deploy component selection,
+// traces the tier it came from, and refuses when a saved selection shadows a
+// richer repo plan (see guardSavedSelectionShadowingPlan) — the ordering both
+// the local-repo and sourceless deploy paths share.
+func resolveGuardedDeploySelection(ctx Context, target DeployTarget, resolvedTarget OpenResult, plan ProjectK8sConfig) ([]string, error) {
+	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
+	traceDeployComponentSelection(ctx, selected, selectionSource)
+	missing := traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
+	if err := guardSavedSelectionShadowingPlan(missing, selected, resolvedTarget.Tenant, resolvedTarget.Environment); err != nil {
+		return nil, err
+	}
+	return selected, nil
 }
 
 func traceDeployComponentSelection(ctx Context, selected []string, source string) {
@@ -1329,10 +1341,8 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 	if err != nil {
 		return nil, err
 	}
-	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
-	traceDeployComponentSelection(ctx, selected, selectionSource)
-	missingFromSelection := traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
-	if err := guardSavedSelectionShadowingPlan(missingFromSelection, selected, resolvedTarget.Tenant, resolvedTarget.Environment); err != nil {
+	selected, err := resolveGuardedDeploySelection(ctx, target, resolvedTarget, plan)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1354,9 +1364,26 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 		resolvedTarget = concretized
 	}
 
-	specs := make([]DeploySpec, 0, len(tenantComponents)+1)
+	specs, err := resolvePublishedComponentDeploySpecs(ctx, store, resolvedTarget, tenantComponents, target.VersionOverride)
+	if err != nil {
+		return nil, err
+	}
+	specs, err = appendPublishedRuntimeDeploySpecs(ctx, store, resolvedTarget, target, runtimeSelected, specs)
+	if err != nil {
+		return nil, err
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a publishable component, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
+	}
+	return specs, nil
+}
+
+// resolvePublishedComponentDeploySpecs resolves the by-reference deploy spec
+// for each selected tenant component chart.
+func resolvePublishedComponentDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, tenantComponents []string, versionOverride string) ([]DeploySpec, error) {
+	specs := make([]DeploySpec, 0, len(tenantComponents))
 	for _, component := range tenantComponents {
-		spec, err := resolvePublishedComponentDeploySpec(ctx, resolvedTarget, component, target.VersionOverride)
+		spec, err := resolvePublishedComponentDeploySpec(ctx, resolvedTarget, component, versionOverride)
 		if err != nil {
 			return nil, err
 		}
@@ -1365,18 +1392,22 @@ func resolvePublishedDeploySpecs(ctx Context, store DeployStore, findProjectRoot
 		}
 		specs = append(specs, spec)
 	}
-	if runtimeSelected {
-		runtimeImageExplicit := strings.TrimSpace(target.RuntimeImageOverride) != ""
-		runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride, target.RuntimeChartOverride, runtimeImageExplicit)
-		if err != nil {
-			return nil, err
-		}
-		specs = append(specs, runtimeSpecs...)
-	}
-	if len(specs) == 0 {
-		return nil, fmt.Errorf("deploy: no components selected for %s/%s — pass --components with a publishable component, save a default selection, or select the runtime to bootstrap the environment", resolvedTarget.Tenant, resolvedTarget.Environment)
-	}
 	return specs, nil
+}
+
+// appendPublishedRuntimeDeploySpecs appends the published runtime chart's
+// deploy spec(s) when the selection includes the runtime; otherwise it
+// returns specs unchanged.
+func appendPublishedRuntimeDeploySpecs(ctx Context, store DeployStore, resolvedTarget OpenResult, target DeployTarget, runtimeSelected bool, specs []DeploySpec) ([]DeploySpec, error) {
+	if !runtimeSelected {
+		return specs, nil
+	}
+	runtimeImageExplicit := strings.TrimSpace(target.RuntimeImageOverride) != ""
+	runtimeSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, target.VersionOverride, target.RuntimeChartOverride, runtimeImageExplicit)
+	if err != nil {
+		return nil, err
+	}
+	return append(specs, runtimeSpecs...), nil
 }
 
 // ensureTenantChartsPublishedFromDeployRegistry concretizes target's registries
