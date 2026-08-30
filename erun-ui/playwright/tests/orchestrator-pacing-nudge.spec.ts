@@ -30,6 +30,18 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 // (TestOrchestratorRespawnsAfterCrashIntoTheSameConversation,
 // TestOrchestratorCleanExitDoesNotRespawn, TestStopOrchestratorRefusesItsOwnRespawn,
 // TestBuildOrchestratorLaunchFallbackKeepsThePin).
+//
+// #1699's env-aware suppression (a linked environment busy on this
+// orchestrator's own dispatched work must not accrue staleness or take a
+// nudge) is the same unreachable-without-a-real-PTY case, so it is covered the
+// same way: erun-ui/orchestrator_pacing_env_test.go
+// (TestOrchestratorPacingSuppressedWhileLinkedEnvBusy,
+// TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments,
+// TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease,
+// TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal,
+// TestOrchestratorPacingSurfacesPastTheEnvBusyBound,
+// TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap,
+// TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder).
 test.describe('orchestrator pacing/respawn has no surface without a live session', () => {
   test('a created-but-never-started orchestrator stays stopped with no busy/shell/alert artifacts', async ({
     app,

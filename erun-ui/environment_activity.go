@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,6 +71,14 @@ type environmentActivityState struct {
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
+	// busyHolderOrchestrators is the sorted, comma-joined set of orchestrator
+	// IDs whose lease is keeping this environment busy right now — how
+	// orchestrator pacing (orchestrator_pacing_env.go) tells "busy on work I
+	// dispatched" from "busy on someone else's job or an operator's own
+	// session" (erun#1699). A plain []string field would not compare with ==,
+	// which emitEnvActivityIfChanged relies on to detect a transition, so this
+	// stays a single comparable string.
+	busyHolderOrchestrators string
 }
 
 func (a *App) runEnvironmentActivityPoller(stop <-chan struct{}) {
@@ -195,6 +204,7 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	a.forgetForwardRepair(selection)
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	observation.state.busyHolderOrchestrators = environmentLeaseHolderOrchestrators(status.Leases)
 	return observation
 }
 
@@ -249,7 +259,32 @@ func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observatio
 	observation.state.reachable = true
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	observation.state.busyHolderOrchestrators = environmentLeaseHolderOrchestrators(status.Leases)
 	return observation
+}
+
+// environmentLeaseHolderOrchestrators reduces the environment's held leases to
+// the distinct, sorted set of orchestrator IDs claiming one, joined into one
+// string (see environmentActivityState.busyHolderOrchestrators for why). A
+// lease with no named orchestrator holder — a plain SSH session, an operator's
+// own agent invocation — contributes nothing: it cannot be attributed to any
+// orchestrator, so it must never suppress one's pacing nudge.
+func environmentLeaseHolderOrchestrators(leases []eruncommon.EnvironmentActivityLease) string {
+	seen := make(map[string]struct{})
+	for _, lease := range leases {
+		if id := strings.TrimSpace(lease.Holder.Orchestrator); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 // environmentBusyFromIdleStatus reduces the environment's own markers to the one
