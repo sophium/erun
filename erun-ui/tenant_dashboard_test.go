@@ -22,27 +22,34 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		switch req.URL.Path {
-		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","roles":["Auditor"],"issuer":"https://sts.aws.example","subject":"subject-1","capabilities":` + capabilities + `}`))
-		case "/v1/reviews", "/v1/reviews/merge-queue":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/review-1/builds":
-			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
-		case "/v1/audit-events":
-			_, _ = w.Write([]byte(`{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`))
-		case "/v1/users":
-			_, _ = w.Write([]byte(`[]`))
-		case "/v1/contexts":
-			_, _ = w.Write([]byte(`[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`))
-		case "/v1/environments":
-			_, _ = w.Write([]byte(`[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`))
-		case "/v1/invite-requests":
-			_, _ = w.Write([]byte(`[]`))
-		default:
-			http.NotFound(w, req)
-		}
+		tenantDashboardAPIResponse(w, req, capabilities)
 	}))
+}
+
+// tenantDashboardAPIResponse is tenantDashboardAPI's fixture body for every
+// path its forbidden/default handling did not already short-circuit — split
+// out to keep tenantDashboardAPI itself under the module's complexity cap.
+func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabilities string) {
+	switch req.URL.Path {
+	case "/v1/whoami":
+		_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","roles":["Auditor"],"issuer":"https://sts.aws.example","subject":"subject-1","capabilities":` + capabilities + `}`))
+	case "/v1/reviews", "/v1/reviews/merge-queue":
+		_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+	case "/v1/reviews/review-1/builds":
+		_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
+	case "/v1/audit-events":
+		_, _ = w.Write([]byte(`{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`))
+	case "/v1/users":
+		_, _ = w.Write([]byte(`[]`))
+	case "/v1/contexts":
+		_, _ = w.Write([]byte(`[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`))
+	case "/v1/environments":
+		_, _ = w.Write([]byte(`[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`))
+	case "/v1/invite-requests":
+		_, _ = w.Write([]byte(`[]`))
+	default:
+		http.NotFound(w, req)
+	}
 }
 
 // testERunPlatformAliasApp builds an App with one signed-in erun-type cloud
