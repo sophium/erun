@@ -200,7 +200,10 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	app.sessions[aliveKey] = &managedTerminal{session: aliveSession, key: aliveKey, serial: 1, kind: sessionKindOrchestrator}
 	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "alive", startedAt: time.Now()}
 
-	report, err := app.WhipNow()
+	report, err := app.WhipNow([]uiWhipTargetRef{
+		{Kind: uiWhipTargetKindEnvironment, ID: "erun/ux"},
+		{Kind: uiWhipTargetKindOrchestrator, ID: "alive"},
+	})
 	if err != nil {
 		t.Fatalf("WhipNow failed: %v", err)
 	}
@@ -221,12 +224,12 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 	}
 }
 
-// TestWhipAllEnvironmentsNowSkipsHostEnvs covers the "enumerates targets
+// TestWhipEnvironmentsNowSkipsHostEnvs covers the "enumerates targets
 // that could never have been whipped" finding: a host-type env has no pod and
 // no cluster contact at all (EnvConfig.HasPod), so it can never carry an AI
 // session to push. Reporting it every pass is noise the report should not
 // carry, unlike a real env this transport merely cannot reach right now.
-func TestWhipAllEnvironmentsNowSkipsHostEnvs(t *testing.T) {
+func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 	store := whipTestStore(t)
 	store.envs["erun/desktop-build"] = eruncommon.EnvConfig{
 		Name:          "desktop-build",
@@ -248,15 +251,123 @@ func TestWhipAllEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 		},
 	})
 
-	results, err := app.whipAllEnvironmentsNow(context.Background())
+	results, err := app.whipEnvironmentsNow(context.Background(), map[string]struct{}{"erun/ux": {}, "erun/desktop-build": {}})
 	if err != nil {
-		t.Fatalf("whipAllEnvironmentsNow failed: %v", err)
+		t.Fatalf("whipEnvironmentsNow failed: %v", err)
 	}
 	if len(results) != 1 {
 		t.Fatalf("expected the host env to be skipped, got %d results: %+v", len(results), results)
 	}
 	if results[0].Candidate.ID != "erun/ux" {
 		t.Fatalf("expected only erun/ux, got %+v", results[0])
+	}
+}
+
+// TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments is the regression
+// test for the desktop's own blast-radius bug (erun#1700): an environment not
+// in the requested set must not be pushed at all, not merely omitted from the
+// report after being attempted anyway.
+func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
+	store := whipTestStore(t)
+	store.envs["erun/dev"] = eruncommon.EnvConfig{
+		Name:              "dev",
+		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		LocalRepoPath:     t.TempDir(),
+		KubernetesContext: "orbstack",
+	}
+
+	var pushedEndpoints []string
+	app := NewApp(erunUIDeps{
+		store: store,
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
+		whipEnvironment: func(_ context.Context, endpoint, _ string) (eruncommon.WhipResult, error) {
+			pushedEndpoints = append(pushedEndpoints, endpoint)
+			return eruncommon.WhipResult{Decision: eruncommon.WhipDecisionNudge, Pushed: true}, nil
+		},
+	})
+
+	results, err := app.whipEnvironmentsNow(context.Background(), map[string]struct{}{"erun/ux": {}})
+	if err != nil {
+		t.Fatalf("whipEnvironmentsNow failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Candidate.ID != "erun/ux" {
+		t.Fatalf("expected only the requested environment in the report, got %+v", results)
+	}
+	if len(pushedEndpoints) != 1 {
+		t.Fatalf("expected exactly one push, got %d: %v", len(pushedEndpoints), pushedEndpoints)
+	}
+}
+
+// TestListWhipEnvironmentTargetsSkipsHostEnvs mirrors
+// TestWhipEnvironmentsNowSkipsHostEnvs for the selection surface's own
+// population: a host-type env must not be offered as a selectable target
+// either, since it can never carry a session to push.
+func TestListWhipEnvironmentTargetsSkipsHostEnvs(t *testing.T) {
+	store := whipTestStore(t)
+	store.envs["erun/desktop-build"] = eruncommon.EnvConfig{
+		Name:          "desktop-build",
+		Type:          eruncommon.EnvironmentTypeHost,
+		LocalRepoPath: t.TempDir(),
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	targets, err := app.listWhipEnvironmentTargets()
+	if err != nil {
+		t.Fatalf("listWhipEnvironmentTargets failed: %v", err)
+	}
+	if len(targets) != 1 || targets[0].environment != "ux" {
+		t.Fatalf("expected only ux, got %+v", targets)
+	}
+}
+
+// TestWhipNowRefusesAnEmptyTargetList is the acceptance-criteria contract
+// (erun#1700): an empty selection is not "all" -- WhipNow must refuse rather
+// than fall back to whipping everything configured.
+func TestWhipNowRefusesAnEmptyTargetList(t *testing.T) {
+	app := NewApp(erunUIDeps{store: whipTestStore(t)})
+	if _, err := app.WhipNow(nil); err == nil {
+		t.Fatal("expected WhipNow to refuse an empty target list")
+	}
+	if _, err := app.WhipNow([]uiWhipTargetRef{}); err == nil {
+		t.Fatal("expected WhipNow to refuse an empty target list")
+	}
+}
+
+// TestWhipNowRefusesAnUnknownTargetKind guards the wire contract between the
+// frontend and this method: a target kind neither transport recognizes must
+// fail loudly rather than being silently dropped from the push.
+func TestWhipNowRefusesAnUnknownTargetKind(t *testing.T) {
+	app := NewApp(erunUIDeps{store: whipTestStore(t)})
+	if _, err := app.WhipNow([]uiWhipTargetRef{{Kind: "bogus", ID: "x"}}); err == nil {
+		t.Fatal("expected WhipNow to refuse an unrecognized target kind")
+	}
+}
+
+// TestWhipTargetsListsEnvironmentsAndOrchestrators is the selection surface's
+// whole-population contract: WhipTargets must offer exactly the environments
+// listWhipEnvironmentTargets enumerates and exactly the orchestrators
+// listWhipOrchestratorTargets enumerates, with IDs that round-trip through
+// WhipNow's own uiWhipTargetRef.
+func TestWhipTargetsListsEnvironmentsAndOrchestrators(t *testing.T) {
+	app := NewApp(erunUIDeps{store: whipTestStore(t)})
+	app.orchestrators["alive"] = &orchestratorSession{id: "alive", serial: 1, name: "Alive", startedAt: time.Now()}
+	key := orchestratorSessionKey("alive")
+	app.sessions[key] = &managedTerminal{session: newCallRecordingSession(), key: key, serial: 1, kind: sessionKindOrchestrator}
+
+	list, err := app.WhipTargets()
+	if err != nil {
+		t.Fatalf("WhipTargets failed: %v", err)
+	}
+	if len(list.Environments) != 1 || list.Environments[0].ID != "erun/ux" {
+		t.Fatalf("expected exactly one environment target erun/ux, got %+v", list.Environments)
+	}
+	if list.Environments[0].Tenant != "erun" || list.Environments[0].Environment != "ux" {
+		t.Fatalf("expected the tenant/environment fields to match the id, got %+v", list.Environments[0])
+	}
+	if len(list.Orchestrators) != 1 || list.Orchestrators[0].ID != "alive" || list.Orchestrators[0].Name != "Alive" {
+		t.Fatalf("expected exactly one orchestrator target alive/Alive, got %+v", list.Orchestrators)
 	}
 }
 
