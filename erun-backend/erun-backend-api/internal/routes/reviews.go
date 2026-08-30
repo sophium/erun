@@ -105,7 +105,7 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 	}
 	reviews, err := r.reviews.List(req.Context(), filter)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, reviews)
@@ -114,7 +114,7 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) listReviewers(w http.ResponseWriter, req *http.Request) {
 	reviewers, err := r.reviewers.List(req.Context(), apirepository.ReviewReviewerFilter{ReviewID: req.PathValue("review_id")})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, reviewers)
@@ -131,7 +131,7 @@ func (r ReviewRoutes) addReviewer(w http.ResponseWriter, req *http.Request) {
 		UserID:   input.UserID,
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, reviewer)
@@ -139,7 +139,7 @@ func (r ReviewRoutes) addReviewer(w http.ResponseWriter, req *http.Request) {
 
 func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 	if err := r.reviewers.Delete(req.Context(), req.PathValue("review_id"), req.PathValue("user_id")); err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -154,7 +154,7 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 	review = r.service.PrepareCreate(review)
 	review, err := r.reviews.Create(req.Context(), review)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, review)
@@ -163,7 +163,7 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
 	reviews, err := r.reviews.ListMergeQueue(req.Context(), req.URL.Query().Get("targetBranch"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, reviews)
@@ -177,7 +177,7 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 	}
 	review, err := r.service.AdvanceMergeQueue(req.Context(), input.TargetBranch)
 	if err != nil {
-		writeAdvanceMergeQueueError(w, err)
+		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, review)
@@ -191,7 +191,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 	}
 	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.TargetBranch, input.Reason)
 	if err != nil {
-		writeAdvanceMergeQueueError(w, err)
+		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, review)
@@ -201,7 +201,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 // the count and the review to route the operator to, rather than the bare
 // status text writeRepositoryError gives every other conflict, and gives the
 // merge-queue-specific machine codes documented in collaboration/reviews.md.
-func writeAdvanceMergeQueueError(w http.ResponseWriter, err error) {
+func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err error) {
 	var blocked *service.UnresolvedThreadsError
 	if errors.As(err, &blocked) {
 		writeJSON(w, http.StatusConflict, unresolvedThreadsResponse{
@@ -221,13 +221,13 @@ func writeAdvanceMergeQueueError(w http.ResponseWriter, err error) {
 		writeErrorCode(w, http.StatusNotFound, "EMPTY_QUEUE", empty.Error())
 		return
 	}
-	writeRepositoryError(w, err)
+	writeRepositoryError(w, req, err)
 }
 
 func (r ReviewRoutes) getReview(w http.ResponseWriter, req *http.Request) {
 	review, err := r.reviews.Get(req.Context(), req.PathValue("review_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, review)
@@ -241,7 +241,7 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 	}
 	review, err := r.service.UpdateStatus(req.Context(), req.PathValue("review_id"), input.Status, input.BuildID, input.RemoteURL)
 	if err != nil {
-		writeUpdateStatusError(w, err)
+		writeUpdateStatusError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, review)
@@ -251,7 +251,7 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 // their exact machine code and details shape; every other failure (not
 // found, missing security context, ...) falls through to the generic
 // status-derived code.
-func writeUpdateStatusError(w http.ResponseWriter, err error) {
+func writeUpdateStatusError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidTransition *service.InvalidTransitionError
 	if errors.As(err, &invalidTransition) {
 		writeErrorDetails(w, http.StatusBadRequest, "INVALID_TRANSITION", invalidTransition.Error(), map[string]any{
@@ -271,5 +271,5 @@ func writeUpdateStatusError(w http.ResponseWriter, err error) {
 		writeErrorCode(w, http.StatusConflict, "MERGE_NOT_VERIFIED", notVerified.Error())
 		return
 	}
-	writeRepositoryError(w, err)
+	writeRepositoryError(w, req, err)
 }

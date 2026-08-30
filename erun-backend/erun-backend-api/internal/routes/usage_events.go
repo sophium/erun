@@ -25,7 +25,7 @@ func RegisterUsageEventRoutes(register ProtectedRouteRegistrar, events UsageEven
 func (r UsageEventRoutes) listUsageEvents(w http.ResponseWriter, req *http.Request) {
 	events, err := r.events.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, events)

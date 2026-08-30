@@ -3,6 +3,8 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type stubInviteRequestSubmitter struct {
@@ -215,5 +218,92 @@ func TestApproveCreateTenantRequiresOperationsTenant(t *testing.T) {
 	}
 	if approver.approveCalls != 1 {
 		t.Fatalf("approve workflow was called %d times, want 1 for an operations caller", approver.approveCalls)
+	}
+}
+
+// fakeApproveCreateTenantRepositories wires the real service.InviteRequestService
+// used below, rather than the stubInviteRequestApprover the tests above use,
+// so this test exercises the actual erun#1722 fix end to end through the
+// HTTP route: routes.approve -> service.ApproveCreateTenant -> the tenant
+// repository's own name-conflict resolution.
+type fakeApproveCreateTenantTenants struct {
+	createErr    error
+	byNameTenant model.Tenant
+}
+
+func (f *fakeApproveCreateTenantTenants) Create(_ context.Context, _ repository.CreateTenantParams) (model.Tenant, error) {
+	return model.Tenant{}, f.createErr
+}
+
+func (f *fakeApproveCreateTenantTenants) GetByName(_ context.Context, _ string) (model.Tenant, error) {
+	return f.byNameTenant, nil
+}
+
+type fakeApproveCreateTenantUsers struct{ gotTenantID string }
+
+func (f *fakeApproveCreateTenantUsers) Create(ctx context.Context, _ repository.CreateUserParams) (model.User, error) {
+	if sc, ok := security.FromContext(ctx); ok {
+		f.gotTenantID = sc.TenantID
+	}
+	return model.User{UserID: "user-1"}, nil
+}
+
+type fakeApproveCreateTenantInvites struct{}
+
+func (fakeApproveCreateTenantInvites) Create(_ context.Context, _ repository.CreateInviteParams) (model.Invite, error) {
+	return model.Invite{InviteID: "invite-1", Token: "tok"}, nil
+}
+
+type fakeApproveCreateTenantDecisions struct{ approved model.InviteRequest }
+
+func (f *fakeApproveCreateTenantDecisions) MarkApproved(_ context.Context, id string, decidedByUserID string, mintedInviteID string) (model.InviteRequest, error) {
+	f.approved = model.InviteRequest{InviteRequestID: id, Status: model.InviteRequestStatusApproved, DecidedByUserID: decidedByUserID, MintedInviteID: mintedInviteID}
+	return f.approved, nil
+}
+
+func (f *fakeApproveCreateTenantDecisions) MarkDeclined(_ context.Context, id string, decidedByUserID string, reason string) (model.InviteRequest, error) {
+	return model.InviteRequest{}, errors.New("not exercised by this test")
+}
+
+// TestApproveCreateTenantWhenTenantAlreadyExistsRespondsOKNotStuckPending
+// drives the real fix end to end through the HTTP layer: approving a
+// CREATE_TENANT request whose tenant name now belongs to a tenant this call
+// did not create must not 500, and must land the request on APPROVED — a
+// state the operator can see resolved — rather than leaving it PENDING.
+func TestApproveCreateTenantWhenTenantAlreadyExistsRespondsOKNotStuckPending(t *testing.T) {
+	store := &stubInviteRequestStore{got: model.InviteRequest{
+		InviteRequestID: "req-1",
+		Status:          model.InviteRequestStatusPending,
+		Kind:            model.InviteRequestKindCreateTenant,
+		TenantName:      "newco",
+		Issuer:          "https://newco-issuer.example.com",
+		Subject:         "verified-subject",
+	}}
+	tenants := &fakeApproveCreateTenantTenants{
+		createErr:    repository.ErrTenantNameConflict,
+		byNameTenant: model.Tenant{TenantID: "tenant-existing", Name: "newco", Type: model.TenantTypeCompany},
+	}
+	users := &fakeApproveCreateTenantUsers{}
+	decisions := &fakeApproveCreateTenantDecisions{}
+	svc := service.NewInviteRequestService(decisions, tenants, users, fakeApproveCreateTenantInvites{})
+	routes := inviteRequestRoutes{requests: store, tenants: &stubTenantRepository{}, decisions: svc}
+
+	req := inviteRequest(http.MethodPost, "/v1/invite-requests/req-1/approve", `{}`, "ops-tenant", string(model.TenantTypeOperations), "https://auth.example.com")
+	req.SetPathValue("invite_request_id", "req-1")
+	rec := httptest.NewRecorder()
+	routes.approve(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (not a 500 on the name collision); body=%s", rec.Code, rec.Body.String())
+	}
+	var decided model.InviteRequest
+	if err := json.Unmarshal(rec.Body.Bytes(), &decided); err != nil {
+		t.Fatalf("response body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if decided.Status != model.InviteRequestStatusApproved {
+		t.Fatalf("request status = %q, want APPROVED — it must not stay PENDING with no reachable outcome", decided.Status)
+	}
+	if users.gotTenantID != "tenant-existing" {
+		t.Fatalf("requester was enrolled under tenant %q, want the existing tenant %q", users.gotTenantID, "tenant-existing")
 	}
 }

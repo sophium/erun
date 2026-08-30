@@ -53,7 +53,7 @@ func (r *TenantRepository) Create(ctx context.Context, params CreateTenantParams
 			Column("name", "type").
 			Returning("*").
 			Scan(ctx); err != nil {
-			return normalizeNoRows(err)
+			return classifyTenantCreateError(err)
 		}
 
 		// ON CONFLICT DO NOTHING lets a shared issuer already in the registry map
@@ -84,6 +84,22 @@ func (r *TenantRepository) Create(ctx context.Context, params CreateTenantParams
 		return model.Tenant{}, err
 	}
 	return tenant, nil
+}
+
+// classifyTenantCreateError maps a failure inserting the tenants row itself
+// to the sentinel a caller needs. name's own UNIQUE constraint
+// (tenants_name_key, the column's inline UNIQUE) means a tenant this call
+// did not create already holds the name — an expected, resolvable race
+// (erun#1722), not a fault, and named specifically so it is never confused
+// with the tenant_issuers conflict Create's caller checks separately, which
+// is a real "this issuer is already spoken for" refusal with no equivalent
+// resolution. Any other error (including a different unique/check violation)
+// passes through normalizeNoRows unclassified rather than being guessed at.
+func classifyTenantCreateError(err error) error {
+	if constraint, ok := pgConstraintName(err); ok && constraint == "tenants_name_key" {
+		return ErrTenantNameConflict
+	}
+	return normalizeNoRows(err)
 }
 
 // nullIfEmpty stores NULL — the single-tenant marker — for empty issuer columns;
@@ -174,6 +190,24 @@ func (r *TenantRepository) Current(ctx context.Context) (model.Tenant, error) {
 			  FROM tenants
 			 WHERE tenant_id = ?
 		`, securityContext.TenantID).Scan(ctx, &tenant)
+		return normalizeNoRows(err)
+	})
+	return tenant, err
+}
+
+// GetByName returns the tenant currently holding name, or ErrNotFound. Its
+// one caller is Create's ErrTenantNameConflict path: resolving the tenant a
+// name race lost to, not a general lookup, so unlike Current it applies no
+// tenant-scoping — the caller (an operations-only workflow) is allowed to
+// resolve any tenant by name.
+func (r *TenantRepository) GetByName(ctx context.Context, name string) (model.Tenant, error) {
+	var tenant model.Tenant
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		err := tx.NewRaw(`
+			SELECT tenant_id, name, type, created_at, updated_at
+			  FROM tenants
+			 WHERE name = ?
+		`, strings.TrimSpace(name)).Scan(ctx, &tenant)
 		return normalizeNoRows(err)
 	})
 	return tenant, err

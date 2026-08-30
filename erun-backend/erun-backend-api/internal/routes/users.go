@@ -65,7 +65,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		// Protected routes always run behind authentication middleware that stamps
 		// the security context, so a missing context is an internal wiring error,
 		// not a client fault.
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 
@@ -109,7 +109,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 			writeError(w, http.StatusNotFound, "one or more requested roles do not exist in this tenant")
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
@@ -118,7 +118,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 func (r UserRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 
@@ -130,7 +130,7 @@ func (r UserRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 
 	users, err := r.users.List(req.Context(), repository.UserFilter{TenantID: targetTenantID})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, users)

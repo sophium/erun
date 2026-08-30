@@ -98,7 +98,7 @@ func requireOperationsTenant(securityContext security.Context) error {
 func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request) (security.Context, bool) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return security.Context{}, false
 	}
 	if err := requireOperationsTenant(securityContext); err != nil {
@@ -133,7 +133,7 @@ func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 	}
 	erunUsers, err := r.erunUsers.List(req.Context(), repository.UserFilter{TenantID: securityContext.TenantID})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	views := mergeIdentityUsers(idpUsers, erunUsers)

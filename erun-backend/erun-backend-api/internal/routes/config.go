@@ -47,22 +47,22 @@ func (r ConfigRoutes) getConfig(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 	tenant, err := r.tenants.Current(ctx)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	environments, err := r.environments.List(ctx)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	contexts, err := r.contexts.List(ctx)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	rateLimit, err := r.rateLimits.Get(ctx)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, configResponse{

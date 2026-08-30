@@ -2,6 +2,8 @@ package routes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -60,7 +62,7 @@ func RegisterInviteRequestRoutes(register ProtectedRouteRegistrar, requests Invi
 func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	filter := repository.InviteRequestFilter{
@@ -71,7 +73,7 @@ func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 	} else {
 		tenant, err := r.tenants.Current(req.Context())
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, req, err)
 			return
 		}
 		filter.Kind = model.InviteRequestKindJoinTenant
@@ -79,7 +81,7 @@ func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 	}
 	requests, err := r.requests.List(req.Context(), filter)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, requests)
@@ -94,7 +96,7 @@ func (r inviteRequestRoutes) list(w http.ResponseWriter, req *http.Request) {
 func (r inviteRequestRoutes) approve(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	request, ok := r.loadPendingRequest(w, req)
@@ -117,11 +119,11 @@ func (r inviteRequestRoutes) approve(w http.ResponseWriter, req *http.Request) {
 		}
 		decided, err = r.decisions.ApproveCreateTenant(req.Context(), request, securityContext.ErunUserID)
 	default:
-		writeError(w, http.StatusInternalServerError, "unknown invite request kind")
+		writeInternalError(w, req, "unknown invite request kind", fmt.Errorf("invite request %s has unrecognized kind %q", request.InviteRequestID, request.Kind))
 		return
 	}
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, decided)
@@ -138,7 +140,7 @@ type declineInviteRequestBody struct {
 func (r inviteRequestRoutes) decline(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	var body declineInviteRequestBody
@@ -170,7 +172,7 @@ func (r inviteRequestRoutes) decline(w http.ResponseWriter, req *http.Request) {
 
 	declined, err := r.decisions.Decline(req.Context(), request, securityContext.ErunUserID, reason)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, declined)
@@ -182,7 +184,7 @@ func (r inviteRequestRoutes) decline(w http.ResponseWriter, req *http.Request) {
 func (r inviteRequestRoutes) loadPendingRequest(w http.ResponseWriter, req *http.Request) (model.InviteRequest, bool) {
 	request, err := r.requests.Get(req.Context(), req.PathValue("invite_request_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return model.InviteRequest{}, false
 	}
 	if request.Status != model.InviteRequestStatusPending {
@@ -198,7 +200,7 @@ func (r inviteRequestRoutes) loadPendingRequest(w http.ResponseWriter, req *http
 func (r inviteRequestRoutes) callerOwnsTenantName(w http.ResponseWriter, req *http.Request, tenantName string) bool {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return false
 	}
 	if !strings.EqualFold(tenant.Name, tenantName) {
@@ -322,7 +324,7 @@ func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Reque
 
 	result, err := r.limiter.allowIdentity(req.Context(), claims.Issuer, claims.Subject)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), err)
 		return
 	}
 	if !result.Allowed {
@@ -338,7 +340,7 @@ func (r inviteRequestPublicRoutes) submit(w http.ResponseWriter, req *http.Reque
 
 	request, err := r.requests.Submit(req.Context(), params)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, request)
@@ -389,7 +391,7 @@ func (r inviteRequestPublicRoutes) mine(w http.ResponseWriter, req *http.Request
 	}
 	request, err := r.requests.GetByIdentity(req.Context(), claims.Issuer, claims.Subject)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, request)

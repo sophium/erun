@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -38,7 +39,7 @@ func RegisterTenantIssuerRoutes(register ProtectedRouteRegistrar, issuers Tenant
 func (r TenantIssuerRoutes) listTenantIssuers(w http.ResponseWriter, req *http.Request) {
 	issuers, err := r.issuers.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, issuers)
@@ -56,7 +57,7 @@ func (r TenantIssuerRoutes) updateTenantIssuerName(w http.ResponseWriter, req *h
 	}
 	issuer, err := r.issuers.UpdateName(req.Context(), input.Issuer, input.Name)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, issuer)
@@ -70,7 +71,7 @@ func (r TenantIssuerRoutes) updateTenantIssuerName(w http.ResponseWriter, req *h
 func (r TenantIssuerRoutes) updateTenantIssuerOrgScope(w http.ResponseWriter, req *http.Request, input updateTenantIssuerRequest) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
@@ -83,7 +84,7 @@ func (r TenantIssuerRoutes) updateTenantIssuerOrgScope(w http.ResponseWriter, re
 	}
 	issuer, err := r.issuers.UpdateOrgScope(req.Context(), input.Issuer, input.OrgFieldKey, input.OrgFieldValue)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, issuer)

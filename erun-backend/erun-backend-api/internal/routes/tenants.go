@@ -58,7 +58,7 @@ func RegisterTenantRoutes(register ProtectedRouteRegistrar, tenants TenantReposi
 func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
 	tenants, err := r.tenants.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tenants)
@@ -71,7 +71,7 @@ func (r TenantRoutes) listTenants(w http.ResponseWriter, req *http.Request) {
 func (r TenantRoutes) reachableTenants(w http.ResponseWriter, req *http.Request) {
 	tenants, err := r.tenants.Reachable(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, tenants)
@@ -86,7 +86,7 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 		// Protected routes always run behind authentication middleware that stamps
 		// the security context, so a missing context is an internal wiring error,
 		// not a client fault.
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
@@ -106,7 +106,7 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 			writeError(w, http.StatusConflict, duplicateIssuerMessage(params.Issuer, params.OrgFieldValue))
 			return
 		}
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (r TenantRoutes) createTenant(w http.ResponseWriter, req *http.Request) {
 func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
@@ -139,7 +139,7 @@ func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Re
 
 	current, err := r.tenants.Current(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
@@ -153,7 +153,7 @@ func (r TenantRoutes) reconcileBootstrapName(w http.ResponseWriter, req *http.Re
 		case errors.Is(err, service.ErrBootstrapNameConflict):
 			writeError(w, http.StatusConflict, err.Error())
 		default:
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, req, err)
 		}
 		return
 	}

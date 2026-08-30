@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -154,5 +156,41 @@ func TestReachableReturnsSingleTenantForSingleTenantCaller(t *testing.T) {
 	mustNoErr(t, err, "Reachable")
 	if len(reachable) != 1 || reachable[0].TenantID != tenantID {
 		t.Fatalf("expected exactly [%s], got %+v", tenantID, reachable)
+	}
+}
+
+// TestCreateReportsTenantNameConflictAndGetByNameResolvesIt is erun#1722's
+// reproduction: a tenant with the requested name was registered out-of-band
+// (a different issuer, standing in for "someone else got there first"), so
+// Create's own name-taken write must come back as the specific,
+// resolvable ErrTenantNameConflict rather than a generic 500, and GetByName
+// must resolve to the tenant that actually holds the name.
+func TestCreateReportsTenantNameConflictAndGetByNameResolvesIt(t *testing.T) {
+	db := tenantsDatabase(t)
+	repo := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	ctx := security.WithContext(context.Background(), security.Context{TenantType: string(model.TenantTypeOperations)})
+
+	name := "name-conflict-e2e-" + time.Now().Format("20060102150405.000000")
+	first, err := repo.Create(ctx, CreateTenantParams{
+		Name:   name,
+		Type:   model.TenantTypeCompany,
+		Issuer: "https://idp.name-conflict-e2e.example/first",
+	})
+	mustNoErr(t, err, "register the first tenant to hold the name")
+	t.Cleanup(func() { clearReachableTenants(t, db, first.TenantID) })
+
+	_, err = repo.Create(ctx, CreateTenantParams{
+		Name:   name,
+		Type:   model.TenantTypeCompany,
+		Issuer: "https://idp.name-conflict-e2e.example/second",
+	})
+	if !errors.Is(err, ErrTenantNameConflict) {
+		t.Fatalf("second Create with the same name: err = %v, want ErrTenantNameConflict", err)
+	}
+
+	resolved, err := repo.GetByName(ctx, name)
+	mustNoErr(t, err, "GetByName")
+	if resolved.TenantID != first.TenantID {
+		t.Fatalf("GetByName returned tenant %s, want the first tenant %s that actually holds the name", resolved.TenantID, first.TenantID)
 	}
 }

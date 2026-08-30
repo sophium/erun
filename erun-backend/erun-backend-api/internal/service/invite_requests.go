@@ -19,9 +19,13 @@ import (
 const inviteRequestInviteTTL = 7 * 24 * time.Hour
 
 // InviteRequestTenantCreator registers a new tenant and its OIDC issuer
-// mapping. *repository.TenantRepository satisfies it.
+// mapping, or resolves the tenant a name race lost to. *repository.TenantRepository
+// satisfies it.
 type InviteRequestTenantCreator interface {
 	Create(ctx context.Context, params repository.CreateTenantParams) (model.Tenant, error)
+	// GetByName resolves Create's ErrTenantNameConflict: the tenant this call
+	// did not create but that now holds the requested name.
+	GetByName(ctx context.Context, name string) (model.Tenant, error)
 }
 
 // InviteRequestUserEnroller enrols a user into the tenant ctx's own
@@ -96,6 +100,19 @@ func (s *InviteRequestService) ApproveJoin(ctx context.Context, request model.In
 // invite for that tenant. The caller (a route) must already have verified
 // the caller is an OPERATIONS tenant before calling this — registering a
 // tenant is operations-only regardless of who asks for it.
+//
+// A CREATE_TENANT request can be overtaken by its own chosen name between
+// being raised and being decided — someone else registers the same name
+// first, or (per the "does not remain PENDING" requirement below) an earlier
+// approve attempt on this very request created the tenant and then failed a
+// later step. Either way the tenant existing is a race, not a mistake
+// (erun#1722): enrolling the requester into it is what CREATE_TENANT actually
+// asks for, so Create's ErrTenantNameConflict resolves to that tenant instead
+// of failing the approval. This is also what makes the overall workflow
+// retry-safe without a spanning database transaction (see the package doc
+// comment): resolving-or-creating the tenant is now idempotent, so retrying a
+// partially-failed approve (e.g. tenant registered, enrollment then failed)
+// converges to success instead of repeating the same fatal error.
 func (s *InviteRequestService) ApproveCreateTenant(ctx context.Context, request model.InviteRequest, decidedByUserID string) (model.InviteRequest, error) {
 	if request.Kind != model.InviteRequestKindCreateTenant {
 		return model.InviteRequest{}, ErrInviteRequestWrongKind
@@ -105,7 +122,15 @@ func (s *InviteRequestService) ApproveCreateTenant(ctx context.Context, request 
 		Type:   model.TenantTypeCompany,
 		Issuer: request.Issuer,
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+		// registered fresh; fall through to enrollment below.
+	case errors.Is(err, repository.ErrTenantNameConflict):
+		tenant, err = s.tenants.GetByName(ctx, request.TenantName)
+		if err != nil {
+			return model.InviteRequest{}, fmt.Errorf("resolve existing tenant %q: %w", request.TenantName, err)
+		}
+	default:
 		return model.InviteRequest{}, fmt.Errorf("register tenant: %w", err)
 	}
 
@@ -113,10 +138,11 @@ func (s *InviteRequestService) ApproveCreateTenant(ctx context.Context, request 
 	// user is enrolled under a synthetic security context bound to it — the
 	// same "resolve tenant, then bind its own security context" shape
 	// IdentityRepository's per-tenant first-user bootstrap already uses for
-	// an equally caller-less enrollment.
+	// an equally caller-less enrollment. tenant.Type (not a hardcoded
+	// COMPANY) matters once tenant may be one Create didn't just mint.
 	tenantCtx := security.WithContext(ctx, security.Context{
 		TenantID:   tenant.TenantID,
-		TenantType: string(model.TenantTypeCompany),
+		TenantType: string(tenant.Type),
 	})
 	if _, err := s.users.Create(tenantCtx, repository.CreateUserParams{
 		Username: enrollmentUsername(request),

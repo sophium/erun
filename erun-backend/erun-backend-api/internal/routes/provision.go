@@ -102,18 +102,18 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 	// to the caller's tenant.
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
 	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 

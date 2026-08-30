@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -41,7 +42,7 @@ type setInviteRequestRateLimitBody struct {
 func (r platformRateLimitRoutes) setInviteRequestRateLimit(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
@@ -59,7 +60,7 @@ func (r platformRateLimitRoutes) setInviteRequestRateLimit(w http.ResponseWriter
 	}
 	limit, err := r.limits.SetInviteRequestWindow(req.Context(), body.WindowSeconds)
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, limit)

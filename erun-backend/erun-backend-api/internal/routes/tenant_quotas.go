@@ -66,7 +66,7 @@ func RegisterTenantQuotaRoute(register ProtectedRouteRegistrar, quotas TenantQuo
 func (r TenantQuotaRoutes) getQuota(w http.ResponseWriter, req *http.Request) {
 	quota, err := r.reader.Get(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, quota)
@@ -77,7 +77,7 @@ func (r TenantQuotaRoutes) getQuota(w http.ResponseWriter, req *http.Request) {
 func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "missing security context")
+		writeInternalError(w, req, "missing security context", errors.New("security context not found in request"))
 		return
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
@@ -108,7 +108,7 @@ func (r TenantQuotaRoutes) setQuota(w http.ResponseWriter, req *http.Request) {
 		MaxTotalStorageGB:     body.MaxTotalStorageGB,
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, quota)

@@ -57,7 +57,7 @@ type createInviteRequest struct {
 func (r InviteRoutes) createInvite(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	var body createInviteRequest
@@ -84,7 +84,7 @@ func (r InviteRoutes) createInvite(w http.ResponseWriter, req *http.Request) {
 		TTL:      inviteTTL,
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, invite)
@@ -93,7 +93,7 @@ func (r InviteRoutes) createInvite(w http.ResponseWriter, req *http.Request) {
 func (r InviteRoutes) listInvites(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	targetTenantID, err := resolveTargetTenant(securityContext, req.URL.Query().Get("tenantId"))
@@ -103,7 +103,7 @@ func (r InviteRoutes) listInvites(w http.ResponseWriter, req *http.Request) {
 	}
 	invites, err := r.invites.List(req.Context(), repository.InviteFilter{TenantID: targetTenantID})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, invites)
@@ -111,7 +111,7 @@ func (r InviteRoutes) listInvites(w http.ResponseWriter, req *http.Request) {
 
 func (r InviteRoutes) revokeInvite(w http.ResponseWriter, req *http.Request) {
 	if err := r.invites.Revoke(req.Context(), req.PathValue("invite_id")); err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

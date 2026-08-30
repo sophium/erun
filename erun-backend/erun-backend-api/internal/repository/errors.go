@@ -15,6 +15,12 @@ var (
 	ErrNotFound               = errors.New("not found")
 	ErrMissingSecurityContext = errors.New("missing security context")
 	ErrConflict               = errors.New("conflict")
+	// ErrTenantNameConflict signals tenants.name's own UNIQUE constraint
+	// specifically, distinguished from the tenant_issuers conflict TenantRepository.Create
+	// also guards against: a tenant this call did not create already holds the
+	// requested name, so a caller resolving one (e.g. ApproveCreateTenant) can
+	// look the existing tenant up instead of treating this as a generic 409.
+	ErrTenantNameConflict = errors.New("tenant name already exists")
 	// ErrLastGrantCapableRole guards against a tenant locking itself out of its
 	// own role management: revoking it would leave no user able to grant roles,
 	// and there would be no recovery lever left inside the product.
