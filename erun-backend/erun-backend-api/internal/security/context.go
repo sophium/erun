@@ -7,6 +7,18 @@ import (
 
 var ErrMissingContext = errors.New("missing security context")
 
+// ErrTenantUnresolved marks a tenant-resolution failure that is not "not
+// enrolled": the token's issuer could not be mapped to a tenant at all, most
+// commonly because an org-scoped (shared) issuer's token carries no matching
+// org claim. This is deliberately distinct from a resolution that succeeds in
+// naming a tenant but finds no user for the caller's external identity in
+// it — that caller may be a genuine member of some tenant this exact token
+// simply cannot resolve to, so telling them to "ask an operator to enrol you"
+// would be advice that cannot work. Implementations of the identity
+// resolution contract wrap this so a caller can classify the failure with
+// errors.Is(err, ErrTenantUnresolved).
+var ErrTenantUnresolved = errors.New("tenant could not be resolved from token")
+
 type Claims struct {
 	Issuer   string
 	Subject  string

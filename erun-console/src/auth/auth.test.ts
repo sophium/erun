@@ -87,11 +87,18 @@ let realLocation: Location | undefined;
 function stubLocationAssign(): ReturnType<typeof vi.fn> {
   const assign = vi.fn();
   realLocation = window.location;
-  // beginLogin only ever calls .assign(...) on window.location, so the stub
-  // needs nothing else — copying the rest of the real Location instance would
-  // lose its prototype (its own methods aren't plain data properties).
+  // beginLogin only ever calls .assign(...) on window.location; origin,
+  // pathname, and search are copied through (plain data properties, unlike
+  // the real Location's own methods) because resolveToken's invalid_scope
+  // retry reads search (via authCallbackError) before calling beginLogin, and
+  // cleanCallbackUrl reads origin/pathname to rewrite the visible URL.
   Object.defineProperty(window, 'location', {
-    value: { assign },
+    value: {
+      assign,
+      origin: realLocation.origin,
+      pathname: realLocation.pathname,
+      search: realLocation.search,
+    },
     writable: true,
     configurable: true,
   });
@@ -139,6 +146,38 @@ describe('beginLogin', () => {
 
     const url = new URL(assign.mock.calls[0]?.[0] as string);
     expect(url.searchParams.get('prompt')).toBe('select_account');
+  });
+
+  // erun#1721: without this scope a shared, org-scoped issuer's token carries
+  // no org claim, so an already-enrolled operator's console session cannot
+  // resolve its tenant even though the CLI/desktop (which already request
+  // this scope by default) resolve fine.
+  it('requests the org-claim scope by default', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    await beginLogin(config);
+
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.get('scope')).toBe(
+      'openid profile email urn:zitadel:iam:user:resourceowner',
+    );
+  });
+
+  it('omits the org-claim scope when told not to include it (the invalid_scope retry)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    await beginLogin(config, undefined, false);
+
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.get('scope')).toBe('openid profile email');
   });
 });
 
@@ -205,6 +244,38 @@ describe('resolveToken', () => {
   it('returns undefined when there is no token at all', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
     expect(await resolveToken(undefined)).toBeUndefined();
+  });
+
+  // erun#1721: a dedicated/BYO issuer has never heard of the org-claim scope
+  // and refuses the authorization request with error=invalid_scope. resolveToken
+  // must retry sign-in once, without that scope, rather than treating the
+  // refusal as "no token" (which would loop back to the landing screen).
+  it('retries sign-in without the org-claim scope after an invalid_scope callback', async () => {
+    setCallbackUrl('?error=invalid_scope&error_description=nope');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse(DISCOVERY))),
+    );
+    const assign = stubLocationAssign();
+
+    const result = await resolveToken(config);
+
+    expect(result).toBeUndefined();
+    expect(assign).toHaveBeenCalledTimes(1);
+    const url = new URL(assign.mock.calls[0]?.[0] as string);
+    expect(url.searchParams.get('scope')).toBe('openid profile email');
+  });
+
+  it('does not retry a second time in the same session', async () => {
+    sessionStorage.setItem('erun.console.oidcOrgScopeRetried', '1');
+    setCallbackUrl('?error=invalid_scope&error_description=nope');
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
+    const assign = stubLocationAssign();
+
+    const result = await resolveToken(config);
+
+    expect(result).toBeUndefined();
+    expect(assign).not.toHaveBeenCalled();
   });
 });
 

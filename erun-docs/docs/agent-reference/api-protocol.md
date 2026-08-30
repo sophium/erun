@@ -24,6 +24,8 @@ ERun resolves the tenant from the token itself, not from the request path. Two d
 - **`issuers`** registers each OIDC issuer **once**, by its `iss` URL, with an org-scoping mode (`org_field_key`):
   - `org_field_key` **NULL** → a **single-tenant issuer**: the `iss` alone resolves the tenant. This is the common case — a tenant's own IdP or a cloud workload-identity issuer (e.g. AWS IAM/OIDC).
   - `org_field_key` **set** → an **org-scoped (shared) issuer** (e.g. one hosted Zitadel serving every tenant): the value names the **token claim** whose value selects which tenant the call belongs to.
+
+  **A client of an org-scoped issuer must request the scope that puts this claim on the token, or it cannot resolve to any tenant.** For the erun-shipped Zitadel, that claim is `urn:zitadel:iam:user:resourceowner:id`, minted only when the client requests the `urn:zitadel:iam:user:resourceowner` OAuth scope. The CLI/desktop OIDC login requests it by default (falling back to a plain login, once, if the issuer refuses the scope — the common shape for a dedicated/BYO issuer that has never heard of it), and the console does the same. A client of your own that talks to a shared issuer directly needs to request this scope itself; omitting it produces `401 TENANT_UNRESOLVED` (see [Errors](#errors)) for every caller on that issuer, even one who is already enrolled in a tenant there.
 - **`tenant_issuers`** maps `(issuer, org_field_value) → tenant`:
   - A single-tenant issuer has exactly one row with a NULL `org_field_value`.
   - An org-scoped issuer has one row per org value, all sharing the same `iss`.
@@ -125,7 +127,7 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name, or convert a single-tenant issuer to org-scoped), and [`PATCH /v1/tenants/reconcile-bootstrap-name`](#patch-v1tenantsreconcile-bootstrap-name) (the platform's own one-way legacy-name repair). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name, or convert a single-tenant issuer to org-scoped), and [`PATCH /v1/tenants/reconcile-bootstrap-name`](#patch-v1tenantsreconcile-bootstrap-name) (the platform's own one-way legacy-name repair). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the deeper JWT-verification-level structured `code` catalogue (`UNSUPPORTED_ALG`, `INVALID_SIGNATURE`, etc.) further down. The tenant/user **resolution** outcome does carry a machine-readable `{code, message}` envelope today — `TENANT_UNRESOLVED` vs `NOT_ENROLLED` vs `UNAUTHENTICATED` (see [Errors](#errors) below) — since collapsing those into one generic message told already-enrolled callers to ask for an enrolment that already existed. Business-logic errors past the auth layer do carry a `code` today too — see [Reviews · Errors](/collaboration/reviews#errors).
 :::
 
 | Method | Path | Description | Required scope |
@@ -1145,21 +1147,22 @@ When the token expires (typical lifetime 1 hour), the Agent's client refreshes i
 
 ### Errors
 
-Today the API rejects with a bare HTTP status code and a **plain-text** body — there is no JSON error envelope and no machine-readable `code` field. The underlying reason (which issuer, which claim) is logged server-side, not returned. The shipped contract:
+Every `401` the auth layer produces carries a JSON `{code, message}` envelope (the same shape `writeErrorCode` uses elsewhere in the API — see `internal/routes/errors.go`); `403` (a permission denial, not an auth-resolution failure) is still a bare status with a plain-text body. `message` is the underlying reason (which issuer, which claim, or its absence) in prose; server logs also carry it. The shipped contract:
 
-| Status | Body | Condition | Recovery |
-|---|---|---|---|
-| `401` | `missing bearer token` | No `Authorization` header, or it is not a single `Bearer <jwt>` pair. | Send `Authorization: Bearer <jwt>`. |
-| `401` | `invalid bearer token` | Signature/claims (`exp`/`nbf`/`iat`) failed, token expired, the issuer is not on the allow-list, or `iss`/`sub` is empty. | Re-mint a valid token from a registered issuer. |
-| `401` | `tenant not resolved` | Token verified, but no `(iss, org)` mapping resolves a tenant (and the `tenants` table is non-empty, so first-identity bootstrap does not apply). | Register the issuer/org in `tenant_issuers`. |
-| `401` | `user not resolved` | Tenant resolved, but no `user_external_ids` row matches `(tenant, iss, sub)` (and the tenant already has users). | Enrol the subject for the tenant. |
-| `403` | `Forbidden` | Authenticated, but the user's roles/permissions do not allow the request's method + path. | Grant the needed role/permission (admin action). |
+| Status | `code` | Example `message` | Condition | Recovery |
+|---|---|---|---|---|
+| `401` | `UNAUTHENTICATED` | `missing bearer token` | No `Authorization` header, or it is not a single `Bearer <jwt>` pair. | Send `Authorization: Bearer <jwt>`. |
+| `401` | `UNAUTHENTICATED` | `invalid bearer token` | Signature/claims (`exp`/`nbf`/`iat`) failed, token expired, the issuer is not on the allow-list, or `iss`/`sub` is empty. | Re-mint a valid token from a registered issuer. |
+| `401` | `TENANT_UNRESOLVED` | `tenant could not be resolved from token: issuer "…" is org-scoped (claim "…") but the token carries no matching claim` | Token verified and the issuer is known, but `(iss, org)` could not be resolved to a tenant — most commonly an org-scoped issuer whose token carries no matching org claim, or one whose claim value matches no registered tenant. **Distinct from `NOT_ENROLLED`**: the caller may already be a member of a tenant this exact token simply cannot resolve to, so "ask an operator to enrol you" would be the wrong advice (erun#1721). | Request the scope that puts the claim on the token (see [the org-scoped issuer note](#tenant-issuers) above), or check the org value against [`GET /v1/tenant-issuers`](#endpoints). |
+| `401` | `NOT_ENROLLED` | `record not found` | The tenant resolved fine, but no `user_external_ids` row matches `(tenant, iss, sub)`, and the tenant already has users (so per-tenant first-user bootstrap does not apply). | Enrol the subject for the tenant (`POST /v1/users`). |
+| `401` | `UNAUTHORIZED` | (varies) | A resolution failure not covered by either case above — e.g. an entirely unregistered issuer with no empty `tenants` table left to bootstrap into. | Register the issuer, or check the server log for the underlying reason. |
+| `403` | *(none — plain text)* | `Forbidden` | Authenticated, but the user's roles/permissions do not allow the request's method + path. | Grant the needed role/permission (admin action). |
 
-The audit trail records every authorized request with `issuer`, `sub`, org, and timestamp.
+The audit trail records every authorized request with `issuer`, `sub`, org, and timestamp. Rejected requests (missing/invalid token, unknown issuer, unresolved tenant, unenrolled subject, denied permission) are **not** audited — see [the audit log spec](/agent-reference/audit-log).
 
 #### Structured error codes `(Planned.)`
 
-A future structured error envelope will return a machine-readable `code` (and, where useful, a `details` object) per failure. It is **not implemented yet** — clients must branch on the HTTP status and plain-text body above, not on these codes:
+The resolution-level codes above (`UNAUTHENTICATED`/`TENANT_UNRESOLVED`/`NOT_ENROLLED`/`UNAUTHORIZED`) are shipped. This deeper, JWT-verification-specific catalogue — plus the codes the still-unimplemented self-service trust-management API would return — is **not implemented yet**; a client must not branch on these:
 
 | Status | `code` | Condition | Recovery |
 |---|---|---|---|

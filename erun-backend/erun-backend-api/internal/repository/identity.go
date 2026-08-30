@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -140,13 +141,30 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		if !errors.Is(err, ErrNotFound) {
 			return model.Tenant{}, model.User{}, err
 		}
+		// The tenant resolved; this external identity is simply not one of
+		// its users (or, if the tenant has zero users, becomes its first).
+		// Either way this is a user-level outcome, not a tenant-resolution
+		// failure, so it is never wrapped in security.ErrTenantUnresolved.
 		user, err = r.bootstrapFirstTenantUser(ctx, tenant, claims)
 		return tenant, user, err
+	}
+	if errors.Is(err, security.ErrTenantUnresolved) {
+		return model.Tenant{}, model.User{}, err
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return model.Tenant{}, model.User{}, err
 	}
-	return r.bootstrapFirstIdentity(ctx, claims)
+	tenant, user, err := r.bootstrapFirstIdentity(ctx, claims)
+	if err != nil {
+		// bootstrapFirstIdentity only ever succeeds against a genuinely empty
+		// tenants table, so a failure here means this token's issuer really
+		// maps to no tenant at all -- the same "unresolved" condition
+		// ResolveTenantByIssuer reports directly for an org-scoped issuer's
+		// missing/unmatched org claim, not "you are not enrolled" (there is
+		// no tenant to be enrolled in).
+		return model.Tenant{}, model.User{}, fmt.Errorf("%w: %s", security.ErrTenantUnresolved, err.Error())
+	}
+	return tenant, user, nil
 }
 
 func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant model.Tenant, user model.User, claims security.Claims) (model.User, error) {
@@ -186,10 +204,14 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 // (resolve by issuer alone, the common BYO/external-IdP case); a set key names
 // the token claim whose value selects the tenant among that issuer's orgs
 // (shared multi-tenant issuer, e.g. a hosted Zitadel). An org-scoped issuer
-// whose token carries no matching org claim returns ErrNotFound — unauthorized,
-// and never bootstraps once tenants exist (bootstrapFirstIdentity guards on an
-// empty tenants table). An unregistered issuer also returns ErrNotFound, which
-// routes to first-identity bootstrap when the database is empty.
+// whose token carries no matching org claim, or whose org claim matches no
+// registered tenant, returns security.ErrTenantUnresolved: the issuer is known,
+// but this token cannot be mapped to one of its tenants — distinct from "not
+// enrolled", which requires a tenant to already have been resolved. An
+// unregistered issuer returns plain ErrNotFound, which routes to
+// first-identity bootstrap when the database is empty (ResolveIdentity wraps
+// a failed bootstrap attempt in security.ErrTenantUnresolved too, since that
+// only ever fails once a tenant already exists elsewhere).
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
 	issuer := strings.TrimSpace(claims.Issuer)
 	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, issuer)
@@ -201,10 +223,11 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 	}
 
 	var tenant model.Tenant
+	var org string
 	if orgFieldKey != "" {
-		org := orgClaimValue(claims.Raw, orgFieldKey)
+		org = orgClaimValue(claims.Raw, orgFieldKey)
 		if org == "" {
-			return model.Tenant{}, ErrNotFound
+			return model.Tenant{}, fmt.Errorf("%w: issuer %q is org-scoped (claim %q) but the token carries no matching claim", security.ErrTenantUnresolved, issuer, orgFieldKey)
 		}
 		err = r.db.NewRaw(`
 			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
@@ -221,7 +244,14 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 		`, issuer).Scan(ctx, &tenant)
 	}
 	if err != nil {
-		return model.Tenant{}, normalizeNoRows(err)
+		err = normalizeNoRows(err)
+		if errors.Is(err, ErrNotFound) {
+			if orgFieldKey != "" {
+				return model.Tenant{}, fmt.Errorf("%w: issuer %q has no tenant registered for org %q", security.ErrTenantUnresolved, issuer, org)
+			}
+			return model.Tenant{}, fmt.Errorf("%w: issuer %q is registered but has no tenant mapping", security.ErrTenantUnresolved, issuer)
+		}
+		return model.Tenant{}, err
 	}
 	return tenant, nil
 }

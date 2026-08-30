@@ -66,6 +66,58 @@ export function NotEnrolledScreen({
   );
 }
 
+// TenantUnresolvedScreen is shown when the API could authenticate the token
+// but could not determine which tenant it resolves to at all -- most
+// commonly a shared, org-scoped issuer whose token carries no matching org
+// claim. Unlike NotEnrolledScreen, this deliberately does not tell the
+// caller to ask an operator to enrol them: they may already be enrolled
+// somewhere, and that advice would not help (erun#1721). `message` carries
+// the API's own diagnosis (issuer, org claim seen or its absence) so an
+// operator debugging this does not have to query the database for it.
+export function TenantUnresolvedScreen({
+  brand,
+  token,
+  message,
+  onSignOut,
+}: {
+  brand: string | undefined;
+  token: string;
+  message: string;
+  onSignOut: () => void;
+}): React.ReactElement {
+  const identity = readTokenIdentity(token);
+  const named = identity.email ?? identity.subject;
+  return (
+    <CenteredCard brand={brand} title="Could not determine your tenant" role="alert">
+      <p className="text-sm text-muted-foreground">
+        You signed in successfully, but this platform could not tell which tenant your account
+        belongs to. This is not the same as not being enrolled — you may already be a member of a
+        tenant here.
+      </p>
+      <p className="text-sm text-destructive">{message}</p>
+      {named !== undefined && (
+        <p className="text-xs text-muted-foreground">
+          Identity: {named}
+          {identity.email !== undefined && identity.subject !== undefined
+            ? ` (subject ${identity.subject})`
+            : ''}
+          {identity.issuer !== undefined ? ` from ${identity.issuer}` : ''}
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-self-start"
+        onClick={onSignOut}
+      >
+        <LogOut aria-hidden="true" />
+        Sign out
+      </Button>
+    </CenteredCard>
+  );
+}
+
 export function ErrorScreen({
   brand,
   message,

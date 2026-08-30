@@ -12,7 +12,12 @@ import { fetchPlatformConfig } from './config/platform';
 import { AcceptInvitePage } from './identity/AcceptInvitePage';
 import { AppShell } from './shell/AppShell';
 import { LandingScreen } from './shell/LandingScreen';
-import { ErrorScreen, LoadingScreen, NotEnrolledScreen } from './shell/PreShellScreens';
+import {
+  ErrorScreen,
+  LoadingScreen,
+  NotEnrolledScreen,
+  TenantUnresolvedScreen,
+} from './shell/PreShellScreens';
 import { beginTenantSwitch, consumeTenantSwitchIntent } from './shell/tenantSwitch';
 import type { TenantSwitchMismatch } from './shell/TenantSwitchMismatchBanner';
 import { applyTheme, initialTheme } from './shell/theme';
@@ -26,6 +31,12 @@ type LoadState =
   // the recovery is completely different: signing in again just repeats the
   // same successful sign-in and lands here once more (#1167).
   | { status: 'not-enrolled'; token: string }
+  // Signed in, and the caller may well already be enrolled somewhere — the
+  // API could simply not determine which tenant this token resolves to (a
+  // shared, org-scoped issuer whose token carries no matching org claim, most
+  // commonly). Distinct from not-enrolled because "ask an operator to enrol
+  // you" is advice that cannot work here (erun#1721).
+  | { status: 'tenant-unresolved'; token: string; message: string }
   | { status: 'error'; message: string };
 
 interface AuthPhase {
@@ -44,16 +55,26 @@ interface ConfigQueryPhase {
   data?: TenantConfigView;
 }
 
-// A 401 means two completely different things depending on whether a token was
-// held. With no token the caller is simply signed out. With a token, the
-// identity provider authenticated them and the API still said no — so the
-// identity is not enrolled, and telling them to sign in is a loop (#1167).
+// A 401 means at least two completely different things depending on whether a
+// token was held, and — once one is — which of two causes the API itself
+// reports via its {code, message} envelope (erun#1721). With no token the
+// caller is simply signed out. With a token, the identity provider
+// authenticated them and the API still said no: either this identity really
+// is not enrolled anywhere (NOT_ENROLLED, telling them to sign in again is a
+// loop, #1167), or the API could not determine which tenant this token
+// resolves to at all (TENANT_UNRESOLVED) — a state the caller may already be
+// enrolled past, so "ask an operator to enrol you" would be wrong advice.
+// Anything else 401-shaped falls back to the same not-enrolled card the API
+// has always produced for an unclassified auth rejection.
 function loadStateFromConfigQuery(token: string, configQuery: ConfigQueryPhase): LoadState {
   if (configQuery.isLoading || configQuery.isUninitialized) {
     return { status: 'loading' };
   }
   if (configQuery.error !== undefined) {
     const described = describeQueryError(configQuery.error);
+    if (described.status === 401 && described.code === 'TENANT_UNRESOLVED') {
+      return { status: 'tenant-unresolved', token, message: described.message };
+    }
     return described.status === 401
       ? { status: 'not-enrolled', token }
       : { status: 'error', message: described.message };
@@ -175,6 +196,15 @@ function AppContent({
       );
     case 'not-enrolled':
       return <NotEnrolledScreen brand={brand} token={state.token} onSignOut={onSignOut} />;
+    case 'tenant-unresolved':
+      return (
+        <TenantUnresolvedScreen
+          brand={brand}
+          token={state.token}
+          message={state.message}
+          onSignOut={onSignOut}
+        />
+      );
     case 'error':
       return <ErrorScreen brand={brand} message={state.message} />;
     case 'ready':
