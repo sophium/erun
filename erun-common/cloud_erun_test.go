@@ -175,6 +175,70 @@ func TestERunCloudProviderLoginDeviceFlowPersistsTokensAndCache(t *testing.T) {
 	}
 }
 
+// TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope proves
+// erun#1605's third item degrades gracefully: the org-claim scope is
+// requested by default, but an issuer that has never heard of it (a
+// dedicated/BYO IdP, the common case, not the shipped Zitadel) must still let
+// the login through — exactly as it did before this default was added —
+// rather than breaking on an invalid_scope refusal.
+func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing.T) {
+	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
+	secrets := NewFileCloudSecretStore(t.TempDir())
+	provider := erunTestProvider()
+
+	var gotScopes []string
+	deps := CloudDependencies{
+		CloudSecretStore: secrets,
+		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", TokenEndpoint: "https://auth.example.test/token"}, nil
+		},
+		StartERunDeviceAuthorization: func(_ Context, _ OIDCDiscovery, _ string, scope string) (ERunDeviceAuthorization, error) {
+			gotScopes = append(gotScopes, scope)
+			if strings.Contains(scope, erunOrgClaimScope) {
+				return ERunDeviceAuthorization{}, errERunInvalidScope
+			}
+			return ERunDeviceAuthorization{DeviceCode: "device-code-degrade", UserCode: "DGRD-1234"}, nil
+		},
+		PollERunDeviceToken: func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error) {
+			return ERunTokens{AccessToken: "access-degrade", RefreshToken: "refresh-degrade", ExpiresIn: time.Hour}, nil
+		},
+	}
+
+	status, err := LoginCloudProviderAlias(Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps)
+	if err != nil {
+		t.Fatalf("LoginCloudProviderAlias: %v", err)
+	}
+	if status.Status != CloudTokenStatusActive {
+		t.Fatalf("Status = %q, want active", status.Status)
+	}
+	assertDegradedScopeAttempts(t, gotScopes)
+	if cached, ok := loadCachedERunAccessToken(secrets, provider.Alias); !ok || cached != "access-degrade" {
+		t.Fatalf("cached = %q (ok=%v), want the fallback attempt's token persisted", cached, ok)
+	}
+}
+
+// assertDegradedScopeAttempts checks the two device-authorization attempts a
+// graceful scope degradation must produce: the first requests the org-claim
+// scope by default, the second (after the issuer's refusal) drops it while
+// keeping the baseline scopes.
+func assertDegradedScopeAttempts(t *testing.T, gotScopes []string) {
+	t.Helper()
+	if len(gotScopes) != 2 {
+		t.Fatalf("expected exactly 2 device-authorization attempts (with, then without, the org-claim scope), got %v", gotScopes)
+	}
+	if !strings.Contains(gotScopes[0], erunOrgClaimScope) {
+		t.Fatalf("first attempt scope = %q, want the org-claim scope requested by default", gotScopes[0])
+	}
+	if strings.Contains(gotScopes[1], erunOrgClaimScope) {
+		t.Fatalf("fallback attempt scope = %q, must not repeat the scope the issuer just rejected", gotScopes[1])
+	}
+	for _, baseline := range []string{"openid", "offline_access"} {
+		if !strings.Contains(gotScopes[1], baseline) {
+			t.Fatalf("fallback scope = %q, want the %q baseline kept", gotScopes[1], baseline)
+		}
+	}
+}
+
 func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testing.T) {
 	store := erunTestCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())

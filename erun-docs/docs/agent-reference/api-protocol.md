@@ -775,7 +775,8 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 |---|---|---|
 | `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
-| `500` | Persistence failed — e.g. the tenant `name` or the `(issuer, org_field_value)` mapping already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name and issuer mapping; if it persists with unique inputs, it is a server bug. |
+| `409` | The `(issuer, org_field_value)` mapping already exists — either the issuer is already registered single-tenant (no org discriminator) and `orgFieldValue` was left empty, or this exact org value on that issuer is already taken; the body names which. | For the no-discriminator case, an operations caller converts the issuer to org-scoped via [`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers) (which backfills the existing tenant's mapping) before retrying this call with `orgFieldKey`/`orgFieldValue`; for the taken-org-value case, pick a different `orgFieldValue`. |
+| `500` | Persistence failed — e.g. the tenant `name` already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name; if it persists, it is a server bug. |
 
 ### `GET /v1/tenants/reachable` {#get-v1tenantsreachable}
 

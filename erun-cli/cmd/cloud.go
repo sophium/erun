@@ -553,7 +553,7 @@ func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, select
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to login")
 	cmd.Flags().StringVar(&flow, "flow", "", "OIDC grant for an erun-hosted alias: \"device\", \"authcode\", or \"auto\" (default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete. Use \"authcode\" when the device page's authentication method fails — its loopback redirect reuses a browser session you already hold")
-	cmd.Flags().StringArrayVar(&scopes, "scope", nil, "Extra OAuth scope to request on top of \"openid offline_access\" (repeatable). A provider's reserved scopes are often absent from its discovery document, so they can only be asked for by name — e.g. urn:zitadel:iam:user:resourceowner, which makes a Zitadel token carry the org claim an org-scoped issuer resolves tenants by")
+	cmd.Flags().StringArrayVar(&scopes, "scope", nil, "Extra OAuth scope to request on top of \"openid offline_access\" and the org-claim scope requested by default (repeatable). A provider's reserved scopes are often absent from its discovery document, so they can only be asked for by name")
 	cmd.Flags().BoolVar(&force, "force", false, "Re-authenticate even when the stored session is still active. Needed to change the requested scopes or flow on an alias that is already signed in, since an active session otherwise short-circuits the login")
 	addDryRunFlag(cmd)
 	return cmd

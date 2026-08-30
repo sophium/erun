@@ -146,10 +146,14 @@ func parseCreateTenantParams(req *http.Request) (repository.CreateTenantParams, 
 // duplicateIssuerMessage names the (issuer, org) mapping a create collided
 // with, since a caller re-registering an already-mapped issuer needs to know
 // whether to pick a different org discriminator or that the issuer is simply
-// taken.
+// taken. A single-tenant issuer cannot be scoped to a different org by
+// retrying this same create call: the issuer row's org-scoping mode is fixed
+// at first registration and this route's ON CONFLICT DO NOTHING leaves it
+// untouched, so the message points at the operations-only conversion route
+// that actually rewrites it and backfills the existing mapping.
 func duplicateIssuerMessage(issuer, orgFieldValue string) string {
 	if orgFieldValue == "" {
-		return fmt.Sprintf("issuer %q is already mapped to a tenant with no org discriminator; pass --org-field-key/--org-field-value to scope a shared issuer to a different org", issuer)
+		return fmt.Sprintf("issuer %q is already mapped to a tenant with no org discriminator; an operations caller must first convert it to org-scoped via PATCH /v1/tenant-issuers (orgFieldKey/orgFieldValue), which backfills the existing tenant's mapping, before a second tenant can be created on it with --org-field-key/--org-field-value", issuer)
 	}
 	return fmt.Sprintf("issuer %q is already mapped for org value %q", issuer, orgFieldValue)
 }

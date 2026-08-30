@@ -40,7 +40,7 @@ type CloudInitERunInput struct {
 
 type CloudLoginInput struct {
 	Alias     string   `json:"alias" jsonschema:"configured cloud provider alias to login"`
-	Scopes    []string `json:"scopes,omitempty" jsonschema:"extra OAuth scopes to request on top of openid offline_access; a provider\u0027s reserved scopes are often unadvertised and can only be asked for by name (e.g. urn:zitadel:iam:user:resourceowner, which makes a Zitadel token carry the org claim an org-scoped issuer resolves tenants by)"`
+	Scopes    []string `json:"scopes,omitempty" jsonschema:"extra OAuth scopes to request on top of openid offline_access and the org-claim scope requested by default; a provider\u0027s reserved scopes are often unadvertised and can only be asked for by name"`
 	Flow      string   `json:"flow,omitempty" jsonschema:"OIDC grant for an erun-hosted alias: device, authcode, or auto (the default) which prefers the device grant and falls back to authorization code + PKCE when it cannot complete"`
 	Preview   bool     `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
 	Verbosity int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
