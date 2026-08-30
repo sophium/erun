@@ -174,7 +174,7 @@ function AppContent({
         />
       );
     case 'not-enrolled':
-      return <NotEnrolledScreen brand={brand} token={state.token} />;
+      return <NotEnrolledScreen brand={brand} token={state.token} onSignOut={onSignOut} />;
     case 'error':
       return <ErrorScreen brand={brand} message={state.message} />;
     case 'ready':

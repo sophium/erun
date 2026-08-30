@@ -168,7 +168,6 @@ export const issueReferenceBaseline = {
   'erun-console/src/identity/controller.ts': 1,
   'erun-console/src/shell/AppShell.tsx': 2,
   'erun-console/src/shell/ConsoleSidebar.tsx': 1,
-  'erun-console/src/shell/PreShellScreens.tsx': 1,
   'erun-console/src/shell/landingContent.ts': 1,
   'erun-console/src/shell/sections.ts': 3,
   'erun-kit/src/models/platformConfig.ts': 1,

@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
@@ -162,5 +162,40 @@ describe('App tenant switch mismatch', () => {
 
     await screen.findByRole('heading', { level: 1, name: 'Overview' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+// erun#1680: a signed-in-but-unenrolled user was stuck on the not-enrolled
+// card with no way to sign in as a different account. Sign-out has to
+// actually return the whole app to the sign-in flow, not just fire a callback.
+describe('App not-enrolled route', () => {
+  it('returns to the sign-in flow when the operator signs out from the not-enrolled card', async () => {
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = input instanceof URL ? input.href : input;
+        if (url.includes('/v1/platform')) {
+          return Promise.resolve(jsonResponse(PLATFORM));
+        }
+        if (url.includes('/v1/config')) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve({}),
+          } as unknown as Response);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    renderWithStore(<App />);
+
+    await screen.findByText('Not yet part of a tenant');
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'What makes Acme different' }),
+    ).toBeInTheDocument();
   });
 });
