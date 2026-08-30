@@ -22,6 +22,7 @@ const (
 	workspaceSyncStubMissingEnv     = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
 	workspaceSyncStubStatEnv        = "ERUN_COMMON_TEST_SSH_STUB_STAT"
 	workspaceSyncStubOutputsEnv     = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS"
+	workspaceSyncStubOutputsExitEnv = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS_EXIT"
 	workspaceSyncStubArchiveEnv     = "ERUN_COMMON_TEST_SSH_STUB_ARCHIVE"
 	workspaceSyncStubGateEnv        = "ERUN_COMMON_TEST_SSH_STUB_GATE"
 	workspaceSyncStubTruncateEnv    = "ERUN_COMMON_TEST_SSH_STUB_TRUNCATE"
@@ -65,10 +66,18 @@ func runWorkspaceSyncSSHStub(args []string) int {
 	case strings.Contains(script, "git ls-files -sz"):
 		return 0
 	case strings.Contains(script, "find . -type f"):
+		if code := strings.TrimSpace(os.Getenv(workspaceSyncStubOutputsExitEnv)); code != "" {
+			n, convErr := strconv.Atoi(code)
+			if convErr != nil {
+				return 1
+			}
+			return n
+		}
 		outputs := os.Getenv(workspaceSyncStubOutputsEnv)
 		if outputs == "" {
-			// `cd` into a not-yet-created outputs dir exits non-zero.
-			return 1
+			// `cd` into a not-yet-created outputs dir: the script's own sentinel
+			// for "confirmed absent" (see remoteOutputsDirAbsentExitCode).
+			return remoteOutputsDirAbsentExitCode
 		}
 		writeNULList(outputs)
 		return 0

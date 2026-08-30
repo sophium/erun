@@ -228,20 +228,31 @@ func localArtifactPaths(artifactsLocal string, paths []string) []string {
 	return resolved
 }
 
+// remoteOutputsDirAbsentExitCode is the sentinel the remote script in
+// remoteOutputsFiles exits with when `cd` into the outputs dir fails, so that
+// outcome can be told apart from every other way the listing can fail: ssh's
+// own exit 255 on a connection failure, or `find` itself failing (e.g. on a
+// permission error). Only this exact code means "confirmed absent"; nothing
+// else does.
+const remoteOutputsDirAbsentExitCode = 42
+
 // remoteOutputsFiles lists the regular files under the pod outputs dir, relative
 // to it. A not-yet-created dir yields no paths and no error, so the mirror is a
-// no-op until an agent writes a deliverable. GNU find's %P prints the path
-// without the leading "./" so entries pass SafeWorkspaceSyncPath.
+// no-op until an agent writes a deliverable. Any other failure — the ssh
+// connection itself (exit 255), or `find` failing once inside the dir — is
+// reported as an error rather than folded into an empty listing, so a caller
+// that prunes local artifacts against this result never mistakes "could not
+// tell" for "confirmed empty" (see ObservedHelmRelease for the same
+// distinction applied to a helm read). GNU find's %P prints the path without
+// the leading "./" so entries pass SafeWorkspaceSyncPath.
 func remoteOutputsFiles(ctx context.Context, hostAlias, outputsRemote string) ([]string, error) {
-	script := fmt.Sprintf("cd %s 2>/dev/null && find . -type f -printf '%%P\\0'", shellQuote(outputsRemote))
+	script := fmt.Sprintf("cd %s 2>/dev/null || exit %d; find . -type f -printf '%%P\\0'", shellQuote(outputsRemote), remoteOutputsDirAbsentExitCode)
 	cmd := CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
 	HideConsoleWindow(cmd)
 	output, err := cmd.Output()
 	if err != nil {
-		// `cd` into a not-yet-created outputs dir exits non-zero; treat the whole
-		// "no deliverables yet" case as an empty, error-free listing.
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == remoteOutputsDirAbsentExitCode {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("list remote outputs: %w", err)
