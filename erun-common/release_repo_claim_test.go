@@ -167,6 +167,133 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	}
 }
 
+// TestReleaseRepoClaimFreshClaimSetsStartedAtToNow guards the baseline a
+// renewal must not disturb: a brand-new claim has nothing to inherit, so its
+// StartedAt is the moment it was taken.
+func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
+	env := newAgentJobTestRepo(t)
+	newBareRemoteForTest(t, env)
+	runGitForTest(t, env, "push", "-q", "-u", "origin", "main")
+
+	now := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
+	ctx := newTestClaimContext()
+	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+
+	sha, err := takeReleaseRepoClaim(ctx, env, "build", "1.0.220", holder, now)
+	if err != nil {
+		t.Fatalf("fresh claim: %v", err)
+	}
+	record, err := readReleaseRepoClaimBlob(ctx, env, sha)
+	if err != nil {
+		t.Fatalf("reading back the claim blob: %v", err)
+	}
+	if !record.StartedAt.Equal(now) {
+		t.Errorf("fresh claim StartedAt = %v, want %v", record.StartedAt, now)
+	}
+}
+
+// TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt is the
+// regression test for erun#1668: a renewal used to rewrite StartedAt to the
+// renewal time, so a release running for an hour with periodic renewals
+// always looked a couple of minutes old in the claim blob.
+func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *testing.T) {
+	env := newAgentJobTestRepo(t)
+	newBareRemoteForTest(t, env)
+	runGitForTest(t, env, "push", "-q", "-u", "origin", "main")
+
+	started := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
+	ctx := newTestClaimContext()
+	holder := EnvironmentActivityLeaseHolder{Tenant: "erun"}
+
+	sha, err := takeReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, started)
+	if err != nil {
+		t.Fatalf("initial claim: %v", err)
+	}
+
+	renewedAt := started.Add(13 * time.Minute)
+	newSHA, err := renewReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, renewedAt, sha)
+	if err != nil {
+		t.Fatalf("renewal: %v", err)
+	}
+
+	record, err := readReleaseRepoClaimBlob(ctx, env, newSHA)
+	if err != nil {
+		t.Fatalf("reading back the renewed claim blob: %v", err)
+	}
+	if !record.StartedAt.Equal(started) {
+		t.Errorf("renewal StartedAt = %v, want the original %v preserved", record.StartedAt, started)
+	}
+	wantExpiresAt := renewedAt.Add(releaseVersionClaimTTL)
+	if !record.ExpiresAt.Equal(wantExpiresAt) {
+		t.Errorf("renewal ExpiresAt = %v, want %v", record.ExpiresAt, wantExpiresAt)
+	}
+}
+
+// TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt is the test
+// that stops the fix above from over-correcting: a reclaim takes over from a
+// dead holder, so it must NOT carry that holder's StartedAt forward — it is
+// a different holder, and preserving the old value would make a genuinely
+// wedged-looking claim (the thing StartedAt exists to reveal) look however
+// old the abandoned holder happened to be.
+func TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt(t *testing.T) {
+	envA := newAgentJobTestRepo(t)
+	remote := newBareRemoteForTest(t, envA)
+	runGitForTest(t, envA, "push", "-q", "-u", "origin", "main")
+	envB := cloneRepoForTest(t, remote)
+
+	start := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
+	ctx := newTestClaimContext()
+
+	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start); err != nil {
+		t.Fatalf("first environment's claim: %v", err)
+	}
+
+	afterLapse := start.Add(releaseVersionClaimTTL + time.Minute)
+	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	sha, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, afterLapse)
+	if err != nil {
+		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
+	}
+
+	record, err := readReleaseRepoClaimBlob(ctx, envB, sha)
+	if err != nil {
+		t.Fatalf("reading back the reclaiming holder's blob: %v", err)
+	}
+	if !record.StartedAt.Equal(afterLapse) {
+		t.Errorf("reclaim StartedAt = %v, want the new holder's own claim time %v, not the abandoned holder's %v", record.StartedAt, afterLapse, start)
+	}
+}
+
+// TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning guards the
+// refusal message added alongside the StartedAt fix: once the field means
+// what its name says, the refusal can tell an operator how long the holder
+// has actually been running, which is the number that says whether to wait
+// or go investigate.
+func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing.T) {
+	envA := newAgentJobTestRepo(t)
+	remote := newBareRemoteForTest(t, envA)
+	runGitForTest(t, envA, "push", "-q", "-u", "origin", "main")
+	envB := cloneRepoForTest(t, remote)
+
+	start := time.Date(2026, 8, 29, 4, 0, 5, 0, time.UTC)
+	ctx := newTestClaimContext()
+
+	holderA := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
+	if _, err := takeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start); err != nil {
+		t.Fatalf("first environment's claim: %v", err)
+	}
+
+	holderB := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
+	_, err := takeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, start.Add(15*time.Minute))
+	if err == nil {
+		t.Fatal("expected the second claim to be refused")
+	}
+	if !strings.Contains(err.Error(), "running for 15m0s") {
+		t.Errorf("refusal must report how long the holder has been running, got: %v", err)
+	}
+}
+
 // TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch reproduces
 // the second defect from the same run: the branch push absorbs a moved base
 // branch by rebasing and retrying, but the release tag was already published
