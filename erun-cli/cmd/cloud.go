@@ -702,24 +702,15 @@ func runCloudOIDCCommand(ctx common.Context, store common.CloudStore, _ PromptRu
 	if provider.Provider != common.CloudProviderAWS {
 		return fmt.Errorf("cloud provider alias %q is a %q-type alias, which does not use AWS web-identity federation; its OIDC issuer is set at `cloud init`", provider.Alias, provider.Provider)
 	}
-	if ctx.DryRun {
-		audience := strings.TrimSpace(params.Audience)
-		if audience == "" {
-			audience = common.CloudProviderBearerAudience
-		}
-		ctx.Trace("check cloud provider token status")
-		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
-		traceAWSEnableOIDCCommand(ctx, provider.Profile)
-		traceAWSBearerTokenCommand(ctx, provider.Profile, audience)
-		ctx.Trace("write cloud provider OIDC issuer resolved from AWS web identity token")
-		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: cloud provider OIDC setup planned.")
-		return err
-	}
 	status, _, err := common.SetupCloudProviderOIDC(ctx, store, common.CloudBearerParams{
 		Alias:    alias,
 		Audience: params.Audience,
 	}, deps)
 	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: cloud provider OIDC setup planned.")
 		return err
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "Saved OIDC issuer %s for %s\n", status.OIDCIssuerURL, status.Alias)
