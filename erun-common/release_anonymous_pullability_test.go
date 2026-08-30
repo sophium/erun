@@ -101,113 +101,94 @@ func (s *anonymousManifestStub) start(t *testing.T) *httptest.Server {
 	return server
 }
 
-func TestProbeAnonymousManifestPullAt(t *testing.T) {
-	t.Run("pullable manifest reports true", func(t *testing.T) {
-		stub := &anonymousManifestStub{ManifestStatus: http.StatusOK}
-		server := stub.start(t)
+// probeStatusCase is one status-handling scenario for probeAnonymousManifestPullAt:
+// a token-endpoint status, a manifest-endpoint status, and the answer the
+// probe must resolve to.
+type probeStatusCase struct {
+	name           string
+	tokenStatus    int
+	manifestStatus int
+	wantPullable   bool
+	wantErr        bool
+}
 
-		pullable, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !pullable {
-			t.Fatal("expected the manifest to report pullable")
-		}
-	})
-
-	t.Run("denied manifest reports false, not an error", func(t *testing.T) {
-		stub := &anonymousManifestStub{ManifestStatus: http.StatusForbidden}
-		server := stub.start(t)
-
-		pullable, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if pullable {
-			t.Fatal("expected the manifest to report not pullable")
-		}
-	})
-
+var probeStatusCases = []probeStatusCase{
+	{name: "pullable manifest reports true", manifestStatus: http.StatusOK, wantPullable: true},
+	{name: "denied manifest reports false, not an error", manifestStatus: http.StatusForbidden},
 	// This is the 1.0.219 regression: a private ghcr package refuses the
 	// anonymous token request itself with 401, before a manifest request is
 	// even made. That refusal is a conclusive answer -- "a stranger cannot
 	// pull this" -- not a failure to reach the registry, so it must resolve
 	// like any other denial: false, no error.
-	t.Run("401 on the token request reports false, not an error", func(t *testing.T) {
-		stub := &anonymousManifestStub{TokenStatus: http.StatusUnauthorized}
-		server := stub.start(t)
+	{name: "401 on the token request reports false, not an error", tokenStatus: http.StatusUnauthorized},
+	{name: "403 on the token request reports false, not an error", tokenStatus: http.StatusForbidden},
+	// A non-auth manifest status is not a conclusive answer about
+	// pullability, so it must keep erroring rather than being folded into
+	// "not pullable".
+	{name: "a non-auth manifest failure is an error, not a conclusive denial", manifestStatus: http.StatusInternalServerError, wantErr: true},
+}
 
-		pullable, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-dns01-webhook", "1.0.219", server.URL, server.URL)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if pullable {
-			t.Fatal("expected the token refusal to report not pullable")
-		}
-	})
+func TestProbeAnonymousManifestPullAtStatusHandling(t *testing.T) {
+	for _, tc := range probeStatusCases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &anonymousManifestStub{ManifestStatus: tc.manifestStatus, TokenStatus: tc.tokenStatus}
+			server := stub.start(t)
 
-	t.Run("403 on the token request reports false, not an error", func(t *testing.T) {
-		stub := &anonymousManifestStub{TokenStatus: http.StatusForbidden}
-		server := stub.start(t)
+			pullable, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if pullable != tc.wantPullable {
+				t.Fatalf("pullable = %v, want %v", pullable, tc.wantPullable)
+			}
+		})
+	}
+}
 
-		pullable, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if pullable {
-			t.Fatal("expected the token refusal to report not pullable")
-		}
-	})
+// A registry that cannot even be reached is genuinely inconclusive -- it must
+// keep erroring rather than being folded into "not pullable", or a network
+// blip during release would silently pass this check.
+func TestProbeAnonymousManifestPullAtTokenRequestUnreachable(t *testing.T) {
+	unreachable := "http://127.0.0.1:1"
+	_, err := probeAnonymousManifestPullAt(context.Background(), &http.Client{Timeout: time.Second}, "sophium/erun-example", "1.0.0", unreachable, unreachable)
+	if err == nil {
+		t.Fatal("expected an error: the probe could not reach the registry at all")
+	}
+}
 
-	// A registry that cannot even be reached is genuinely inconclusive -- it
-	// must keep erroring rather than being folded into "not pullable", or a
-	// network blip during release would silently pass this check.
-	t.Run("a token request that cannot reach the registry is an error", func(t *testing.T) {
-		unreachable := "http://127.0.0.1:1"
-		_, err := probeAnonymousManifestPullAt(context.Background(), &http.Client{Timeout: time.Second}, "sophium/erun-example", "1.0.0", unreachable, unreachable)
-		if err == nil {
-			t.Fatal("expected an error: the probe could not reach the registry at all")
-		}
-	})
+// This is the regression for the defect release-time verification used to
+// have: verifyPublishedReleaseArtifacts re-resolves a manifest through
+// `docker manifest inspect`, which authenticates with whatever the local
+// daemon has stored, so it can never observe whether a stranger with no
+// credential at all could pull the same image. This probe must never send
+// one, in either direction: not on the token exchange, and not folded into
+// the manifest request's own Authorization header.
+func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
+	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
+	useDockerConfigDir(t, dir)
+	useGHToken(t, func(string) (string, bool) { return "leaked-gh-token", true })
 
-	t.Run("a non-auth manifest failure is an error, not a conclusive denial", func(t *testing.T) {
-		stub := &anonymousManifestStub{ManifestStatus: http.StatusInternalServerError}
-		server := stub.start(t)
+	stub := &anonymousManifestStub{ManifestStatus: http.StatusOK}
+	server := stub.start(t)
 
-		_, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL)
-		if err == nil {
-			t.Fatal("expected an error: a 500 is not a conclusive answer about pullability")
-		}
-	})
-
-	// This is the regression for the defect release-time verification used to
-	// have: verifyPublishedReleaseArtifacts re-resolves a manifest through
-	// `docker manifest inspect`, which authenticates with whatever the local
-	// daemon has stored, so it can never observe whether a stranger with no
-	// credential at all could pull the same image. This probe must never send
-	// one, in either direction: not on the token exchange, and not folded into
-	// the manifest request's own Authorization header.
-	t.Run("sends no credentials", func(t *testing.T) {
-		dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
-		useDockerConfigDir(t, dir)
-		useGHToken(t, func(string) (string, bool) { return "leaked-gh-token", true })
-
-		stub := &anonymousManifestStub{ManifestStatus: http.StatusOK}
-		server := stub.start(t)
-
-		if _, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if stub.tokenRequestSawBasicAuth {
-			t.Fatal("the token exchange must never send Basic auth, even when a docker credential is configured on this machine")
-		}
-		if stub.tokenRequestSawAnyAuthHdr {
-			t.Fatal("the token exchange must carry no Authorization header at all")
-		}
-		if stub.manifestAuthHeader != "Bearer anon-token" {
-			t.Fatalf("manifest request Authorization = %q, want the anonymously-minted token, never a stored credential", stub.manifestAuthHeader)
-		}
-	})
+	if _, err := probeAnonymousManifestPullAt(context.Background(), server.Client(), "sophium/erun-example", "1.0.0", server.URL, server.URL); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stub.tokenRequestSawBasicAuth {
+		t.Fatal("the token exchange must never send Basic auth, even when a docker credential is configured on this machine")
+	}
+	if stub.tokenRequestSawAnyAuthHdr {
+		t.Fatal("the token exchange must carry no Authorization header at all")
+	}
+	if stub.manifestAuthHeader != "Bearer anon-token" {
+		t.Fatalf("manifest request Authorization = %q, want the anonymously-minted token, never a stored credential", stub.manifestAuthHeader)
+	}
 }
 
 func fakeExecutionForImage(imageName, tag, version string) BuildExecutionSpec {
