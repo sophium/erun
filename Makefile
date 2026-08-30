@@ -44,16 +44,44 @@ LINT_TIMEOUT ?= 15m
 
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
-# Run golangci-lint across the gated modules, each against its own
-# .golangci.yml (erun-integration has none, so it uses the default linters).
-# Runs every module even when an earlier one has findings, then fails once at
-# the end, so one red module never hides the rest -- reporting a subset of
-# findings as if it were the whole answer is worse than reporting nothing.
-# golangci-lint must be on PATH (the image test stage installs it; locally,
-# install the version pinned in the repo-root GOLANGCI_LINT_VERSION file), and
-# it must actually be that pinned version: a newer install's vendored
-# analyzers can flag things the pinned one does not (and vice versa), so
-# `make lint` and the image build would otherwise silently disagree.
+# Bound on how many golangci-lint invocations run at once. Each invocation is
+# itself internally parallel (cgroup-aware GOMAXPROCS), so running every
+# LINT_MODULES entry at once already oversubscribes the machine -- measured on
+# a 12-core pod (warm cache, one file touched per module to force real
+# analysis rather than a full cache hit) to still win on wall-clock, because a
+# single module's own analysis has serial phases that leave cores idle: p1
+# (serial) 13.5s, p2 10.3s, p3 9.3s, p4 9.6s, p6 (all modules at once) 8.7s
+# wall, peak memory climbing from 2.5GiB at p1 to 4.1GiB at p6 (see erun#1690).
+# Scaled off `nproc` rather than a flat constant so a small pod runs fewer
+# concurrent golangci-lint processes -- each wants the full core count, and a
+# flat width sized for a 12-core pod would oversubscribe a 4-core one far
+# harder and multiply its peak memory for no wall-clock benefit it has the
+# cores to use anyway. Capped at the module count: more workers than modules
+# cannot help.
+LINT_PARALLELISM ?= $(shell n=$$(nproc 2>/dev/null || echo 4); m=$(words $(LINT_MODULES)); if [ "$$n" -lt "$$m" ]; then echo "$$n"; else echo "$$m"; fi)
+
+# Run golangci-lint across the gated modules concurrently (bounded by
+# LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
+# none, so it uses the default linters). Every module's combined stdout/stderr
+# is buffered by scripts/parallel-gate.sh and emitted atomically under its
+# ">> golangci-lint <module>" marker, in LINT_MODULES order, so concurrent
+# runs never shred each other's diagnostics. Runs every module even when an
+# earlier one has findings, then fails once at the end (with every failing
+# module named on the "lint failed in:" line), so one red module never hides
+# the rest -- reporting a subset of findings as if it were the whole answer is
+# worse than reporting nothing. golangci-lint must be on PATH (the image test
+# stage installs it; locally, install the version pinned in the repo-root
+# GOLANGCI_LINT_VERSION file), and it must actually be that pinned version: a
+# newer install's vendored analyzers can flag things the pinned one does not
+# (and vice versa), so `make lint` and the image build would otherwise
+# silently disagree. That version check runs once, up front, outside the
+# fan-out, so a missing/mismatched tool fails the whole target before any
+# golangci-lint process starts. `--allow-parallel-runners` is required here:
+# golangci-lint acquires a file lock around its (shared, ~/.cache/golangci-lint)
+# result cache by default and refuses a second concurrent instance ("parallel
+# golangci-lint is running"); the flag opts into golangci-lint's own supported
+# concurrent-runner mode, which is safe against the shared cache because cache
+# entries are keyed by file content hash, not writer identity.
 lint:
 	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
 	pin_num=$${pin#v}; \
@@ -64,17 +92,9 @@ lint:
 		   echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$pin" >&2; \
 		   exit 1 ;; \
 	esac
-	@failed=""; \
-	for m in $(LINT_MODULES); do \
-		echo ">> golangci-lint $$m"; \
-		if ! (cd $$m && golangci-lint run --timeout $(LINT_TIMEOUT) ./...); then \
-			failed="$$failed $$m"; \
-		fi; \
-	done; \
-	if [ -n "$$failed" ]; then \
-		echo "lint failed in:$$failed" >&2; \
-		exit 1; \
-	fi
+	@for m in $(LINT_MODULES); do \
+		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "cd $$m && golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
+	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
 # a separate step rather than folded into integration-test or a contributor's
@@ -132,6 +152,16 @@ test-frontend:
 	@echo ">> erun-console gates"
 	@(cd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test)
 
+# Bound on how many chart-test scripts run at once. Each is a single `helm
+# template` render (no cluster, no docker), so unlike lint this scales cleanly
+# with width and memory stays flat: measured on a 12-core pod at p1 2.7s, p2
+# 2.4s, p4 1.9s, p8 (every current script at once) 1.1s wall, ~1.25-1.3GiB
+# peak memory across all widths (see erun#1690). Scaled off `nproc` like
+# LINT_PARALLELISM anyway, capped at the actual script count, so a small pod
+# doesn't launch more `helm template` processes than it has cores for and a
+# growing k8s/ directory can't launch unboundedly many at once.
+HELM_CHART_TEST_PARALLELISM ?= $(shell n=$$(nproc 2>/dev/null || echo 4); m=$(words $(wildcard erun-devops/k8s/*_test.sh)); if [ "$$n" -lt "$$m" ]; then echo "$$n"; else echo "$$m"; fi)
+
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
 # erun-zitadel, erun-console, erun-docs): each *_test.sh renders its chart with
@@ -139,12 +169,19 @@ test-frontend:
 # rendering -- so a pinned `helm` binary is all the image test stage needs to
 # run these (see the Dockerfile's test stage). Iterates the directory rather
 # than naming each script so a new chart's *_test.sh is picked up with no
-# Makefile edit.
+# Makefile edit. Scripts run concurrently (bounded by
+# HELM_CHART_TEST_PARALLELISM) via scripts/parallel-gate.sh, which buffers
+# each script's output and emits it atomically under its ">> <script>"
+# marker, then runs every script and reports every failing one on a single
+# "helm-chart-tests failed in:" line -- deliberately aggregate rather than
+# the prior fail-fast `|| exit 1`: once the scripts run in parallel, a
+# fail-fast exit has already paid for every other script's `helm template`
+# work, so discarding those results on the first failure buys nothing (see
+# erun#1690).
 helm-chart-tests:
 	@for t in erun-devops/k8s/*_test.sh; do \
-		echo ">> $$t"; \
-		sh "$$t" || exit 1; \
-	done
+		printf '%s\t%s\t%s\n' "$$t" "$$t" "sh $$t"; \
+	done | ./scripts/parallel-gate.sh $(HELM_CHART_TEST_PARALLELISM) helm-chart-tests
 
 # End-to-end proof that a postgres restart cannot destroy committed data,
 # against a real postgres and the real atlas migrations. Deliberately NOT part
