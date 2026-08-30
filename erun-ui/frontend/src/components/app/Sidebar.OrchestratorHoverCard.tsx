@@ -7,6 +7,13 @@ import { orchestratorBusyElapsed } from '@/app/orchestratorBusyLabel';
 import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivity';
 import { orchestratorNudgeSummary } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
+import {
+  HOVER_CARD_CAPTION_CLASS,
+  HoverCardBadge,
+  HoverCardMuted,
+  HoverCardRow,
+  HoverCardTitle,
+} from '@/components/app/Sidebar.HoverCardRow';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // OrchestratorHoverCard gives an orchestrator row the same hover treatment the
@@ -84,18 +91,14 @@ export function OrchestratorHoverCard({
       >
         <div className="border-b border-border px-3 py-2">
           <div className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate font-medium">{orchestrator.name}</span>
-            {orchestrator.transient && (
-              <span className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] leading-none font-medium tracking-wide text-muted-foreground uppercase">
-                Transient
-              </span>
-            )}
+            <HoverCardTitle>{orchestrator.name}</HoverCardTitle>
+            {orchestrator.transient && <HoverCardBadge>Transient</HoverCardBadge>}
           </div>
         </div>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">
-          <HoverRow label="Status">{running ? 'Running' : 'Stopped'}</HoverRow>
+          <HoverCardRow label="Status">{running ? 'Running' : 'Stopped'}</HoverCardRow>
           {running && orchestrator.restartRequired && (
-            <HoverRow label="Restart">
+            <HoverCardRow label="Restart">
               <span className="flex items-start gap-1.5 text-amber-600">
                 <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 flex-none" />
                 <span>
@@ -103,22 +106,22 @@ export function OrchestratorHoverCard({
                   set until restarted.
                 </span>
               </span>
-            </HoverRow>
+            </HoverCardRow>
           )}
-          <HoverRow label="Doing">
+          <HoverCardRow label="Doing">
             <OrchestratorDoing orchestrator={orchestrator} running={running} />
-          </HoverRow>
+          </HoverCardRow>
           {/* wide: an environment's busy detail names a real holder ("held by
               gradle-build"), which needs the card's full content width to read
               without eliding -- the narrow value column every other row shares
               with the "Environments" label leaves too little room for it. */}
-          <HoverRow label="Environments" wide>
+          <HoverCardRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
-          </HoverRow>
+          </HoverCardRow>
           {running && (
-            <HoverRow label="Nudges">
+            <HoverCardRow label="Nudges">
               <OrchestratorNudges orchestrator={orchestrator} />
-            </HoverRow>
+            </HoverCardRow>
           )}
         </dl>
       </PopoverContent>
@@ -201,15 +204,13 @@ function OrchestratorEnvironments({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{line.name}</span>
-              <span className="block truncate text-[12px] text-muted-foreground">
-                {line.status}
-              </span>
+              <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
               {line.usage && (
                 <span
                   className={
                     line.usageStale
-                      ? 'block truncate text-[12px] text-amber-700 dark:text-amber-400'
-                      : 'block truncate text-[12px] text-muted-foreground'
+                      ? 'block truncate text-xs tabular-nums text-amber-700 dark:text-amber-400'
+                      : `block truncate tabular-nums ${HOVER_CARD_CAPTION_CLASS}`
                   }
                 >
                   {line.usage}
@@ -249,42 +250,6 @@ function OrchestratorNudges({
   return <Muted>{summary}</Muted>;
 }
 
-function HoverRow({
-  label,
-  wide = false,
-  children,
-}: {
-  label: string;
-  // wide stacks the label above the value across both grid columns, for a
-  // value that needs the card's full content width rather than sharing it
-  // with the label column.
-  wide?: boolean;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <>
-      <dt
-        className={
-          wide
-            ? 'col-span-2 text-[12px] text-muted-foreground'
-            : 'text-[12px] text-muted-foreground'
-        }
-      >
-        {label}
-      </dt>
-      <dd
-        className={
-          wide
-            ? 'col-span-2 min-w-0 break-words text-foreground'
-            : 'min-w-0 break-words text-foreground'
-        }
-      >
-        {children}
-      </dd>
-    </>
-  );
-}
-
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <span className="text-muted-foreground">{children}</span>;
+  return <HoverCardMuted>{children}</HoverCardMuted>;
 }
