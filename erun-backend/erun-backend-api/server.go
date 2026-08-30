@@ -331,7 +331,8 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 		}
 	}
 	routes.RegisterContextRoutes(register, repos.contexts, contextProvisioner)
-	routes.RegisterTenantRoutes(register, repos.tenants)
+	tenantService := service.NewTenantService(repos.tenants, repos.environments, options.BootstrapTenantName)
+	routes.RegisterTenantRoutes(register, repos.tenants, tenantService)
 	routes.RegisterTenantQuotaRoute(register, repos.tenantQuotas, repos.tenantQuotas)
 	routes.RegisterConfigRoute(register, repos.tenants, repos.environments, repos.contexts)
 	routes.RegisterProvisionRoute(register, repos.tenants, repos.environments, repos.tenantQuotas)

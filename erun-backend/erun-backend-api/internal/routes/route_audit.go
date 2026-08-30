@@ -25,6 +25,16 @@ var InternalAPIRoutes = map[string]bool{
 	// flow (advancing the queue, closing a review) already has a real
 	// desktop surface, which is what actually needs one.
 	"POST /v1/reviews/{review_id}/builds": true,
+	// A one-time, operations-only repair action for a platform whose own
+	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
+	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's
+	// bootstrap-name comment). Every platform bootstraps exactly once, so this
+	// is invoked at most once per already-affected platform ever, by whoever
+	// operates it directly against the API -- not a recurring operator
+	// workflow like tenant registration or issuer administration, which is
+	// what earns those a console surface. There is no ongoing UI affordance to
+	// design here, only a break-glass call.
+	"PATCH /v1/tenants/reconcile-bootstrap-name": true,
 }
 
 // KnownUnsurfacedRoutes is a record of known gaps, not a design decision: it

@@ -10,6 +10,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
@@ -119,6 +120,15 @@ type EnvDeployConfig struct {
 	TLSWebhookGroup string
 	ACMEEmail       string
 	ACMEServer      string
+	// PlatformTenant is this instance's own declared tenant identity
+	// (ERUN_TENANT), threaded here so resolveBootstrapImage can name a
+	// runtime-image fallback substitution: a platform's own
+	// OPERATIONS tenant bootstrapped under a legacy name keeps resolving that
+	// legacy <name>-devops image, confirms it missing, and silently falls
+	// back to the canonical erun-devops image even when the platform actually
+	// publishes <declared>-devops. Empty (ERUN_TENANT unset) never reports a
+	// substitution, matching every deploy before this existed.
+	PlatformTenant string
 }
 
 // EnvProvisioner runs the durable env-deploy workflow, so a control-plane restart
@@ -178,7 +188,37 @@ func (p *EnvProvisioner) StartDeploy(input EnvProvisionInput) error {
 // selects the fallback, never a network hiccup or an unreadable namespace.
 func (p *EnvProvisioner) resolveBootstrapImage(input EnvProvisionInput) bool {
 	_, bootstrap := ResolveRuntimeImage(context.Background(), p.imageChecker, p.config.Registry, input.Tenant, input.Version)
+	if bootstrap {
+		p.reportRuntimeImageFallbackSubstitution(input)
+	}
 	return bootstrap
+}
+
+// reportRuntimeImageFallbackSubstitution names the runtime-image fallback
+// when it may be masking a real published image: a platform's own
+// OPERATIONS tenant bootstrapped under a legacy name (see
+// repository.defaultBootstrapTenantName) keeps resolving that legacy
+// <name>-devops image, confirms it missing, and falls back to the canonical
+// erun-devops image — correct when the tenant genuinely has no image, but
+// misleading when the platform actually publishes <declared>-devops under its
+// ERUN_TENANT name and this environment's own tenant is simply named
+// differently. Only checked for the platform's own OPERATIONS tenant: an
+// ordinary tenant with no image has no other name to have published under.
+// Reports nothing unless the differently-named image is affirmatively
+// confirmed present, matching RuntimeImageChecker's fail-open contract.
+func (p *EnvProvisioner) reportRuntimeImageFallbackSubstitution(input EnvProvisionInput) {
+	platformTenant := strings.TrimSpace(p.config.PlatformTenant)
+	if platformTenant == "" || platformTenant == input.Tenant || input.TenantType != string(model.TenantTypeOperations) || p.imageChecker == nil {
+		return
+	}
+	canonical := CanonicalRuntimeImage(p.config.Registry, input.Version)
+	declared := TenantRuntimeImage(p.config.Registry, platformTenant, input.Version)
+	present, err := p.imageChecker.ConfirmedPresent(context.Background(), declared, canonical)
+	if err != nil || !present {
+		return
+	}
+	log.Printf("erun api: runtime image fallback substitution: operations tenant %q has no own %s image and fell back to canonical %s, but ERUN_TENANT=%q has a published %s -- this tenant's name likely disagrees with the platform's declared identity; reconcile via PATCH /v1/tenants/reconcile-bootstrap-name",
+		input.Tenant, TenantRuntimeImage(p.config.Registry, input.Tenant, input.Version), canonical, platformTenant, declared)
 }
 
 // deployJobParams renders the placement for one env-deploy Job. A tenant that

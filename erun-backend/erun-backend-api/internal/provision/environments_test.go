@@ -3,7 +3,10 @@ package provision
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
 // stubImageChecker reports a fixed answer, or an error when set.
@@ -13,6 +16,14 @@ type stubImageChecker struct {
 	calls      int
 	gotImage   string
 	gotControl string
+	// present/presentErr answer ConfirmedPresent, tracked separately from the
+	// ConfirmedMissing fields above since a caller may probe both in one run
+	// (see reportRuntimeImageFallbackSubstitution).
+	present           bool
+	presentErr        error
+	presentCalls      int
+	presentGotImage   string
+	presentGotControl string
 }
 
 func (c *stubImageChecker) ConfirmedMissing(_ context.Context, image, control string) (bool, error) {
@@ -20,6 +31,13 @@ func (c *stubImageChecker) ConfirmedMissing(_ context.Context, image, control st
 	c.gotImage = image
 	c.gotControl = control
 	return c.missing, c.err
+}
+
+func (c *stubImageChecker) ConfirmedPresent(_ context.Context, image, control string) (bool, error) {
+	c.presentCalls++
+	c.presentGotImage = image
+	c.presentGotControl = control
+	return c.present, c.presentErr
 }
 
 // TestResolveBootstrapImage locks the synchronous precondition Start/StartDeploy
@@ -65,6 +83,80 @@ func TestResolveBootstrapImage(t *testing.T) {
 		if p.resolveBootstrapImage(input) {
 			t.Fatal("resolveBootstrapImage = true, want false (fail open on checker error)")
 		}
+	})
+}
+
+// TestReportRuntimeImageFallbackSubstitutionReportsAConfirmedSubstitution
+// locks that the runtime-image fallback names the substitution only when a
+// differently-named image the platform actually publishes is affirmatively
+// confirmed present; the sibling test below locks every case where it must
+// stay silent instead.
+func TestReportRuntimeImageFallbackSubstitutionReportsAConfirmedSubstitution(t *testing.T) {
+	config := EnvDeployConfig{Registry: "ghcr.io/sophium", PlatformTenant: "frs"}
+	operationsInput := EnvProvisionInput{Tenant: "operations", TenantType: string(model.TenantTypeOperations), Version: "1.2.3"}
+	checker := &stubImageChecker{missing: true, present: true}
+	p := &EnvProvisioner{config: config, imageChecker: checker}
+	output := captureLog(t, func() {
+		if !p.resolveBootstrapImage(operationsInput) {
+			t.Fatal("resolveBootstrapImage = false, want true on a confirmed-missing tenant image")
+		}
+	})
+	if checker.presentGotImage != "ghcr.io/sophium/frs-devops:1.2.3" {
+		t.Fatalf("checker probed presence of %q, want the declared tenant's own image", checker.presentGotImage)
+	}
+	if checker.presentGotControl != "ghcr.io/sophium/erun-devops:1.2.3" {
+		t.Fatalf("checker probed presence against control %q, want the canonical image", checker.presentGotControl)
+	}
+	for _, want := range []string{"operations", "frs", "ghcr.io/sophium/frs-devops:1.2.3", "ghcr.io/sophium/erun-devops:1.2.3", "PATCH /v1/tenants/reconcile-bootstrap-name"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("log output = %q, want it to contain %q", output, want)
+		}
+	}
+}
+
+// assertNoSubstitutionReported drives resolveBootstrapImage and asserts the
+// fallback substitution log line never fires, so each silence scenario below
+// reads as the precondition it violates plus the one assertion that matters.
+func assertNoSubstitutionReported(t *testing.T, p *EnvProvisioner, input EnvProvisionInput, reason string) {
+	t.Helper()
+	output := captureLog(t, func() { p.resolveBootstrapImage(input) })
+	if strings.Contains(output, "reconcile-bootstrap-name") {
+		t.Fatalf("log output = %q, want no reported substitution: %s", output, reason)
+	}
+}
+
+// TestReportRuntimeImageFallbackSubstitutionStaysSilent covers every
+// precondition that must suppress the report: an unconfirmed probe, a
+// non-operations tenant, no declared platform tenant, and a tenant already
+// named the declared tenant.
+func TestReportRuntimeImageFallbackSubstitutionStaysSilent(t *testing.T) {
+	config := EnvDeployConfig{Registry: "ghcr.io/sophium", PlatformTenant: "frs"}
+	operationsInput := EnvProvisionInput{Tenant: "operations", TenantType: string(model.TenantTypeOperations), Version: "1.2.3"}
+
+	t.Run("declared name's image not confirmed present", func(t *testing.T) {
+		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{missing: true, present: false}}
+		assertNoSubstitutionReported(t, p, operationsInput, "an unconfirmed probe proves nothing")
+	})
+
+	t.Run("ordinary (non-operations) tenant", func(t *testing.T) {
+		checker := &stubImageChecker{missing: true, present: true}
+		p := &EnvProvisioner{config: config, imageChecker: checker}
+		companyInput := EnvProvisionInput{Tenant: "acme", TenantType: string(model.TenantTypeCompany), Version: "1.2.3"}
+		assertNoSubstitutionReported(t, p, companyInput, "an ordinary tenant has no other declared name to check")
+		if checker.presentCalls != 0 {
+			t.Fatalf("presentCalls = %d, want 0: an ordinary tenant has no other declared name to check", checker.presentCalls)
+		}
+	})
+
+	t.Run("no ERUN_TENANT configured", func(t *testing.T) {
+		p := &EnvProvisioner{config: EnvDeployConfig{Registry: "ghcr.io/sophium"}, imageChecker: &stubImageChecker{missing: true, present: true}}
+		assertNoSubstitutionReported(t, p, operationsInput, "nothing is declared to compare against")
+	})
+
+	t.Run("tenant already named the declared tenant", func(t *testing.T) {
+		p := &EnvProvisioner{config: config, imageChecker: &stubImageChecker{missing: true, present: true}}
+		alreadyNamed := EnvProvisionInput{Tenant: "frs", TenantType: string(model.TenantTypeOperations), Version: "1.2.3"}
+		assertNoSubstitutionReported(t, p, alreadyNamed, "the tenant already matches")
 	})
 }
 

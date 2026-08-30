@@ -330,7 +330,7 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 	}); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
-	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
 	return tenant, user, nil
@@ -381,7 +381,7 @@ func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.T
 	}); err != nil {
 		return model.User{}, err
 	}
-	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.User{}, err
 	}
 	return user, nil
@@ -481,24 +481,32 @@ func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username
 }
 
 // insertDefaultUserAccess links the bootstrapped user's external identity and
-// grants it the predefined roles. It only ever runs against a tenant with no
-// prior users (first-identity/first-tenant-user bootstrap), so grantPredefinedRoles
-// always takes its create-fresh-roles path here.
-func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
+// grants it the predefined roles. tenantID must always be the enrolling
+// tenant's own ID explicitly: findOrCreateRole's untenanted lookup mode
+// relies on the active transaction's own RLS scoping to stay tenant-safe, but
+// that scoping only holds for the erun_tenant role. An OPERATIONS-type
+// tenant's own per-tenant-first-user bootstrap runs as erun_operations, whose
+// RLS policy is deliberately cross-tenant (USING (true), the same reach the
+// operations gate depends on elsewhere), so an untenanted "WHERE name = ?"
+// there can match a *different* tenant's already-created ReadAll/WriteAll
+// role — a real FK violation on role_permissions, since registering a second
+// OPERATIONS tenant (a documented, legitimate action) is exactly what
+// exposes it.
+func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
 	if _, err := tx.NewRaw(`INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`, userID, issuer, subject).Exec(ctx); err != nil {
 		return err
 	}
-	return grantPredefinedRoles(ctx, tx, "", userID)
+	return grantPredefinedRoles(ctx, tx, tenantID, userID)
 }
 
 // grantPredefinedRoles grants a user the two predefined roles every enrolled
 // user gets today (there is no finer-grained role assignment surface yet).
-// tenantID, when non-empty, targets a tenant other than the caller's own
-// session tenant (an operations-scoped enrollment): every row this writes then
-// needs the target tenant set explicitly, because relying on the tenant-owned
-// default would write the caller's own tenant instead. findOrCreateRole makes
-// this safe to call for a tenant's second and later users too, since
-// ReadAll/WriteAll are created once per tenant and reused after that.
+// tenantID is always the enrolling tenant's own ID, explicit rather than
+// relying on the active transaction's RLS scoping — see
+// insertDefaultUserAccess for why that scoping cannot be trusted for every
+// caller. findOrCreateRole makes this safe to call for a tenant's second and
+// later users too, since ReadAll/WriteAll are created once per tenant and
+// reused after that.
 func grantPredefinedRoles(ctx context.Context, tx bun.Tx, tenantID string, userID string) error {
 	specs := []struct {
 		name          string

@@ -86,6 +86,7 @@ func run(args []string) error {
 			TLSWebhookGroup:         cfg.DNS01WebhookGroupName,
 			ACMEEmail:               cfg.ACMEEmail,
 			ACMEServer:              cfg.ACMEServer,
+			PlatformTenant:          cfg.BootstrapTenantName,
 		},
 		Platform: routes.PlatformInfo{
 			Issuer:          cfg.PlatformIssuer,
@@ -120,7 +121,7 @@ func run(args []string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("erun api listening on %s; database=postgres audit=postgres oidc allowed issuers=%d %s", server.Addr, len(splitCSV(cfg.AllowedIssuers)), oidcAudiencePolicy(splitCSV(cfg.AllowedAudiences)))
-	log.Print(identityBootstrapStatus(context.Background(), db))
+	log.Print(identityBootstrapStatus(context.Background(), db, cfg.BootstrapTenantName))
 	return server.ListenAndServe()
 }
 
@@ -226,7 +227,7 @@ func oidcAudiencePolicy(audiences []string) string {
 	return fmt.Sprintf("oidc audience enforcement=on (allowed: %s)", strings.Join(audiences, ", "))
 }
 
-func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {
+func identityBootstrapStatus(ctx context.Context, db *sql.DB, platformTenant string) string {
 	tenants, tenantErr := countRows(ctx, db, "tenants")
 	users, userErr := countRows(ctx, db, "users")
 	issuers, issuerErr := countRows(ctx, db, "tenant_issuers")
@@ -236,10 +237,35 @@ func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {
 	if tenants == 0 {
 		return "erun api identity bootstrap pending; firstTenant=false firstUser=false tenants=0 users=0 issuers=0"
 	}
+	mismatch := platformTenantNameMismatch(ctx, db, platformTenant)
 	if users == 0 {
-		return fmt.Sprintf("erun api identity bootstrap pending; firstTenant=true firstUser=false tenants=%d users=0 issuers=%d", tenants, issuers)
+		return fmt.Sprintf("erun api identity bootstrap pending; firstTenant=true firstUser=false tenants=%d users=0 issuers=%d%s", tenants, issuers, mismatch)
 	}
-	return fmt.Sprintf("erun api identity ready; firstTenant=true firstUser=true tenants=%d users=%d issuers=%d", tenants, users, issuers)
+	return fmt.Sprintf("erun api identity ready; firstTenant=true firstUser=true tenants=%d users=%d issuers=%d%s", tenants, users, issuers, mismatch)
+}
+
+// platformTenantNameMismatch reports when this instance's declared tenant
+// (ERUN_TENANT) disagrees with the name its own OPERATIONS tenant actually
+// bootstrapped under. Bootstrap only ever runs once, so a platform
+// whose ERUN_TENANT was unset (or different) at bootstrap time can carry that
+// original name indefinitely with nothing else to say so -- the mismatch was
+// previously discoverable only by querying the database directly. Empty when
+// ERUN_TENANT is unset, the OPERATIONS tenant cannot be read, or the two
+// already agree.
+func platformTenantNameMismatch(ctx context.Context, db *sql.DB, platformTenant string) string {
+	platformTenant = strings.TrimSpace(platformTenant)
+	if platformTenant == "" {
+		return ""
+	}
+	var operationsName string
+	err := db.QueryRowContext(ctx, `SELECT name FROM tenants WHERE type = 'OPERATIONS' ORDER BY created_at ASC LIMIT 1`).Scan(&operationsName)
+	if err != nil {
+		return ""
+	}
+	if operationsName == platformTenant {
+		return ""
+	}
+	return fmt.Sprintf("; tenant name mismatch: declared tenant is %q, OPERATIONS tenant is %q; reconcile via PATCH /v1/tenants/reconcile-bootstrap-name", platformTenant, operationsName)
 }
 
 func countRows(ctx context.Context, db *sql.DB, table string) (int, error) {
@@ -340,7 +366,7 @@ type apiConfig struct {
 	// <tenant>-devops finds an image the platform actually publishes,
 	// instead of a synthetic placeholder falling back only when it is unset.
 	BootstrapTenantName string
-	// Identity administration (issue #1209) drives Zitadel's Management API
+	// Identity administration drives Zitadel's Management API
 	// with the org-owner PAT the erun-zitadel chart already provisions and
 	// persists. All three fields must be set for the /v1/identity/* routes
 	// to register; any one missing leaves them off, same as every other

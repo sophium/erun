@@ -92,6 +92,8 @@ Turning it on is a **configuration change**, not a code change: the client ids a
 
 **First-identity bootstrap.** When the `tenants` table is empty, the first valid token bootstraps the system: it creates an `OPERATIONS` tenant, registers its `iss` in `issuers`, creates the first user, and grants it both `ReadAll` and `WriteAll`.
 
+**The bootstrap tenant's name, and why it can drift.** The `OPERATIONS` tenant is named after this instance's own declared identity — its `ERUN_TENANT` config — so that hosted provisioning's first resolve of `<tenant>-devops` (see [Provisioning lifecycle](/concepts/hosted-platform#provisioning-lifecycle)) finds an image the platform actually publishes, rather than a placeholder name nobody will ever publish under. `ERUN_TENANT` unset at that moment falls back to the literal name `operations`. **This naming decision is made exactly once, against an empty `tenants` table** — bootstrap never re-runs once any tenant exists, so a platform whose `ERUN_TENANT` was unset (or different) the very first time it ever started keeps that original name indefinitely, even after `ERUN_TENANT` is later corrected. Nothing before this tolerated that silently: the API's startup log now reports the disagreement plainly (`tenant name mismatch: declared tenant is "<ERUN_TENANT>", OPERATIONS tenant is "<actual name>"`) whenever the two disagree, instead of leaving it discoverable only by querying `tenants` directly. [`PATCH /v1/tenants/reconcile-bootstrap-name`](#patch-v1tenantsreconcile-bootstrap-name) below is the one-way repair for a platform in that state.
+
 How that issuer is registered decides whether the platform can ever host a second tenant on it, so it is not a fixed choice: when the bootstrap token carries an org claim an erun-shipped IdP is known to emit (today `urn:zitadel:iam:user:resourceowner:id`, which needs the token minted with the `urn:zitadel:iam:user:resourceowner` scope), the issuer is registered **org-scoped** on that claim and the bootstrap tenant's mapping records its own org value. Any other issuer keeps the single-tenant registration (`org_field_key` NULL), which is the right shape for a dedicated per-tenant IdP. Registering a *shared* IdP single-tenant is a one-way door — org-scoping mode lives on the shared `issuers` row, so every later tenant on that issuer is refused; see [`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers) for the conversion that recovers a platform already in that state.
 
 **Per-tenant first-user bootstrap.** Bootstrap is not limited to the empty-`tenants` case. Whenever a token resolves to a tenant (a registered issuer, the right org claim for org-scoped issuers) that has **zero** users, the first such valid token is enrolled as that tenant's first user with `ReadAll` + `WriteAll` — this is how a newly-provisioned tenant gets its first admin without a separate user-management call. **For an org-scoped issuer this means the first valid caller in a freshly-provisioned org becomes that tenant's admin**, so provisioning a tenant + registering its issuer/org is the act that authorizes its first caller. After a tenant has at least one user, unknown subjects for it — and unknown/unregistered issuers anywhere — stay unauthorized.
@@ -123,7 +125,7 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 ### Endpoints
 
 :::note Shipped vs planned
-The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), and `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name, or convert a single-tenant issuer to org-scoped). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
+The `(iss, org) → tenant` resolution model and first-identity bootstrap above are **shipped**, as are `GET /v1/whoami`, `GET /v1/tenant-issuers` (list), `PATCH /v1/tenant-issuers` (rename a trusted issuer's display name, or convert a single-tenant issuer to org-scoped), and [`PATCH /v1/tenants/reconcile-bootstrap-name`](#patch-v1tenantsreconcile-bootstrap-name) (the platform's own one-way legacy-name repair). New tenants and their issuer mapping can be registered through the operations-only `POST /v1/tenants` below; for an existing tenant, additional issuers and their org-scoping mode are still provisioned directly in the `issuers` / `tenant_issuers` tables (migrations or the bootstrap path), not via a tenant-self-service endpoint. `POST /v1/users` enrolls additional users beyond the first-user bootstrap. A tenant-self-service **trust-management** API (a tenant adding/removing its own issuers with `audience`/`tenantClaim`/`allowedSubjects`, and the `409`/`422` codes below) is `(Planned.)`, as is the structured machine-readable error `code` field for authentication/authorization failures specifically — today those return bare HTTP status codes with a plain-text body (see [Errors](#errors) below). Business-logic errors past the auth layer do carry a `code` today — see [Reviews · Errors](/collaboration/reviews#errors).
 :::
 
 | Method | Path | Description | Required scope |
@@ -777,6 +779,34 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `409` | The `(issuer, org_field_value)` mapping already exists — either the issuer is already registered single-tenant (no org discriminator) and `orgFieldValue` was left empty, or this exact org value on that issuer is already taken; the body names which. | For the no-discriminator case, an operations caller converts the issuer to org-scoped via [`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers) (which backfills the existing tenant's mapping) before retrying this call with `orgFieldKey`/`orgFieldValue`; for the taken-org-value case, pick a different `orgFieldValue`. |
 | `500` | Persistence failed — e.g. the tenant `name` already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name; if it persists, it is a server bug. |
+
+### `PATCH /v1/tenants/reconcile-bootstrap-name` {#patch-v1tenantsreconcile-bootstrap-name}
+
+The one-way repair for [the bootstrap-name drift above](#tenant-issuers): renames the caller's own `OPERATIONS` tenant to match this instance's declared `ERUN_TENANT`. Deliberately **not** a general tenant-rename API — renaming a tenant that already has environments would break the `<tenant>-<env>` namespace invariant every one of them depends on, so this only ever touches the platform's own tenant, and only while it has none.
+
+Takes **no request body**. The target name is this instance's own server-side config, never a value the caller supplies — that is what keeps the surface narrow instead of a rename primitive a caller could point anywhere:
+
+```jsonc
+// 200 response — already the same shape POST /v1/tenants returns
+{
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
+  "name": "frs",
+  "type": "OPERATIONS",
+  "createdAt": "2026-08-19T18:12:22Z",
+  "updatedAt": "2026-08-30T09:00:00Z"
+}
+```
+
+If the caller's tenant name already matches `ERUN_TENANT`, this is a no-op success (`200`, tenant unchanged) rather than a refusal — calling it speculatively is always safe.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `403` | The caller's resolved tenant is not `OPERATIONS` (the same explicit gate `POST /v1/tenants` applies). | Call from the platform's own operations-tenant token. |
+| `409` | This instance has no `ERUN_TENANT` configured — nothing to reconcile against. | Set `ERUN_TENANT` on the deployment, then retry. |
+| `409` | The caller's tenant already has one or more environments — renaming it would break their `<tenant>-<env>` namespace invariant. | Nothing to do: an operations tenant with existing environments cannot be renamed by design. If the name genuinely must change, that is a manual, out-of-band data migration, not this endpoint. |
+| `409` | Another tenant already holds the `ERUN_TENANT` name (`tenants.name` is globally unique). | Free or rename the conflicting tenant first, or correct `ERUN_TENANT` to a name that is actually this platform's own. |
 
 ### `GET /v1/tenants/reachable` {#get-v1tenantsreachable}
 

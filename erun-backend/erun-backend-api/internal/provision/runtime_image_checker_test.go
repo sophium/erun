@@ -239,6 +239,67 @@ func TestGHCRImageCheckerProbesTheRequestedRepositories(t *testing.T) {
 	}
 }
 
+// assertConfirmedPresent mirrors assertConfirmedMissing for the positive
+// counterpart.
+func assertConfirmedPresent(t *testing.T, checker *GHCRImageChecker, want bool, reason string) {
+	t.Helper()
+	present, err := checker.ConfirmedPresent(context.Background(), tenantImage, canonicalImage)
+	if err != nil {
+		t.Fatalf("ConfirmedPresent: %v", err)
+	}
+	if present != want {
+		t.Fatalf("confirmedPresent = %v, want %v: %s", present, want, reason)
+	}
+}
+
+// TestGHCRImageCheckerConfirmedPresent locks ConfirmedPresent, the positive
+// counterpart to ConfirmedMissing added for erun#1480: it is what lets the
+// runtime-image fallback report a real substitution instead of guessing one
+// — a confirmed 200 is the only outcome that reports true, so an absent,
+// forbidden, or inconclusive probe never asserts a substitution that was
+// never actually confirmed.
+func TestGHCRImageCheckerConfirmedPresent(t *testing.T) {
+	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
+	credentials := staticCredentials{host: "ghcr.io", credential: credential}
+
+	t.Run("a published image is confirmed present", func(t *testing.T) {
+		stub := &ghcrStub{
+			manifests:  map[string]int{"acme/erun-devops:1.2.3": http.StatusOK, "acme/acme-devops:1.2.3": http.StatusOK},
+			credential: credential,
+		}
+		stub.start(t)
+		assertConfirmedPresent(t, NewGHCRImageChecker(credentials), true,
+			"a credentialed 200 against a namespace the same credential can read is a confirmed presence")
+	})
+
+	t.Run("a missing image is not confirmed present", func(t *testing.T) {
+		stub := &ghcrStub{
+			manifests:  map[string]int{"acme/erun-devops:1.2.3": http.StatusOK},
+			credential: credential,
+		}
+		stub.start(t)
+		assertConfirmedPresent(t, NewGHCRImageChecker(credentials), false,
+			"a 404 is not a confirmed presence")
+	})
+
+	t.Run("control image absent leaves the question undecided", func(t *testing.T) {
+		(&ghcrStub{credential: credential}).start(t)
+		assertConfirmedPresent(t, NewGHCRImageChecker(credentials), false,
+			"the canonical control image the bootstrap would run does not resolve either")
+	})
+
+	t.Run("non-ghcr host is not this checker's job", func(t *testing.T) {
+		present, err := NewGHCRImageChecker(credentials).ConfirmedPresent(context.Background(),
+			"registry.internal.example.com/acme/acme-devops:1.2.3", "registry.internal.example.com/acme/erun-devops:1.2.3")
+		if err != nil {
+			t.Fatalf("ConfirmedPresent: %v", err)
+		}
+		if present {
+			t.Fatal("confirmedPresent = true, want false for a non-ghcr.io host")
+		}
+	})
+}
+
 func TestParseImageReference(t *testing.T) {
 	host, repo, tag, ok := parseImageReference("ghcr.io/acme/acme-devops:1.2.3")
 	if !ok || host != "ghcr.io" || repo != "acme/acme-devops" || tag != "1.2.3" {
