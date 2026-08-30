@@ -221,6 +221,14 @@ after touching it — like `erun-devops/docker/erun-devops/entrypoint_test.sh`,
 it asserts process/argv behavior against a stubbed `erun` and is not wired
 into `make check`.
 
+`scripts/parallel-gate.sh`'s `width` mode is the single place that derives
+how wide a parallel fan-out (`LINT_PARALLELISM`, `HELM_CHART_TEST_PARALLELISM`)
+may run on this environment, from the real CPU quota and a memory ceiling
+rather than `nproc` alone — see its own header comment for why `nproc` (which
+reads the CPU affinity mask, not the CFS quota) isn't sufficient on its own.
+Run `scripts/parallel-gate_test.sh` directly after touching it, same
+not-wired-into-`make check` reasoning as `agent-gate_test.sh` above.
+
 The criterion for wrapping a command this way is "long enough that a harness
 will background it", never the target's name — `make check` was simply the
 first one found this way. `erun-ui/playwright/run.sh` (longer than `make

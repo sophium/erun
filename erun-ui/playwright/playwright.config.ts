@@ -30,7 +30,11 @@ isolatedRoot();
 // a smaller one. os.availableParallelism() honours the cgroup CPU quota (unlike
 // os.cpus().length, which reports the host's cores), and the memory ceiling is
 // read from the cgroup when present so a container limit is respected rather
-// than the node's total RAM.
+// than the node's total RAM. scripts/parallel-gate.sh's `width` mode is the
+// analogous derivation for the Makefile's gate widths (#1702) -- it can't
+// share this function across languages, but reads the same cgroup files with
+// the same v2-then-v1-then-unlimited fallback order and the same
+// Number.MAX_SAFE_INTEGER treatment of v1's huge "unlimited" sentinel below.
 const WORKER_BUDGET_MIB = 900;
 
 function cgroupMemoryLimitMib(): number | null {
