@@ -543,11 +543,16 @@ func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 	deployName := DeployJobName(deployParams.Tenant, deployParams.Environment, deployParams.Version, "")
 
 	// The first stop already ran to completion; the environment was then
-	// redeployed and that Job is still active when the second stop runs.
+	// redeployed and that Job is still active when the second stop runs. The
+	// first stop is seeded Failed, not Succeeded: a genuine second stop must
+	// end up Succeeded, so if it instead replayed the first attempt's cached
+	// outcome, the outcome assertion below would catch it — seeding the first
+	// attempt Succeeded too would let a replay slip through undetected, since
+	// "succeeded" is what both the replay and a real run would report.
 	kube := fake.NewSimpleClientset(
 		&batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{Name: firstStopName, Namespace: stopParams.Namespace, Labels: lifecycleJobLabels(stopParams.Tenant, stopParams.Environment)},
-			Status:     batchv1.JobStatus{Succeeded: 1},
+			Status:     batchv1.JobStatus{Failed: 1},
 		},
 		&batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{Name: deployName, Namespace: deployParams.Namespace, Labels: lifecycleJobLabels(deployParams.Tenant, deployParams.Environment)},
@@ -564,9 +569,17 @@ func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 		t.Fatalf("run second stop: %v", err)
 	}
 	if result.Outcome != OutcomeSucceeded {
-		t.Fatalf("second stop outcome = %q, want succeeded — the environment must end up stopped", result.Outcome)
+		t.Fatalf("second stop outcome = %q, want succeeded — the environment must end up stopped, not replay the first attempt's failed outcome", result.Outcome)
 	}
 	if created() == nil {
 		t.Fatal("the second stop did not create its own fresh job — it was confused by, or replayed, an unrelated job")
+	}
+
+	jobs, err := kube.BatchV1().Jobs(stopParams.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs.Items) != 3 {
+		t.Fatalf("jobs in namespace = %d, want 3 (the failed first stop, the active redeploy, and the new second stop)", len(jobs.Items))
 	}
 }
