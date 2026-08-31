@@ -4,11 +4,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2615,6 +2618,97 @@ esac
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_namespace_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-namespace-get: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_from_devops_cwd) even with
+		// execution.modes.kubectl-namespace-get=library, since
+		// TraceEnsureKubernetesNamespace only ever renders the trace line
+		// (kubectlGetNamespaceArgs) and never calls kubernetesNamespaceExists
+		// on a dry run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-namespace-get", "library")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_namespace_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (namespace already exists, no create needed) via a
+		// real client-go call against a fake API server instead of shelling
+		// out to kubectl. The kubectl stub fails loudly and distinctively
+		// only for the "get namespace" argv shape (every other kubectl
+		// subcommand this deploy needs — the post-helm rollout wait and
+		// pod-watch poll — still succeeds), so a fallback to the subprocess
+		// path for the namespace check surfaces as a recognizable deploy
+		// failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-namespace-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get namespace"*) printf '%s\n' "fell through to the kubectl subprocess for the namespace check" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("namespace check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
 	})
 
 	t.Run("real_run_failure_shows_deploy_failed_header_at_default_verbosity", func(t *testing.T) {

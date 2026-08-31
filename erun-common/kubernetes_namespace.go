@@ -67,8 +67,7 @@ func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) 
 		return
 	}
 
-	args := kubernetesContextArgs(contextName)
-	ctx.TraceCommand("", "kubectl", append(append([]string{}, args...), "get", "namespace", namespace, "-o", "name")...)
+	ctx.TraceCommand("", "kubectl", kubectlGetNamespaceArgs(contextName, namespace)...)
 
 	if ctx.DryRun {
 		ctx.Trace("deploy: namespace " + namespace + " is created if the check above reports it missing")
@@ -78,7 +77,7 @@ func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) 
 	if exists, err := kubernetesNamespaceExists(contextName, namespace); err == nil && exists {
 		return
 	}
-	ctx.TraceCommand("", "kubectl", append(append([]string{}, args...), "create", "namespace", namespace)...)
+	ctx.TraceCommand("", "kubectl", append(kubernetesContextArgs(contextName), "create", "namespace", namespace)...)
 }
 
 // kubernetesContextArgs is the shared --context prefix every kubectl invocation
@@ -421,14 +420,17 @@ func WrapHelmChartDeployerWithNamespaceEnsure(ensure NamespaceEnsurerFunc, deplo
 	}
 }
 
+// kubernetesNamespaceExists dispatches to the subprocess or library path per
+// the kubectl-namespace-get execution mode (see execution_mode.go).
 func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
-	args := []string{}
-	if strings.TrimSpace(contextName) != "" {
-		args = append(args, "--context", contextName)
+	if currentExecutionMode(kubectlNamespaceGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryKubernetesNamespaceExists(contextName, namespace)
 	}
-	args = append(args, "get", "namespace", namespace, "-o", "name")
+	return defaultKubernetesNamespaceExists(contextName, namespace)
+}
 
-	output, err := Command("kubectl", args...).CombinedOutput()
+func defaultKubernetesNamespaceExists(contextName, namespace string) (bool, error) {
+	output, err := Command("kubectl", kubectlGetNamespaceArgs(contextName, namespace)...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

@@ -3,6 +3,7 @@ Target: team/dev
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
 
 Running: Clear cached JetBrains Gateway backend metadata
 Cached backend path: <TMP>

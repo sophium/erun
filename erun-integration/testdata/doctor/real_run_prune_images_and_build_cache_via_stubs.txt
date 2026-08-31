@@ -3,6 +3,7 @@ Target: team/dev
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
 
 == Helm release status ==
 NAME: team-devops
