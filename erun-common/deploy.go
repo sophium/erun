@@ -3865,12 +3865,20 @@ func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeployme
 		return false, output, nil
 	}
 
-	detail := kubernetesDeploymentCheckFailureDetail(output)
-	trimmed := strings.TrimSpace(output)
-	if trimmed == "" {
+	detail := kubernetesDeploymentCheckFailureDetail(output, kubectlContext)
+	sanitized := sanitizeKubectlFailureOutput(output)
+	// The sanitized sentence is what reaches the operator; kubectl's raw
+	// combined output still goes to the per-env trace log (ActivateEnvTrace
+	// tees it unconditionally, so this reaches disk regardless of terminal
+	// verbosity) so the full diagnostic is never actually lost, only kept out
+	// of a surface too narrow to show it.
+	if trimmedRaw := strings.TrimSpace(output); trimmedRaw != "" {
+		ctx.Logger.Debug("kubectl deployment check raw output: " + trimmedRaw)
+	}
+	if sanitized == "" {
 		return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %w", params.Name, detail, err)
 	}
-	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, trimmed)
+	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, sanitized)
 }
 
 // kubernetesDeploymentCheckFailureDetail names why a kubectl deployment
@@ -3879,8 +3887,12 @@ func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeployme
 // API server, credentials or permissions refused) from an error it does not
 // recognize. Neither is evidence the deployment is absent. Reuses
 // isKubernetesContextMissingMessage for the context-missing case it already
-// covers instead of a second matcher for the same signal.
-func kubernetesDeploymentCheckFailureDetail(output string) string {
+// covers instead of a second matcher for the same signal. Names the
+// kubectl context for the unreachable-API-server case (erun#1766): erun
+// already knows it from its own configuration, so the message can identify
+// the target cluster without depending on a substring of kubectl's own
+// output surviving whatever later truncates the message for display.
+func kubernetesDeploymentCheckFailureDetail(output, kubectlContext string) string {
 	if isKubernetesContextMissingMessage(output) {
 		return "the configured kubernetes context was not found in kubeconfig"
 	}
@@ -3891,6 +3903,9 @@ func kubernetesDeploymentCheckFailureDetail(output string) string {
 		strings.Contains(message, "no such host"),
 		strings.Contains(message, "i/o timeout"),
 		strings.Contains(message, "no configuration has been provided"):
+		if kubectlContext = strings.TrimSpace(kubectlContext); kubectlContext != "" {
+			return fmt.Sprintf("the kubernetes api server could not be reached (context %q)", kubectlContext)
+		}
 		return "the kubernetes api server could not be reached"
 	case strings.Contains(message, "forbidden"),
 		strings.Contains(message, "unauthorized"),
@@ -3900,6 +3915,46 @@ func kubernetesDeploymentCheckFailureDetail(output string) string {
 	default:
 		return "kubectl returned an error erun does not recognize"
 	}
+}
+
+// klogFramePattern matches the severity+timestamp+goroutine-id+source-location
+// prefix klog stamps on every line it emits (e.g. `E0831 13:46:43.793908
+// 10289 memcache.go:265]`). None of it is operator-relevant: the
+// severity/timestamp duplicate context the caller's own message already
+// carries, and the goroutine id and Go source file are internal to
+// kubectl/client-go.
+var klogFramePattern = regexp.MustCompile(`^[EWIF]\d{4} \d{2}:\d{2}:\d{2}\.\d+\s+\d+ \S+\.go:\d+\]\s*`)
+
+// klogUnhandledErrorPattern extracts the inner err="..." sentence klog's
+// "Unhandled Error" wrapper carries -- the one piece of a klog line an
+// operator can act on. The capture is greedy so it consumes through the
+// line's real closing quote rather than stopping at an escaped `\"` inside
+// the nested message.
+var klogUnhandledErrorPattern = regexp.MustCompile(`^"Unhandled Error"\s+err="(.*)"$`)
+
+// sanitizeKubectlFailureOutput reduces kubectl's raw combined output to the
+// one sentence an operator can act on, rather than pasting a klog line
+// verbatim (erun#1766: a toast rendered that line at a fixed width, so the
+// goroutine id and source location survived while the API server address --
+// the one piece of the message that actually named a cause -- was what got
+// cut off). It scans from the last non-blank line backward, strips klog's
+// frame if present, and unwraps an "Unhandled Error" carrier down to its
+// err= text; a line with neither shape is returned frame-stripped as-is, so
+// an unrecognized failure still reaches the operator rather than
+// disappearing. Returns "" only when there is truly nothing to show.
+func sanitizeKubectlFailureOutput(raw string) string {
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(klogFramePattern.ReplaceAllString(lines[i], ""))
+		if line == "" {
+			continue
+		}
+		if match := klogUnhandledErrorPattern.FindStringSubmatch(line); match != nil {
+			return strings.ReplaceAll(match[1], `\"`, `"`)
+		}
+		return line
+	}
+	return ""
 }
 
 // KubernetesDeploymentAbsentMessageMarker is the fixed substring every
@@ -3962,6 +4017,9 @@ func deploymentMatchesExpectedSettings(ctx Context, params KubernetesDeploymentC
 	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
+		if sanitized := sanitizeKubectlFailureOutput(string(output)); sanitized != "" {
+			return false, fmt.Errorf("failed to inspect deployment %q: %w: %s", params.Name, err, sanitized)
+		}
 		return false, fmt.Errorf("failed to inspect deployment %q: %w", params.Name, err)
 	}
 

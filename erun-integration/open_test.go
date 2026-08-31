@@ -183,6 +183,23 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
+// stubKubectlKlogFramedError reproduces erun#1766's real captured toast
+// verbatim: client-go's klog "Unhandled Error" carrier around the same
+// connection-refused cause stubKubectlGenericError uses, framed with the
+// severity/timestamp/goroutine-id/source-location an operator can never act
+// on.
+func stubKubectlKlogFramedError(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+		Stderr:   `E0831 13:46:43.793908   10289 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://127.0.0.1:6443/api?timeout=32s\": dial tcp 127.0.0.1:6443: connect: connection refused"`,
+		ExitCode: 1,
+	})
+	stubLsofNoHolder(t, stubs)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	return append(envVars, openHostOSOverride)
+}
+
 // stubLsofNoHolder keeps the adopt-or-conflict probe silent in scenarios that
 // don't drive it, so a developer's leftover `kubectl port-forward` on an erun
 // default port can't fire the probe mid-scenario and corrupt the golden.
@@ -479,6 +496,28 @@ func TestOpen(t *testing.T) {
 			t.Fatalf("a check that could not ask the cluster must never read as absence, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "open/no_shell_real_run_check_unreachable_errors_without_claiming_absence", normalize.Apply(result.Combined))
+	})
+
+	t.Run("no_shell_real_run_check_unreachable_sanitizes_klog_framed_error", func(t *testing.T) {
+		// erun#1766: the same unreachable-cluster path above, but with the
+		// exact klog "Unhandled Error" shape client-go actually emits
+		// (severity, timestamp, goroutine id, Go source location wrapping
+		// the real cause). Before the fix, checkKubernetesDeploymentWithContext
+		// pasted this verbatim, so the operator-facing error carried
+		// kubectl-internal noise around the one sentence that named the
+		// unreachable address. It must instead read as the cause alone,
+		// with the kube context named from erun's own config.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlKlogFramedError(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the deployment check could not resolve an answer, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "is not deployed") {
+			t.Fatalf("a check that could not ask the cluster must never read as absence, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_check_unreachable_sanitizes_klog_framed_error", normalize.Apply(result.Combined))
 	})
 
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
