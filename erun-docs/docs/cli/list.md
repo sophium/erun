@@ -44,6 +44,26 @@ The full per-env field set (local port allocations, API URL, SSH details, …) p
 
 Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, or `role=undeclared` when nothing has been set.
 
+## Release lines {#release-lines}
+
+`runtime-version:` is a bare number, and a number alone can't say which release it belongs to: a
+tenant can publish its own `<tenant>-devops` image and version it on its own line, so two
+environments of the same tenant can genuinely be running different lines from each other. `erun
+list` names the line beside the number:
+
+```
+runtime-version: 1.0.84 (frs line, ghcr.io/sophium/frs-devops)
+runtime-version: 1.0.203 (erun line, ghcr.io/sophium/erun-devops — release name frs-devops disagrees with the image)
+runtime-version: 1.0.226 (line undetermined — no resolved runtime image recorded; redeploy to record it)
+```
+
+The middle line is the case worth double-checking: a `frs-devops` release running the stock
+`erun-devops` image is legitimate, but it means that environment moves on ERun's own release line,
+not the tenant's — comparing its number against another environment's tenant-line number is
+comparing two different things. The last line means exactly what it says: nothing has recorded which
+image this environment's pod actually runs yet, so `erun list` says so rather than guessing from the
+tenant's name.
+
 ## The sizing recommendation
 
 `runtime-pod:` prints the size an environment was *given*. Under it, when ERun has watched the
