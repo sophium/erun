@@ -35,6 +35,7 @@ const (
 	PinSiteHelmDependency PinSiteKind = "helm-dependency"
 	PinSiteRuntimeImage   PinSiteKind = "runtime-image"
 	PinSiteImageReference PinSiteKind = "image-reference"
+	PinSiteRuntimeChart   PinSiteKind = "runtime-chart"
 )
 
 // PinSite is one place a version is recorded, and what it would become.
@@ -167,38 +168,13 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 		ProjectRoot: projectRoot,
 		Previous:    strings.TrimSpace(env.RuntimeVersion),
 	}
-	image := strings.TrimSpace(env.RuntimeImage)
-	// A tenant-imaged env's runtimeversion is versioned on that image's own
-	// release line, not erun's (frs/prod on ghcr.io/sophium/frs-devops:1.0.76 is
-	// the reported case) — rewriting it to the erun target names a tag that line
-	// never publishes, guaranteeing an ImagePullBackOff on the next deploy.
-	if image != "" && !runtimeImageIsStockDevops(image) {
-		plan.Skipped = append(plan.Skipped, "runtimeversion "+tenant+"/"+environment+" rides "+image+"'s own release line, not erun's, so pin leaves it alone; it moves on the tenant's own next build/release")
-	} else {
-		plan.Sites = append(plan.Sites, PinSite{
-			Kind:    PinSiteRuntimeVersion,
-			Detail:  tenant + "/" + environment,
-			Current: strings.TrimSpace(env.RuntimeVersion),
-			Target:  target,
-		})
-	}
-	if image != "" {
-		if _, version, ok := splitImageTag(image); ok {
-			// Only the stock erun-devops image's tag is an erun version; a
-			// tenant's own <tenant>-devops image rides the tenant's own release
-			// line, and rewriting its tag to an erun version would name a tag
-			// that line never publishes.
-			if runtimeImageIsStockDevops(image) {
-				plan.Sites = append(plan.Sites, PinSite{
-					Kind:    PinSiteRuntimeImage,
-					Detail:  image,
-					Current: version,
-					Target:  target,
-				})
-			} else {
-				plan.Skipped = append(plan.Skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
-			}
-		}
+	versionSites, versionSkipped := resolveRuntimeVersionAndImagePinSites(tenant, environment, target, env)
+	plan.Sites = append(plan.Sites, versionSites...)
+	plan.Skipped = append(plan.Skipped, versionSkipped...)
+	if chartSite, chartSkipped := resolveRuntimeChartPinSite(strings.TrimSpace(env.RuntimeChart), target); chartSite != nil {
+		plan.Sites = append(plan.Sites, *chartSite)
+	} else if chartSkipped != "" {
+		plan.Skipped = append(plan.Skipped, chartSkipped)
 	}
 
 	fileSites, err := scanPinFiles(projectRoot, target)
@@ -207,6 +183,84 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	}
 	plan.Sites = append(plan.Sites, fileSites...)
 	return plan, nil
+}
+
+// resolveRuntimeVersionAndImagePinSites answers the two env-config sites that
+// ride erun's own release line only when the environment's runtimeimage does:
+// runtimeversion, and a stated-stock runtimeimage's own tag. A tenant-imaged
+// env (frs/prod on ghcr.io/sophium/frs-devops:1.0.76 is the reported case) has
+// its runtimeversion skipped instead — rewriting it to the erun target names
+// a tag that line never publishes, guaranteeing an ImagePullBackOff on the
+// next deploy.
+func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env EnvConfig) ([]PinSite, []string) {
+	var sites []PinSite
+	var skipped []string
+	image := strings.TrimSpace(env.RuntimeImage)
+	if image != "" && !runtimeImageIsStockDevops(image) {
+		skipped = append(skipped, "runtimeversion "+tenant+"/"+environment+" rides "+image+"'s own release line, not erun's, so pin leaves it alone; it moves on the tenant's own next build/release")
+	} else {
+		sites = append(sites, PinSite{
+			Kind:    PinSiteRuntimeVersion,
+			Detail:  tenant + "/" + environment,
+			Current: strings.TrimSpace(env.RuntimeVersion),
+			Target:  target,
+		})
+	}
+	if image == "" {
+		return sites, skipped
+	}
+	_, version, ok := splitImageTag(image)
+	if !ok {
+		return sites, skipped
+	}
+	// Only the stock erun-devops image's tag is an erun version; a tenant's own
+	// <tenant>-devops image rides the tenant's own release line, and rewriting
+	// its tag to an erun version would name a tag that line never publishes.
+	if !runtimeImageIsStockDevops(image) {
+		skipped = append(skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
+		return sites, skipped
+	}
+	sites = append(sites, PinSite{
+		Kind:    PinSiteRuntimeImage,
+		Detail:  image,
+		Current: version,
+		Target:  target,
+	})
+	return sites, skipped
+}
+
+// resolveRuntimeChartPinSite classifies a stated runtimechart the same way
+// #1754/#1762 classify the image: by the reference's own name, never by
+// version number — a tenant's own line and erun's own line can each publish
+// the same number. A chart naming erun's own stock chart returns a site to
+// move when it carries an explicit version; a stated chart with no version
+// rides the deploy version already, so there is nothing to move and no
+// skip note either. Any other name -- the tenant's own umbrella, or a
+// reference pin could not even read a name out of -- returns a skip note
+// instead, and never a site: an unclassifiable pairing must proceed, not
+// block, the same rule the runtime-image line guard established.
+func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
+	if chart == "" {
+		return nil, ""
+	}
+	reference, chartVersion := splitChartReferenceVersion(chart)
+	chartName := chartNameFromReference(reference)
+	if chartName != DevopsComponentName {
+		reason := "names " + chartName + ", not the stock " + DevopsComponentName + " chart, so it rides its own release line"
+		if chartName == "" {
+			reason = "could not be read to find its chart name"
+		}
+		return nil, "runtimechart " + chart + " " + reason + "; pin leaves it alone"
+	}
+	if chartVersion == "" {
+		return nil, ""
+	}
+	return &PinSite{
+		Kind:    PinSiteRuntimeChart,
+		Detail:  chart,
+		Current: chartVersion,
+		Target:  target,
+	}, ""
 }
 
 // DescribeCwdFallbackProjectRoot names a resolved project root's HEAD and
@@ -349,8 +403,10 @@ func pinTerraformFile(name string) bool {
 }
 
 // ApplyPinPlan rewrites every file site to the target. The environment's own
-// runtimeversion is not written here: it lives in erun's config store, which the
-// caller owns, so the transport applies that half and this owns the repo half.
+// config fields (runtimeversion, runtimeimage, runtimechart) are not written
+// here: they live in erun's config store, which the caller owns via
+// ApplyPinnedEnvConfig, so the transport applies that half and this owns the
+// repo half.
 func ApplyPinPlan(plan PinPlan) error {
 	byPath := map[string]struct{}{}
 	for _, site := range plan.Changes() {
@@ -384,6 +440,78 @@ func ApplyPinPlan(plan PinPlan) error {
 		}
 	}
 	return nil
+}
+
+// ApplyPinnedEnvConfig returns the environment config a resolved plan's own
+// env-config sites (runtimeversion, a stated-stock runtimeimage, runtimechart)
+// would produce, and whether anything actually changed. These three are one
+// coordinate — erun#1754 found runtimeversion healed while runtimeimage was
+// left behind, and erun#1771 found the same gap for runtimechart — so a
+// caller applying a plan computes every field it carries a site for in one
+// pass and saves once. Two independent saves derived from the same starting
+// snapshot would each overwrite the other's change, since a config save
+// writes the whole struct rather than merging fields.
+func ApplyPinnedEnvConfig(env EnvConfig, plan PinPlan) (EnvConfig, bool) {
+	updated := env
+	changed := false
+	if planHasSite(plan, PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
+		updated.RuntimeVersion = plan.Target
+		changed = true
+	}
+	if planHasEnvConfigSite(plan, PinSiteRuntimeImage) {
+		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeImage, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeImage) {
+			updated.RuntimeImage = rewritten
+			changed = true
+		}
+	}
+	if planHasSite(plan, PinSiteRuntimeChart) {
+		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeChart, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeChart) {
+			updated.RuntimeChart = rewritten
+			changed = true
+		}
+	}
+	return updated, changed
+}
+
+func planHasSite(plan PinPlan, kind PinSiteKind) bool {
+	for _, site := range plan.Sites {
+		if site.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// planHasEnvConfigSite reports a site of kind that lives in the env's own
+// config rather than a repo file (Path empty) — PinSiteRuntimeImage can be
+// either, depending on whether it came from EnvConfig.RuntimeImage or a
+// scanned Dockerfile/tfvars reference, and only the former is this
+// function's to persist; the latter is already rewritten in place by
+// ApplyPinPlan.
+func planHasEnvConfigSite(plan PinPlan, kind PinSiteKind) bool {
+	for _, site := range plan.Sites {
+		if site.Kind == kind && strings.TrimSpace(site.Path) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// rewritePinnedReferenceVersion moves the version embedded in a stated image
+// or chart reference to target, leaving its scheme, registry, and name
+// exactly as stated.
+func rewritePinnedReferenceVersion(raw, target string) string {
+	raw = strings.TrimSpace(raw)
+	cut := strings.LastIndex(raw, "/")
+	if cut < 0 {
+		return raw
+	}
+	last := raw[cut+1:]
+	sep := strings.LastIndex(last, ":")
+	if sep <= 0 {
+		return raw
+	}
+	return raw[:cut+1] + last[:sep] + ":" + target
 }
 
 // rewritePinnedVersions moves every erun reference in one file to the target,

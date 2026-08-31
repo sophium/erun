@@ -29,7 +29,8 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 		Long: "Re-pin every erun version reference for an environment: the Terraform module refs, " +
 			"an erun image reference set directly in Terraform variables (e.g. the cluster-edge " +
 			"module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env " +
-			"image tag, and the environment's own runtime version.\n\n" +
+			"image tag, a stated runtime chart or runtime image naming erun's own stock release, " +
+			"and the environment's own runtime version.\n\n" +
 			"Idempotent, and a no-op once aligned. It rewrites the source of truth only — realizing " +
 			"the new version (terraform apply, deploy) stays a separate explicit step.",
 		Example: "  erun pin --list\n  erun pin acme dev --dry-run\n  erun pin acme dev --version 1.0.175\n  erun pin acme dev --revert",
@@ -148,7 +149,7 @@ func applyPinCommand(cmdCtx common.Context, projectRoot string, result common.Op
 	if err := common.ApplyPinPlan(plan); err != nil {
 		return err
 	}
-	if err := savePinnedRuntimeVersion(result, plan, saveEnvConfig); err != nil {
+	if err := savePinnedEnvConfig(result, plan, saveEnvConfig); err != nil {
 		return err
 	}
 	// The rewritten Chart.yaml and the lock beside it have to agree, or the next
@@ -256,33 +257,22 @@ func resolvePinProjectRoot(result common.OpenResult, listEnvConfigs func(string)
 		result.Tenant, result.Environment, result.Tenant)
 }
 
-// savePinnedRuntimeVersion persists the env's own runtimeversion — but only
-// when ResolvePinPlan actually included that site. A tenant-imaged env's
-// runtimeversion rides the tenant's own release line, not erun's, and
-// ResolvePinPlan already decided to leave it alone (plan.Skipped names why);
-// writing it here regardless would silently undo that decision.
-func savePinnedRuntimeVersion(result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
+// savePinnedEnvConfig persists every env-config field a resolved plan
+// actually included a site for — runtimeversion, a stated-stock runtimeimage,
+// and runtimechart — in the one write ApplyPinnedEnvConfig computes. A
+// tenant-imaged env's runtimeversion, or a tenant's own runtimechart, rides
+// that line's own release, not erun's, and ResolvePinPlan already decided to
+// leave those alone (plan.Skipped names why); writing them here regardless
+// would silently undo that decision.
+func savePinnedEnvConfig(result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
 	}
-	if !pinPlanHasRuntimeVersionSite(plan) {
+	updated, changed := common.ApplyPinnedEnvConfig(result.EnvConfig, plan)
+	if !changed {
 		return nil
 	}
-	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == strings.TrimSpace(plan.Target) {
-		return nil
-	}
-	updated.RuntimeVersion = plan.Target
 	return saveEnvConfig(result.Tenant, updated)
-}
-
-func pinPlanHasRuntimeVersionSite(plan common.PinPlan) bool {
-	for _, site := range plan.Sites {
-		if site.Kind == common.PinSiteRuntimeVersion {
-			return true
-		}
-	}
-	return false
 }
 
 // tracePinPlan renders every site and its old→new value. Emitted for a real run

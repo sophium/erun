@@ -307,6 +307,105 @@ func TestPin(t *testing.T) {
 		}
 	})
 
+	// The reported bug, for real: a runtimechart naming erun's own stock
+	// chart is versioned on erun's own release line, just like runtimeversion
+	// and a stated runtimeimage — a re-pin's dry-run plan must name it as a
+	// site to move rather than reporting a plan that looks complete while
+	// leaving it behind.
+	t.Run("dry_run_reports_a_stale_runtimechart_reference", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUnreachableRuntimeRegistry(t, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.201\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/dry_run_reports_a_stale_runtimechart_reference", normalize.Apply(result.Combined))
+	})
+
+	// The whole coordinate, applied for real: a stated-stock runtimeimage and
+	// runtimechart move to the target alongside runtimeversion, in the one
+	// write that realigns the environment's own config. Before this fix, only
+	// runtimeversion moved — runtimechart (this report) and a stated
+	// runtimeimage (a latent instance of the same #1754 gap, found while
+	// fixing this) were both left behind.
+	t.Run("real_run_pins_runtimeversion_runtimeimage_and_runtimechart_together", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUnreachableRuntimeRegistry(t, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		body := string(existing) +
+			"runtimeimage: ghcr.io/sophium/erun-devops:1.0.201\n" +
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.201\n"
+		if err := os.WriteFile(envConfigPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		after, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config after: %v", err)
+		}
+		for _, want := range []string{
+			"runtimeversion: 1.0.175",
+			"runtimeimage: ghcr.io/sophium/erun-devops:1.0.175",
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.175",
+		} {
+			if !strings.Contains(string(after), want) {
+				t.Fatalf("expected %q in the env config after pinning, got:\n%s", want, after)
+			}
+		}
+	})
+
+	// A tenant's own runtimechart line is a real, deliberate configuration —
+	// --runtime-chart exists precisely so the chart can be versioned
+	// separately from the image and the erun release. A re-pin must leave it
+	// exactly as stated, even while the rest of the coordinate moves.
+	t.Run("real_run_leaves_a_tenant_own_runtimechart_line_unchanged", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUnreachableRuntimeRegistry(t, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimechart: oci://ghcr.io/sophium/charts/team-devops:1.0.76\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		after, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config after: %v", err)
+		}
+		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/team-devops:1.0.76") {
+			t.Fatalf("a tenant's own runtimechart line must be left alone, got:\n%s", after)
+		}
+		if !strings.Contains(string(after), "runtimeversion: 1.0.175") {
+			t.Fatalf("runtimeversion should still move, got:\n%s", after)
+		}
+	})
+
 	// Discovery answers "what can I pin to" from the registry, so choosing a
 	// version is recognition rather than recall. Served locally: a scenario that
 	// asks a real registry measures the host.

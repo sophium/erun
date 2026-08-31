@@ -1,4 +1,4 @@
-Re-pin every erun version reference for an environment: the Terraform module refs, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env image tag, and the environment's own runtime version.
+Re-pin every erun version reference for an environment: the Terraform module refs, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env image tag, a stated runtime chart or runtime image naming erun's own stock release, and the environment's own runtime version.
 
 Idempotent, and a no-op once aligned. It rewrites the source of truth only — realizing the new version (terraform apply, deploy) stays a separate explicit step.
 

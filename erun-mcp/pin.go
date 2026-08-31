@@ -90,7 +90,7 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.
 	for _, note := range plan.Skipped {
 		runCtx.Trace("pin skipped: " + note)
 	}
-	out, err := applyPinPlanUnlessPreviewing(runCtx, plan, projectRoot, tenant, environment)
+	out, err := applyPinPlanUnlessPreviewing(runtime, runCtx, plan, projectRoot, tenant, environment, envConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.
 // applyPinPlanUnlessPreviewing writes the plan unless this is a preview or the
 // tree is already aligned. The previous version is recorded before anything
 // moves, so a revert has somewhere to go even if the rewrite fails partway.
-func applyPinPlanUnlessPreviewing(runCtx eruncommon.Context, plan eruncommon.PinPlan, workDir, tenant, environment string) (PinOutput, error) {
+func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx eruncommon.Context, plan eruncommon.PinPlan, workDir, tenant, environment string, envConfig eruncommon.EnvConfig) (PinOutput, error) {
 	out := PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil
@@ -110,6 +110,15 @@ func applyPinPlanUnlessPreviewing(runCtx eruncommon.Context, plan eruncommon.Pin
 	}
 	if err := eruncommon.ApplyPinPlan(plan); err != nil {
 		return PinOutput{}, err
+	}
+	// The CLI transport's own runtimeversion/runtimeimage/runtimechart sites
+	// live in erun's config store, not a repo file, so ApplyPinPlan never
+	// touches them -- this half was missing here entirely, leaving even
+	// runtimeversion unmoved by an MCP-driven re-pin.
+	if updated, changed := eruncommon.ApplyPinnedEnvConfig(envConfig, plan); changed {
+		if err := runtime.Store.SaveEnvConfig(tenant, updated); err != nil {
+			return PinOutput{}, err
+		}
 	}
 	// The lock beside a rewritten Chart.yaml still names the old versions, and
 	// deploy refuses a lock that disagrees with its chart — so an agent that
