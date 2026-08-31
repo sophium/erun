@@ -3,7 +3,6 @@ package erunmcp
 import (
 	"context"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -11,8 +10,8 @@ import (
 )
 
 type UsageInput struct {
-	Tenant          string  `json:"tenant,omitempty" jsonschema:"tenant whose environment's usage should be read; defaults to the server tenant context"`
-	Environment     string  `json:"environment,omitempty" jsonschema:"environment whose usage should be read; defaults to the server environment context"`
+	Tenant          string  `json:"tenant,omitempty" jsonschema:"tenant whose environment's usage should be read; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment     string  `json:"environment,omitempty" jsonschema:"environment whose usage should be read; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	IntervalSeconds float64 `json:"intervalSeconds,omitempty" jsonschema:"CPU sample window in seconds (clamped to 0.1-30, default 1): usage is read, the window elapses, then it is read again so utilisation is a rate rather than a meaningless cumulative counter"`
 	Preview         bool    `json:"preview,omitempty" jsonschema:"when true, resolve and trace the kubectl exec call that would run without executing it"`
 	Verbosity       int     `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
@@ -60,26 +59,15 @@ func usageIntervalFromSeconds(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-// resolveUsageOpenResult mirrors resolveObserveOpenResult's explicit ->
-// partial -> runtime-context -> default fallback chain, so `usage` resolves
-// tenant/environment the same way every other typed MCP tool does.
+// resolveUsageOpenResult resolves tenant/environment through
+// resolveLocalTarget -- the same refusal every other typed MCP tool in this
+// module applies -- before asking the store to resolve the rest of the
+// OpenResult, so `usage` can never be pointed at a different environment than
+// the one this server's pod actually runs in.
 func resolveUsageOpenResult(runtime RuntimeConfig, input UsageInput) (eruncommon.OpenResult, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	environment := strings.TrimSpace(input.Environment)
-	switch {
-	case tenant != "" && environment != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
-	case tenant != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, UseDefaultEnvironment: true})
-	case environment != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Environment: environment, UseDefaultTenant: true})
+	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+	if err != nil {
+		return eruncommon.OpenResult{}, err
 	}
-
-	runtimeTenant := strings.TrimSpace(runtime.Context.Tenant)
-	runtimeEnvironment := strings.TrimSpace(runtime.Context.Environment)
-	if runtimeTenant != "" && runtimeEnvironment != "" {
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: runtimeTenant, Environment: runtimeEnvironment})
-	}
-
-	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true})
+	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }

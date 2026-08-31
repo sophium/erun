@@ -9,8 +9,8 @@ import (
 )
 
 type UnexposeInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the MCP runtime context tenant"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment name; defaults to the MCP runtime context environment"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
 	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned action without executing it"`
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
@@ -30,8 +30,10 @@ type UnexposeInput struct {
 
 func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UnexposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
-		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
-		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, JobEnvelopeOutput{}, err
+		}
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
 		exposeStore, ok := any(runtime.Store).(eruncommon.ExposeStore)

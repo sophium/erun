@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Client side of the per-environment MCP edge. The JSON-RPC round-trip is
@@ -181,6 +182,22 @@ type mcpSession struct {
 	// recovering suppresses a nested re-handshake or tunnel retry so one bad
 	// request costs at most one retry.
 	recovering bool
+	// awaitStartup opts this session into postOnce's bounded first-request wait
+	// (see postOnce). Only the stdio proxy sets it: a relayed client's own
+	// initialize is the one call it will never repeat later in the session if
+	// refused, unlike the typed CLI/desktop callers (CallMCPTool/ListMCPTools),
+	// which already have their own active recovery -- reattaching the
+	// port-forward and retrying -- so a passive wait there would only make an
+	// ordinary "not open" call slower without fixing anything the active
+	// recovery does not already fix.
+	awaitStartup bool
+	// startupWaited marks whether postOnce has already given this session's
+	// first request its bounded wait for the local port to come up. Set on the
+	// first attempt regardless of outcome, so only that one request ever waits.
+	startupWaited bool
+	// startupWait overrides mcpStartupReachabilityWait for tests that need a
+	// bound short enough to run quickly; zero means use the production bound.
+	startupWait time.Duration
 	// notice reports a recovery the caller would otherwise never see; nil when
 	// the caller has nowhere to put diagnostics.
 	notice func(string)
@@ -188,8 +205,10 @@ type mcpSession struct {
 
 // newMCPSession prepares the transport without performing the handshake, so a
 // relay that forwards a client's own initialize can share the header, session,
-// and framing rules with the typed callers.
-func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
+// and framing rules with the typed callers. awaitStartup is passed straight
+// through to the session -- see mcpSession.awaitStartup for who should (and
+// should not) set it.
+func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe, awaitStartup bool) (*mcpSession, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("MCP endpoint is required")
@@ -209,6 +228,7 @@ func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion stri
 		client:        &http.Client{},
 		idleProbe:     idleProbe,
 		localPort:     localMCPEndpointPort(endpoint),
+		awaitStartup:  awaitStartup,
 	}, nil
 }
 
@@ -231,8 +251,14 @@ func localMCPEndpointPort(endpoint string) int {
 	return port
 }
 
+// openMCPSession backs the typed CLI/desktop callers (CallMCPTool,
+// ListMCPTools), which already reattach the port-forward and retry on
+// ErrMCPEndpointUnreachable (see callMCPToolWithReattach in erun-cli), so it
+// does not opt into postOnce's passive startup wait -- doing so would only
+// make an ordinary "not open yet" call slower, not fix anything the active
+// reattach does not already fix.
 func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
-	session, err := newMCPSession(endpoint, mintToken, clientVersion, idleProbe)
+	session, err := newMCPSession(endpoint, mintToken, clientVersion, idleProbe, false)
 	if err != nil {
 		return nil, err
 	}
@@ -357,8 +383,16 @@ func (s *mcpSession) report(message string) {
 // dead: the caller's context deadline (or, with none, no bound at all) would
 // otherwise be the only thing that ever ends the wait. A port nothing holds at
 // all is a different, ordinary case (no port-forward was ever established) and
-// is left to the real request's own dial failure, unchanged.
+// is left to the real request's own dial failure -- except on a session with
+// awaitStartup set, whose very first attempt gets a bounded wait first (see
+// awaitLocalMCPEndpointReachable): a relayed client that spawned this session
+// moments before its own `erun open` finished establishing the forward
+// otherwise fails its one and only initialize call, and most MCP clients never
+// repeat that call later in the session -- unlike every subsequent request,
+// which postRaw's own tunnel-recovery retry above already covers once a
+// session is live.
 func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) {
+	s.awaitStartupOnce(ctx)
 	if s.localPort > 0 && !CanReachLocalMCPEndpoint(s.localPort) && LocalPortIsBound(s.localPort) {
 		return nil, s.staleTunnelError()
 	}
@@ -386,6 +420,27 @@ func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) 
 		return nil, err
 	}
 	return decodeMCPReply(resp)
+}
+
+// startupReachabilityWait is the bound postOnce's first-attempt wait uses:
+// startupWait when a test has overridden it, otherwise the production
+// default.
+func (s *mcpSession) startupReachabilityWait() time.Duration {
+	if s.startupWait > 0 {
+		return s.startupWait
+	}
+	return mcpStartupReachabilityWait
+}
+
+// awaitStartupOnce gives this session's first request a bounded wait for the
+// local port to come up (see postOnce's own comment for why only the first
+// request gets it), and marks the session so no later request waits again.
+func (s *mcpSession) awaitStartupOnce(ctx context.Context) {
+	if !s.awaitStartup || s.localPort <= 0 || s.startupWaited {
+		return
+	}
+	s.startupWaited = true
+	awaitLocalMCPEndpointReachable(ctx, s.localPort, s.startupReachabilityWait())
 }
 
 func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) (*http.Request, error) {

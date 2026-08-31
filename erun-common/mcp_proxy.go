@@ -51,7 +51,10 @@ func RunMCPStdioProxy(ctx context.Context, params MCPStdioProxyParams) error {
 	// Never an idle probe: an MCP client relayed through this proxy is actively
 	// driving the environment (an agent, an operator's tool call), not asking a
 	// diagnostic question, so its calls must register as activity like any other.
-	session, err := newMCPSession(params.Endpoint, params.MintToken, params.ClientVersion, false)
+	// awaitStartup is set: unlike the typed CLI/desktop callers, a relayed
+	// client's own initialize has no active reattach behind it, and is the one
+	// call the client will not repeat later if refused (see mcpSession.awaitStartup).
+	session, err := newMCPSession(params.Endpoint, params.MintToken, params.ClientVersion, false, true)
 	if err != nil {
 		return err
 	}

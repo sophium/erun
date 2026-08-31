@@ -12,8 +12,8 @@ import (
 )
 
 type DoctorInput struct {
-	Tenant                     string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override"`
-	Environment                string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override"`
+	Tenant                     string                   `json:"tenant,omitempty" jsonschema:"optional explicit tenant override; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment                string                   `json:"environment,omitempty" jsonschema:"optional explicit environment override; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	PruneImages                bool                     `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
 	PruneBuildCache            bool                     `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
 	PruneContainers            bool                     `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
@@ -87,7 +87,7 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 	if fatal || onlyRootConfigDoctorInput(input) {
 		return report, nil
 	}
-	restoreWasTheWholeRequest, err := runDoctorEnvConfigRestore(input, runCtx, report)
+	restoreWasTheWholeRequest, err := runDoctorEnvConfigRestore(runtime, input, runCtx, report)
 	if err != nil {
 		return report, err
 	}
@@ -102,24 +102,26 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 
 // runDoctorEnvConfigRestore runs the backup-restore leg when one was asked for,
 // reporting whether it was the whole request and nothing else needs to run.
-func runDoctorEnvConfigRestore(input DoctorInput, runCtx eruncommon.Context, report *DoctorRootConfigReport) (bool, error) {
+func runDoctorEnvConfigRestore(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context, report *DoctorRootConfigReport) (bool, error) {
 	selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup)
 	if selector == "" {
 		return false, nil
 	}
-	if err := restoreDoctorEnvConfigFromBackup(runCtx, input, selector, report); err != nil {
+	if err := restoreDoctorEnvConfigFromBackup(runtime, runCtx, input, selector, report); err != nil {
 		return false, err
 	}
 	return onlyEnvConfigRestoreInput(input), nil
 }
 
 // restoreDoctorEnvConfigFromBackup recovers a changed or corrupted env config
-// from a backup before any tenant/env work runs against it.
-func restoreDoctorEnvConfigFromBackup(runCtx eruncommon.Context, input DoctorInput, selector string, report *DoctorRootConfigReport) error {
-	tenant := strings.TrimSpace(input.Tenant)
-	environment := strings.TrimSpace(input.Environment)
-	if tenant == "" || environment == "" {
-		return errors.New("restoreEnvConfigFromBackup requires explicit tenant and environment")
+// from a backup before any tenant/env work runs against it. tenant/environment
+// resolve through resolveLocalTarget so a backup restore, like every other
+// tenant/env action in this module, can never be pointed at an environment
+// this server's pod does not itself run.
+func restoreDoctorEnvConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.Context, input DoctorInput, selector string, report *DoctorRootConfigReport) error {
+	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+	if err != nil {
+		return err
 	}
 	livePath, err := eruncommon.EnvConfigPath(tenant, environment)
 	if err != nil {
@@ -436,40 +438,17 @@ func writeDoctorOutput(runCtx eruncommon.Context, stdout, stderr string) error {
 	return nil
 }
 
+// resolveDoctorOpenResult resolves tenant/environment through
+// resolveLocalTarget -- the same refusal every other typed MCP tool in this
+// module applies -- before asking the store to resolve the rest of the
+// OpenResult, so doctor's tenant/env actions can never be pointed at a
+// different environment than the one this server's pod actually runs in.
 func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (eruncommon.OpenResult, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	environment := strings.TrimSpace(input.Environment)
-	switch {
-	case tenant != "" && environment != "":
-		return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{
-			Tenant:      tenant,
-			Environment: environment,
-		})
-	case tenant != "":
-		return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{
-			Tenant:                tenant,
-			UseDefaultEnvironment: true,
-		})
-	case environment != "":
-		return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{
-			Environment:      environment,
-			UseDefaultTenant: true,
-		})
+	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+	if err != nil {
+		return eruncommon.OpenResult{}, err
 	}
-
-	runtimeTenant := strings.TrimSpace(runtime.Context.Tenant)
-	runtimeEnvironment := strings.TrimSpace(runtime.Context.Environment)
-	if runtimeTenant != "" && runtimeEnvironment != "" {
-		return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{
-			Tenant:      runtimeTenant,
-			Environment: runtimeEnvironment,
-		})
-	}
-
-	return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{
-		UseDefaultTenant:      true,
-		UseDefaultEnvironment: true,
-	})
+	return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }
 
 func doctorActionsFromInput(input DoctorInput) []eruncommon.DoctorAction {
