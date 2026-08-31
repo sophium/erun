@@ -867,6 +867,27 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_build_deploy_resolves_docker_target_deploy_specs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", func(t *testing.T) {
+		// erun#1746: when the docker component being built --deploy'd IS the
+		// runtime chart's own erun-devops (true for the "erun" tenant, whose
+		// own devops component is literally named erun-devops), the resolved
+		// spec's image doubles as the runtime-line memo a real deploy would
+		// heal into EnvConfig.RuntimeRunningImage. This locks that resolution
+		// for a non-"team" tenant so the tenant-name-collision case is
+		// exercised too.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "erun", "dev")
+		fixture.SeedDevopsRepo(t, setup, "erun", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "erun")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		dockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
 		// From inside linux/<component>, `erun build` resolves the dir's build.sh
 		// and dry-run traces its invocation with the version. ERUN_HOST_OS_OVERRIDE
