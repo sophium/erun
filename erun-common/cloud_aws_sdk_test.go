@@ -17,7 +17,7 @@ func stsCallerIdentityFixture(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/xml")
-		fmt.Fprint(w, `<?xml version="1.0"?>
+		_, _ = fmt.Fprint(w, `<?xml version="1.0"?>
 <GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
   <GetCallerIdentityResult>
     <Arn>arn:aws:iam::123456789012:user/test-user</Arn>

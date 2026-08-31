@@ -972,18 +972,30 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 		deps.RunAWSExportCredentials = defaultRunAWSExportCredentials
 	}
 	if deps.ResolveAWSIdentity == nil {
-		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
-		if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
-			deps.ResolveAWSIdentity = libraryResolveAWSIdentity
-		}
+		deps.ResolveAWSIdentity = resolveAWSIdentityForExecutionMode()
 	}
 	if deps.CheckAWSStatus == nil {
-		deps.CheckAWSStatus = defaultCheckAWSStatus
-		if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
-			deps.CheckAWSStatus = libraryCheckAWSStatus
-		}
+		deps.CheckAWSStatus = checkAWSStatusForExecutionMode()
 	}
 	return deps
+}
+
+// resolveAWSIdentityForExecutionMode and checkAWSStatusForExecutionMode pick
+// the subprocess or library implementation per the aws-sts execution mode
+// (see execution_mode.go), split out of normalizeAWSCloudDependencies to keep
+// its own branching within the cyclomatic complexity budget.
+func resolveAWSIdentityForExecutionMode() func(Context, string) (AWSIdentity, error) {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryResolveAWSIdentity
+	}
+	return defaultResolveAWSIdentity
+}
+
+func checkAWSStatusForExecutionMode() func(Context, CloudProviderConfig) CloudProviderStatus {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryCheckAWSStatus
+	}
+	return defaultCheckAWSStatus
 }
 
 // normalizeCloudflareCloudDependencies leaves CloudSecretStore nil on purpose:
