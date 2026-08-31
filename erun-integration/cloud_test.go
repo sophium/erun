@@ -684,12 +684,12 @@ func TestCloud(t *testing.T) {
 	})
 
 	t.Run("init_aws_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
-		// Locks the dry-run/audit contract (root AGENTS.md issue #1691): the
-		// `aws sts get-caller-identity` trace line the CLI hand-renders under
-		// --dry-run must stay byte-identical to the subprocess-mode golden
-		// even when execution.modes.aws-sts opts into the library path,
-		// because ResolveAWSIdentity/CheckAWSStatus are never invoked during
-		// this command's dry-run path at all (see init_aws_dry_run.txt).
+		// Locks the dry-run/audit contract: the `aws sts get-caller-identity`
+		// trace line the CLI hand-renders under --dry-run must stay
+		// byte-identical to the subprocess-mode golden even when
+		// execution.modes.aws-sts opts into the library path, because
+		// ResolveAWSIdentity/CheckAWSStatus are never invoked during this
+		// command's dry-run path at all (see init_aws_dry_run.txt).
 		setup := env.New(t)
 		seedExecutionMode(t, setup, "aws-sts", "library")
 		args := []string{
@@ -707,13 +707,12 @@ func TestCloud(t *testing.T) {
 
 	t.Run("login_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
 		// Proves the library path produces the same observable result as the
-		// subprocess path (root AGENTS.md issue #1691): with
-		// execution.modes.aws-sts=library and a real static-credential AWS
-		// profile on disk, CheckAWSStatus resolves via aws-sdk-go-v2 against a
-		// fake STS endpoint (AWS_ENDPOINT_URL) instead of shelling out, so the
-		// scenario declares no "aws" stub at all — the PATH scrub in
-		// internal/env would fail the run with "executable file not found" if
-		// production code fell through to a subprocess.
+		// subprocess path: with execution.modes.aws-sts=library and a real
+		// static-credential AWS profile on disk, CheckAWSStatus resolves via
+		// aws-sdk-go-v2 against a fake STS endpoint (AWS_ENDPOINT_URL) instead
+		// of shelling out, so the scenario declares no "aws" stub at all —
+		// the PATH scrub in internal/env would fail the run with "executable
+		// file not found" if production code fell through to a subprocess.
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 		seedExecutionMode(t, setup, "aws-sts", "library")
@@ -1480,10 +1479,10 @@ func seedCloudProviderAlias(t testing.TB, setup env.Setup, alias, profile string
 }
 
 // seedExecutionMode appends an execution.modes override to the root
-// config.yaml (root AGENTS.md issue #1691), preserving whatever
-// seedCloudProviderAlias or another fixture already wrote — config.yaml is
-// plain YAML, so appending a distinct top-level key is enough, without
-// needing to parse and re-merge the existing document.
+// config.yaml, preserving whatever seedCloudProviderAlias or another fixture
+// already wrote — config.yaml is plain YAML, so appending a distinct
+// top-level key is enough, without needing to parse and re-merge the
+// existing document.
 func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

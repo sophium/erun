@@ -4,11 +4,11 @@ import "strings"
 
 // Execution mode lets a handful of operations that shell out to a CLI (aws,
 // helm, kubectl, ...) instead call the equivalent Go library, while keeping
-// the exact same CLI invocation as the dry-run/audit trace either way (see
-// root AGENTS.md issue #1691). Each ported operation is keyed by its own
-// name rather than by tool, since a tool is rarely ported all at once — e.g.
-// "aws-sts" covers only the `aws sts get-caller-identity` call sites, not
-// `aws sso login` or `aws configure set`, which stay subprocess-only.
+// the exact same CLI invocation as the dry-run/audit trace either way. Each
+// ported operation is keyed by its own name rather than by tool, since a tool
+// is rarely ported all at once — e.g. "aws-sts" covers only the `aws sts
+// get-caller-identity` call sites, not `aws sso login` or `aws configure
+// set`, which stay subprocess-only.
 const (
 	ExecutionModeSubprocess = "subprocess"
 	ExecutionModeLibrary    = "library"

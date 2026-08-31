@@ -28,10 +28,8 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("dry_run_reports_library_execution_mode", func(t *testing.T) {
-		// Root AGENTS.md issue #1691: "erun doctor reports which mode each
-		// tool is in" — an operator who flipped execution.modes.aws-sts to
-		// "library" in config.yaml must see it reflected here, not just take
-		// it on faith.
+		// An operator who flipped execution.modes.aws-sts to "library" in
+		// config.yaml must see it reflected here, not just take it on faith.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		seedExecutionMode(t, setup, "aws-sts", "library")
