@@ -117,6 +117,10 @@ func nullIfEmpty(value string) any {
 // tenants is a root resolution table (not RLS-scoped), so a non-operations
 // caller must be filtered in application code rather than relying on the
 // database to scope the query.
+//
+// The operations branch computes UserCount with a single LEFT JOIN/GROUP BY
+// rather than one query per tenant, so a platform with many tenants costs
+// this endpoint one round trip, not N.
 func (r *TenantRepository) List(ctx context.Context) ([]model.Tenant, error) {
 	securityContext, ok := security.FromContext(ctx)
 	if !ok {
@@ -132,9 +136,12 @@ func (r *TenantRepository) List(ctx context.Context) ([]model.Tenant, error) {
 	var tenants []model.Tenant
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewRaw(`
-			SELECT tenant_id, name, type, created_at, updated_at
-			  FROM tenants
-			 ORDER BY created_at ASC
+			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at,
+			       COUNT(u.user_id) AS user_count
+			  FROM tenants t
+			  LEFT JOIN users u ON u.tenant_id = t.tenant_id
+			 GROUP BY t.tenant_id, t.name, t.type, t.created_at, t.updated_at
+			 ORDER BY t.created_at ASC
 		`).Scan(ctx, &tenants)
 	})
 	return tenants, err
