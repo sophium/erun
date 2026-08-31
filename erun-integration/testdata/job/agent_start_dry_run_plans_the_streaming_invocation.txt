@@ -2,7 +2,7 @@ audit: erun job start --agent claude --dry-run --environment dev --name sweep --
 job: resolving agent tool "claude" in this environment
 job: detaching "sweep" as job sweep, output at <TMP>
 job: holding activity lease job-sweep for the job's lifetime
-<TMP> exec job supervise --tenant team --environment dev --id sweep --name sweep --max-output-bytes 16777216 --lease-ttl 15m0s --agent claude -- claude -p 'fix the failing tests' --output-format stream-json --verbose
+<TMP> exec job supervise --tenant team --environment dev --id sweep --name sweep --max-output-bytes 16777216 --lease-ttl 15m0s --agent claude -- claude -p 'fix the failing tests' --output-format stream-json --verbose --disallowedTools ScheduleWakeup
 audit: erun job start --agent codex --dry-run --environment dev --name sweep --tenant team fix the failing tests
 job: resolving agent tool "codex" in this environment
 job: detaching "sweep" as job sweep, output at <TMP>
