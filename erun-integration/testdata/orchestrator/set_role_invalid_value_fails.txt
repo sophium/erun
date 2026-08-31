@@ -1,2 +1,2 @@
 audit: erun orchestrator set-role --role bogus eng-1 team dev
-invalid role "bogus": must be "code", "build", or "none" (undeclared)
+invalid role "bogus": must be "code", "build", "runtime", or "none" (undeclared)

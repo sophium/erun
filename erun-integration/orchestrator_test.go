@@ -98,6 +98,39 @@ func TestOrchestrator(t *testing.T) {
 		golden.Equal(t, "orchestrator/set_role_real_run_persists_and_is_visible_in_list_erun_list", normalize.Apply(listResult.Combined))
 	})
 
+	// set_role_real_run_accepts_the_runtime_role locks erun#1770's third role
+	// value on this writer: "runtime" parses and persists exactly like "code"
+	// and "build" above. set-role has no environment-type gate (see
+	// erun-common's OrchestratorRoleStore doc comment for why that is a
+	// tracked follow-up, not this test's concern) -- it only proves the value
+	// itself is now legal here, the same way the desktop's link/edit gate
+	// (erun-ui/orchestrator_test.go) proves it for the link path.
+	t.Run("set_role_real_run_accepts_the_runtime_role", func(t *testing.T) {
+		setup := env.New(t)
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "eng-1",
+				name: "Eng One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "team", environment: "dev", directory: "/repo/team-dev"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"orchestrator", "set-role", "eng-1", "team", "dev", "--role", "runtime"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "orchestrator/set_role_real_run_accepts_the_runtime_role", normalize.Apply(result.Combined))
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "role: runtime") {
+			t.Fatalf("expected persisted role: runtime, got:\n%s", raw)
+		}
+	})
+
 	t.Run("set_role_real_run_can_clear_back_to_undeclared", func(t *testing.T) {
 		setup := env.New(t)
 		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{

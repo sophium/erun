@@ -6,8 +6,8 @@ import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 // OrchestratorEnvRole mirrors the Go eruncommon.OrchestratorEnvRole values:
 // what an orchestrator uses a linked environment for. '' is undeclared, never
-// a default of either 'code' or 'build'.
-export type OrchestratorEnvRole = 'code' | 'build' | '';
+// a default of either 'code', 'build', or 'runtime'.
+export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
 
 export interface OrchestratorEnvRef {
   tenant: string;

@@ -62,7 +62,10 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     setName(editing?.name ?? '');
     setSelected(editing ? editing.environments.map((env) => ({ ...env })) : []);
     void ListOrchestratorEnvCandidates().then((list) => {
-      setCandidates(list);
+      // The Wails binding types requiredRole as a plain string (Go's
+      // OrchestratorEnvRole erases to that on the wire); loadOrchestrators
+      // takes the same widen-then-narrow approach for OrchestratorInfo below.
+      setCandidates(list as EnvCandidate[]);
     });
   }, [open, editing]);
 
@@ -80,8 +83,12 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
               environment: candidate.environment,
               directory: candidate.defaultDirectory,
               // Not declared, never a silent default of either known role —
-              // an operator who wants one picks it explicitly.
-              role: '',
+              // an operator who wants one picks it explicitly. The one
+              // exception is a candidate with a requiredRole (a runtime
+              // environment): it has exactly one legal choice, so pre-selecting
+              // it is not guessing a default, it is the only value the picker
+              // will actually accept — see EnvironmentRow's own role options.
+              role: candidate.requiredRole ?? '',
             },
           ]
         : rest;

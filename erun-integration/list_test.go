@@ -194,6 +194,31 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_orchestrator_environment_roles", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_orchestrator_runtime_role_on_a_runtime_type_environment", func(t *testing.T) {
+		// Locks erun#1770's own naming worry: type and role now share the
+		// spelling "runtime" for two different things. The tenant's own
+		// environment carries `type: runtime` (its worktree/pod shape); the
+		// orchestrator link to that same environment carries `role=runtime`
+		// (what the orchestrator uses it for). Both must render, each in its
+		// own labeled section, so a reader can tell which is which.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "ops-1",
+				name: "Ops One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "frs", environment: "prod", role: "runtime"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_orchestrator_runtime_role_on_a_runtime_type_environment", normalize.Apply(result.Combined))
+	})
+
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
 		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)

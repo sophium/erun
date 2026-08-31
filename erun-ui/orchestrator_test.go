@@ -113,7 +113,10 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 // host env's worktree is already the operator's own checkout, so the
 // orchestrator reviews it in place, the same as a local-agent worktree, never
 // a synced mirror (which only makes sense for a pod whose worktree lives
-// somewhere else).
+// somewhere else). Every role, including undeclared, works for these three
+// types; a runtime env is the odd one out and is covered by its own test
+// below (TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole) since its answer
+// depends on the role, not just the type.
 func TestOrchestratableEnvCoversHost(t *testing.T) {
 	cases := []struct {
 		envType eruncommon.EnvironmentType
@@ -122,13 +125,39 @@ func TestOrchestratableEnvCoversHost(t *testing.T) {
 		{eruncommon.EnvironmentTypeLocalAgent, true},
 		{eruncommon.EnvironmentTypeRemoteAgent, true},
 		{eruncommon.EnvironmentTypeHost, true},
-		{eruncommon.EnvironmentTypeRuntime, false},
 		{"", false},
 	}
 	for _, tc := range cases {
 		env := eruncommon.EnvConfig{Type: tc.envType}
-		if got := orchestratableEnv(env); got != tc.want {
-			t.Errorf("orchestratableEnv(type=%q) = %v, want %v", tc.envType, got, tc.want)
+		if got := orchestratableEnv(env, ""); got != tc.want {
+			t.Errorf("orchestratableEnv(type=%q, role=undeclared) = %v, want %v", tc.envType, got, tc.want)
+		}
+		if got := orchestratableEnv(env, eruncommon.OrchestratorEnvRoleCode); got != tc.want {
+			t.Errorf("orchestratableEnv(type=%q, role=code) = %v, want %v", tc.envType, got, tc.want)
+		}
+	}
+}
+
+// TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole locks the fix: a runtime
+// env, which has no worktree to review and no in-pod agent to delegate to,
+// may only be linked with the runtime role. code, build, and undeclared are
+// all still refused — the same refusal the gate previously applied
+// unconditionally, now narrowed to every role except runtime rather than
+// dropped.
+func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	cases := []struct {
+		role eruncommon.OrchestratorEnvRole
+		want bool
+	}{
+		{eruncommon.OrchestratorEnvRoleRuntime, true},
+		{eruncommon.OrchestratorEnvRoleCode, false},
+		{eruncommon.OrchestratorEnvRoleBuild, false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := orchestratableEnv(env, tc.role); got != tc.want {
+			t.Errorf("orchestratableEnv(runtime, role=%q) = %v, want %v", tc.role, got, tc.want)
 		}
 	}
 }
@@ -144,9 +173,22 @@ func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
 	}
 }
 
+// TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv locks scope item 3: a
+// runtime-role link resolves no review directory, asserted on the resolved
+// value itself rather than the absence of an error — it must not fall
+// through to the mirror default meant for a remote-agent env that does have
+// a pod to sync a mirror from.
+func TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	dir, mirrored := orchestratorReviewDirectory("frs", env)
+	if dir != "" || mirrored {
+		t.Fatalf("orchestratorReviewDirectory(runtime) = (%q, %v), want (\"\", false)", dir, mirrored)
+	}
+}
+
 // listOrchestratorTestCandidates is the shared fixture read for the
 // candidate-shape assertions below: dev (remote-agent), laptop (local-agent),
-// runtime (ineligible), in that sorted order.
+// runtime (eligible only for the runtime role), in that sorted order.
 func listOrchestratorTestCandidates(t *testing.T) (dev, laptop, rt orchestratorEnvCandidate, laptopRepo string) {
 	t.Helper()
 	app, repo := orchestratorTestAppWithLocalRepo(t)
@@ -157,7 +199,7 @@ func listOrchestratorTestCandidates(t *testing.T) (dev, laptop, rt orchestratorE
 		t.Fatalf("ListOrchestratorEnvCandidates failed: %v", err)
 	}
 	if len(candidates) != 3 {
-		t.Fatalf("expected both agent envs plus the ineligible runtime env, got %+v", candidates)
+		t.Fatalf("expected both agent envs plus the runtime env, got %+v", candidates)
 	}
 	dev, laptop, rt = candidates[0], candidates[1], candidates[2]
 	if dev.Environment != "dev" || laptop.Environment != "laptop" || rt.Environment != "runtime" {
@@ -186,45 +228,103 @@ func TestListOrchestratorEnvCandidatesReviewsALocalAgentEnvInPlace(t *testing.T)
 	}
 }
 
-// TestListOrchestratorEnvCandidatesKeepsARuntimeEnvListedButIneligible locks
-// the fix: a runtime env stays in the list, disabled, with an operator-facing
-// reason, rather than being dropped without trace.
-func TestListOrchestratorEnvCandidatesKeepsARuntimeEnvListedButIneligible(t *testing.T) {
+// TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole locks
+// scope item 5: a runtime env is no longer greyed out in the picker. It stays
+// eligible (the dialog offers the role picker for it, not the ineligibility
+// notice), carries no review directory or mirror flag, and names the one
+// role — runtime — the operator must pick for it to actually link.
+func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *testing.T) {
 	_, _, rt, _ := listOrchestratorTestCandidates(t)
-	if rt.Eligible {
-		t.Fatalf("expected the runtime env to stay ineligible, got %+v", rt)
+	if !rt.Eligible {
+		t.Fatalf("expected the runtime env to stay eligible, got %+v", rt)
 	}
 	if rt.DefaultDirectory != "" || rt.Mirrored {
-		t.Fatalf("expected the ineligible runtime env to carry no review directory, got %+v", rt)
+		t.Fatalf("expected the runtime env to carry no review directory, got %+v", rt)
 	}
-	if rt.IneligibleReason == "" {
-		t.Fatalf("expected the runtime env to carry an operator-facing reason, got %+v", rt)
+	if rt.RequiredRole != eruncommon.OrchestratorEnvRoleRuntime {
+		t.Fatalf("expected the runtime env to require the runtime role, got %+v", rt)
+	}
+	if rt.IneligibleReason != "" {
+		t.Fatalf("expected the eligible runtime env to carry no reason, got %+v", rt)
 	}
 }
 
 // TestOrchestratorIneligibilityReasonExplainsEachRejectedType locks the
-// operator-facing copy: an eligible env carries no reason, a runtime env
-// names the concrete gap (no worktree, no in-pod agent), and an unresolved
-// type still gets an actionable — if generic — explanation rather than "".
+// operator-facing copy: an eligible env/role pair carries no reason, a
+// runtime env refused a non-runtime role names the concrete gap (no
+// worktree, no in-pod agent) and points at the role that does work, and an
+// unresolved type still gets an actionable — if generic — explanation rather
+// than "".
 func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
 	cases := []struct {
 		envType    eruncommon.EnvironmentType
+		role       eruncommon.OrchestratorEnvRole
 		wantEmpty  bool
 		wantSubstr string
 	}{
-		{eruncommon.EnvironmentTypeLocalAgent, true, ""},
-		{eruncommon.EnvironmentTypeRemoteAgent, true, ""},
-		{eruncommon.EnvironmentTypeHost, true, ""},
-		{eruncommon.EnvironmentTypeRuntime, false, "no worktree"},
-		{"", false, "type"},
+		{eruncommon.EnvironmentTypeLocalAgent, "", true, ""},
+		{eruncommon.EnvironmentTypeRemoteAgent, "", true, ""},
+		{eruncommon.EnvironmentTypeHost, "", true, ""},
+		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleRuntime, true, ""},
+		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleCode, false, "no worktree"},
+		{eruncommon.EnvironmentTypeRuntime, "", false, "runtime role"},
+		{"", "", false, "type"},
 	}
 	for _, tc := range cases {
-		got := orchestratorIneligibilityReason(eruncommon.EnvConfig{Type: tc.envType})
+		got := orchestratorIneligibilityReason(eruncommon.EnvConfig{Type: tc.envType}, tc.role)
 		if tc.wantEmpty && got != "" {
-			t.Errorf("orchestratorIneligibilityReason(type=%q) = %q, want empty", tc.envType, got)
+			t.Errorf("orchestratorIneligibilityReason(type=%q, role=%q) = %q, want empty", tc.envType, tc.role, got)
 		}
 		if !tc.wantEmpty && !strings.Contains(got, tc.wantSubstr) {
-			t.Errorf("orchestratorIneligibilityReason(type=%q) = %q, want substring %q", tc.envType, got, tc.wantSubstr)
+			t.Errorf("orchestratorIneligibilityReason(type=%q, role=%q) = %q, want substring %q", tc.envType, tc.role, got, tc.wantSubstr)
+		}
+	}
+}
+
+// TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole is the link-time
+// half of scope item 2: a runtime env may be linked when its role is
+// runtime, and the persisted link carries no review directory — the
+// operate-role link resolves no review directory, per scope item 3, asserted
+// on the resolved value rather than the absence of an error.
+func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
+		{Tenant: "frs", Environment: "runtime", Role: eruncommon.OrchestratorEnvRoleRuntime},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if len(info.Environments) != 1 {
+		t.Fatalf("expected one linked environment, got %+v", info.Environments)
+	}
+	linked := info.Environments[0]
+	if linked.Role != eruncommon.OrchestratorEnvRoleRuntime {
+		t.Fatalf("expected the runtime role to persist, got %+v", linked)
+	}
+	if linked.Directory != "" {
+		t.Fatalf("expected no review directory for a runtime-role link, got %+v", linked)
+	}
+}
+
+// TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole locks scope
+// item 6: linking a runtime env as code or build (or leaving the role
+// undeclared) must still be refused, narrowing the gate rather than opening
+// it, with the same reason orchestratorIneligibilityReason gives.
+func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	for _, role := range []eruncommon.OrchestratorEnvRole{eruncommon.OrchestratorEnvRoleCode, eruncommon.OrchestratorEnvRoleBuild, ""} {
+		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
+			{Tenant: "frs", Environment: "runtime", Role: role},
+		})
+		if err == nil {
+			t.Fatalf("expected linking the runtime env with role %q to be refused", role)
+		}
+		if !strings.Contains(err.Error(), "no worktree") {
+			t.Fatalf("expected the refusal to name the concrete gap, got %v", err)
 		}
 	}
 }

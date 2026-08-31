@@ -15,7 +15,7 @@ const OrchestratorEnvRoleNone = "none"
 // ParseOrchestratorEnvRoleFlag resolves a CLI/API-facing role token into the
 // OrchestratorEnvRole it names, so every surface that lets an operator type a
 // role validates against the exact same set IsValid already defines: "code",
-// "build", or OrchestratorEnvRoleNone for undeclared.
+// "build", "runtime", or OrchestratorEnvRoleNone for undeclared.
 func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
 	trimmed := strings.TrimSpace(value)
 	if strings.EqualFold(trimmed, OrchestratorEnvRoleNone) {
@@ -23,8 +23,8 @@ func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
 	}
 	role := OrchestratorEnvRole(trimmed)
 	if !role.IsValid() || role == "" {
-		return "", fmt.Errorf("invalid role %q: must be %q, %q, or %q (undeclared)",
-			value, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleNone)
+		return "", fmt.Errorf("invalid role %q: must be %q, %q, %q, or %q (undeclared)",
+			value, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime, OrchestratorEnvRoleNone)
 	}
 	return role, nil
 }
@@ -33,6 +33,16 @@ func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
 // SetOrchestratorEnvRole needs -- the same two-method shape as CloudStore and
 // DeleteStore, named for this operation the way each of those command areas
 // names its own.
+//
+// SetOrchestratorEnvRole does not re-check the linked environment's type
+// (OrchestratorEnvRoleAllowed) the way the desktop's link/edit gate does: it
+// only edits the role of a link that already exists, and every existing
+// link was created through a surface that already enforced the type/role
+// pairing at link time. A CLI operator could still use this to set an
+// unsound role on an already-linked runtime environment; closing that gap
+// needs the CLI to resolve the environment's config too, which the
+// integration fixtures for this command do not seed today, so it is left
+// as a known narrow gap rather than widened speculatively here.
 type OrchestratorRoleStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	SaveERunConfig(ERunConfig) error
@@ -50,9 +60,10 @@ type SetOrchestratorEnvRoleParams struct {
 // SetOrchestratorEnvRole sets the role an orchestrator uses one of its
 // already-linked environments for. It is the CLI's writer for
 // OrchestratorEnvConfig.Role, the counterpart to the desktop's
-// UpdateOrchestrator -- both surfaces write the same field through the same
-// legal values (OrchestratorEnvRole.IsValid), so neither can drift from the
-// other on what a role is allowed to be.
+// UpdateOrchestrator. It validates the role itself (OrchestratorEnvRole.IsValid)
+// but, unlike the desktop's link/edit gate, does not re-check the role against
+// the linked environment's type -- see OrchestratorRoleStore's doc comment for
+// why that is a known, tracked gap rather than an oversight.
 func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params SetOrchestratorEnvRoleParams) (OrchestratorConfig, error) {
 	if store == nil {
 		return OrchestratorConfig{}, fmt.Errorf("store is required")
@@ -62,8 +73,8 @@ func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params Set
 		return OrchestratorConfig{}, err
 	}
 	if !params.Role.IsValid() {
-		return OrchestratorConfig{}, fmt.Errorf("invalid role %q: must be %q or %q, or empty for undeclared",
-			params.Role, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild)
+		return OrchestratorConfig{}, fmt.Errorf("invalid role %q: must be %q, %q, or %q, or empty for undeclared",
+			params.Role, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime)
 	}
 
 	config, _, err := store.LoadERunConfig()

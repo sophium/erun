@@ -122,16 +122,23 @@ type orchestratorEnvInput struct {
 // orchestratorEnvCandidate is an env the operator considered linking, eligible
 // or not. Mirrored distinguishes the two kinds of review directory an eligible
 // env carries: a workspace-sync mirror the operator may place anywhere, or the
-// env's own worktree on this machine, whose path is derived and fixed. An
-// ineligible env carries no directory — IneligibleReason explains, in
-// operator language, why it cannot be linked instead.
+// env's own worktree on this machine, whose path is derived and fixed. Neither
+// applies to a runtime env: DefaultDirectory is "" and Mirrored is false, and
+// RequiredRole names the one role (eruncommon.OrchestratorEnvRoleRuntime) it
+// must be linked with — the dialog uses this to offer that role directly
+// instead of the mirror/worktree directory controls, which have nothing to
+// show for a link with no review directory. RequiredRole is "" when any role,
+// including undeclared, already works. An ineligible env carries no
+// directory — IneligibleReason explains, in operator language, why it cannot
+// be linked at all.
 type orchestratorEnvCandidate struct {
-	Tenant           string `json:"tenant"`
-	Environment      string `json:"environment"`
-	Eligible         bool   `json:"eligible"`
-	DefaultDirectory string `json:"defaultDirectory"`
-	Mirrored         bool   `json:"mirrored"`
-	IneligibleReason string `json:"ineligibleReason"`
+	Tenant           string                         `json:"tenant"`
+	Environment      string                         `json:"environment"`
+	Eligible         bool                           `json:"eligible"`
+	DefaultDirectory string                         `json:"defaultDirectory"`
+	Mirrored         bool                           `json:"mirrored"`
+	RequiredRole     eruncommon.OrchestratorEnvRole `json:"requiredRole,omitempty"`
+	IneligibleReason string                         `json:"ineligibleReason"`
 }
 
 // orchestratorEnvInfo is the JSON-safe view of one linked environment.
@@ -272,33 +279,27 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 	return filepath.Join(orchestratorsRoot(), strings.TrimSpace(tenant)+"-"+strings.TrimSpace(environment))
 }
 
-// orchestratableEnv reports whether an env can be linked to an orchestrator. A
-// local-agent or remote-agent env has a worktree to review and an in-pod agent
-// to delegate to; a runtime env has neither and is excluded. A host env has no
-// pod, but its worktree is already the operator's own checkout — the
-// orchestrator still does not edit it, and the env's own agent does, exactly
-// as for a local-agent env (see orchestratorReviewDirectory), so it links the
-// same way.
-func orchestratableEnv(env eruncommon.EnvConfig) bool {
-	switch env.ResolvedType() {
-	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeRemoteAgent, eruncommon.EnvironmentTypeHost:
-		return true
-	default:
-		return false
-	}
+// orchestratableEnv reports whether role may be linked against env — a thin
+// wrapper over eruncommon.OrchestratorEnvRoleAllowed, the single decision this
+// gate and the CLI's SetOrchestratorEnvRole both consult so neither can drift
+// from the other on what a role is allowed to be. A local-agent or
+// remote-agent env has a worktree to review and an in-pod agent to delegate
+// to, so any role is fine; a host env has no pod, but its worktree is already
+// the operator's own checkout — the orchestrator still does not edit it, and
+// the env's own agent does, exactly as for a local-agent env (see
+// orchestratorReviewDirectory), so it links the same way. A runtime env has
+// neither, so only the runtime role — operate, not review or delegate — may
+// be declared for it.
+func orchestratableEnv(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) bool {
+	return eruncommon.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
 
-// orchestratorIneligibilityReason explains, in the operator's language, why an
-// env orchestratableEnv rejects cannot be linked — reusing that function's own
-// reasoning rather than restating it. Returns "" for an eligible env.
-func orchestratorIneligibilityReason(env eruncommon.EnvConfig) string {
-	if orchestratableEnv(env) {
-		return ""
-	}
-	if env.ResolvedType() == eruncommon.EnvironmentTypeRuntime {
-		return "Runtime environments have no worktree to review and no in-pod agent to delegate to, so they can't be linked to an orchestrator."
-	}
-	return "This environment's type isn't recognized, so it can't be linked to an orchestrator."
+// orchestratorIneligibilityReason explains, in the operator's language, why
+// role cannot be declared for env — a thin wrapper over
+// eruncommon.OrchestratorEnvRoleIneligibilityReason, reusing orchestratableEnv's
+// own reasoning rather than restating it. Returns "" when the link is allowed.
+func orchestratorIneligibilityReason(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) string {
+	return eruncommon.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
 }
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
@@ -306,12 +307,17 @@ func orchestratorIneligibilityReason(env eruncommon.EnvConfig) string {
 // same policy as hostWorkspacePath — a local-agent or host worktree is already
 // here, so it is reviewed in place (for host, the review directory and the
 // worktree are the very same path, since there is no pod to mount it into) —
-// but yields the mirror path a remote-agent env would be wired to rather than
-// "" when its sync is not on yet.
+// yields the mirror path a remote-agent env would be wired to rather than ""
+// when its sync is not on yet, and answers explicitly for a runtime env: it
+// has no worktree and no mirror, so there is no review directory at all,
+// rather than falling through to the mirror default meant for an env that
+// does have a pod to sync from.
 func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
 	switch env.ResolvedType() {
 	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
 		return strings.TrimSpace(env.LocalRepoPath), false
+	case eruncommon.EnvironmentTypeRuntime:
+		return "", false
 	default:
 		return defaultOrchestratorDirectory(tenant, env.Name), true
 	}
@@ -351,6 +357,13 @@ here happen to have files — read the config every time.
   kept in sync from its pod. A path outside this root is a **local-agent
   environment's own worktree**, which lives on this machine and is hostPath-mounted
   into its pod. The environment's ` + "`type`" + ` tells you which kind you have.
+- An entry whose ` + "`role`" + ` is ` + "`runtime`" + ` is a different relationship: you
+  **operate** that environment — deploy, pin, observe — rather than review or
+  delegate to it. It has no worktree to review and no in-pod agent to delegate to,
+  so it carries no review ` + "`directory`" + ` at all. None of the review/delegate
+  rules below apply to it: drive it directly through ` + "`erun`" + ` (` + "`deploy`" + `,
+  ` + "`pin`" + `, ` + "`platform env`" + `, and equivalent commands) or the platform API,
+  never through a directory on this host.
 - **Never write into a review directory**, whichever kind it is. In a mirror the edit
   is simply lost — the next sync overwrites it. In a local-agent worktree it is worse:
   the edit *does* reach the pod, so it silently competes with the in-pod agent that
@@ -1412,15 +1425,22 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 			continue
 		}
 		for _, env := range envs {
+			requiredRole := eruncommon.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
 			candidate := orchestratorEnvCandidate{
 				Tenant:      tenant.Name,
 				Environment: env.Name,
-				Eligible:    orchestratableEnv(env),
+				// A candidate is eligible if it can be linked under whatever
+				// role requiredRole names ("" for "any role, including
+				// undeclared" on an agent/host env; the runtime role for a
+				// runtime env) — the role picker enforces the specific choice
+				// once the operator selects the environment.
+				Eligible: orchestratableEnv(env, requiredRole),
 			}
 			if candidate.Eligible {
 				candidate.DefaultDirectory, candidate.Mirrored = orchestratorReviewDirectory(tenant.Name, env)
+				candidate.RequiredRole = requiredRole
 			} else {
-				candidate.IneligibleReason = orchestratorIneligibilityReason(env)
+				candidate.IneligibleReason = orchestratorIneligibilityReason(env, requiredRole)
 			}
 			out = append(out, candidate)
 		}
@@ -1438,7 +1458,10 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 // is the operator's to place, so their input wins; a local-agent env's review
 // directory is derived from its repository path, so it is resolved here and any
 // supplied value ignored — that keeps the env config the single source of truth
-// and a link from outliving a repository path that moved.
+// and a link from outliving a repository path that moved. A runtime env has no
+// review directory at all (orchestratorReviewDirectory answers explicitly), so
+// its "" is expected rather than the missing-repository-path failure a
+// local-agent/host env with an unset LocalRepoPath would hit.
 func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.OrchestratorEnvConfig, error) {
 	refs := make([]eruncommon.OrchestratorEnvConfig, 0, len(inputs))
 	for _, input := range inputs {
@@ -1447,28 +1470,42 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 		if tenant == "" || environment == "" {
 			continue
 		}
-		env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+		ref, err := a.resolveEnvInput(tenant, environment, input)
 		if err != nil {
-			return nil, fmt.Errorf("load %s/%s: %w", tenant, environment, err)
+			return nil, err
 		}
-		derived, mirrored := orchestratorReviewDirectory(tenant, env)
-		dir := derived
-		if mirrored {
-			if supplied := strings.TrimSpace(input.Directory); supplied != "" {
-				dir = supplied
-			}
-		} else if dir == "" {
-			return nil, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
-		}
-		if !input.Role.IsValid() {
-			return nil, fmt.Errorf("%s/%s: invalid role %q", tenant, environment, input.Role)
-		}
-		refs = append(refs, eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir, Role: input.Role})
+		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
 		return nil, fmt.Errorf("an orchestrator must link at least one environment")
 	}
 	return refs, nil
+}
+
+// resolveEnvInput resolves one candidate's role and review directory,
+// split out of resolveEnvInputs to keep that loop within the lint
+// complexity budget.
+func (a *App) resolveEnvInput(tenant, environment string, input orchestratorEnvInput) (eruncommon.OrchestratorEnvConfig, error) {
+	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("load %s/%s: %w", tenant, environment, err)
+	}
+	if !input.Role.IsValid() {
+		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: invalid role %q", tenant, environment, input.Role)
+	}
+	if !orchestratableEnv(env, input.Role) {
+		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s: %s", tenant, environment, orchestratorIneligibilityReason(env, input.Role))
+	}
+	derived, mirrored := orchestratorReviewDirectory(tenant, env)
+	dir := derived
+	if mirrored {
+		if supplied := strings.TrimSpace(input.Directory); supplied != "" {
+			dir = supplied
+		}
+	} else if dir == "" && env.ResolvedType() != eruncommon.EnvironmentTypeRuntime {
+		return eruncommon.OrchestratorEnvConfig{}, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
+	}
+	return eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir, Role: input.Role}, nil
 }
 
 // wireEnvironmentReview prepares the env's host review directory. A remote-agent
@@ -1478,10 +1515,16 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 // needs neither: the pod hostPath-mounts the worktree, so the directory already
 // exists and no sync is involved — creating it would hand the orchestrator an
 // empty review window instead of surfacing a repository path that is not there.
+// A runtime env needs neither either, for a different reason: it has no
+// worktree and no mirror to prepare at all, by design (see
+// orchestratorReviewDirectory), so there is nothing to wire.
 func (a *App) wireEnvironmentReview(ref eruncommon.OrchestratorEnvConfig) error {
 	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
 	if err != nil {
 		return fmt.Errorf("load %s/%s: %w", ref.Tenant, ref.Environment, err)
+	}
+	if env.ResolvedType() == eruncommon.EnvironmentTypeRuntime {
+		return nil
 	}
 	if _, mirrored := orchestratorReviewDirectory(ref.Tenant, env); !mirrored {
 		info, statErr := os.Stat(ref.Directory)

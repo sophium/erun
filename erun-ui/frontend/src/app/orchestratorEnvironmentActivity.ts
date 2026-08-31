@@ -52,6 +52,29 @@ export interface OrchestratorEnvironmentLine {
   // asked for this.
   usage: string;
   usageStale: boolean;
+  // roleLabel names what this orchestrator uses the environment for ("Code
+  // role", "Build role", "Runtime role"), '' when undeclared — undeclared
+  // stays silent rather than rendering "Undeclared role" on every row that
+  // predates this field. This is what makes an operate-role link's
+  // association visible in the card, the same way it is for any other role.
+  roleLabel: string;
+}
+
+// orchestratorEnvRoleCaption renders the short label the hover card shows
+// beneath an environment's status line. '' for undeclared, matching
+// erun-cli/cmd/list.go's own "say nothing rather than guess" treatment of an
+// unset role.
+function orchestratorEnvRoleCaption(role: OrchestratorEnvRef['role']): string {
+  switch (role) {
+    case 'code':
+      return 'Code role';
+    case 'build':
+      return 'Build role';
+    case 'runtime':
+      return 'Runtime role';
+    default:
+      return '';
+  }
 }
 
 export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): OrchestratorEnvironmentLine {
@@ -61,6 +84,7 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
   const usageSummary = summarizeEnvironmentUsage(env.usage, Date.now());
   const usage = usageSummary.headline;
   const usageStale = usageSummary.stale;
+  const roleLabel = orchestratorEnvRoleCaption(env.role);
 
   if (activity?.outage) {
     return {
@@ -71,6 +95,7 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       dot: 'failed',
       usage,
       usageStale,
+      roleLabel,
     };
   }
   if (activity?.checkFailed) {
@@ -86,6 +111,7 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       status: "Can't confirm from here — open it to check directly",
       usage,
       usageStale,
+      roleLabel,
     };
   }
   if (!activity?.reachable) {
@@ -102,6 +128,7 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       status: 'No forward from this desktop',
       usage,
       usageStale,
+      roleLabel,
     };
   }
   if (!activity.observed) {
@@ -112,6 +139,7 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       status: 'Connected — activity unknown',
       usage,
       usageStale,
+      roleLabel,
     };
   }
   if (activity.busy) {
@@ -123,7 +151,8 @@ export function orchestratorEnvironmentLine(env: OrchestratorEnvRef): Orchestrat
       dot: 'busy',
       usage,
       usageStale,
+      roleLabel,
     };
   }
-  return { key, name, state: 'idle', status: 'Idle', dot: 'running', usage, usageStale };
+  return { key, name, state: 'idle', status: 'Idle', dot: 'running', usage, usageStale, roleLabel };
 }
