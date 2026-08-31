@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
@@ -134,25 +135,25 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		if err == nil {
 			user, err = r.refreshUserUsername(ctx, tenant, user, claims)
 			if err != nil {
-				return model.Tenant{}, model.User{}, err
+				return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "username refresh", tenant.TenantID, claims)
 			}
 			return tenant, user, nil
 		}
 		if !errors.Is(err, ErrNotFound) {
-			return model.Tenant{}, model.User{}, err
+			return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "user lookup", tenant.TenantID, claims)
 		}
 		// The tenant resolved; this external identity is simply not one of
 		// its users (or, if the tenant has zero users, becomes its first).
 		// Either way this is a user-level outcome, not a tenant-resolution
 		// failure, so it is never wrapped in security.ErrTenantUnresolved.
 		user, err = r.bootstrapFirstTenantUser(ctx, tenant, claims)
-		return tenant, user, err
+		return tenant, user, sanitizeResolutionError(err, "bootstrap first tenant user", tenant.TenantID, claims)
 	}
 	if errors.Is(err, security.ErrTenantUnresolved) {
 		return model.Tenant{}, model.User{}, err
 	}
 	if !errors.Is(err, ErrNotFound) {
-		return model.Tenant{}, model.User{}, err
+		return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "tenant lookup", "", claims)
 	}
 	tenant, user, err := r.bootstrapFirstIdentity(ctx, claims)
 	if err != nil {
@@ -162,9 +163,36 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		// ResolveTenantByIssuer reports directly for an org-scoped issuer's
 		// missing/unmatched org claim, not "you are not enrolled" (there is
 		// no tenant to be enrolled in).
+		err = sanitizeResolutionError(err, "bootstrap first identity", "", claims)
 		return model.Tenant{}, model.User{}, fmt.Errorf("%w: %s", security.ErrTenantUnresolved, err.Error())
 	}
 	return tenant, user, nil
+}
+
+// sanitizeResolutionError logs a raw PostgreSQL error -- a constraint name
+// and SQLSTATE, meaningless to an operator or to the console rendering it as
+// the auth-rejection message -- before ResolveIdentity can return it, and
+// replaces it with ErrIdentityResolutionFailed. step names which internal
+// branch produced it (e.g. "username refresh" vs "bootstrap first tenant
+// user"), since both write to users and can violate the identical
+// users_tenant_username_key constraint, and are otherwise indistinguishable
+// once the error reaches the auth-rejected log line alone (erun#1752).
+// Errors already classified as ErrNotFound or security.ErrTenantUnresolved
+// pass through unchanged -- they are safe, expected outcomes, not internal
+// failures.
+func sanitizeResolutionError(err error, step string, tenantID string, claims security.Claims) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) || errors.Is(err, security.ErrTenantUnresolved) {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	log.Printf("erun api identity resolution failed step=%q tenant=%q issuer=%q subject=%q reason=%q", step, tenantID, claims.Issuer, claims.Subject, "unexpected database error")
+	return ErrIdentityResolutionFailed
 }
 
 func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant model.Tenant, user model.User, claims security.Claims) (model.User, error) {

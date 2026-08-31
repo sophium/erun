@@ -336,8 +336,9 @@ func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tena
 // matching org claim, or an issuer with no tenant mapping at all) — distinct
 // from a repository.ErrNotFound reached after a tenant already resolved,
 // which means this external identity simply is not enrolled in it. Any other
-// error (an unexpected database failure, for instance) passes through
-// unclassified rather than being guessed at.
+// error passes through unclassified rather than being guessed at;
+// repository.ErrIdentityResolutionFailed is one such error, and authErrorCode
+// still recognizes it directly as RESOLUTION_FAILED, distinct from both.
 func classifyIdentityError(err error) error {
 	if err == nil {
 		return nil
@@ -370,12 +371,20 @@ func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error)
 // a client can render "no tenant matched this token" apart from "you are not
 // enrolled" instead of collapsing both into one generic message — the
 // distinction the not-enrolled UI otherwise cannot make (erun#1721).
+// RESOLUTION_FAILED is a third, distinct outcome: an internal error (a
+// database failure IdentityRepository already sanitized into
+// repository.ErrIdentityResolutionFailed) rather than a real answer about
+// enrolment, so a client must not tell the caller they need enrolling, or
+// that their tenant could not be determined — neither claim is true here
+// (erun#1752).
 func authErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrTenantNotResolved):
 		return "TENANT_UNRESOLVED"
 	case errors.Is(err, ErrUserNotResolved):
 		return "NOT_ENROLLED"
+	case errors.Is(err, repository.ErrIdentityResolutionFailed):
+		return "RESOLUTION_FAILED"
 	default:
 		return "UNAUTHORIZED"
 	}

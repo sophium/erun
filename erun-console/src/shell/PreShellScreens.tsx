@@ -203,6 +203,59 @@ export function TenantUnresolvedScreen({
   );
 }
 
+// ResolutionErrorScreen is shown when the API authenticated the token but
+// failed to resolve the identity because of an internal error (e.g. an
+// unexpected database failure) rather than a real answer about enrolment --
+// distinct from both NotEnrolledScreen and TenantUnresolvedScreen, since
+// neither "an operator has to enrol you" nor "you may already be enrolled
+// somewhere else" is the right advice here (erun#1752). This screen never
+// offers an enrolment command: whatever the API's record of this identity
+// is, it was not what failed, so no command derived from it would help.
+export function ResolutionErrorScreen({
+  brand,
+  token,
+  message,
+  onSignOut,
+}: {
+  brand: string | undefined;
+  token: string;
+  message: string;
+  onSignOut: () => void;
+}): React.ReactElement {
+  const identity = readTokenIdentity(token);
+  const named = identity.email ?? identity.subject;
+  return (
+    <CenteredCard brand={brand} title="Could not resolve your identity" role="alert">
+      <p className="text-sm text-muted-foreground">
+        You signed in successfully, but this platform hit an internal error while resolving your
+        identity. This is not the same as not being enrolled, and not the same as your tenant being
+        unclear — something went wrong on this platform&apos;s side. Try signing in again in a
+        moment; if it keeps happening, tell an operator.
+      </p>
+      <p className="text-sm text-destructive">{message}</p>
+      {named !== undefined && (
+        <p className="text-xs text-muted-foreground">
+          Identity: {named}
+          {identity.email !== undefined && identity.subject !== undefined
+            ? ` (subject ${identity.subject})`
+            : ''}
+          {identity.issuer !== undefined ? ` from ${identity.issuer}` : ''}
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="justify-self-start"
+        onClick={onSignOut}
+      >
+        <LogOut aria-hidden="true" />
+        Sign out
+      </Button>
+    </CenteredCard>
+  );
+}
+
 export function ErrorScreen({
   brand,
   message,
