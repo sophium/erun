@@ -26,6 +26,7 @@ import * as React from 'react';
 import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
+import { EnrollUserForm } from './EnrollUserForm';
 import { UserRolesDialog } from './UserRolesDialog';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
@@ -429,7 +430,19 @@ function UsersBody({
 // colleague (creates the IdP identity and the erun user mapping in one
 // action), deactivate/reactivate an existing one, and manage which roles an
 // enrolled user holds. Only rendered for an OPERATIONS tenant — see App.tsx.
-export function UsersPanel({ token }: { token: string }): React.ReactElement {
+// EnrollUserForm below is the separate, tenant-targetable enrollment path
+// (POST /v1/users, erun#1744) that can put a first user into a tenant other
+// than the caller's own — the one thing the IdP-creating form above cannot
+// do, since it always creates the identity in the caller's own org.
+export function UsersPanel({
+  token,
+  ownTenantId,
+  tenantType,
+}: {
+  token: string;
+  ownTenantId: string;
+  tenantType: string;
+}): React.ReactElement {
   const { usersState, enrollState, enroll, setActive, dismissTemporaryPassword } =
     useUsersController(token);
   const temporaryPassword =
@@ -451,6 +464,7 @@ export function UsersPanel({ token }: { token: string }): React.ReactElement {
           onManageRoles={setManagingRoles}
         />
         <EnrollForm enroll={enrollState} onEnroll={enroll} />
+        <EnrollUserForm token={token} ownTenantId={ownTenantId} tenantType={tenantType} />
       </CardContent>
       {temporaryPassword !== undefined && enrollState.status === 'enrolled' && (
         <TemporaryPasswordDialog

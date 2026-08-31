@@ -32,16 +32,18 @@ function OperationsSectionContent({
   active,
   token,
   docsUrl,
+  tenant,
 }: {
   active: 'tenants' | 'users' | 'org-settings' | 'smtp-settings';
   token: string;
   docsUrl: string | undefined;
+  tenant: TenantConfigView['tenant'];
 }): React.ReactElement {
   switch (active) {
     case 'tenants':
       return <TenantsPanel token={token} docsUrl={docsUrl} />;
     case 'users':
-      return <UsersPanel token={token} />;
+      return <UsersPanel token={token} ownTenantId={tenant.tenantId} tenantType={tenant.type} />;
     case 'org-settings':
       return <OrgSettingsPanel token={token} />;
     case 'smtp-settings':
@@ -98,7 +100,14 @@ function SectionContent({
         />
       );
     default:
-      return <OperationsSectionContent active={active} token={token} docsUrl={docsUrl} />;
+      return (
+        <OperationsSectionContent
+          active={active}
+          token={token}
+          docsUrl={docsUrl}
+          tenant={config.tenant}
+        />
+      );
   }
 }
 

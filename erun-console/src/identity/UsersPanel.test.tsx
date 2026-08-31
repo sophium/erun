@@ -47,7 +47,9 @@ afterEach(() => {
 describe('UsersPanel', () => {
   it('lists identities and renders an empty state when there are none', async () => {
     mockFetch(() => jsonResponse([]));
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     expect(await screen.findByText('No users enrolled yet.')).toBeInTheDocument();
   });
 
@@ -65,7 +67,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     expect(await screen.findByText('alice')).toBeInTheDocument();
     expect(screen.getByText('alice@example.com')).toBeInTheDocument();
     expect(screen.getByText('USER_STATE_ACTIVE')).toBeInTheDocument();
@@ -87,16 +91,19 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('No users enrolled yet.');
 
-    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+    const form = within(screen.getByRole('form', { name: 'Enroll a user' }));
+    fireEvent.change(form.getByLabelText('Username', { exact: false }), {
       target: { value: 'bob' },
     });
-    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+    fireEvent.change(form.getByLabelText('Email', { exact: false }), {
       target: { value: 'bob@example.com' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
+    fireEvent.click(form.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/Enrolled bob/)).toBeInTheDocument();
     expect(screen.getByText(/An invite email is on its way/)).toBeInTheDocument();
@@ -120,16 +127,19 @@ describe('UsersPanel', () => {
       }
       return jsonResponse([]);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('No users enrolled yet.');
 
-    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+    const form = within(screen.getByRole('form', { name: 'Enroll a user' }));
+    fireEvent.change(form.getByLabelText('Username', { exact: false }), {
       target: { value: 'dana' },
     });
-    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+    fireEvent.change(form.getByLabelText('Email', { exact: false }), {
       target: { value: 'dana@example.com' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
+    fireEvent.click(form.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/Outbound mail is not configured/)).toBeInTheDocument();
     expect(screen.getByText('Temporary password for dana')).toBeInTheDocument();
@@ -158,16 +168,19 @@ describe('UsersPanel', () => {
       }
       return jsonResponse([]);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('No users enrolled yet.');
 
-    fireEvent.change(screen.getByLabelText('Username', { exact: false }), {
+    const form = within(screen.getByRole('form', { name: 'Enroll a user' }));
+    fireEvent.change(form.getByLabelText('Username', { exact: false }), {
       target: { value: 'carol' },
     });
-    fireEvent.change(screen.getByLabelText('Email', { exact: false }), {
+    fireEvent.change(form.getByLabelText('Email', { exact: false }), {
       target: { value: 'carol@example.com' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
+    fireEvent.click(form.getByRole('button', { name: 'Enroll user' }));
 
     expect(await screen.findByText(/could not be enrolled as an erun user/)).toBeInTheDocument();
   });
@@ -182,7 +195,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('alice');
 
     expect(screen.getByText('Tenant member')).toBeInTheDocument();
@@ -198,7 +213,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('admin-sa');
 
     expect(screen.getByText('Machine account')).toBeInTheDocument();
@@ -217,7 +234,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
@@ -233,7 +252,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
@@ -255,7 +276,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
@@ -292,7 +315,9 @@ describe('UsersPanel', () => {
       }),
     );
 
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
@@ -323,7 +348,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_ACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
@@ -351,7 +378,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('alice');
 
     expect(screen.getAllByRole('button', { name: 'Manage roles' })).toHaveLength(1);
@@ -386,7 +415,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('alice');
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage roles' }));
@@ -431,7 +462,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('alice');
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage roles' }));
@@ -460,7 +493,9 @@ describe('UsersPanel', () => {
       }
       return jsonResponse({}, 404);
     });
-    renderWithStore(<UsersPanel token="dev-token" />);
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
     await screen.findByText('USER_STATE_INACTIVE');
 
     fireEvent.click(screen.getByRole('button', { name: 'Reactivate' }));

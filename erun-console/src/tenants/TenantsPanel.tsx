@@ -8,6 +8,7 @@ import {
   FieldLabel,
   Input,
   SelectField,
+  StatusBadge,
   Table,
   TableBody,
   TableCell,
@@ -22,6 +23,7 @@ import type { CreateTenantInput, PlatformTenant } from '../app/api/tenantsApi';
 import { PUBLIC_DOCS_URL } from '../shell/landingContent';
 import type { CreateTenantState, TenantFieldError, TenantsState } from './controller';
 import { useTenantsController } from './controller';
+import { EnrollTenantUserDialog } from './EnrollTenantUserDialog';
 import { TenantQuotaDialog } from './TenantQuotaDialog';
 
 // The identity model's own explanation of org-scoped (shared) issuers — see
@@ -275,12 +277,40 @@ function formatCreatedAt(createdAt: string): string {
   return Number.isNaN(parsed.getTime()) ? createdAt : parsed.toLocaleDateString();
 }
 
+// TenantUserCountBadge is the Tenants view's own noticing point for an inert
+// tenant (erun#1744): a tenant registered through the product but with no
+// console-reachable way to add a user reads identically to a healthy one
+// unless the zero itself is flagged here, where it was created. `undefined`
+// (the count did not load, rather than genuinely being zero) renders as
+// "Unknown" so a fetch hiccup never gets mistaken for the inert state.
+function TenantUserCountBadge({
+  userCount,
+}: {
+  userCount: number | undefined;
+}): React.ReactElement {
+  if (userCount === undefined) {
+    return <StatusBadge tone="muted" label="Unknown" showIcon={false} />;
+  }
+  if (userCount === 0) {
+    return <StatusBadge tone="warning" label="No users" />;
+  }
+  return (
+    <StatusBadge
+      tone="muted"
+      label={`${String(userCount)} ${userCount === 1 ? 'user' : 'users'}`}
+      showIcon={false}
+    />
+  );
+}
+
 function TenantRow({
   tenant,
   onManageQuota,
+  onEnrollUser,
 }: {
   tenant: PlatformTenant;
   onManageQuota: (tenant: PlatformTenant) => void;
+  onEnrollUser: (tenant: PlatformTenant) => void;
 }): React.ReactElement {
   return (
     <TableRow>
@@ -288,6 +318,19 @@ function TenantRow({
       <TableCell>{tenant.type}</TableCell>
       <TableCell>{formatCreatedAt(tenant.createdAt)}</TableCell>
       <TableCell>
+        <TenantUserCountBadge userCount={tenant.userCount} />
+      </TableCell>
+      <TableCell className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            onEnrollUser(tenant);
+          }}
+        >
+          Enroll user
+        </Button>
         <Button
           type="button"
           variant="outline"
@@ -306,9 +349,11 @@ function TenantRow({
 function TenantsTable({
   tenants,
   onManageQuota,
+  onEnrollUser,
 }: {
   tenants: PlatformTenant[];
   onManageQuota: (tenant: PlatformTenant) => void;
+  onEnrollUser: (tenant: PlatformTenant) => void;
 }): React.ReactElement {
   if (tenants.length === 0) {
     return <EmptyState icon={<Building2 />} heading="No tenants registered yet." />;
@@ -320,12 +365,18 @@ function TenantsTable({
           <TableHead>Name</TableHead>
           <TableHead>Type</TableHead>
           <TableHead>Created</TableHead>
-          <TableHead>Quota</TableHead>
+          <TableHead>Users</TableHead>
+          <TableHead />
         </TableRow>
       </TableHeader>
       <TableBody>
         {tenants.map((tenant) => (
-          <TenantRow key={tenant.tenantId} tenant={tenant} onManageQuota={onManageQuota} />
+          <TenantRow
+            key={tenant.tenantId}
+            tenant={tenant}
+            onManageQuota={onManageQuota}
+            onEnrollUser={onEnrollUser}
+          />
         ))}
       </TableBody>
     </Table>
@@ -335,9 +386,11 @@ function TenantsTable({
 function TenantsBody({
   tenantsState,
   onManageQuota,
+  onEnrollUser,
 }: {
   tenantsState: TenantsState;
   onManageQuota: (tenant: PlatformTenant) => void;
+  onEnrollUser: (tenant: PlatformTenant) => void;
 }): React.ReactElement {
   if (tenantsState.status === 'loading') {
     return (
@@ -353,7 +406,13 @@ function TenantsBody({
       </p>
     );
   }
-  return <TenantsTable tenants={tenantsState.tenants} onManageQuota={onManageQuota} />;
+  return (
+    <TenantsTable
+      tenants={tenantsState.tenants}
+      onManageQuota={onManageQuota}
+      onEnrollUser={onEnrollUser}
+    />
+  );
 }
 
 // TenantsPanel is the console's tenant-registration surface: the one action
@@ -370,13 +429,20 @@ export function TenantsPanel({
   const [managingQuotaFor, setManagingQuotaFor] = React.useState<PlatformTenant | undefined>(
     undefined,
   );
+  const [enrollingUserFor, setEnrollingUserFor] = React.useState<PlatformTenant | undefined>(
+    undefined,
+  );
   return (
     <Card aria-labelledby="tenants-heading">
       <CardHeader>
         <CardTitle id="tenants-heading">Tenants</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-6">
-        <TenantsBody tenantsState={tenantsState} onManageQuota={setManagingQuotaFor} />
+        <TenantsBody
+          tenantsState={tenantsState}
+          onManageQuota={setManagingQuotaFor}
+          onEnrollUser={setEnrollingUserFor}
+        />
         <CreateTenantForm createState={createState} docsUrl={docsUrl} onCreate={create} />
       </CardContent>
       {managingQuotaFor !== undefined && (
@@ -386,6 +452,15 @@ export function TenantsPanel({
           token={token}
           onClose={() => {
             setManagingQuotaFor(undefined);
+          }}
+        />
+      )}
+      {enrollingUserFor !== undefined && (
+        <EnrollTenantUserDialog
+          tenant={enrollingUserFor}
+          token={token}
+          onClose={() => {
+            setEnrollingUserFor(undefined);
           }}
         />
       )}
