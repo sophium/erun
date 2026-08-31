@@ -52,6 +52,90 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/refuses_host_environment", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_runtime_environment_from_host", func(t *testing.T) {
+		// Regression (erun#1740): a runtime env's terraform state lives on its own
+		// runtime pod's home PVC. Invoked from the host (no injected
+		// ERUN_TENANT/ERUN_ENVIRONMENT pod identity), erun must refuse rather than
+		// resolve this host's own home directory and silently treat real, applied
+		// state as empty.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		result := erun.Run(t, []string{"terraform", "init", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a runtime env's terraform invoked from the host, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/refuses_runtime_environment_from_host", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_environment_allowed_in_pod", func(t *testing.T) {
+		// The same runtime env's terraform must still work — and still initialize
+		// fresh state on a genuinely first-time environment — when invoked from
+		// inside its own pod, signaled the same way deploy's in-pod guard detects
+		// it: the chart-injected ERUN_TENANT/ERUN_ENVIRONMENT pair matching the
+		// target env.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=prod")
+		result := erun.Run(t, []string{"terraform", "init", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/runtime_environment_allowed_in_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refuses_runtime_environment_from_a_different_environments_pod", func(t *testing.T) {
+		// Being inside *some* runtime pod is not enough — the injected identity
+		// must match the targeted tenant/environment exactly, or an operator
+		// shelled into team/dev could apply against team/prod's never-resolved
+		// host-side state.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"terraform", "init", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the injected pod identity names a different environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/refuses_runtime_environment_from_a_different_environments_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refuses_remote_agent_environment_from_host", func(t *testing.T) {
+		// A remote-agent env's worktree — and terraform state — is PVC-backed
+		// inside its own pod too, same as runtime; the host-side refusal must
+		// cover it as well, not just type "runtime" by name.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a remote-agent env's terraform invoked from the host, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/refuses_remote_agent_environment_from_host", normalize.Apply(result.Combined))
+	})
+
+	t.Run("local_agent_environment_still_resolves_on_host", func(t *testing.T) {
+		// The default fixture is local-agent, whose worktree is hostPath-mounted
+		// from this same machine — its terraform state genuinely is this host's
+		// own home directory, so it must keep resolving directly, with no injected
+		// pod identity required. Regression guard for erun#1740: the RemoteWorktree
+		// gate must not sweep local-agent envs into the refusal above.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/local_agent_environment_still_resolves_on_host", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_dry_run", func(t *testing.T) {
 		// init is its own operation now (apply/plan/destroy no longer init). With no
 		// committed lock yet, init generates one and records provider hashes for both

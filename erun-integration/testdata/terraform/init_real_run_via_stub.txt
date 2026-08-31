@@ -1,6 +1,6 @@
 terraform init complete in <TMP>
 audit: erun terraform init team dev
-terraform: init in <TMP> (env team/dev, namespace team-dev)
-terraform: state <STATE_ROOT>/team/dev/terraform.tfstate (local backend on the home PVC — survives pod restarts)
+terraform: init in <TMP> (env team/dev, type local-agent, namespace team-dev)
+terraform: state <STATE_ROOT>/team/dev/terraform.tfstate (this host's home directory)
 terraform: TF_DATA_DIR <STATE_ROOT>/team/dev/data
 terraform: no .terraform.lock.hcl yet — init will generate it and record provider hashes for linux_amd64, linux_arm64; commit it so read-only envs can init with -lockfile=readonly
