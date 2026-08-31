@@ -32,15 +32,29 @@
 # outcome instead.
 #
 # That replay is only safe when the tree being gated hasn't moved since the
-# recorded run. A job id that is stable across invocations (`check`,
+# recorded run, and when the command being run is the same one that produced
+# the recorded outcome. A job id that is stable across invocations (`check`,
 # `ui-playwright`, `integration-test`) would otherwise replay a finished
-# outcome over code changed after that run -- greening work nobody tested.
-# So the id actually used against the job store folds in a hash of the tree
-# state (HEAD, working-tree status, and diff content) alongside the caller's
-# id: an unchanged tree keeps hitting the same id and replays as before: a
-# changed tree resolves to a new id, finds no finished record under it, and
-# runs fresh. AGENT_GATE_RERUN=1 still skips the check and forces a new run
-# regardless of tree state.
+# outcome over code changed after that run, or a full run's id over a
+# narrower one's result -- greening work nobody tested, or answering a
+# request for the full suite with a focused run's verdict. So the id
+# actually used against the job store folds in a hash of the tree state
+# (HEAD, working-tree status, and diff content) and a hash of the exact
+# command being gated, alongside the caller's id: an unchanged tree and
+# command keep hitting the same id and replay as before; either one changing
+# resolves to a new id, finds no finished record under it, and runs fresh.
+# AGENT_GATE_RERUN=1 still skips the check and forces a new run regardless of
+# tree state.
+#
+# A replayed result is never silently indistinguishable from a fresh one: it
+# is always announced on stderr, naming the job id it came from (queryable
+# again with `erun exec job status`) and the exact recorded outcome. And a
+# replay only ever stands in for another *passing* run -- a recorded failure,
+# an abandoned job, or anything else short of a clean exit is never replayed,
+# since a stale failure is cheap to re-check and a stale record of anything
+# other than success has no value. Only a stale pass could plausibly be
+# mistaken for a real one, and only for that case does the tree+command key
+# above have to carry the whole safety burden.
 
 set -eu
 
@@ -115,7 +129,15 @@ tree_state_key() {
 	} 2>/dev/null | hash_stdin | cut -c1-16
 }
 
-resolved_job_id="${job_id}-$(tree_state_key)"
+# cmd_state_key prints a key that changes whenever the command being gated
+# does, so a job id built from it can never satisfy a request for a
+# differently-scoped run (e.g. a full `make check-gate` reusing a narrower
+# run's cached result under the same job id).
+cmd_state_key() {
+	printf '%s\0' "$@" | hash_stdin | cut -c1-16
+}
+
+resolved_job_id="${job_id}-$(tree_state_key)-$(cmd_state_key "$@")"
 
 await_timeout="${ERUN_AGENT_GATE_AWAIT_TIMEOUT:-8m}"
 
@@ -132,8 +154,8 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 			# it correctly (start reports "already running" and falls through), so
 			# no special-casing is needed here.
 			;;
-		*)
-			printf 'agent-gate: %s already finished; reporting its recorded outcome instead of starting a new run (set AGENT_GATE_RERUN=1 to force a fresh run)\n' "$job_name" >&2
+		"exited 0:"*)
+			printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree and command unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
 			replay_status=0
 			erun exec job await \
 				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
@@ -142,6 +164,13 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
 				--id "$resolved_job_id" --max-bytes 16777216
 			exit "$replay_status"
+			;;
+		*)
+			# A recorded outcome exists but is not a clean pass (a failure, an
+			# abandoned job, an incomplete gate, or anything else). Never replay
+			# it -- a stale non-pass has no value and re-running it is cheap --
+			# so fall through to start a genuinely fresh run instead.
+			printf 'agent-gate: %s has a non-passing recorded result from job %s (%s); running fresh instead of replaying it\n' "$job_name" "$resolved_job_id" "$status_line" >&2
 			;;
 		esac
 	fi
