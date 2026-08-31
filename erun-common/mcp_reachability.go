@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +16,42 @@ const localMCPProbeTimeout = 1500 * time.Millisecond
 // localPortDialTimeout bounds the "is anything holding this port" check, which
 // only completes a TCP handshake against loopback.
 const localPortDialTimeout = 200 * time.Millisecond
+
+// mcpStartupReachabilityWait bounds awaitLocalMCPEndpointReachable: long
+// enough to cover the ordinary gap between an MCP client session starting and
+// `erun open` finishing the port-forward it depends on, short enough that a
+// genuinely unopened environment still fails within one request rather than
+// hanging the client's handshake indefinitely.
+const mcpStartupReachabilityWait = 20 * time.Second
+
+// mcpStartupReachabilityPoll is how often awaitLocalMCPEndpointReachable
+// re-probes while waiting.
+const mcpStartupReachabilityPoll = 500 * time.Millisecond
+
+// awaitLocalMCPEndpointReachable blocks until the local port answers, wait
+// elapses, or ctx ends -- whichever comes first. It never returns an error and
+// does not report which of those happened: the caller's own dial (or its own
+// already-bound-but-dead check) is what actually decides the request's
+// outcome, so a still-unreachable port after this wait simply proceeds to
+// fail exactly as it would have without the wait, only later.
+func awaitLocalMCPEndpointReachable(ctx context.Context, port int, wait time.Duration) {
+	if port <= 0 || CanReachLocalMCPEndpoint(port) {
+		return
+	}
+	deadline := time.Now().Add(wait)
+	ticker := time.NewTicker(mcpStartupReachabilityPoll)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if CanReachLocalMCPEndpoint(port) {
+				return
+			}
+		}
+	}
+}
 
 // LocalMCPEndpoint is the loopback URL a port-forward exposes an environment's
 // MCP edge on.

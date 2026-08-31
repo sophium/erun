@@ -199,10 +199,32 @@ func runtimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 // refusing it, because the result then asserts a target the work never reached
 // and the caller is left holding written evidence that it worked (#1195).
 func resolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
-	serverTenant := strings.TrimSpace(runtime.Context.Tenant)
-	serverEnvironment := strings.TrimSpace(runtime.Context.Environment)
-	requestedTenant := strings.TrimSpace(tenant)
-	requestedEnvironment := strings.TrimSpace(environment)
+	resolvedTenant, resolvedEnvironment, err := matchOrDefaultLocalTarget(
+		strings.TrimSpace(runtime.Context.Tenant), strings.TrimSpace(runtime.Context.Environment),
+		tenant, environment,
+	)
+	if err != nil {
+		return "", "", err
+	}
+	if resolvedTenant == "" || resolvedEnvironment == "" {
+		return "", "", errMissingLocalTarget(resolvedTenant == "", resolvedEnvironment == "")
+	}
+	return resolvedTenant, resolvedEnvironment, nil
+}
+
+// matchOrDefaultLocalTarget is the refusal check shared by resolveLocalTarget
+// and scopedTenantEnv: a caller-supplied tenant/environment that names a
+// different environment than this server's own is refused, naming both the
+// server's own scope and the requested one, and pointing at the remedy --
+// call that environment's own MCP edge -- rather than silently substituting
+// the local environment for the requested one. A field left empty by the
+// caller defaults to the server's own identity rather than being required;
+// resolveLocalTarget layers the "both must resolve" requirement on top of
+// that, scopedTenantEnv does not, since some of its callers have no
+// tenant/environment work to do at all.
+func matchOrDefaultLocalTarget(serverTenant, serverEnvironment, requestedTenant, requestedEnvironment string) (tenant, environment string, err error) {
+	requestedTenant = strings.TrimSpace(requestedTenant)
+	requestedEnvironment = strings.TrimSpace(requestedEnvironment)
 	tenantMismatch := requestedTenant != "" && serverTenant != "" && requestedTenant != serverTenant
 	environmentMismatch := requestedEnvironment != "" && serverEnvironment != "" && requestedEnvironment != serverEnvironment
 	if tenantMismatch || environmentMismatch {
@@ -212,12 +234,7 @@ func resolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (stri
 			firstNonEmpty(requestedTenant, serverTenant), firstNonEmpty(requestedEnvironment, serverEnvironment),
 		)
 	}
-	resolvedTenant := firstNonEmpty(requestedTenant, serverTenant)
-	resolvedEnvironment := firstNonEmpty(requestedEnvironment, serverEnvironment)
-	if resolvedTenant == "" || resolvedEnvironment == "" {
-		return "", "", errMissingLocalTarget(resolvedTenant == "", resolvedEnvironment == "")
-	}
-	return resolvedTenant, resolvedEnvironment, nil
+	return firstNonEmpty(requestedTenant, serverTenant), firstNonEmpty(requestedEnvironment, serverEnvironment), nil
 }
 
 // errMissingLocalTarget names exactly what is missing (tenant, environment,

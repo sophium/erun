@@ -22,11 +22,15 @@ type RawInput struct {
 	Stdin   string            `json:"stdin,omitempty" jsonschema:"optional stdin to pass to the command; only used in the foreground (wait true)"`
 	Dir     string            `json:"dir,omitempty" jsonschema:"working directory to run from, absolute or relative to the runtime repo root; defaults to the runtime repo root"`
 	Env     map[string]string `json:"env,omitempty" jsonschema:"additional KEY=VALUE environment for the command, on top of what it inherits from the runtime pod; only valid with wait false, since a foreground call already runs in this process's own environment with nothing to extend it with. Values land in the job supervisor's argv, visible to anything that can list processes in this environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a few other names that could redirect what the job executes are refused, as is any ERUN_ name"`
-	// Tenant/Environment, and Name/ID, address a backgrounded command the way
-	// job_start's did; ignored in the foreground, where there is no handle to
-	// address and this server's own context already applies.
-	Tenant          string `json:"tenant,omitempty" jsonschema:"tenant whose environment runs the backgrounded command; only used with wait false. Defaults to the server tenant context, and must match it: this server only acts on its own environment"`
-	Environment     string `json:"environment,omitempty" jsonschema:"environment to run the backgrounded command in; only used with wait false. Defaults to the server environment context, and must match it: this server only acts on its own environment"`
+	// Tenant/Environment must match this server's own scope in both modes (see
+	// resolveLocalTarget/scopedTenantEnv): in the foreground there is no handle
+	// to address, so a value here is validated but otherwise unused, this
+	// server's own context already applies; a mismatch is refused rather than
+	// silently run locally anyway, which is what let a caller believe a
+	// foreground exec_raw had reached a different environment when it had not.
+	// Name/ID address a backgrounded command the way job_start's did.
+	Tenant          string `json:"tenant,omitempty" jsonschema:"tenant whose environment runs the command; defaults to the server tenant context, and must match it: this server only acts on its own environment. In the foreground (wait true) this is validated but otherwise unused, since the command always runs in this process"`
+	Environment     string `json:"environment,omitempty" jsonschema:"environment to run the command in; defaults to the server environment context, and must match it: this server only acts on its own environment. In the foreground (wait true) this is validated but otherwise unused, since the command always runs in this process"`
 	Name            string `json:"name,omitempty" jsonschema:"what the backgrounded command is, shown wherever the environment reports as busy; only used with wait false. Defaults to exec_raw"`
 	ID              string `json:"id,omitempty" jsonschema:"handle to address the backgrounded command by; only used with wait false. Defaults to name, so re-running the same named command keeps one stable handle"`
 	MaxOutputBytes  int64  `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes for a backgrounded command; past it output is dropped and the job reports outputTruncated. Only used with wait false. Defaults to 16777216"`
@@ -53,6 +57,9 @@ func rawTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 }
 
 func execRawForeground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput, error) {
+	if _, _, err := scopedTenantEnv(input.Tenant, input.Environment, runtime); err != nil {
+		return JobEnvelopeOutput{}, err
+	}
 	traceOutput := new(bytes.Buffer)
 	ctx := runtimeCallContext(input.Preview, input.Verbosity, strings.NewReader(input.Stdin), traceOutput, traceOutput)
 

@@ -15,8 +15,8 @@ type ObserveSecretCheckInput struct {
 }
 
 type ObserveInput struct {
-	Tenant      string                    `json:"tenant,omitempty" jsonschema:"tenant whose environment should be observed; defaults to the server tenant context"`
-	Environment string                    `json:"environment,omitempty" jsonschema:"environment to observe; defaults to the server environment context"`
+	Tenant      string                    `json:"tenant,omitempty" jsonschema:"tenant whose environment should be observed; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string                    `json:"environment,omitempty" jsonschema:"environment to observe; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	Secrets     []ObserveSecretCheckInput `json:"secrets,omitempty" jsonschema:"named Secret/key pairs to check for presence, without reading their values"`
 	Preview     bool                      `json:"preview,omitempty" jsonschema:"when true, resolve and trace the kubectl calls that would run without executing them"`
 	Verbosity   int                       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
@@ -49,26 +49,15 @@ func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []eruncommon
 	return checks
 }
 
-// resolveObserveOpenResult mirrors resolveDoctorOpenResult's explicit ->
-// partial -> runtime-context -> default fallback chain, so `observe` resolves
-// tenant/environment/namespace the same way every other typed MCP tool does.
+// resolveObserveOpenResult resolves tenant/environment through
+// resolveLocalTarget -- the same refusal every other typed MCP tool in this
+// module applies -- before asking the store to resolve the rest of the
+// OpenResult, so `observe` can never be pointed at a different environment
+// than the one this server's pod actually runs in.
 func resolveObserveOpenResult(runtime RuntimeConfig, input ObserveInput) (eruncommon.OpenResult, error) {
-	tenant := strings.TrimSpace(input.Tenant)
-	environment := strings.TrimSpace(input.Environment)
-	switch {
-	case tenant != "" && environment != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
-	case tenant != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, UseDefaultEnvironment: true})
-	case environment != "":
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Environment: environment, UseDefaultTenant: true})
+	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+	if err != nil {
+		return eruncommon.OpenResult{}, err
 	}
-
-	runtimeTenant := strings.TrimSpace(runtime.Context.Tenant)
-	runtimeEnvironment := strings.TrimSpace(runtime.Context.Environment)
-	if runtimeTenant != "" && runtimeEnvironment != "" {
-		return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: runtimeTenant, Environment: runtimeEnvironment})
-	}
-
-	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true})
+	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }

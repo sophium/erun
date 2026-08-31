@@ -11,8 +11,8 @@ import (
 
 type TerraformInput struct {
 	Operation   string   `json:"operation" jsonschema:"required terraform operation: init (download providers, wire state, record the provider lock — run once before the others), apply (fmt/plan/apply), plan (read-only), or destroy"`
-	Tenant      string   `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the MCP runtime context tenant"`
-	Environment string   `json:"environment,omitempty" jsonschema:"environment name; defaults to the MCP runtime context environment"`
+	Tenant      string   `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string   `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ProjectRoot string   `json:"projectRoot,omitempty" jsonschema:"project root holding terraform-<tenant>/ or <tenant>-devops/terraform-<tenant>/ (or the paths.terraform base from .erun/config.yaml); defaults to the runtime repo path"`
 	Confirm     string   `json:"confirm,omitempty" jsonschema:"for apply/destroy: restate the environment name to confirm the mutation; required to apply, ignored for plan and preview"`
 	ExtraArgs   []string `json:"extraArgs,omitempty" jsonschema:"extra args passed through to terraform plan"`
@@ -23,8 +23,10 @@ type TerraformInput struct {
 
 func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, TerraformInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input TerraformInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
-		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
-		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
+		if err != nil {
+			return nil, JobEnvelopeOutput{}, err
+		}
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
 		terraformStore, ok := any(runtime.Store).(eruncommon.TerraformStore)
