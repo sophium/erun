@@ -139,7 +139,62 @@ const (
 	// detach-and-await, or an agent's own Bash tool) reads it back and records
 	// StartedByJobID without either side threading it through explicitly.
 	environmentJobIDEnvVar = "ERUN_JOB_ID"
+
+	// EnvironmentJobGateIncompleteWaitCapEnvVar overrides
+	// environmentJobGateIncompleteWaitCap for a single job supervisor process,
+	// parsed with time.ParseDuration; an empty or unparseable value falls back
+	// to the default. It exists because the default is generous on purpose
+	// (see environmentJobGateIncompleteWaitCap) and a subprocess-level
+	// integration test has no in-process var to swap the way a Go unit test
+	// does -- the same shape as ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES tuning a
+	// different generous-by-default floor.
+	EnvironmentJobGateIncompleteWaitCapEnvVar = "ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP"
+	// EnvironmentJobGateIncompletePollEnvVar is EnvironmentJobGateIncompleteWaitCapEnvVar's
+	// twin for the poll interval, same parsing and fallback rule.
+	EnvironmentJobGateIncompletePollEnvVar = "ERUN_JOB_GATE_INCOMPLETE_POLL"
 )
+
+// environmentJobGateIncompleteWaitCap bounds how long a job's own finish check
+// waits for a non-handoff job it started to reach a verdict before giving up
+// and recording gate-incomplete anyway. It is generous by design: unlike an
+// interactive `job await` call, nothing is holding a connection or a caller's
+// turn open here — the supervisor is already a detached background process,
+// so waiting out even the longest gate costs nothing the await ceiling above
+// exists to avoid. It shares EnvironmentJobRetention's value only because both
+// answer "how long is worth waiting before giving up", not because the two
+// concerns are the same one. A var, not a const, so a Go test can shrink it
+// directly rather than genuinely waiting out a seeded "still running" child;
+// resolveEnvironmentJobGateIncompleteWaitCap is what a subprocess (an
+// integration test, or an operator) overrides instead, via
+// EnvironmentJobGateIncompleteWaitCapEnvVar.
+var environmentJobGateIncompleteWaitCap = EnvironmentJobRetention
+
+// environmentJobGateIncompletePoll is how often the wait re-reads the started
+// job's record while it waits. A var for the same test-shrinking reason as
+// environmentJobGateIncompleteWaitCap above.
+var environmentJobGateIncompletePoll = 2 * time.Second
+
+// resolveEnvironmentJobGateIncompleteWaitCap is what resolveEnvironmentJobOutcome
+// actually waits by: EnvironmentJobGateIncompleteWaitCapEnvVar when it is set
+// to a valid positive duration, otherwise environmentJobGateIncompleteWaitCap.
+func resolveEnvironmentJobGateIncompleteWaitCap() time.Duration {
+	return resolveEnvironmentJobDurationOverride(EnvironmentJobGateIncompleteWaitCapEnvVar, environmentJobGateIncompleteWaitCap)
+}
+
+// resolveEnvironmentJobGateIncompletePoll is environmentJobGateIncompletePoll's
+// EnvironmentJobGateIncompletePollEnvVar-aware twin.
+func resolveEnvironmentJobGateIncompletePoll() time.Duration {
+	return resolveEnvironmentJobDurationOverride(EnvironmentJobGateIncompletePollEnvVar, environmentJobGateIncompletePoll)
+}
+
+func resolveEnvironmentJobDurationOverride(envVar string, fallback time.Duration) time.Duration {
+	if raw := strings.TrimSpace(os.Getenv(envVar)); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return fallback
+}
 
 // EnvironmentJob is one unit of long work and its outcome.
 type EnvironmentJob struct {
@@ -209,6 +264,16 @@ type EnvironmentJob struct {
 	// It is what lets the parent's own finish check tell "a job I started" from
 	// "an unrelated job that happens to share this environment".
 	StartedByJobID string `json:"startedByJobId,omitempty"`
+	// Handoff marks this job as deliberately meant to outlive whatever started
+	// it, set by `job start --handoff`. Without it, a parent whose own process
+	// exits while this job is still running waits for it (see
+	// EnvironmentJobStateGateIncomplete) rather than trusting its own exit
+	// code — the right default for a nested gate, and the wrong one for work an
+	// agent starts and intentionally leaves running past its own turn (a
+	// release, a long render). Handoff is how a caller tells the two apart:
+	// this job is excluded from its parent's own finish check entirely, both
+	// while it runs and once it is done.
+	Handoff bool `json:"handoff,omitempty"`
 
 	LogPath          string `json:"logPath,omitempty"`
 	OutputBytes      int64  `json:"outputBytes"`
@@ -297,6 +362,16 @@ type EnvironmentJob struct {
 	// never a candidate for reclaim (a command job, one outside the work
 	// root, or one that did not finish cleanly).
 	CloneKeptReason string `json:"cloneKeptReason,omitempty"`
+
+	// StartedJobFailed names a job this job started (StartedByJobID, excluding
+	// any marked Handoff) that had already finished without succeeding by the
+	// time this job's own outcome was recorded. It exists because a clean exit
+	// code from this job's own process is not the same claim as a clean
+	// outcome from work it waited for (see EnvironmentJobStateGateIncomplete):
+	// once that wait ends because the started job finished, its own failure
+	// would otherwise vanish behind this job's own exit code. Empty when every
+	// non-handoff job this job started succeeded, or when it started none.
+	StartedJobFailed string `json:"startedJobFailed,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.
@@ -316,9 +391,12 @@ func (j EnvironmentJob) Finished() bool {
 // the supervisor managed to preserve on the agent's behalf (see
 // job_worktree.go), the agent itself did not commit its own work, and that is
 // worth a caller's attention even when everything else about the run looks
-// fine. Backs the EnvironmentJob.Succeeded field.
+// fine. StartedJobFailed is the same shape again, one step removed: a job
+// this job started and waited for reached a verdict, and the verdict was not
+// success. Backs the EnvironmentJob.Succeeded field.
 func environmentJobSucceeded(j EnvironmentJob) bool {
-	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 && !j.WorktreeDirty
+	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 &&
+		!j.WorktreeDirty && j.StartedJobFailed == ""
 }
 
 // LoadEnvironmentJob returns one job with its state resolved, reconciling and
@@ -426,20 +504,20 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	return job
 }
 
-// environmentJobRunningChildren returns the jobs in dir that name parentID as
-// their StartedByJobID and are still not finished, reconciled against current
-// process liveness the same way every other read is — so a child whose own
-// supervisor died without recording an outcome reads as unknown here too, not
-// as still running. This is what lets a job's own finish check tell "work I
-// started is still going" from a plain directory listing, without needing the
-// parent to have tracked its children itself.
-func environmentJobRunningChildren(dir, parentID string, now time.Time) []EnvironmentJob {
+// environmentJobChildren returns every job in dir that names parentID as its
+// StartedByJobID, reconciled against current process liveness the same way
+// every other read is — so a child whose own supervisor died without
+// recording an outcome reads as unknown here too, not as still running. Both
+// environmentJobRunningChildren and environmentJobFailedChildren derive from
+// this one listing so they agree on what counts as "a job I started" without
+// needing the parent to have tracked its children itself.
+func environmentJobChildren(dir, parentID string, now time.Time) []EnvironmentJob {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	hostname := currentJobHostname()
-	var running []EnvironmentJob
+	var children []EnvironmentJob
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -448,13 +526,45 @@ func environmentJobRunningChildren(dir, parentID string, now time.Time) []Enviro
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
-		job = reconcileEnvironmentJob(dir, job, now, processAlive, hostname)
-		if !job.Finished() {
-			running = append(running, job)
+		children = append(children, reconcileEnvironmentJob(dir, job, now, processAlive, hostname))
+	}
+	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
+	return children
+}
+
+// environmentJobRunningChildren returns parentID's children that are still not
+// finished, excluding any marked Handoff: a deliberately handed-off job is
+// meant to outlive whatever started it, so it must never be what keeps a
+// parent's own finish check waiting. This is what lets a job's own finish
+// check tell "work I started is still going" from a plain directory listing.
+func environmentJobRunningChildren(dir, parentID string, now time.Time) []EnvironmentJob {
+	var running []EnvironmentJob
+	for _, child := range environmentJobChildren(dir, parentID, now) {
+		if child.Handoff {
+			continue
+		}
+		if !child.Finished() {
+			running = append(running, child)
 		}
 	}
-	sort.Slice(running, func(i, j int) bool { return running[i].ID < running[j].ID })
 	return running
+}
+
+// environmentJobFailedChildren returns parentID's children that have finished
+// without succeeding, excluding any marked Handoff. It is what lets a parent
+// whose own process exited cleanly still report the truth once it has waited
+// out a job it started (see EnvironmentJobStateGateIncomplete) and that job
+// turns out not to have succeeded — a clean exit code from the parent's own
+// process is not the same claim as a clean outcome from work it waited for.
+func environmentJobFailedChildren(dir, parentID string, now time.Time) []EnvironmentJob {
+	var failed []EnvironmentJob
+	for _, child := range environmentJobChildren(dir, parentID, now) {
+		if child.Handoff || !child.Finished() || child.Succeeded {
+			continue
+		}
+		failed = append(failed, child)
+	}
+	return failed
 }
 
 // environmentJobAliveAgeMs is nil only when the job has never beaten, so a

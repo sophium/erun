@@ -92,6 +92,21 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	}
 }
 
+// shrinkGateIncompleteWait overrides the wait cap/poll a job's own finish
+// check uses when waiting for a job it started (see
+// awaitEnvironmentJobRunningChildren), so a test whose seeded child never
+// actually finishes hits the cap in milliseconds rather than genuinely
+// waiting out the production value. Restored on cleanup so tests do not leak
+// state into each other.
+func shrinkGateIncompleteWait(t *testing.T, waitCap, poll time.Duration) {
+	t.Helper()
+	originalCap, originalPoll := environmentJobGateIncompleteWaitCap, environmentJobGateIncompletePoll
+	environmentJobGateIncompleteWaitCap, environmentJobGateIncompletePoll = waitCap, poll
+	t.Cleanup(func() {
+		environmentJobGateIncompleteWaitCap, environmentJobGateIncompletePoll = originalCap, originalPoll
+	})
+}
+
 // An agent job that runs a gate through its own `job start` (agent-gate.sh's
 // detach-and-await, or an agent driving the same primitive directly) and then
 // ends -- however that end comes about: the agent backgrounding the run
@@ -104,8 +119,14 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 // instead. The gate job is seeded directly rather than started for real,
 // because the property under test is what the *parent's* finish check does
 // when a sibling record says still running, not how the sibling got there.
+//
+// The parent's finish check actually waits out the gate up to a cap before
+// declaring it incomplete (see resolveEnvironmentJobOutcome); the seeded
+// child here never finishes, so the wait is shrunk to milliseconds rather
+// than genuinely waiting out the production cap.
 func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSuccess(t *testing.T) {
 	isolateActivityCache(t)
+	shrinkGateIncompleteWait(t, 50*time.Millisecond, 5*time.Millisecond)
 
 	const tenant = "gate-incomplete-contract"
 	const environment = "seeded-child-test"
@@ -157,6 +178,128 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	}
 	if !strings.Contains(parent.Reason, childID) {
 		t.Fatalf("Reason %q does not name the still-running job %q", parent.Reason, childID)
+	}
+}
+
+// A deliberate handoff (`job start --handoff`) is excluded from its parent's
+// own finish check entirely -- unlike the gate above, a handed-off job that
+// is still running (and never finishes) must not stop its parent from
+// reporting its own, real success. This is the "some jobs are meant to
+// outlive the run that started them" case: a release or a long render an
+// agent kicks off on purpose before ending its own turn.
+func TestEnvironmentJobHandoffDoesNotBlockItsParentsSuccess(t *testing.T) {
+	isolateActivityCache(t)
+
+	const tenant = "gate-incomplete-contract"
+	const environment = "handoff-test"
+	const parentID = "outer"
+	const childID = "released-work"
+
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	// Alive for the test's whole life, same as the seeded child above -- the
+	// point under test is that Handoff excludes it regardless of how long it
+	// runs, not that it happens to finish quickly.
+	child := EnvironmentJob{
+		ID:             childID,
+		Name:           childID,
+		State:          EnvironmentJobStateRunning,
+		PID:            os.Getpid(),
+		StartedAt:      time.Now(),
+		StartedByJobID: parentID,
+		LeaseID:        environmentJobLeaseID(childID),
+		Handoff:        true,
+	}
+	if err := writeEnvironmentJob(dir, child); err != nil {
+		t.Fatalf("seed handed-off child job record: %v", err)
+	}
+
+	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          parentID,
+		Name:        parentID,
+		Command:     []string{"sh", "-c", "exit 0"},
+	}); err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+
+	parent, err := LoadEnvironmentJob(tenant, environment, parentID, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+	if !parent.Succeeded {
+		t.Fatalf("a handed-off job that is still running blocked its parent's success: %+v", parent)
+	}
+	if parent.State != EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q", parent.State, EnvironmentJobStateExited)
+	}
+}
+
+// A job this job started, and waited for (see the gate-incomplete test
+// above), that finishes without succeeding must not vanish behind this job's
+// own clean exit code once that wait concludes because the started job
+// finished (rather than by hitting the wait cap) -- StartedJobFailed is what
+// surfaces it without a caller separately chasing down every job this one
+// ever started. The child here is seeded already finished and failed, so no
+// waiting happens at all.
+func TestEnvironmentJobThatStartedAFinishedButFailedJobIsNotReportedAsSuccess(t *testing.T) {
+	isolateActivityCache(t)
+
+	const tenant = "gate-incomplete-contract"
+	const environment = "failed-child-test"
+	const parentID = "outer"
+	const childID = "gate"
+
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	failedCode := 1
+	child := EnvironmentJob{
+		ID:             childID,
+		Name:           childID,
+		State:          EnvironmentJobStateExited,
+		StartedAt:      time.Now(),
+		EndedAt:        time.Now(),
+		ExitCode:       &failedCode,
+		StartedByJobID: parentID,
+		LeaseID:        environmentJobLeaseID(childID),
+	}
+	if err := writeEnvironmentJob(dir, child); err != nil {
+		t.Fatalf("seed failed child job record: %v", err)
+	}
+
+	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          parentID,
+		Name:        parentID,
+		Command:     []string{"sh", "-c", "exit 0"},
+	}); err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+
+	parent, err := LoadEnvironmentJob(tenant, environment, parentID, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+	if parent.Succeeded {
+		t.Fatalf("job reported success even though a job it started (and waited for) failed: %+v", parent)
+	}
+	if parent.State != EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q -- this job's own process still exited cleanly, only the started job it waited for failed", parent.State, EnvironmentJobStateExited)
+	}
+	if !strings.Contains(parent.StartedJobFailed, childID) {
+		t.Fatalf("StartedJobFailed %q does not name the failed job %q", parent.StartedJobFailed, childID)
 	}
 }
 

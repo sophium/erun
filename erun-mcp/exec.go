@@ -31,6 +31,7 @@ type RawInput struct {
 	ID              string `json:"id,omitempty" jsonschema:"handle to address the backgrounded command by; only used with wait false. Defaults to name, so re-running the same named command keeps one stable handle"`
 	MaxOutputBytes  int64  `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes for a backgrounded command; past it output is dropped and the job reports outputTruncated. Only used with wait false. Defaults to 16777216"`
 	LeaseTTLSeconds int64  `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL a backgrounded command renews inside while it runs; only used with wait false. Defaults to 900"`
+	Handoff         bool   `json:"handoff,omitempty" jsonschema:"mark the backgrounded command as deliberately meant to outlive whatever starts it; only used with wait false. When this call itself runs from inside another job's own work, that job otherwise waits for this one to reach a verdict before reporting its own outcome; set true for work meant to keep running past the caller's own turn on purpose"`
 	Preview         bool   `json:"preview,omitempty" jsonschema:"when true, trace the command (or, with wait false, the job that would start) without executing it"`
 	Verbosity       int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	Wait            *bool  `json:"wait,omitempty" jsonschema:"when true (the default), run in the foreground and return once the command exits, with its captured stdout/stderr inline -- today's behaviour. Set false to detach the command as a background job instead and get back {jobId, state: running} immediately: erun gives it its own session, captures merged stdout/stderr to the job's log, and records the exit status by waiting on the process, so nothing has to be wrapped in setsid/nohup/a redirect. Poll exec_job_status/exec_job_await/exec_job_output for the outcome. This is the replacement for the removed job_start tool's command mode; reach for exec_agent instead when the work is an AI tool rather than a plain command"`
@@ -99,6 +100,7 @@ func execRawBackground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		Env:            input.Env,
 		MaxOutputBytes: input.MaxOutputBytes,
 		LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
+		Handoff:        input.Handoff,
 		SupervisorPath: supervisor,
 	})
 	if err != nil {

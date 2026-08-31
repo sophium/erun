@@ -146,7 +146,7 @@ type JobAwaitInput struct {
 	Tenant         string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the job; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
 	Environment    string `json:"environment,omitempty" jsonschema:"environment holding the job; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID             string `json:"id" jsonschema:"job to wait for"`
-	TimeoutSeconds int64  `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning still-running; defaults to 30 and may not exceed 600, so no call is ever held open for the work's lifetime"`
+	TimeoutSeconds int64  `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning still-running; defaults to 30 and may not exceed 600 (a larger value is refused, not capped silently), so no call is ever held open for the work's lifetime. For a job that can run longer than 600s, call this tool again each time it reports timedOut=true rather than requesting one longer wait"`
 }
 
 func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, eruncommon.AwaitEnvironmentJobResult, error) {

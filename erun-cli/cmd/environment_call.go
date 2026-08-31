@@ -92,6 +92,8 @@ func isZeroToolArgument(value any) bool {
 		return len(typed) == 0
 	case map[string]string:
 		return len(typed) == 0
+	case bool:
+		return !typed
 	}
 	return false
 }

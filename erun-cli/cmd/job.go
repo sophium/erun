@@ -83,6 +83,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	var env []string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
+	var handoff bool
 	cmd := &cobra.Command{
 		Use:   "start [flags] -- <command> [args...]",
 		Short: "Run a command, or an AI agent, as a detached job and return its handle",
@@ -104,7 +105,13 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
 			"supervisor's argv, visible to anything that can list processes in this\n" +
 			"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
-			"few other names that could redirect what the job executes are refused.",
+			"few other names that could redirect what the job executes are refused.\n\n" +
+			"When this start itself runs from inside another job's own work (an agent\n" +
+			"job running `job start` for a gate, the common case), that other job waits\n" +
+			"for this one to reach a verdict before it reports its own outcome — its exit\n" +
+			"code alone is never trusted while work it started has not finished. Pass\n" +
+			"--handoff for work that is meant to outlive the caller on purpose (a release,\n" +
+			"a long render): it excludes this job from that wait entirely.",
 		Example: "  # Start a test suite and come back for the result.\n" +
 			"  erun exec job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
 			"  erun exec job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
@@ -113,7 +120,9 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"  erun exec job status --tenant team --environment dev --id sweep\n\n" +
 			"  # Raise an agent's output-token cap for this run only.\n" +
 			"  erun exec job start --tenant team --environment dev --name sweep --agent claude \\\n" +
-			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'",
+			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'\n\n" +
+			"  # Kick off a release that is meant to keep running past this run's own turn.\n" +
+			"  erun exec job start --tenant team --environment dev --name release --handoff -- erun release",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			envMap, err := parseJobEnvFlags(env)
@@ -129,6 +138,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 				Env:            envMap,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
+				Handoff:        handoff,
 			}
 			if strings.TrimSpace(agent) != "" {
 				params.Agent = agent
@@ -147,6 +157,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
+	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -435,7 +446,17 @@ func jobExitedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
 	}
-	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobStartedJobFailedSuffix surfaces a job this job started and waited for
+// (see EnvironmentJobStateGateIncomplete) that finished without succeeding --
+// the one thing this job's own exit code cannot say once that wait is over.
+func jobStartedJobFailedSuffix(job common.EnvironmentJob) string {
+	if strings.TrimSpace(job.StartedJobFailed) == "" {
+		return ""
+	}
+	return ", " + job.StartedJobFailed
 }
 
 // jobCloneSuffix surfaces what happened to an agent job's own working
@@ -491,7 +512,7 @@ func jobAbandonedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
 	}
-	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
 // jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
@@ -577,11 +598,24 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the 5000ms caller threshold before state necessarily catches up, so a\n" +
 			"caller in a hurry can act on it directly instead of waiting for the next\n" +
 			"reconcile (see `erun exec job status --help`).\n\n" +
+			"--timeout is capped at 10m: a wait bounded well past the length of a single\n" +
+			"call is the same held-connection failure mode this command exists to avoid,\n" +
+			"just at a larger size. A job that runs longer than 10m (the full test suite\n" +
+			"gate routinely does) is not a case this command refuses to cover -- call it\n" +
+			"again each time it reports the job still running (exit 124) rather than\n" +
+			"asking for a single longer wait; a timeout past the cap is refused outright,\n" +
+			"naming the 10m ceiling in the refusal.\n\n" +
 			"Exit codes are the contract: 0 when the job exited 0, 124 when the timeout\n" +
 			"elapsed with the job still running, 125 when the outcome is unknown, and 1\n" +
-			"when the job exited non-zero (its real code is in the reported result).",
-		Example: "  erun exec job await --tenant team --environment dev --id suite --timeout 2m",
-		Args:    cobra.NoArgs,
+			"when the job exited non-zero (its real code is in the reported result). 124\n" +
+			"is never a verdict on the job -- it means only that this one call's own\n" +
+			"bounded wait elapsed, and the documented response is to call await again,\n" +
+			"not to treat the silence as an answer.",
+		Example: "  erun exec job await --tenant team --environment dev --id suite --timeout 2m\n\n" +
+			"  # A gate that can run longer than the 10m ceiling: keep awaiting at the\n" +
+			"  # ceiling until it stops reporting 124.\n" +
+			"  erun exec job await --tenant team --environment dev --id suite --timeout 10m",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobAwait(cmd, resolveOpen, common.AwaitEnvironmentJobParams{
 				Tenant:      tenant,
@@ -593,7 +627,7 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 	}
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to wait for")
-	cmd.Flags().DurationVar(&timeout, "timeout", common.DefaultEnvironmentJobAwaitTimeout, "How long to wait before reporting the job as still running")
+	cmd.Flags().DurationVar(&timeout, "timeout", common.DefaultEnvironmentJobAwaitTimeout, fmt.Sprintf("How long to wait before reporting the job as still running (capped at %s; call await again to keep waiting past it)", common.MaxEnvironmentJobAwaitTimeout))
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -660,6 +694,8 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 		return fmt.Errorf("job %q ended while work it started was still running: %s", result.Job.ID, result.Job.Reason)
 	case result.Job.WorktreeDirty:
 		return fmt.Errorf("job %q ended with an uncommitted working tree: %s", result.Job.ID, jobWorktreeSummary(result.Job))
+	case strings.TrimSpace(result.Job.StartedJobFailed) != "":
+		return fmt.Errorf("job %q: %s", result.Job.ID, result.Job.StartedJobFailed)
 	default:
 		return fmt.Errorf("job %q exited %d", result.Job.ID, jobExitCodeOrUnset(result.Job))
 	}
@@ -824,6 +860,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	var env []string
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
+	var handoff bool
 	cmd := &cobra.Command{
 		Use:    "supervise [flags] -- <command> [args...]",
 		Short:  "Run a job's work, hold its lease, and record the outcome (internal)",
@@ -845,6 +882,7 @@ func newJobSuperviseCmd() *cobra.Command {
 				Env:            envMap,
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
+				Handoff:        handoff,
 			})
 		},
 	}
@@ -856,6 +894,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several")
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
+	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it")
 	return cmd
 }
 
