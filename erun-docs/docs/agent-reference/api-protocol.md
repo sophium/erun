@@ -145,6 +145,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `DELETE` | `/v1/environments/{environment_id}` | Start tearing down a runtime env's namespace (skipped if it never deployed) and removing its row — the server-side equivalent of `erun delete`. Asynchronous: `202 Accepted` with the row at `status: deleting`; poll to see it converge. Not recoverable. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
+| `POST` | `/v1/environments/{environment_id}/ai-sessions` | The environment's own AI-tool hooks report their turn-boundary status (busy/idle/awaiting-input/exited) for one session. Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -517,6 +518,50 @@ The operator lands this token as the Secret the per-tenant Issuer's webhook solv
 | `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend. |
 | `500` | The tenant read or signing failed (internal wiring error). | Retry; if it persists, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/ai-sessions` {#ai-sessions-endpoint}
+
+Lets an environment's own AI-tool hooks report a turn-boundary event for one session (`ai`, `contribute-ai`, `open-<slot>`) — the authenticated-edge twin of the structured busy/idle/awaiting-input status model the desktop and per-env MCP already resolve locally from the same events, replacing what used to be a PTY output-volume heuristic. A later report **replaces** the previous one outright for that session: only the most recent event decides the resolved state, never how long it has been since. The environment is resolved from `{environment_id}` under row-level security, so a caller can only report against its own tenant's environment.
+
+```jsonc
+// POST /v1/environments/{environment_id}/ai-sessions body
+{
+  "sessionId": "ai",             // required
+  "tool": "claude",              // optional — an event that omits it carries the previously reported tool forward
+  "event": "turn-end",           // required — one of: turn-start, tool-use, turn-end, notify, exit
+  "exitCode": null,              // optional — set on an "exit" event
+  "exitReason": ""               // optional — set on an "exit" event; the literal value "oom" resolves state to oom-killed
+}
+```
+
+There is no client-supplied timestamp: the backend stamps its own receipt time, so a caller cannot make a stale or clock-skewed report read as current.
+
+**Resolved state.** On success (`201`) the endpoint returns the same resolved shape a local caller sees:
+
+```jsonc
+// 201 response
+{
+  "sessionId": "ai",
+  "tool": "claude",
+  "state": "awaiting-input",     // idle | busy | awaiting-input | exited | oom-killed
+  "reason": "finished its turn and is waiting for your next message",
+  "lastActivity": "2026-08-31T21:53:01Z",
+  "exitCode": null
+}
+```
+
+`event` → `state` resolution: `turn-start`/`tool-use` → `busy`; `turn-end`/`notify` → `awaiting-input`; `exit` with `exitReason: "oom"` → `oom-killed`; any other `exit` → `exited`. A session with no recorded event at all reads as `idle`, never as an error.
+
+**No read route yet.** This endpoint is deliberately write-only: no `GET` reads it back today, because no operator surface (hosted console or a native companion client) yet exists to consume one, and this platform does not ship a route with nothing that can call it. The read side ships alongside its first real caller.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env, never leaking its existence). | Report against an environment id the caller's tenant owns. |
+| `400` | `sessionId` is empty, or `event` is not one of the five recognized values. | Fix the request body; an unrecognized event is refused rather than silently resolving to `idle`. |
+| `500` | The write failed (internal wiring error or repository failure). | Retry; if it persists, it is a server bug. |
 
 ### DNS-01 broker: `POST /v1/dns01/present` · `POST /v1/dns01/cleanup` {#dns01-broker}
 

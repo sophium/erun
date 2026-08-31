@@ -124,3 +124,8 @@ CREATE TRIGGER platform_rate_limits_set_timestamps
   BEFORE INSERT OR UPDATE ON platform_rate_limits
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER ai_sessions_set_timestamps
+  BEFORE INSERT OR UPDATE ON ai_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

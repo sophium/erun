@@ -27,6 +27,7 @@ env "default" {
     "file://schema/tables/cloud_provider_aliases.sql",
     "file://schema/tables/context_credentials.sql",
     "file://schema/tables/usage_events.sql",
+    "file://schema/tables/ai_sessions.sql",
     "file://schema/tables/invites.sql",
     "file://schema/tables/invite_requests.sql",
     "file://schema/tables/platform_rate_limits.sql",
@@ -68,6 +69,7 @@ env "default" {
     "file://schema/rls/cloud_provider_aliases.sql",
     "file://schema/rls/context_credentials.sql",
     "file://schema/rls/usage_events.sql",
+    "file://schema/rls/ai_sessions.sql",
     "file://schema/rls/invites.sql",
   ]
   url = var.database_url
