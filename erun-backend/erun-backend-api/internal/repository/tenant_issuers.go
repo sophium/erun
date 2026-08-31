@@ -17,11 +17,14 @@ func NewTenantIssuerRepository(txs *TxManager) *TenantIssuerRepository {
 	return &TenantIssuerRepository{txs: txs}
 }
 
-func (r *TenantIssuerRepository) List(ctx context.Context) ([]model.TenantIssuer, error) {
-	securityContext, ok := security.FromContext(ctx)
-	if !ok {
-		return nil, ErrMissingSecurityContext
-	}
+// TenantIssuerFilter scopes List. TenantID is the explicit target tenant —
+// required for an operations-scoped caller, mirroring UserFilter/InviteFilter.
+type TenantIssuerFilter struct {
+	TenantID string
+}
+
+func (r *TenantIssuerRepository) List(ctx context.Context, filter TenantIssuerFilter) ([]model.TenantIssuer, error) {
+	tenantID := strings.TrimSpace(filter.TenantID)
 	var issuers []model.TenantIssuer
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewRaw(`
@@ -32,7 +35,7 @@ func (r *TenantIssuerRepository) List(ctx context.Context) ([]model.TenantIssuer
 			  JOIN issuers i ON i.issuer = ti.issuer
 			 WHERE ti.tenant_id = ?
 			 ORDER BY ti.name, ti.issuer
-		`, securityContext.TenantID).Scan(ctx, &issuers)
+		`, tenantID).Scan(ctx, &issuers)
 	})
 	return issuers, err
 }
