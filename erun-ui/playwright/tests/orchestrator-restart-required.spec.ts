@@ -63,7 +63,7 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
     // is what tells the two states apart.
     await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeVisible();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     const card = page.getByRole('dialog', { name: `${SEED_ORCHESTRATOR} details` });
     await expect(card).toBeVisible();
     await expect(card).toContainText('Running');
@@ -80,7 +80,7 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
     await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeHidden();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     const card = page.getByRole('dialog', { name: `${SEED_ORCHESTRATOR} details` });
     await expect(card).toBeVisible();
     await expect(card).not.toContainText('Its environments changed while it was running');

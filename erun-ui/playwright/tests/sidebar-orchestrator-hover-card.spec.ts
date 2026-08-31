@@ -72,7 +72,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Running');
@@ -90,7 +90,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
     await stubOrchestratorList(page, snapshot({ busy: false }));
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Running');
@@ -108,7 +108,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
     await stubOrchestratorList(page, snapshot({ status: 'stopped', sessionId: 0 }));
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Stopped');
@@ -125,7 +125,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
     await app.reboot();
 
     const row = app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR);
-    await row.hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     await expect(card(page)).toBeVisible();
     await expect(row).toBeEnabled();
     await row.click();

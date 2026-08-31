@@ -615,30 +615,85 @@ export function removeTenant(tenant: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant), { recursive: true, force: true });
 }
 
-// addOrchestrators appends throwaway orchestrator entries directly to the
-// top-level user config.yaml -- the same shape seedBaseline() writes for
-// SEED_ORCHESTRATOR -- so a spec can stage a realistic population (erun#1748:
-// the field report was 7 orchestrators, 9+ environments) without depending on
-// whatever another spec in this worker happened to leave behind.
-// `orchestrators:` is the file's last top-level key, so a plain append keeps
-// the YAML list valid. WhipTargets reads this file fresh on every call, so no
-// reload/wait is needed after writing it. Returns a restore function that
-// puts the file back exactly as found.
+const ORCHESTRATORS_KEY = 'orchestrators:';
+
+// orchestratorEntries renders sequence items at whatever indentation the file
+// already uses for them. Only the base indent varies between writers; the
+// structure relative to it does not -- the item dash sits at `indent`, the
+// item's own keys two further in, and its nested sequence two beyond that.
+function orchestratorEntries(
+  ids: string[],
+  tenant: string,
+  environment: string,
+  indent: number,
+): string[] {
+  const item = ' '.repeat(indent);
+  const key = ' '.repeat(indent + 2);
+  const nested = ' '.repeat(indent + 4);
+  return ids.flatMap((id) => [
+    `${item}- id: ${id}`,
+    `${key}name: ${id}`,
+    `${key}environments:`,
+    `${nested}- tenant: ${tenant}`,
+    `${nested}  environment: ${environment}`,
+    `${nested}  directory: ${repoDir()}`,
+  ]);
+}
+
+// withOrchestrators returns `source` with `ids` added to its top-level
+// `orchestrators:` sequence.
+//
+// Appending the entries at end-of-file at a fixed indentation, as this used
+// to, is wrong in two ways that only show up once the desktop has written the
+// file itself. seedBaseline hand-writes it with two-space sequence indentation
+// and `orchestrators:` last, but the desktop re-emits the whole file through
+// its own YAML marshaller the moment any spec creates an orchestrator through
+// the dialog -- and that writer indents sequences by four and is free to place
+// further top-level keys below `orchestrators:`. Entries appended at the wrong
+// indent, or after a following top-level key, make the file unparseable.
+//
+// That is not a torn write a reader can wait out: it is stable corruption, so
+// every later read reports it, the desktop renders zero tenants behind a
+// "could not be read" banner, and every subsequent spec on that worker that
+// waits for a row it seeded runs out its own timeout instead. Reading the
+// file's own indentation and splicing into the block it belongs to keeps both
+// writers' shapes valid.
+function withOrchestrators(
+  source: string,
+  ids: string[],
+  tenant: string,
+  environment: string,
+): string {
+  const lines = source.split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);
+  if (keyIndex < 0) {
+    // Nothing to extend. A brand-new top-level key at end-of-file is valid
+    // whatever precedes it, so this is the one safe place to append.
+    const base = source === '' || source.endsWith('\n') ? source : `${source}\n`;
+    return `${base}${ORCHESTRATORS_KEY}\n${orchestratorEntries(ids, tenant, environment, 2).join('\n')}\n`;
+  }
+  let end = keyIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  const existingItem = lines.slice(keyIndex + 1, end).find((line) => /^\s+- /.test(line));
+  const indent = existingItem ? existingItem.length - existingItem.trimStart().length : 2;
+  lines.splice(end, 0, ...orchestratorEntries(ids, tenant, environment, indent));
+  return lines.join('\n');
+}
+
+// addOrchestrators stages throwaway orchestrator entries in the top-level user
+// config.yaml -- the same shape seedBaseline() writes for SEED_ORCHESTRATOR --
+// so a spec can stage a realistic population (the field report behind the whip
+// panel's layout was 7 orchestrators and 9+ environments) without depending on
+// whatever another spec in this worker happened to leave behind. WhipTargets
+// reads this file fresh on every call, so no reload/wait is needed after
+// writing it. Returns a restore function that puts the file back exactly as
+// found.
 export function addOrchestrators(ids: string[], tenant: string, environment: string): () => void {
   const configPath = path.join(erunConfigDir(), 'config.yaml');
   const before = fs.readFileSync(configPath, 'utf8');
-  const entries = ids
-    .map(
-      (id) =>
-        `  - id: ${id}\n` +
-        `    name: ${id}\n` +
-        '    environments:\n' +
-        `      - tenant: ${tenant}\n` +
-        `        environment: ${environment}\n` +
-        `        directory: ${repoDir()}\n`,
-    )
-    .join('');
-  writeConfigFile(configPath, before + entries);
+  writeConfigFile(configPath, withOrchestrators(before, ids, tenant, environment));
   return () => {
     writeConfigFile(configPath, before);
   };

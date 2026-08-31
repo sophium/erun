@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { captureHoverCard, expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // No surface that lists environments reported their usage, so comparing two
@@ -108,9 +108,10 @@ test.describe('environment usage on the hover cards', () => {
       await expect(dialog).not.toContainText('Stale', { timeout: 1_000 });
       // Taken while still converged and hovered — a screenshot outside this
       // callback can race the backend sweep's own overwrite of the reading.
-      await dialog.screenshot({
-        path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-fresh.png',
-      });
+      await captureHoverCard(
+        dialog,
+        '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-fresh.png',
+      );
     });
   });
 
@@ -137,9 +138,10 @@ test.describe('environment usage on the hover cards', () => {
         await expect(dialog).toContainText('Stale', { timeout: 1_000 });
         // Taken while still converged and hovered — a screenshot outside this
         // callback can race the backend sweep's own overwrite of the reading.
-        await dialog.screenshot({
-          path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-stale.png',
-        });
+        await captureHoverCard(
+          dialog,
+          '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-stale.png',
+        );
       },
     );
   });
@@ -176,9 +178,10 @@ test.describe('environment usage on the hover cards', () => {
         await expect(dialog).not.toContainText('0%', { timeout: 1_000 });
         // Taken while still converged and hovered — a screenshot outside this
         // callback can race the backend sweep's own overwrite of the reading.
-        await dialog.screenshot({
-          path: '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-no-pod.png',
-        });
+        await captureHoverCard(
+          dialog,
+          '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-no-pod.png',
+        );
       },
     );
   });
@@ -196,16 +199,17 @@ test.describe('environment usage on the hover cards', () => {
     const dialog = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
     await driveEnvUsage(page, freshUsagePayload(), async () => {
       await page.mouse.move(0, 0);
-      await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+      await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
       await expect(dialog).toBeVisible({ timeout: 1_000 });
       await expect(dialog).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
       await expect(dialog).toContainText('CPU 12.0%', { timeout: 1_000 });
       await expect(dialog).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
       // Taken while still converged and hovered — a screenshot outside this
       // callback can race the backend sweep's own overwrite of the reading.
-      await dialog.screenshot({
-        path: '/home/erun/.erun/outputs/environment-usage-visual/orchestrator-card-usage.png',
-      });
+      await captureHoverCard(
+        dialog,
+        '/home/erun/.erun/outputs/environment-usage-visual/orchestrator-card-usage.png',
+      );
     });
   });
 

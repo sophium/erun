@@ -14,20 +14,29 @@ import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seed
 // reading pixel counts off a screenshot, so a future one-off className on a
 // single row fails a test instead of drifting back to six treatments quietly.
 
+// The card is only alive while the pointer rests on the row that raised it, so
+// every read below is bounded and taken in as few round trips as possible: a
+// sample split across one call per element leaves a window between counting
+// the rows and measuring them, and a card that closes inside that window does
+// not fail the read, it hangs it -- the next .nth() waits for an element that
+// cannot come back while the pointer still sits where it is. The callers
+// re-hover and re-read as one convergent step for the same reason.
+const READ_TIMEOUT_MS = 2_000;
+
 async function fontSizePx(locator: import('@playwright/test').Locator): Promise<number> {
-  const size = await locator.evaluate((el) => window.getComputedStyle(el).fontSize);
+  const size = await locator.evaluate((el) => window.getComputedStyle(el).fontSize, undefined, {
+    timeout: READ_TIMEOUT_MS,
+  });
   return Number.parseFloat(size);
 }
 
 async function distinctFontSizes(
   locator: import('@playwright/test').Locator,
 ): Promise<Set<number>> {
-  const count = await locator.count();
-  const sizes = new Set<number>();
-  for (let index = 0; index < count; index += 1) {
-    sizes.add(await fontSizePx(locator.nth(index)));
-  }
-  return sizes;
+  const sizes = await locator.evaluateAll((els) =>
+    els.map((el) => Number.parseFloat(window.getComputedStyle(el).fontSize)),
+  );
+  return new Set(sizes);
 }
 
 async function stubWorkingIssue(page: Page): Promise<void> {
@@ -58,16 +67,29 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     await stubWorkingIssue(page);
     await app.reboot();
 
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible();
-    // Wait for the working-issue fetch (stubbed above) to resolve so the
-    // mono branch value is actually rendered before sizes are sampled.
-    await expect(card).toContainText('feature/1694-hover-card-type-scale');
-
-    const values = distinctFontSizes(card.locator('dd'));
-    const labels = distinctFontSizes(card.locator('dt'));
-    const [valueSizes, labelSizes] = await Promise.all([values, labels]);
+    let valueSizes = new Set<number>();
+    let labelSizes = new Set<number>();
+    let titleSize = 0;
+    await expect(async () => {
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      // Wait for the working-issue fetch (stubbed above) to resolve so the
+      // mono branch value is actually rendered before sizes are sampled.
+      await expect(card).toContainText('feature/1694-hover-card-type-scale', {
+        timeout: READ_TIMEOUT_MS,
+      });
+      valueSizes = await distinctFontSizes(card.locator('dd'));
+      labelSizes = await distinctFontSizes(card.locator('dt'));
+      // The title reuses the value treatment's size (emphasis is by weight
+      // only), never a fourth size.
+      titleSize = await fontSizePx(
+        card.getByText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: true }),
+      );
+      // Only that the card was still up for the whole read -- the scale itself
+      // is asserted once, below, on what was read.
+      expect(valueSizes.size).toBeGreaterThan(0);
+      expect(labelSizes.size).toBeGreaterThan(0);
+    }).toPass({ timeout: 20_000 });
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);
     expect(labelSizes.size, 'every dt in the card must share one font-size').toBe(1);
@@ -75,11 +97,7 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     const [valueSize] = [...valueSizes];
     const [labelSize] = [...labelSizes];
     expect(valueSize).toBeGreaterThan(labelSize as number);
-
-    // The title reuses the value treatment's size (emphasis is by weight
-    // only), never a fourth size.
-    const title = card.getByText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: true });
-    expect(await fontSizePx(title)).toBeCloseTo(valueSize as number, 1);
+    expect(titleSize).toBeCloseTo(valueSize as number, 1);
   });
 
   test('the orchestrator card value column is exactly one font-size, distinct from the label size', async ({
@@ -118,14 +136,19 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     });
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
     const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-    await expect(card).toBeVisible();
-    await expect(card).toContainText('Working, for');
-
-    const values = distinctFontSizes(card.locator('dd'));
-    const labels = distinctFontSizes(card.locator('dt'));
-    const [valueSizes, labelSizes] = await Promise.all([values, labels]);
+    let valueSizes = new Set<number>();
+    let labelSizes = new Set<number>();
+    let titleSize = 0;
+    await expect(async () => {
+      await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
+      await expect(card).toContainText('Working, for', { timeout: READ_TIMEOUT_MS });
+      valueSizes = await distinctFontSizes(card.locator('dd'));
+      labelSizes = await distinctFontSizes(card.locator('dt'));
+      titleSize = await fontSizePx(card.getByText(SEED_ORCHESTRATOR, { exact: true }));
+      expect(valueSizes.size).toBeGreaterThan(0);
+      expect(labelSizes.size).toBeGreaterThan(0);
+    }).toPass({ timeout: 20_000 });
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);
     expect(labelSizes.size, 'every dt in the card must share one font-size').toBe(1);
@@ -133,23 +156,23 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     const [valueSize] = [...valueSizes];
     const [labelSize] = [...labelSizes];
     expect(valueSize).toBeGreaterThan(labelSize as number);
-
-    const title = card.getByText(SEED_ORCHESTRATOR, { exact: true });
-    expect(await fontSizePx(title)).toBeCloseTo(valueSize as number, 1);
+    expect(titleSize).toBeCloseTo(valueSize as number, 1);
   });
 
   test('numeric values (version, usage figures) carry tabular figures', async ({ app }) => {
     await app.reboot();
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible();
-
-    const version = card.locator('dd').first();
-    await expect(version).toContainText('1.0.0');
-    const variant = await version
-      .locator('span')
-      .first()
-      .evaluate((el) => window.getComputedStyle(el).fontVariantNumeric);
-    expect(variant).toContain('tabular-nums');
+    await expect(async () => {
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      const version = card.locator('dd').first();
+      await expect(version).toContainText('1.0.0', { timeout: READ_TIMEOUT_MS });
+      const variant = await version
+        .locator('span')
+        .first()
+        .evaluate((el) => window.getComputedStyle(el).fontVariantNumeric, undefined, {
+          timeout: READ_TIMEOUT_MS,
+        });
+      expect(variant).toContain('tabular-nums');
+    }).toPass({ timeout: 20_000 });
   });
 });
