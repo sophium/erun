@@ -402,8 +402,9 @@ concrete: `common.tf`'s `backend "local" {}` keeps state at
 anyone who can `erun open` that env can read every credential Terraform has ever
 created there.
 
-Pick one of the two mitigations **in the scaffold** and record which in a
-comment in the module's `main.tf`. Leaving it undecided is not an option:
+Pick one of the two mitigations **per credential, in the scaffold** and
+record which in a comment in the module's `main.tf`. Leaving it undecided is
+not an option:
 
 1. **Terraform creates the identity, not the credential.** Manage the
    `aws_iam_user` and its policy; mint the access key out of band and write the
@@ -411,14 +412,58 @@ comment in the module's `main.tf`. Leaving it undecided is not an option:
    so Terraform manages the secret container but never its material. Nothing
    secret enters state. This is the same stance the blueprint already takes for
    the Zitadel masterkey, so it is a consistent extension rather than a new
-   idea — **prefer it.** The cost is honest: rotation becomes a manual
-   out-of-band re-put, not an `apply`.
+   idea — **prefer it wherever the credential allows it.** The cost is honest:
+   rotation becomes a manual out-of-band re-put, not an `apply`.
 2. **Treat the state backend as secret material** — encrypt it and
    access-control it. On erun's default local backend that means the env's home
    PVC and the set of people who can `erun open` the env. If that set is wider
    than the set who may hold the credential, this mitigation is not met: either
    move state to a backend that encrypts at rest with a restrictive key policy,
    or take option 1.
+
+**Option 1 is unavailable for a provider-derived credential** — one the
+provider computes as a local transform on the managed resource itself, rather
+than returning it from an API. `aws_iam_access_key.ses_smtp_password_v4` is
+the worked example: it is a SigV4 transform of the secret access key that the
+AWS provider derives on the resource, not a value the IAM API returns, so no
+`data` source can yield it for a key minted out of band — that holds even
+under `terraform import`, since there is nothing on the API side to import it
+from. This is easy to mis-check: a plural `aws_iam_access_keys` data source
+does exist, but it returns access-key *metadata* only, and never the secret or
+its SMTP derivation, so it cannot substitute. For this class of credential,
+Terraform must own the resource that derives it, and the material enters
+state regardless of preference. Hand-deriving the transform to keep the key
+out-of-band anyway is not a workaround for this — don't do it.
+
+**The mitigation is a per-credential decision, not a per-tree one.** A tree
+with one credential that cannot take option 1 still applies option 1 to every
+other credential that can — don't abandon the pattern tree-wide because one
+resource requires the fallback. The common shape mixes both in the same
+module set: an IAM reader key for the ESO sync (see erun installs no sync,
+above) takes option 1 — Terraform creates the `aws_iam_user` only, the key is
+minted and applied out of band — while a provider-derived key like the SMTP
+password takes option 2, in the same tree.
+
+**When the fallback is forced, the comment must say why, not just which.**
+The "record which, in a comment" rule above still applies verbatim when
+option 1 is chosen freely. When a credential falls back to option 2 because
+option 1 is structurally unavailable, name the reason at the resource —
+the derivation, and the absence of a data source that could substitute:
+
+```hcl
+# ses_smtp_password_v4 is a local SigV4 derivation the AWS provider computes
+# on this resource; no data source can yield the secret material or its SMTP
+# derivation, so this key cannot be minted out of band (option 1). Falls back
+# to option 2: state is encrypted + access-controlled (see Secrets Terraform
+# produces, above).
+resource "aws_iam_access_key" "ses" {
+  user = aws_iam_user.ses.name
+}
+```
+
+A comment that names the reason lets a reviewer tell a considered fallback
+from an unconsidered one; "state backend is encrypted" with no reason attached
+does not.
 
 ## Step 3 — the Helm side (optional — the patch/override path)
 
