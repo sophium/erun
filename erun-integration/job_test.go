@@ -710,6 +710,22 @@ func TestJob(t *testing.T) {
 		if await.ExitCode != 1 {
 			t.Fatalf("expected an abandoned job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 		}
+		// erun#1731: a raw exitCode of 0 sitting beside state "abandoned" is
+		// exactly the false-success shape a caller reading only exitCode would
+		// miss; succeeded must say so explicitly rather than leaving it to be
+		// re-derived from state.
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "gate", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State     string `json:"state"`
+			ExitCode  *int   `json:"exitCode"`
+			Succeeded bool   `json:"succeeded"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "abandoned" || payload.ExitCode == nil || *payload.ExitCode != 0 || payload.Succeeded {
+			t.Fatalf("expected an abandoned job with exitCode 0 to report succeeded=false, got %+v", payload)
+		}
 		golden.Equal(t, "job/a_job_that_backgrounds_work_and_exits_reads_as_abandoned_not_success", normalize.Apply(status.Combined+await.Combined))
 	})
 
@@ -762,6 +778,23 @@ func TestJob(t *testing.T) {
 		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if await.ExitCode != 1 {
 			t.Fatalf("expected a gate-incomplete job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		// erun#1731: this is the exact shape the issue reported -- exitCode 0
+		// sitting beside state gate-incomplete, with only state telling the
+		// truth. succeeded must say so explicitly, so exec_agent (and any other
+		// caller reading the job record over MCP or --output json) cannot read
+		// this as success from exitCode alone.
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State     string `json:"state"`
+			ExitCode  *int   `json:"exitCode"`
+			Succeeded bool   `json:"succeeded"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "gate-incomplete" || payload.ExitCode == nil || *payload.ExitCode != 0 || payload.Succeeded {
+			t.Fatalf("expected a gate-incomplete job with exitCode 0 to report succeeded=false, got %+v", payload)
 		}
 		golden.Equal(t, "job/a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", normalize.Apply(status.Combined+await.Combined))
 	})

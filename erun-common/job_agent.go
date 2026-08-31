@@ -60,7 +60,17 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	case agentToolClaude:
 		// --verbose is what makes stream-json emit per event instead of one
 		// closing envelope, which is the whole point of running it this way.
-		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose"}, nil
+		//
+		// --disallowedTools ScheduleWakeup: this run is a one-shot supervised
+		// process with no later invocation to wake into, unlike the orchestrator's
+		// own persistent session (ai_launch.go), which keeps the tool. Offering it
+		// here let the agent "successfully" schedule a wakeup that will never
+		// fire and end its turn, while the supervisor still recorded a clean exit
+		// -- the run looked done and the work it was waiting on was still in
+		// flight (erun#1731). Denying the tool removes it from what the model is
+		// even offered, verified against a real `claude -p` run, rather than
+		// merely rejecting the call after the model has already committed to it.
+		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
 	case agentToolCodex:
 		return []string{agentToolCodex, "exec", "--json", text}, nil
 	default:

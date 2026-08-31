@@ -41,7 +41,7 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if !finished.Succeeded() {
+	if !finished.Succeeded {
 		t.Fatalf("finished job = %+v, want succeeded", finished)
 	}
 	var decoded taskResult
@@ -74,7 +74,7 @@ func TestStartTaskEnvironmentJobRecordsAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if finished.Succeeded() {
+	if finished.Succeeded {
 		t.Fatalf("finished job = %+v, want failed", finished)
 	}
 	if finished.ExitCode == nil || *finished.ExitCode == 0 {
@@ -109,7 +109,7 @@ func TestStartTaskEnvironmentJobRecoversAPanic(t *testing.T) {
 	if finished.State != EnvironmentJobStateExited {
 		t.Fatalf("state = %q, want exited (never left running)", finished.State)
 	}
-	if finished.Succeeded() {
+	if finished.Succeeded {
 		t.Fatalf("a panicking task must never read as succeeded")
 	}
 }

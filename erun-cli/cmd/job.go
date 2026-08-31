@@ -652,7 +652,7 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 		return internal.WithExitCode(fmt.Errorf("job %q is still running after %ds", result.Job.ID, result.TimeoutSeconds), jobAwaitTimeoutExitCode)
 	case result.Job.State == common.EnvironmentJobStateUnknown:
 		return internal.WithExitCode(fmt.Errorf("job %q has no recorded outcome: %s", result.Job.ID, result.Job.Reason), jobAwaitUnknownExitCode)
-	case result.Job.Succeeded():
+	case result.Job.Succeeded:
 		return nil
 	case result.Job.State == common.EnvironmentJobStateAbandoned:
 		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
