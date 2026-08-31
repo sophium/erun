@@ -973,9 +973,15 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.ResolveAWSIdentity == nil {
 		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
+		if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+			deps.ResolveAWSIdentity = libraryResolveAWSIdentity
+		}
 	}
 	if deps.CheckAWSStatus == nil {
 		deps.CheckAWSStatus = defaultCheckAWSStatus
+		if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+			deps.CheckAWSStatus = libraryCheckAWSStatus
+		}
 	}
 	return deps
 }
@@ -1233,10 +1239,7 @@ func generatedAWSProfileName() string {
 }
 
 func defaultResolveAWSIdentity(ctx Context, profile string) (AWSIdentity, error) {
-	args := []string{"sts", "get-caller-identity", "--output", "json"}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsGetCallerIdentityArgs(profile)
 	ctx.TraceCommand("", "aws", args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
