@@ -1,0 +1,1 @@
+could not determine whether deployment "team-devops" is deployed (the kubernetes api server could not be reached (context "test-context")): couldn't get current server API group list: Get "https://<LOOPBACK>:6443/api?timeout=32s": dial tcp <LOOPBACK>:6443: connect: connection refused

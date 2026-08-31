@@ -235,6 +235,9 @@ func gitIsAncestorOfHead(projectRoot, commit string) (bool, error) {
 func gitCommitSubject(projectRoot, commit string) (string, error) {
 	output, err := Command("git", "-C", projectRoot, "show", "-s", "--format=%s", commit).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -249,6 +252,9 @@ func gitCommitSubject(projectRoot, commit string) (string, error) {
 func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]string, error) {
 	output, err := Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", revRange).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return nil, fmt.Errorf("%w: %s", err, stderr)
+		}
 		return nil, err
 	}
 	var matches []string
@@ -264,6 +270,9 @@ func findCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]strin
 func gitTagAnnotationSubject(projectRoot, tag string) (string, error) {
 	output, err := Command("git", "-C", projectRoot, "for-each-ref", "--format=%(contents:subject)", "refs/tags/"+tag).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil

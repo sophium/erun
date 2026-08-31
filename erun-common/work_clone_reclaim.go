@@ -296,6 +296,9 @@ func gitCommitsAhead(ctx Context, dir, base, tip string) (int, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-list", "--count", rangeSpec)
 	output, err := Command("git", "-C", dir, "rev-list", "--count", rangeSpec).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return 0, fmt.Errorf("%w: %s", err, stderr)
+		}
 		return 0, err
 	}
 	count, convErr := strconv.Atoi(strings.TrimSpace(string(output)))

@@ -1,0 +1,23 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Docker storage ==
+could not read: exit status 1: Error from server: etcdserver: request timed out
+The runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+Skipping the requested prune action(s) for the same reason.
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

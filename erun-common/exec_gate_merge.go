@@ -185,6 +185,9 @@ func gitResolveRef(ctx Context, root, ref string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", root, "rev-parse", ref)
 	output, err := Command("git", "-C", root, "rev-parse", ref).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil

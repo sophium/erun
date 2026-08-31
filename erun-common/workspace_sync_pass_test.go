@@ -17,16 +17,17 @@ import (
 // always correct, and the listing it was handed was not.
 
 const (
-	workspaceSyncSSHStubEnv         = "ERUN_COMMON_TEST_SSH_STUB"
-	workspaceSyncStubIndexEnv       = "ERUN_COMMON_TEST_SSH_STUB_INDEX"
-	workspaceSyncStubMissingEnv     = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
-	workspaceSyncStubStatEnv        = "ERUN_COMMON_TEST_SSH_STUB_STAT"
-	workspaceSyncStubOutputsEnv     = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS"
-	workspaceSyncStubOutputsExitEnv = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS_EXIT"
-	workspaceSyncStubArchiveEnv     = "ERUN_COMMON_TEST_SSH_STUB_ARCHIVE"
-	workspaceSyncStubGateEnv        = "ERUN_COMMON_TEST_SSH_STUB_GATE"
-	workspaceSyncStubTruncateEnv    = "ERUN_COMMON_TEST_SSH_STUB_TRUNCATE"
-	workspaceSyncStubFetchMarkerEnv = "ERUN_COMMON_TEST_SSH_STUB_FETCH_MARKER"
+	workspaceSyncSSHStubEnv           = "ERUN_COMMON_TEST_SSH_STUB"
+	workspaceSyncStubIndexEnv         = "ERUN_COMMON_TEST_SSH_STUB_INDEX"
+	workspaceSyncStubMissingEnv       = "ERUN_COMMON_TEST_SSH_STUB_MISSING"
+	workspaceSyncStubStatEnv          = "ERUN_COMMON_TEST_SSH_STUB_STAT"
+	workspaceSyncStubOutputsEnv       = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS"
+	workspaceSyncStubOutputsExitEnv   = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS_EXIT"
+	workspaceSyncStubOutputsStderrEnv = "ERUN_COMMON_TEST_SSH_STUB_OUTPUTS_STDERR"
+	workspaceSyncStubArchiveEnv       = "ERUN_COMMON_TEST_SSH_STUB_ARCHIVE"
+	workspaceSyncStubGateEnv          = "ERUN_COMMON_TEST_SSH_STUB_GATE"
+	workspaceSyncStubTruncateEnv      = "ERUN_COMMON_TEST_SSH_STUB_TRUNCATE"
+	workspaceSyncStubFetchMarkerEnv   = "ERUN_COMMON_TEST_SSH_STUB_FETCH_MARKER"
 )
 
 // TestMain doubles as the stub `ssh` binary: the test executable is copied onto
@@ -85,6 +86,9 @@ func runWorkspaceSyncSSHStubOutputsListing() int {
 		n, convErr := strconv.Atoi(code)
 		if convErr != nil {
 			return 1
+		}
+		if stderr := os.Getenv(workspaceSyncStubOutputsStderrEnv); stderr != "" {
+			_, _ = os.Stderr.WriteString(stderr)
 		}
 		return n
 	}

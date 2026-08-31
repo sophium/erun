@@ -68,6 +68,32 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_rollback_traces_helm_rollback", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_rollback_failure_reports_helm_stderr", func(t *testing.T) {
+		// erun#1768: RunDeployRecovery's rollback branch always captured
+		// helm's combined output, but runDeployRecoveryActions (the CLI
+		// caller) used to discard it on failure and return the bare error
+		// -- a real rollback failure read as a content-free "exit status
+		// 1" with no explanation of why. It must instead carry helm's own
+		// message.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`case "$1" in`,
+			`  status) printf '%s\n' 'NAME: team-devops' 'STATUS: deployed' ;;`,
+			`  rollback) echo 'Error: release: "team-devops": release has no rollback candidate' >&2; exit 1 ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a failed rollback, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_rollback_failure_reports_helm_stderr", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_clear_pending_helm_traces_kubectl_delete", func(t *testing.T) {
 		// Exercises the deploy-recovery action: --clear-pending-helm
 		// --dry-run must trace the `kubectl delete secrets,configmaps -l
@@ -1417,6 +1443,45 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_storage_unhealthy_diagnostic_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unrecognized_wait_failure_still_reports_kubectl_stderr", func(t *testing.T) {
+		// erun#1768: kubectl wait fails with a cause doctorKubectlDiagnostic
+		// does not recognize (neither the disk-i/o-error nor the
+		// namespace-lookup-failed shape above matches). Before the fix,
+		// normalizeDoctorKubectlError's unrecognized-cause branch discarded
+		// the captured stderr and returned the bare wrapped error, so the
+		// degraded report read "could not read: exit status 1" with no
+		// explanation. It must instead carry kubectl's own message.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `echo 'Error from server: etcdserver: request timed out' >&2; exit 1`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_unrecognized_wait_failure_still_reports_kubectl_stderr", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unrecognized_wait_failure_with_no_stderr_reports_exit_status_plainly", func(t *testing.T) {
+		// erun#1768's empty-stderr case: when kubectl wait fails with
+		// nothing captured on stderr, normalizeDoctorKubectlError has
+		// nothing to add, so the degraded report must still name the exit
+		// status plainly rather than emitting a blank fragment.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `exit 1`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_unrecognized_wait_failure_with_no_stderr_reports_exit_status_plainly", normalize.Apply(result.Combined))
 	})
 
 	t.Run("repair_config_recovers_cloud_context_real_run", func(t *testing.T) {
