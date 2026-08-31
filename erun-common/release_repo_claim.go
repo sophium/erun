@@ -229,6 +229,9 @@ func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, hol
 	cmd.Stdin = strings.NewReader(string(data))
 	output, err := cmd.Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -291,6 +294,9 @@ func loadReleaseRepoClaimRecord(ctx Context, projectRoot, remote, ref, version s
 	}
 	output, err := Command("git", "-C", projectRoot, "cat-file", "-p", probe).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return releaseRepoClaimRecord{}, fmt.Errorf("%w: %s", err, stderr)
+		}
 		return releaseRepoClaimRecord{}, err
 	}
 	var record releaseRepoClaimRecord

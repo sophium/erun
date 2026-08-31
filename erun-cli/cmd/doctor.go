@@ -318,6 +318,9 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 		}
 		output, runErr := common.RunDeployRecovery(ctx, req, action)
 		if runErr != nil {
+			if detail := strings.TrimSpace(output); detail != "" {
+				return fmt.Errorf("%w: %s", runErr, detail)
+			}
 			return runErr
 		}
 		if !ctx.DryRun {

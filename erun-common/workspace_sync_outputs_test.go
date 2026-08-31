@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,40 @@ func TestSyncOutputsArtifactsStillPrunesRemovedArtifactOnSuccessfulListing(t *te
 	}
 	if _, statErr := os.Stat(filepath.Join(artifactsLocal, "keep.exe")); statErr != nil {
 		t.Fatalf("expected the newly listed artifact to be present: %v", statErr)
+	}
+}
+
+// TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus is erun#1768:
+// cmd.Output() already captures ssh's own diagnostic onto exitErr.Stderr, so a
+// failure must surface it rather than the content-free "exit status 255" that
+// %w alone renders.
+func TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus(t *testing.T) {
+	stubWorkspaceSyncSSHForOutputs(t)
+	t.Setenv(workspaceSyncStubOutputsExitEnv, "255")
+	t.Setenv(workspaceSyncStubOutputsStderrEnv, "ssh: connect to host pod port 22: Connection refused")
+
+	_, err := remoteOutputsFiles(context.Background(), "pod", "/home/agent/outputs")
+	if err == nil {
+		t.Fatal("expected the ssh failure to surface as an error")
+	}
+	if !strings.Contains(err.Error(), "Connection refused") {
+		t.Fatalf("error %q does not include ssh's own diagnostic", err.Error())
+	}
+}
+
+// TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr covers the
+// case where ssh (or find) failed with nothing on stderr: the message must
+// still name the exit status rather than emit an empty, misleading fragment.
+func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testing.T) {
+	stubWorkspaceSyncSSHForOutputs(t)
+	t.Setenv(workspaceSyncStubOutputsExitEnv, "255")
+
+	_, err := remoteOutputsFiles(context.Background(), "pod", "/home/agent/outputs")
+	if err == nil {
+		t.Fatal("expected the ssh failure to surface as an error")
+	}
+	if !strings.Contains(err.Error(), "exit status 255") {
+		t.Fatalf("error %q should still name the exit status when ssh wrote nothing to stderr", err.Error())
 	}
 }
 

@@ -255,9 +255,25 @@ func remoteOutputsFiles(ctx context.Context, hostAlias, outputsRemote string) ([
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == remoteOutputsDirAbsentExitCode {
 			return nil, nil
 		}
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return nil, fmt.Errorf("list remote outputs: %w: %s", err, stderr)
+		}
 		return nil, fmt.Errorf("list remote outputs: %w", err)
 	}
 	return parseWorkspaceSyncPathList(output), nil
+}
+
+// stderrFromExitError trims the stderr exec.Cmd.Output() captures onto a
+// failed *exec.ExitError, so a caller that wrapped only "%w" (which renders
+// as the content-free "exit status N") can include the process's own
+// diagnostic instead. Returns "" for a non-ExitError (e.g. context
+// cancellation) or an ExitError with nothing on stderr.
+func stderrFromExitError(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return strings.TrimSpace(string(exitErr.Stderr))
+	}
+	return ""
 }
 
 // pruneLocalArtifacts deletes host artifact files no longer present in the pod so

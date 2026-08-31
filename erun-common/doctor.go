@@ -150,10 +150,16 @@ func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
 
 func normalizeDoctorKubectlError(req ShellLaunchParams, stderr string, err error) error {
 	diagnostic := doctorKubectlDiagnostic(req, stderr)
-	if diagnostic == "" {
-		return err
-	}
 	stderr = strings.TrimSpace(stderr)
+	if diagnostic == "" {
+		// No recognized cause, but kubectl's own stderr was still captured --
+		// include it rather than falling back to the bare "%w" (which renders
+		// as content-free "exit status N") that this branch used to return.
+		if stderr == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, stderr)
+	}
 	if stderr == "" {
 		return fmt.Errorf("%s: %w", diagnostic, err)
 	}

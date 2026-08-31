@@ -524,6 +524,9 @@ func gitRemoteTagExists(ctx Context, projectRoot, remote, tag string) (bool, err
 	ctx.TraceCommand("", "git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag)
 	output, err := Command("git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag).CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return false, fmt.Errorf("%w: %s", err, detail)
+		}
 		return false, err
 	}
 	return strings.TrimSpace(string(output)) != "", nil
@@ -540,6 +543,9 @@ func gitResolvedRef(ctx Context, projectRoot, ref string) (string, bool, error) 
 	if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
 		return "", false, nil
 	}
+	if detail := strings.TrimSpace(string(output)); detail != "" {
+		return "", false, fmt.Errorf("%w: %s", err, detail)
+	}
 	return "", false, err
 }
 
@@ -547,6 +553,9 @@ func GitCurrentBranch(ctx Context, projectRoot string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -556,6 +565,9 @@ func GitShortCommit(ctx Context, projectRoot string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -598,6 +610,9 @@ func gitWorktreeClean(ctx Context, projectRoot string) (bool, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no")
 	output, err := Command("git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no").CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return false, fmt.Errorf("%w: %s", err, detail)
+		}
 		return false, err
 	}
 	return strings.TrimSpace(string(output)) == "", nil
@@ -1477,6 +1492,9 @@ func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (Rele
 	}
 	output, err := Command("git", "-C", spec.ProjectRoot, "rev-parse", ref).CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w: %s", ref, err, detail)
+		}
 		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
 	}
 	sha := strings.TrimSpace(string(output))

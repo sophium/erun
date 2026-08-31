@@ -255,6 +255,9 @@ func readAttachedAppSessions(ctx Context, target RuntimeScaleTarget) ([]RemoteAp
 	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return nil, fmt.Errorf("%w: %s", err, stderr)
+		}
 		return nil, err
 	}
 	return ParseRemoteAppSessionHeartbeats(string(output)), nil

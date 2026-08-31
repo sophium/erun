@@ -275,6 +275,9 @@ func gitStagedFiles(ctx Context, root string) ([]string, error) {
 	ctx.TraceCommand("", "git", args...)
 	output, err := Command("git", args...).Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return nil, fmt.Errorf("%w: %s", err, stderr)
+		}
 		return nil, err
 	}
 	return splitNULSeparatedPaths(output), nil
@@ -297,6 +300,9 @@ func gitChangedWorkingTreeFiles(ctx Context, root string) ([]string, error) {
 		ctx.TraceCommand("", "git", traceArgs...)
 		output, err := Command("git", traceArgs...).Output()
 		if err != nil {
+			if stderr := stderrFromExitError(err); stderr != "" {
+				return fmt.Errorf("%w: %s", err, stderr)
+			}
 			return err
 		}
 		for _, path := range splitNULSeparatedPaths(output) {
