@@ -20,6 +20,7 @@ export const platformApi = createApi({
     'Environment',
     'Context',
     'IdentityUsers',
+    'PlatformUsers',
     'OrgSettings',
     'SmtpSettings',
     'Invites',

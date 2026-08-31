@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithStore } from '../test/renderWithStore';
@@ -78,6 +78,43 @@ describe('TenantsPanel', () => {
     // Scoped to a table cell: the create form's own Type select also defaults
     // to displaying "COMPANY", so a bare getByText would be ambiguous.
     expect(screen.getByRole('cell', { name: 'COMPANY' })).toBeInTheDocument();
+    // The response carried no userCount at all (a read path that never
+    // counts) -- this must render as "unresolved", never as the same "0
+    // users" badge a genuinely empty tenant gets.
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.queryByText('No users')).not.toBeInTheDocument();
+  });
+
+  it('flags a tenant with zero users as inert, distinctly from one with an unresolved count', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants' && req.method === 'GET') {
+        return jsonResponse([
+          {
+            tenantId: 'tn-empty',
+            name: 'validationagent',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+            userCount: 0,
+          },
+          {
+            tenantId: 'tn-populated',
+            name: 'acme',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+            userCount: 3,
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<TenantsPanel token="dev-token" docsUrl={undefined} />);
+    await screen.findByText('validationagent');
+
+    expect(screen.getByText('No users')).toBeInTheDocument();
+    expect(screen.getByText('3 users')).toBeInTheDocument();
+    expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
 
   it('registers a tenant and reports the no-first-user note, then refreshes the list', async () => {
@@ -247,6 +284,50 @@ describe('TenantsPanel', () => {
       maxTotalMemoryMb: 4096,
       maxTotalStorageGb: 100,
     });
+  });
+
+  it('enrolls the first user of an empty tenant from the Tenants view and names the TenantAdmin grant', async () => {
+    let enrollBody: unknown;
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants' && req.method === 'GET') {
+        return jsonResponse([
+          {
+            tenantId: 'tn-empty',
+            name: 'validationagent',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+            userCount: 0,
+          },
+        ]);
+      }
+      if (req.url === '/v1/users' && req.method === 'POST') {
+        enrollBody = req.body;
+        return jsonResponse(
+          { userId: 'u-1', tenantId: 'tn-empty', username: 'jane', alreadyEnrolled: false },
+          201,
+        );
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<TenantsPanel token="dev-token" docsUrl={undefined} />);
+    await screen.findByText('validationagent');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
+    const dialog = await screen.findByRole('dialog');
+    // Told before confirming, not discovered after (erun#1744 acceptance
+    // criterion): the notice is visible as soon as the dialog opens.
+    expect(within(dialog).getByText(/will be granted TenantAdmin/)).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText('Username', { exact: false }), {
+      target: { value: 'jane' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enroll user' }));
+
+    expect(
+      await screen.findByText(/first user and have been granted TenantAdmin/),
+    ).toBeInTheDocument();
+    expect(enrollBody).toEqual({ username: 'jane', tenantId: 'tn-empty' });
   });
 
   it('links the org-scoped-issuer explanation using the instance docs URL when provided', async () => {

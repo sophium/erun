@@ -194,3 +194,47 @@ func TestCreateReportsTenantNameConflictAndGetByNameResolvesIt(t *testing.T) {
 		t.Fatalf("GetByName returned tenant %s, want the first tenant %s that actually holds the name", resolved.TenantID, first.TenantID)
 	}
 }
+
+// TestListReportsUserCountPerTenant proves List's UserCount is a real
+// per-tenant read, not a value that defaults to zero when nothing was
+// counted: a tenant seeded with a user reports 1, and a tenant registered
+// with none reports an explicit 0 (a non-nil pointer), the distinction the
+// console's inert-tenant flag (erun#1744) depends on to tell "genuinely
+// empty" apart from "not computed".
+func TestListReportsUserCountPerTenant(t *testing.T) {
+	db := tenantsDatabase(t)
+	stamp := time.Now().Format("20060102150405.000000")
+
+	withUser := seedReachableTenant(t, db, "list-usercount-with-user-"+stamp,
+		"https://idp.list-usercount-e2e.example/with-user", "", "list-usercount-e2e-user")
+
+	ctx := security.WithContext(context.Background(), security.Context{TenantType: string(model.TenantTypeOperations)})
+	repo := NewTenantRepository(NewTxManager(db, DialectPostgres))
+	empty, err := repo.Create(ctx, CreateTenantParams{
+		Name:   "list-usercount-empty-" + stamp,
+		Type:   model.TenantTypeCompany,
+		Issuer: "https://idp.list-usercount-e2e.example/empty",
+	})
+	mustNoErr(t, err, "register the zero-user tenant")
+	t.Cleanup(func() { clearReachableTenants(t, db, withUser, empty.TenantID) })
+
+	tenants, err := repo.List(ctx)
+	mustNoErr(t, err, "List")
+
+	counts := make(map[string]*int, len(tenants))
+	for i := range tenants {
+		counts[tenants[i].TenantID] = tenants[i].UserCount
+	}
+
+	withUserCount := counts[withUser]
+	if withUserCount == nil || *withUserCount != 1 {
+		t.Fatalf("tenant with a seeded user: UserCount = %v, want a pointer to 1", withUserCount)
+	}
+	emptyCount := counts[empty.TenantID]
+	if emptyCount == nil {
+		t.Fatalf("tenant with zero users: UserCount = nil, want an explicit pointer to 0, not an unresolved count")
+	}
+	if *emptyCount != 0 {
+		t.Fatalf("tenant with zero users: UserCount = %d, want 0", *emptyCount)
+	}
+}

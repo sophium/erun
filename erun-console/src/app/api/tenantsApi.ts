@@ -7,12 +7,22 @@ import { asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';
 
+// userCount is populated only by listTenants (the operations-only listing
+// erun-backend-api's TenantRepository.List computes it for); it is
+// `undefined` — not 0 — for the createTenant/getReachableTenants responses,
+// which never count. Collapsing "not computed" into 0 would flag a healthy
+// tenant as inert the moment its count simply hadn't loaded yet.
 export interface PlatformTenant {
   tenantId: string;
   name: string;
   type: string;
   createdAt: string;
   updatedAt: string;
+  userCount?: number;
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
 }
 
 function parsePlatformTenant(raw: Record<string, unknown>): PlatformTenant {
@@ -22,6 +32,7 @@ function parsePlatformTenant(raw: Record<string, unknown>): PlatformTenant {
     type: asString(raw.type),
     createdAt: asString(raw.createdAt),
     updatedAt: asString(raw.updatedAt),
+    userCount: asOptionalNumber(raw.userCount),
   };
 }
 

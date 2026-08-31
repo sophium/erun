@@ -19,6 +19,7 @@ Signed in as an Operator on an **OPERATIONS** tenant, the console's **Users** vi
 - **Deactivate** a user, which blocks their next sign-in immediately. The console asks you to confirm before it takes effect, naming the person and the consequence.
 - **Reactivate** a deactivated user.
 - **Manage a user's roles.** A newly enrolled user starts with **no access at all** — they can sign in and do nothing until someone grants them a role. Click **Manage roles** on their row to see what they hold today, grant one of the tenant's defined roles, or revoke one. The tenant's first user is the one exception: they still get full access automatically, since a brand-new tenant with nobody able to grant anything would otherwise be stuck. For the full role/permission model, see [Agent reference · erun API protocol](/agent-reference/api-protocol#roles-endpoints).
+- **Enroll a user directly, into any tenant.** A second, separate form writes a user row straight into a tenant — the same action `erun platform user enroll` runs from the CLI — without creating a new identity-provider account. This is the one enrollment path that can target a tenant other than your own: a **Tenant** selector appears above the form, defaulting to your own tenant, so nothing changes for the common case unless you pick a different one. If the tenant you pick has no users yet, the form tells you before you submit that this enrollment makes them its first user and grants them **TenantAdmin**. Re-enrolling an identity already enrolled there reports back plainly that it already existed, distinct from a genuine username clash in that tenant.
 
 The **Org settings** view lets you read and change:
 
@@ -48,11 +49,13 @@ Every other view in this console operates inside your own tenant. Registering a 
 
 Signed in as an Operator on an OPERATIONS tenant, this view lets you:
 
-- **See every tenant this platform hosts** — name, type, and when it was registered.
+- **See every tenant this platform hosts** — name, type, when it was registered, and how many users it has.
 - **Register a new tenant.** Give it a **name** (lowercase letters and digits only, no hyphens — the console tells you this rule up front, since the `<tenant>-<env>` namespace needs it to stay unambiguous), a **type** (`COMPANY` or `OPERATIONS`), and the **issuer** whose tokens should resolve to it. A rejected name, issuer, or type renders next to the field it's actually about, not as a bare status code.
 - **Point a new tenant at a shared (org-scoped) issuer** — one identity provider serving several tenants — using the optional org field key/value pair. The view links to [the identity model's own explanation](/agent-reference/api-protocol#tenant-issuers) of how `(issuer, org)` resolves to a tenant, so those two values aren't guesswork.
 
 Registering a tenant creates **no first user**. The tenant's first admin is whoever presents the first valid token that resolves to it — the same per-tenant first-user bootstrap every tenant already relies on (see [Agent reference · erun API protocol](/agent-reference/api-protocol#tenant-issuers)). The console says this plainly right after registration, since it's easy to expect an enrollment step that doesn't exist here.
+
+That leaves a tenant reachable only once some token can actually resolve to it. **A tenant showing "No users" is flagged right in this list** — distinct from a count that hasn't loaded yet, which reads "Unknown" rather than a false zero — so an inert tenant is noticed here, where it was created, not discovered later as a support report. **Enroll user** on that row opens the same direct-enrollment action described under [What the console offers](#what-the-console-offers) above, already targeting this tenant, with the same first-user/TenantAdmin notice before you submit.
 
 For the full endpoint spec, see [Agent reference · erun API protocol](/agent-reference/api-protocol#post-v1tenants).
 

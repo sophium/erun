@@ -20,6 +20,11 @@ type Tenant struct {
 	Type          TenantType `json:"type" bun:"type"`
 	CreatedAt     time.Time  `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt     time.Time  `json:"updatedAt" bun:"updated_at,scanonly"`
+	// UserCount is read-only, UX-derived data populated only by queries that
+	// join against users (TenantRepository.List) — nil, not zero, wherever a
+	// query does not compute it, so a caller can tell "this tenant genuinely
+	// has zero users" apart from "this read path never counted".
+	UserCount *int `json:"userCount,omitempty" bun:"user_count,scanonly"`
 }
 
 type TenantIssuer struct {

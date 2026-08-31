@@ -1,11 +1,16 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -236,6 +241,87 @@ func TestUserRepositoryCreateTreatsReEnrollmentAsNoOp(t *testing.T) {
 	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND username = $2`, tenantID, "rihards").Scan(&count), "count rows for the requested username")
 	if count != 0 {
 		t.Fatalf("expected no user row for the requested (unused) username, got %d", count)
+	}
+}
+
+// seedTenant registers a second tenant beyond usersDatabase's own, so a test
+// can act as one tenant while targeting another.
+func seedTenant(t *testing.T, db *sql.DB, tenantType, namePrefix string) string {
+	t.Helper()
+	var tenantID string
+	err := db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, $2) RETURNING tenant_id`,
+		namePrefix+"-"+time.Now().Format("20060102150405.000000"), tenantType,
+	).Scan(&tenantID)
+	mustNoErr(t, err, "seed "+tenantType+" tenant")
+	t.Cleanup(func() { clearPermissionsTenant(t, db, tenantID) })
+	return tenantID
+}
+
+// TestUserRepositoryOperationsCallerEnrollsIntoTargetTenant is the
+// authorization boundary POST /v1/users' resolveTargetTenant exists for,
+// proven end to end rather than against a stub: an operations-scoped
+// caller's transaction runs as erun_operations (TxManager's
+// setPostgresSecurityContext), which schema/rls/users.sql's
+// users_operations_access policy lets write any tenant_id, so the enrolled
+// user must actually land in the requested target tenant, not the caller's
+// own operations tenant.
+func TestUserRepositoryOperationsCallerEnrollsIntoTargetTenant(t *testing.T) {
+	db, targetTenantID := usersDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	users := &UserRepository{txs: txs}
+	opsTenantID := seedTenant(t, db, "OPERATIONS", "users-e2e-ops")
+	opsCtx := security.WithContext(context.Background(), security.Context{
+		TenantID: opsTenantID, TenantType: "OPERATIONS", ErunUserID: "ops-caller",
+	})
+
+	created, _, err := users.Create(opsCtx, CreateUserParams{Username: "cross-tenant-user", TenantID: targetTenantID})
+	mustNoErr(t, err, "operations caller enrolls into the target tenant")
+	if created.TenantID != targetTenantID {
+		t.Fatalf("created.TenantID = %q, want the target tenant %q, not the operations caller's own", created.TenantID, targetTenantID)
+	}
+
+	var count int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND username = $2`, targetTenantID, "cross-tenant-user").Scan(&count), "count rows in the target tenant")
+	if count != 1 {
+		t.Fatalf("expected exactly one row landed in the target tenant, got %d", count)
+	}
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM users WHERE tenant_id = $1`, opsTenantID).Scan(&count), "count rows in the operations caller's own tenant")
+	if count != 0 {
+		t.Fatalf("expected no row landed in the operations caller's own tenant, got %d", count)
+	}
+}
+
+// TestUserRepositoryNonOperationsCallerCannotOverrideTenant proves the
+// authorization boundary holds even below the route's resolveTargetTenant
+// gate: a non-operations caller's transaction runs as erun_tenant, whose
+// users_tenant_isolation policy (schema/rls/users.sql) has WITH CHECK
+// (tenant_id = erun_current_tenant_id()), so an insert explicitly naming a
+// different tenant_id is refused by PostgreSQL itself — not merely by the
+// route's own check — if this method is ever reached with an override from
+// a non-operations caller.
+func TestUserRepositoryNonOperationsCallerCannotOverrideTenant(t *testing.T) {
+	db, callerTenantID := usersDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	users := &UserRepository{txs: txs}
+	targetTenantID := seedTenant(t, db, "COMPANY", "users-e2e-target")
+	callerCtx := security.WithContext(context.Background(), security.Context{
+		TenantID: callerTenantID, TenantType: "COMPANY", ErunUserID: "caller",
+	})
+
+	_, _, err := users.Create(callerCtx, CreateUserParams{Username: "should-not-exist", TenantID: targetTenantID})
+	if err == nil {
+		t.Fatalf("expected a non-operations caller's cross-tenant override to be refused, got success")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.InsufficientPrivilege {
+		t.Fatalf("expected a row-level-security insufficient-privilege error, got %v", err)
+	}
+
+	var count int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM users WHERE username = $1`, "should-not-exist").Scan(&count), "count rows for the refused username")
+	if count != 0 {
+		t.Fatalf("expected no row was written anywhere, got %d", count)
 	}
 }
 
