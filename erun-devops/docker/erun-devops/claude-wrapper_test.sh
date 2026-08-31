@@ -69,7 +69,7 @@ run_case "resume preserves user args" "claude-real [--continue] [hello]" hello
 
 # Bypass flags must not get --continue.
 for flag in --continue -c --resume -r --print -p --new --no-resume \
-            --help -h --version -v; do
+            --help -h --version -v --bg --background; do
     run_case "bypass flag ${flag}" "claude-real [${flag}]" "${flag}"
 done
 
@@ -77,9 +77,18 @@ done
 run_case "bypass flag with arg" "claude-real [--resume] [abc123]" --resume abc123
 
 # Subcommands bypass.
-for sub in mcp update migrate-installer setup-token config doctor; do
+for sub in mcp update migrate-installer setup-token config doctor \
+           agents attach stop respawn logs rm; do
     run_case "bypass subcommand ${sub}" "claude-real [${sub}]" "${sub}"
 done
+
+# Background-session subcommands bypass with their id argument, in project
+# dirs too (already present from the "resume injected" case above): they
+# address an instance by id, never the cwd's conversation.
+for sub in attach stop respawn logs rm; do
+    run_case "bg subcommand ${sub} with id in project dir" "claude-real [${sub}] [41e22820]" "${sub}" 41e22820
+done
+run_case "--bg with prompt in project dir" "claude-real [--bg] [do the thing]" --bg "do the thing"
 
 # Subcommand with arg.
 run_case "config set passes through" "claude-real [config] [set] [theme] [dark]" config set theme dark
