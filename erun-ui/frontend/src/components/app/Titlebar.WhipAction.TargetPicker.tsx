@@ -49,22 +49,15 @@ function environmentRows(
   }));
 }
 
-function whipButtonLabel(pending: boolean, count: number): string {
-  if (pending) {
-    return 'Whipping…';
-  }
-  return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
-}
-
 // TitlebarWhipTargetPicker is the selection surface issue erun#1700 asks for:
 // individual environments and orchestrators, checkable, plus the three group
-// shortcuts, with the primary action stating how many targets it will whip
-// before it acts (Nielsen #1, visibility of system status) rather than
-// leaving the operator to guess from an unlabeled button. Plain checkboxes
-// and buttons rather than a Command/cmdk list: the population here is short
-// and never needs type-to-filter, and every row is reachable with a plain Tab
-// (WCAG 2.1.1 keyboard) the same way the existing deploy-components and
-// orchestrator-environments checklists already are.
+// shortcuts. Plain checkboxes and buttons rather than a Command/cmdk list:
+// the population here is short and never needs type-to-filter, and every row
+// is reachable with a plain Tab (WCAG 2.1.1 keyboard) the same way the
+// existing deploy-components and orchestrator-environments checklists
+// already are. The primary whip action lives in the popover header
+// (Titlebar.WhipAction.tsx) rather than here, so it stays reachable without
+// scrolling this list (erun#1748).
 export function TitlebarWhipTargetPicker({
   targets,
   targetsLoading,
@@ -74,9 +67,6 @@ export function TitlebarWhipTargetPicker({
   onSelectAllEnvironments,
   onSelectAllOrchestrators,
   onSelectAll,
-  count,
-  pending,
-  onWhip,
 }: {
   targets: main.uiWhipTargetList | null;
   targetsLoading: boolean;
@@ -86,9 +76,6 @@ export function TitlebarWhipTargetPicker({
   onSelectAllEnvironments: () => void;
   onSelectAllOrchestrators: () => void;
   onSelectAll: () => void;
-  count: number;
-  pending: boolean;
-  onWhip: () => void;
 }): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
@@ -126,14 +113,6 @@ export function TitlebarWhipTargetPicker({
           />
         </div>
       )}
-      <Button
-        type="button"
-        variant="default"
-        disabled={pending || targetsLoading || count === 0}
-        onClick={onWhip}
-      >
-        {whipButtonLabel(pending, count)}
-      </Button>
     </div>
   );
 }
