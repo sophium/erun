@@ -72,17 +72,25 @@ export const test = base.extend<{
 // spec that seeds its own env config directly (rather than through the
 // fixtures above) can key its wait to the same observable precondition
 // instead of a single fixed-timeout reload+waitFor.
+//
+// timeoutMs defaults to the budget every other caller relies on. A spec that
+// seeds an unusually large population before calling this (many environments
+// and/or orchestrators in one go) makes each reload genuinely more expensive
+// to resolve and render, not just slower to observe -- titlebar-whip-panel-
+// layout.spec.ts's realistic-population case (erun#1748) widens it for that
+// reason rather than accepting a marginal budget tuned for a single-row wait.
 export async function waitForSeededRow(
   app: AppShell,
   tenant: string,
   environment: string,
+  timeoutMs = 30_000,
 ): Promise<void> {
   await expect(async () => {
     await app.reloadEnvironments();
     await app.sidebar
       .envRowButton(tenant, environment)
       .waitFor({ state: 'visible', timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass({ timeout: timeoutMs });
 }
 
 export { expect };

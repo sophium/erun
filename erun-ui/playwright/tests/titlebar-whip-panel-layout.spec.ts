@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   addOrchestrators,
   removeTenant,
@@ -20,9 +20,36 @@ import {
 const ENVIRONMENT_COUNT = 9;
 const ORCHESTRATOR_COUNT = 7;
 
+// whipCountText mirrors Titlebar.WhipAction.tsx's own whipButtonLabel: the
+// pluralization the primary action renders for a given selected count.
+function whipCountText(count: number): string {
+  return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
+}
+
+// whipCheckedCount counts however many target rows the popover renders
+// checked right now. The suite's baseline seeds a default tenant/environment
+// (`defaulttenant: pw`, pw's `defaultenvironment: alpha`), so a fresh boot's
+// sidebar focus -- and therefore Whip's preselected default target -- is not
+// guaranteed to be empty; backend-side sessions persisting across specs in
+// the same worker (playwright/AGENTS.md) mean the exact starting selection
+// is not under this spec's control either (mirrors titlebar-whip-action.spec
+// .ts's own whipCountLabel helper, built for the same reason). Reading the
+// real starting count, rather than assuming zero, is how this spec proves a
+// single manual check widens the selection by exactly one without depending
+// on ambient state it does not own.
+async function whipCheckedCount(app: import('../pages/index.js').AppShell): Promise<number> {
+  return app.titlebar.whipPanel().locator('[role="checkbox"][aria-checked="true"]').count();
+}
+
 test('a realistic population keeps the whip action reachable without scrolling', async ({
   app,
 }, testInfo) => {
+  // This spec's seed is far larger than the default single-row case the
+  // suite's global 30s per-test timeout is tuned for (root AGENTS.md's "no
+  // flaky tests" gate needs this to be a real budget increase, not a race
+  // against the whole-test clock the widened waitForSeededRow call below
+  // would still lose).
+  test.setTimeout(90_000);
   const tenant = uniqueEnvironmentName(testInfo.title);
   const firstEnvironment = 'env-0';
   const lastEnvironment = `env-${String(ENVIRONMENT_COUNT - 1)}`;
@@ -41,20 +68,25 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // WhipTargets reads the config tree fresh on every call (no reload/wait
     // needed), but the sidebar itself only picks up new rows via fsnotify --
     // reload it so the population is visibly staged before driving the panel.
-    await app.reloadEnvironments();
-    await app.sidebar
-      .envRowButton(tenant, lastEnvironment)
-      .waitFor({ state: 'visible', timeout: 30_000 });
+    // This spec's seed (9 environments plus 7 orchestrators written in one
+    // batch) is far larger than any other waitForSeededRow caller's, so a
+    // reload here genuinely costs more to resolve and render -- widen the
+    // budget rather than share the single-row default.
+    await waitForSeededRow(app, tenant, lastEnvironment, 60_000);
 
     await app.titlebar.whipButton().click();
 
     // Tick one target near the top of the now-long list -- the reported
     // click -- and the primary action must already be reachable, with no
-    // scroll of any kind performed to find it.
+    // scroll of any kind performed to find it. This freshly seeded target
+    // cannot already be checked, so whatever the popover started with, one
+    // manual check must widen it by exactly one.
     const firstTarget = `${tenant}/${firstEnvironment}`;
+    await expect(app.titlebar.whipTargetCheckbox(firstTarget)).not.toBeChecked();
+    const startingChecked = await whipCheckedCount(app);
     await app.titlebar.whipTargetCheckbox(firstTarget).check();
     await expect(app.titlebar.whipRunButton()).toBeVisible();
-    await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
+    await expect(app.titlebar.whipRunButton()).toHaveText(whipCountText(startingChecked + 1));
 
     // Structural proof, not just a visual one: the action is a sibling of the
     // scrollable target list, never a descendant of it, so target count can
