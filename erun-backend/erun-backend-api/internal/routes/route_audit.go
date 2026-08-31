@@ -70,9 +70,7 @@ var KnownUnsurfacedRoutes = map[string]bool{
 	"GET /v1/releases/{release_id}":                      true,
 	"GET /v1/reviews/{review_id}/builds/{build_id}":      true,
 	"GET /v1/reviews/{review_id}/releases":               true,
-	"GET /v1/tenant-issuers":                             true,
 	"GET /v1/usage-events":                               true,
-	"PATCH /v1/tenant-issuers":                           true,
 	"POST /v1/environments/{environment_id}/dns01-token": true,
 	"POST /v1/releases":                                  true,
 }

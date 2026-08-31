@@ -6,11 +6,12 @@ import (
 	"net/http"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type TenantIssuerRepository interface {
-	List(ctx context.Context) ([]model.TenantIssuer, error)
+	List(ctx context.Context, filter repository.TenantIssuerFilter) ([]model.TenantIssuer, error)
 	UpdateName(ctx context.Context, issuer string, name string) (model.TenantIssuer, error)
 	UpdateOrgScope(ctx context.Context, issuer, orgFieldKey, orgFieldValue string) (model.TenantIssuer, error)
 }
@@ -36,8 +37,23 @@ func RegisterTenantIssuerRoutes(register ProtectedRouteRegistrar, issuers Tenant
 	register(http.MethodPatch, "/v1/tenant-issuers", http.HandlerFunc(routes.updateTenantIssuerName))
 }
 
+// listTenantIssuers defaults to the caller's own tenant, mirroring
+// resolveTargetTenant's use in users.go/invites.go: an operations-scoped
+// caller may pass tenantId to read another tenant's issuer mappings (the
+// console uses this to resolve a target tenant's org before enrolling into
+// it), and any other caller naming a different tenant is refused.
 func (r TenantIssuerRoutes) listTenantIssuers(w http.ResponseWriter, req *http.Request) {
-	issuers, err := r.issuers.List(req.Context())
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	targetTenantID, err := resolveTargetTenant(securityContext, req.URL.Query().Get("tenantId"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	issuers, err := r.issuers.List(req.Context(), repository.TenantIssuerFilter{TenantID: targetTenantID})
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return

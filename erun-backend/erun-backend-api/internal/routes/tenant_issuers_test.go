@@ -9,24 +9,27 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type stubTenantIssuerRepository struct {
-	list       []model.TenantIssuer
-	updated    model.TenantIssuer
-	gotIssuer  string
-	gotName    string
-	updateErr  error
-	listCalled bool
+	list          []model.TenantIssuer
+	updated       model.TenantIssuer
+	gotIssuer     string
+	gotName       string
+	updateErr     error
+	listCalled    bool
+	gotListFilter repository.TenantIssuerFilter
 
 	gotOrgFieldKey   string
 	gotOrgFieldValue string
 	orgScopeCalled   bool
 }
 
-func (r *stubTenantIssuerRepository) List(context.Context) ([]model.TenantIssuer, error) {
+func (r *stubTenantIssuerRepository) List(_ context.Context, filter repository.TenantIssuerFilter) ([]model.TenantIssuer, error) {
 	r.listCalled = true
+	r.gotListFilter = filter
 	return r.list, nil
 }
 
@@ -52,6 +55,18 @@ func tenantIssuerRequest(body, tenantType string) *http.Request {
 	}))
 }
 
+func tenantIssuerListRequest(tenantType, queryTenantID string) *http.Request {
+	url := "/v1/tenant-issuers"
+	if queryTenantID != "" {
+		url += "?tenantId=" + queryTenantID
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	return req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   "tenant-1",
+		TenantType: tenantType,
+	}))
+}
+
 func TestTenantIssuerRoutesListTenantIssuers(t *testing.T) {
 	repo := &stubTenantIssuerRepository{list: []model.TenantIssuer{{
 		TenantID: "tenant-1",
@@ -59,9 +74,8 @@ func TestTenantIssuerRoutesListTenantIssuers(t *testing.T) {
 		Name:     "AWS production",
 	}}}
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/tenant-issuers", nil)
 
-	TenantIssuerRoutes{issuers: repo}.listTenantIssuers(rec, req)
+	TenantIssuerRoutes{issuers: repo}.listTenantIssuers(rec, tenantIssuerListRequest(string(model.TenantTypeCompany), ""))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -69,12 +83,49 @@ func TestTenantIssuerRoutesListTenantIssuers(t *testing.T) {
 	if !repo.listCalled {
 		t.Fatal("expected repository list call")
 	}
+	if repo.gotListFilter.TenantID != "tenant-1" {
+		t.Fatalf("expected the caller's own tenant by default, got %q", repo.gotListFilter.TenantID)
+	}
 	var issuers []model.TenantIssuer
 	if err := json.NewDecoder(rec.Body).Decode(&issuers); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(issuers) != 1 || issuers[0].Name != "AWS production" || issuers[0].Issuer != "https://issuer.example" {
 		t.Fatalf("unexpected issuers: %+v", issuers)
+	}
+}
+
+// An operations-scoped caller may read another tenant's issuer mappings —
+// the console's enroll-into-another-org flow resolves a target tenant's org
+// this way before creating an identity provider account in it.
+func TestTenantIssuerRoutesListTenantIssuersOperationsCanReadAnotherTenant(t *testing.T) {
+	repo := &stubTenantIssuerRepository{}
+	rec := httptest.NewRecorder()
+
+	TenantIssuerRoutes{issuers: repo}.listTenantIssuers(rec, tenantIssuerListRequest(string(model.TenantTypeOperations), "tenant-2"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if repo.gotListFilter.TenantID != "tenant-2" {
+		t.Fatalf("expected the requested tenant, got %q", repo.gotListFilter.TenantID)
+	}
+}
+
+// A non-operations caller naming a tenant other than its own is refused
+// before the repository is ever called, mirroring the same
+// resolveTargetTenant gate on cross-tenant users/invites reads.
+func TestTenantIssuerRoutesListTenantIssuersRefusesCrossTenantForNonOperations(t *testing.T) {
+	repo := &stubTenantIssuerRepository{}
+	rec := httptest.NewRecorder()
+
+	TenantIssuerRoutes{issuers: repo}.listTenantIssuers(rec, tenantIssuerListRequest(string(model.TenantTypeCompany), "tenant-2"))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if repo.listCalled {
+		t.Fatal("a non-operations caller naming another tenant must not reach the repository")
 	}
 }
 

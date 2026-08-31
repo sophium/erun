@@ -2,6 +2,7 @@ import { FieldLabel, Input, SelectField } from 'erun-kit';
 import * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
+import type { OrgTarget } from './enrollOrgTargetController';
 import type { PlatformEnrollState } from './platformEnrollController';
 
 // TenantTargetSelect is shown only to an OPERATIONS caller — the same
@@ -111,6 +112,52 @@ export function PlatformEnrollUsernameFields({
 
 function tenantLabel(tenants: PlatformTenant[], tenantId: string): string {
   return tenants.find((tenant) => tenant.tenantId === tenantId)?.name ?? tenantId;
+}
+
+// OrgTargetStatus tells the operator which Zitadel org an identity is about
+// to be created in before they submit — the default (platform's own org) is
+// labelled explicitly rather than left implicit, and a chosen tenant with no
+// org mapping renders as its own distinguishable state rather than silently
+// falling back to the default or a generic error.
+export function OrgTargetStatus({
+  target,
+  tenants,
+  tenantId,
+}: {
+  target: OrgTarget;
+  tenants: PlatformTenant[];
+  tenantId: string;
+}): React.ReactElement {
+  const tenantName = tenantLabel(tenants, tenantId);
+  if (target.status === 'loading') {
+    return (
+      <p className="text-xs text-muted-foreground" role="status">
+        Resolving {tenantName}’s organization…
+      </p>
+    );
+  }
+  if (target.status === 'error') {
+    return (
+      <p className="text-sm text-destructive" role="alert">
+        Could not resolve {tenantName}’s organization: {target.message}
+      </p>
+    );
+  }
+  if (target.status === 'unmapped') {
+    return (
+      <p className="text-sm text-destructive" role="alert">
+        {tenantName} has no organization mapping yet, so an identity cannot be created for it
+        directly. Convert its issuer to org-scoped first.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-muted-foreground">
+      {target.status === 'default'
+        ? 'Creates the identity in the platform’s own organization.'
+        : `Creates the identity in ${tenantName}’s organization.`}
+    </p>
+  );
 }
 
 // PlatformEnrollFeedback renders alreadyEnrolled and a genuine username

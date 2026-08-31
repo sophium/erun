@@ -20,7 +20,7 @@ Every operation is a named endpoint below, mapped to one specific Zitadel Manage
 
 Zitadel's built-in `ORG_USER_MANAGER` role would scope user create/list/deactivate/reactivate more narrowly than org-owner. Org policy management (login policy, password complexity) has no built-in role short of org-owner, though. Minting a second, narrower machine-user credential for only the user-CRUD half was considered and rejected for this increment: it would shrink the blast radius for half the surface while adding a second bootstrap-managed credential to operate, and the compensating control — an enumerated, non-proxying endpoint surface (previous section) — already applies uniformly. The single org-owner credential is used for the whole surface; this is a recorded decision, not a default.
 
-## Enrolling into another organization
+## Enrolling into another organization {#enrolling-into-another-organization}
 
 `POST /v1/identity/users` takes an optional `orgId`. Without it the identity is created in the platform's own organization, as before. With it, the identity is created in **that** organization — the identity boundary another tenant resolves by.
 
@@ -34,6 +34,10 @@ This is what makes a newly created tenant usable at all. A tenant's first admin 
 **No erun user row is written for a cross-org enrollment, and that is not a failure.** The caller's tenant is not the new user's, and row-level security would file them under the wrong one. The response reports `mappingDeferred`, so a zero erun user there means "by design" rather than "the mapping failed" — the target tenant's own first-user bootstrap enrolls them, with full access, on their first sign-in.
 
 Zitadel scopes a Management API call by an `x-zitadel-orgid` header, so the same org-owner credential acts in an org it did not create; no additional IdP privilege is involved.
+
+**A caller composing `orgId` from a tenant, rather than a raw org id, resolves it via [`GET /v1/tenant-issuers?tenantId=<tenant_id>`](/agent-reference/api-protocol#get-v1tenant-issuers)** (operations-only for a tenant other than the caller's own) and reads `orgFieldValue` off the returned mapping — the console's Enroll form does exactly this rather than asking the operator for a raw org id. A target tenant with no `orgFieldValue` on any mapping (a single-tenant issuer, or no issuer trusted at all) has no org to enroll into yet; that is a real, distinguishable state, not a failed lookup, and the caller should not fall back to omitting `orgId` — doing so silently reproduces the platform's-own-org defect this endpoint exists to avoid.
+
+**A user created in the wrong organization cannot be moved.** Zitadel has no "move user to another org" operation — an organization is a hard identity boundary, not a reassignable attribute. Recovering from a wrong-org enrollment means deactivating (or deleting) the misplaced identity and recreating it with the correct `orgId`; there is no in-place repair.
 
 ## `POST /v1/identity/orgs`
 
