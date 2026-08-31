@@ -1,0 +1,2 @@
+audit: erun terraform init --dry-run team prod
+terraform team/prod: prod is a runtime environment — its terraform state lives on its own runtime pod's home PVC, not on this machine. Run `erun open team prod` for a shell inside the environment, then run `erun terraform ...` from there
