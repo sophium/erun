@@ -26,7 +26,9 @@ import * as React from 'react';
 import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
+import { useEnrollOrgTarget } from './enrollOrgTargetController';
 import { EnrollUserForm } from './EnrollUserForm';
+import { OrgTargetStatus, TenantTargetSelect } from './PlatformEnrollFields';
 import { UserRolesDialog } from './UserRolesDialog';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
@@ -134,9 +136,15 @@ function TemporaryPasswordDialog({
 }
 
 function EnrollForm({
+  token,
+  ownTenantId,
+  tenantType,
   enroll,
   onEnroll,
 }: {
+  token: string;
+  ownTenantId: string;
+  tenantType: string;
   enroll: EnrollState;
   onEnroll: (input: EnrollIdentityUserInput) => void;
 }): React.ReactElement {
@@ -144,15 +152,23 @@ function EnrollForm({
   const [email, setEmail] = React.useState('');
   const [firstName, setFirstName] = React.useState('');
   const [lastName, setLastName] = React.useState('');
+  const [targetTenantId, setTargetTenantId] = React.useState(ownTenantId);
   const busy = enroll.status === 'enrolling';
+
+  const { tenants, orgTarget } = useEnrollOrgTarget(token, ownTenantId, targetTenantId);
+  const canSubmit = orgTarget.status === 'default' || orgTarget.status === 'resolved';
 
   const submit = (event: React.SyntheticEvent): void => {
     event.preventDefault();
+    if (orgTarget.status !== 'default' && orgTarget.status !== 'resolved') {
+      return;
+    }
     onEnroll({
       username: username.trim(),
       email: email.trim(),
       firstName: firstName.trim() || undefined,
       lastName: lastName.trim() || undefined,
+      orgId: orgTarget.status === 'resolved' ? orgTarget.orgId : undefined,
     });
   };
 
@@ -208,7 +224,14 @@ function EnrollForm({
           }}
         />
       </div>
-      <Button type="submit" disabled={busy} className="justify-self-start">
+      <TenantTargetSelect
+        tenantType={tenantType}
+        tenants={tenants}
+        value={targetTenantId}
+        onChange={setTargetTenantId}
+      />
+      <OrgTargetStatus target={orgTarget} tenants={tenants} tenantId={targetTenantId} />
+      <Button type="submit" disabled={busy || !canSubmit} className="justify-self-start">
         {busy ? 'Enrolling…' : 'Enroll user'}
       </Button>
       <EnrollFeedback enroll={enroll} />
@@ -430,10 +453,13 @@ function UsersBody({
 // colleague (creates the IdP identity and the erun user mapping in one
 // action), deactivate/reactivate an existing one, and manage which roles an
 // enrolled user holds. Only rendered for an OPERATIONS tenant — see App.tsx.
-// EnrollUserForm below is the separate, tenant-targetable enrollment path
-// (POST /v1/users, erun#1744) that can put a first user into a tenant other
-// than the caller's own — the one thing the IdP-creating form above cannot
-// do, since it always creates the identity in the caller's own org.
+// EnrollForm's tenant selector targets another tenant's Zitadel org (its
+// org_field_value, resolved via GET /v1/tenant-issuers) rather than the
+// platform's own — a user's org decides which tenant they resolve to, so
+// this is the only way to put a first user into a tenant other than the
+// caller's own through the IdP-creating path. EnrollUserForm below is the
+// separate, tenant-targetable path that instead writes a user row directly
+// (POST /v1/users) with no IdP identity created at all.
 export function UsersPanel({
   token,
   ownTenantId,
@@ -463,7 +489,13 @@ export function UsersPanel({
           onRequestDeactivate={setPendingDeactivate}
           onManageRoles={setManagingRoles}
         />
-        <EnrollForm enroll={enrollState} onEnroll={enroll} />
+        <EnrollForm
+          token={token}
+          ownTenantId={ownTenantId}
+          tenantType={tenantType}
+          enroll={enrollState}
+          onEnroll={enroll}
+        />
         <EnrollUserForm token={token} ownTenantId={ownTenantId} tenantType={tenantType} />
       </CardContent>
       {temporaryPassword !== undefined && enrollState.status === 'enrolled' && (

@@ -112,6 +112,51 @@ describe('UsersPanel', () => {
     expect(screen.queryByText(/Temporary password/)).not.toBeInTheDocument();
   });
 
+  // erun#1756's default-path guarantee: leaving the target tenant untouched
+  // must send the exact same request body as before orgId existed, and must
+  // never resolve an org at all — a network call the caller never asked for
+  // is itself a defect, not just an unused result.
+  it('omits orgId and never resolves an org when the target tenant is unchanged', async () => {
+    let enrollBody: unknown;
+    let tenantIssuersCalled = false;
+    const calls = mockFetch((req) => {
+      if (req.method === 'POST' && req.url === '/v1/identity/users') {
+        enrollBody = req.body;
+        return jsonResponse({
+          idpUser: { id: 'idp-5', username: 'erin', state: 'USER_STATE_INITIAL' },
+          erunUser: { userId: 'erun-5', username: 'erin' },
+          mailDeliveryConfigured: true,
+        });
+      }
+      if (req.url.startsWith('/v1/tenant-issuers')) {
+        tenantIssuersCalled = true;
+      }
+      return jsonResponse([]);
+    });
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
+    await screen.findByText('No users enrolled yet.');
+
+    expect(
+      screen.getByText('Creates the identity in the platform’s own organization.'),
+    ).toBeInTheDocument();
+
+    const form = within(screen.getByRole('form', { name: 'Enroll a user' }));
+    fireEvent.change(form.getByLabelText('Username', { exact: false }), {
+      target: { value: 'erin' },
+    });
+    fireEvent.change(form.getByLabelText('Email', { exact: false }), {
+      target: { value: 'erin@example.com' },
+    });
+    fireEvent.click(form.getByRole('button', { name: 'Enroll user' }));
+
+    expect(await screen.findByText(/Enrolled erin/)).toBeInTheDocument();
+    expect(enrollBody).toEqual({ username: 'erin', email: 'erin@example.com' });
+    expect(tenantIssuersCalled).toBe(false);
+    expect(calls.some((call) => call.url.startsWith('/v1/tenant-issuers'))).toBe(false);
+  });
+
   it('shows a one-time, copyable temporary password when mail is not configured', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });

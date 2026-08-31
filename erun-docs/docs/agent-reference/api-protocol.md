@@ -133,7 +133,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | Method | Path | Description | Required scope |
 |---|---|---|---|
 | `GET` | `/v1/platform` | Unauthenticated self-discovery a caller resolves **before** signing in: this instance's own `issuer`, `apiUrl`, `consoleUrl`, OIDC client ids, and white-label surface (`brand`, `docsUrl`, `tagline`, `logoUrl`). Response below. | None — no bearer required |
-| `GET` | `/v1/tenant-issuers` | List all issuers trusted by the caller's tenant. | Tenant member |
+| `GET` | `/v1/tenant-issuers` | List the caller's tenant's trusted issuers, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 | `PATCH` | `/v1/tenant-issuers` | Rename a trusted issuer's display name. Body below. | Tenant admin |
 | `GET` | `/v1/whoami` | Resolved identity for the calling token. Response below. | Tenant member |
 | `GET` | `/v1/config` | The console's read model over the per-tenant erun config: `{tenant, environments[], contexts[]}`. | Tenant member |
@@ -252,6 +252,12 @@ Its contract:
 Errors: when the capability set cannot be resolved, `GET /v1/whoami` fails with `500` rather than answering without one — an omitted set would otherwise read as "you may do nothing" and hide surfaces the caller can use. `GET /v1/whoami` is itself authorized like every other route, so a caller holding no permissions at all is refused it with `403` and never reaches an empty set; a client has to treat that refusal as "you have no access to this tenant", not as a transport fault.
 
 For how a client is expected to degrade from this set — a list the caller may not read is not an empty list, an action they may not perform is not an enabled button — see the permission-degradation rules in `erun-ui/AGENTS.md` and `erun-console/AGENTS.md`.
+
+### `GET /v1/tenant-issuers` {#get-v1tenant-issuers}
+
+Lists the caller's tenant's trusted issuer mappings — `tenantId`, `issuer`, `name`, and, for an org-scoped issuer, `orgFieldKey`/`orgFieldValue` (each mapping's own org value; see [Identity model](#tenant-issuers)). An operations-scoped caller may instead read another tenant's mappings via `?tenantId=<tenant_id>`, the same `resolveTargetTenant` convention [`GET /v1/users`](#post-v1users-and-get-v1users) and [`GET /v1/invites`](#invites) use: omitted or equal to the caller's own tenant reads the caller's own mappings; a different value is refused with `403` for any caller whose tenant is not `OPERATIONS`.
+
+This is how the console resolves a target tenant's org before [enrolling an identity into it](/agent-reference/identity-administration#enrolling-into-another-organization) — the operator names a tenant, and the console reads that tenant's `orgFieldValue` here rather than asking for a raw Zitadel org id.
 
 ### `PATCH /v1/tenant-issuers`
 

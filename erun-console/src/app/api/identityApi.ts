@@ -57,11 +57,16 @@ function parseIdentityUserList(value: unknown): IdentityUser[] {
   return value.filter(isRecord).map(parseIdentityUser);
 }
 
+// orgId targets another Zitadel organization instead of the platform's own
+// — the identity boundary another tenant resolves by (erun-backend-api's
+// enrollIdentityUserRequest.OrgID). Omitting it keeps today's behavior: the
+// identity lands in the platform's own org.
 export interface EnrollIdentityUserInput {
   username: string;
   email: string;
   firstName?: string;
   lastName?: string;
+  orgId?: string;
 }
 
 // An enrolled erun user's minimal identity, distinct from IdentityUser (the
