@@ -190,27 +190,6 @@ type openOptions struct {
 	Reconnect        bool
 }
 
-func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
-	version = strings.TrimSpace(version)
-	registry = strings.TrimSpace(registry)
-	if version == "" || saveEnvConfig == nil {
-		return result, nil
-	}
-
-	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == version && strings.TrimSpace(updated.RuntimeRegistry) == registry {
-		return result, nil
-	}
-	updated.RuntimeVersion = version
-	updated.RuntimeRegistry = registry
-
-	result.EnvConfig = updated
-	if err := saveEnvConfig(result.Tenant, updated); err != nil {
-		return common.OpenResult{}, err
-	}
-	return result, nil
-}
-
 func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
@@ -542,23 +521,16 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
-	if execution.SkipHelm {
-		// All runtime images came from the fingerprint cache, so
-		// execution.Deploy.Version is a freshly minted snapshot timestamp that
-		// was never pushed. Persisting it would point the env config — and the
-		// desktop runtime dialog — at a phantom version the deploy picker can
-		// never offer (it gates on registry presence), so heal to the version the
-		// release is actually running instead. Twin of the deploy-command guard in
-		// PersistRuntimeVersionFromDeploySpecs.
-		running := r.resolveRunningRuntimeVersion(execution)
-		if running == "" {
-			r.ctx.Trace("open: runtime images all cached (no rebuild); could not read the deployed version, leaving persisted runtime version unchanged")
-			return nil
-		}
-		r.ctx.Trace("open: runtime images all cached (no rebuild); persisting the running runtime version " + running)
-		return r.persistRuntimeVersion(running, common.RuntimeRegistryForDeploySpec(execution))
-	}
-	return r.persistRuntimeVersion(execution.Deploy.Version, common.RuntimeRegistryForDeploySpec(execution))
+	// Persist through the same shared writer `erun deploy`/`erun upgrade` use
+	// (common.PersistRuntimeVersionFromDeploySpecs) instead of a hand-rolled
+	// subset: the hand-rolled version only ever wrote RuntimeVersion and
+	// RuntimeRegistry, so an operator's own --runtime-image on `open --deploy`
+	// installed correctly this one time and then was silently forgotten on the
+	// next plain open/deploy. The shared writer also heals RuntimeRunningImage, a
+	// stated RuntimeChart, and the MCP-auth key, and already knows to heal to
+	// the running version instead of a never-pushed snapshot when every image
+	// came from the fingerprint cache (SkipHelm).
+	return common.PersistRuntimeVersionFromDeploySpecs(r.ctx, []common.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
@@ -567,33 +539,6 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) commo
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
 		common.ClearHelmReleasePendingOperation,
 	)
-}
-
-func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) error {
-	if r.ctx.DryRun {
-		return nil
-	}
-	result, err := persistOpenRuntimeVersion(r.result, version, registry, r.options.SaveEnvConfig)
-	if err != nil {
-		return err
-	}
-	r.result = result
-	return nil
-}
-
-// resolveRunningRuntimeVersion returns "" when the running version can't be read
-// (dry-run, no resolver, helm error), signalling the caller to leave the
-// persisted version untouched rather than record a phantom.
-func (r *resolvedOpenRunner) resolveRunningRuntimeVersion(execution common.DeploySpec) string {
-	if r.ctx.DryRun || r.resolveDeployedVersion == nil {
-		return ""
-	}
-	version, err := r.resolveDeployedVersion(r.ctx, execution.Deploy.ReleaseName, execution.Deploy.Namespace, execution.Deploy.KubernetesContext)
-	if err != nil {
-		r.ctx.Trace("open: reading the deployed runtime version failed: " + err.Error())
-		return ""
-	}
-	return strings.TrimSpace(version)
 }
 
 // ensureRuntimeDeployed fails a pure `open` when the env's runtime is not
