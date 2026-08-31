@@ -1215,6 +1215,42 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_reports_runtime_image_registry_mismatch", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_runtime_image_line_mismatch", func(t *testing.T) {
+		// erun#1754: a runtimeimage naming the stock erun-devops image while
+		// the env's last confirmed deploy (runtimerunningimage) actually ran a
+		// tenant's own <tenant>-devops image is static config drift a health
+		// check exists to catch -- comparing the two image fields needs no
+		// live cluster read (a bare version number alone cannot name a
+		// release line, but an image name always can), so doctor reports it
+		// identically in --dry-run and for real.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: ghcr.io/sophium/erun-devops\nruntimerunningimage: ghcr.io/sophium/team-devops:1.0.86\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_runtime_image_line_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_consistent_runtime_image_line_reports_nothing", func(t *testing.T) {
+		// The other half: a consistent pairing (both fields name the same
+		// release line) must never be flagged, so an env riding the stock
+		// image on purpose (frs/local's shape in the issue) sees no new
+		// friction from this check.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: erun-devops\nruntimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Runtime image release line") {
+			t.Fatalf("expected no release-line finding for a consistent pairing, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_consistent_runtime_image_line_reports_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as

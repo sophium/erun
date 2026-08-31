@@ -461,7 +461,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
 	deployInput.RuntimeChartRegistry = chart.registry
-	image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
+	image, persistImage := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
 	if image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
 		deployInput.ResolvedRuntimeImage = image
@@ -471,6 +471,11 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		// That is fully known here even though nothing is threaded to helm for
 		// it, so record it rather than leaving the memo empty.
 		deployInput.ResolvedRuntimeImage = registry + "/" + DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
+	}
+	deployInput.PersistRuntimeImage = persistImage
+	explicitLineChange := runtimeImageExplicit || strings.TrimSpace(runtimeChartOverride) != ""
+	if err := guardRuntimeImageLineSwitch(ctx, target, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
+		return DeploySpec{}, err
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo
 	// at the deployed release tag on first boot; resolveWorktreeStorage already
@@ -760,25 +765,39 @@ func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtime
 // automatically. Otherwise the deploy's own line names the image, keyed off
 // chartName/chartVersion exactly as resolved: the operator stated no image at
 // all here, so there is nothing to protect from the override.
-func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) string {
+//
+// persistImage is what PersistRuntimeVersionFromDeploySpecs should write back
+// to EnvConfig.RuntimeImage after the deploy succeeds -- the bare component
+// name only (never a registry or tag), so the pin stays self-maintaining the
+// same way an operator's own `erun init --runtime-image` pin does
+// (stripRuntimeImageTag). When the persisted override is honored verbatim
+// (explicit or not stale), nothing changed, so persistImage names the same
+// image the config already records -- a no-op write. When it falls through to
+// the deploy's own default, persistImage is the name that default resolved
+// to, healing exactly the field erun#1754 found silently left behind. Empty
+// only for the erun product's own environments, which have no line of their
+// own to persist a name for.
+func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) (image, persistImage string) {
 	chartName = strings.TrimSpace(chartName)
 	version = strings.TrimSpace(version)
 	registry := deployRuntimeImageRegistry(target, chartRegistry)
 	tenant := strings.TrimSpace(target.Tenant)
 	if image := resolveRuntimeImageOverride(registry, version, target.EnvConfig.RuntimeImage); image != "" {
+		recorded := strings.TrimSpace(target.EnvConfig.RuntimeImage)
 		if runtimeImageExplicit {
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
-			return image
+			return image, recorded
 		}
 		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
 		stale := staleRuntimeImageTrace(image, staleChartName, version, strings.TrimSpace(staleChartVersion))
 		if stale == "" {
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
-			return image
+			return image, recorded
 		}
 		ctx.Trace(stale)
 	}
-	return defaultDeployRuntimeImage(ctx, registry, version, tenant, chartName)
+	defaultImage := defaultDeployRuntimeImage(ctx, registry, version, tenant, chartName)
+	return defaultImage, defaultDeployRuntimeImageBareName(tenant, chartName)
 }
 
 // staleRuntimeImageTrace explains why a saved runtimeimage override cannot be
@@ -812,22 +831,33 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 	return ""
 }
 
-// defaultDeployRuntimeImageName names the image the deploy's own line
-// publishes: the umbrella's, when the tenant deploys its own <tenant>-devops
-// chart, else the tenant's own <tenant>-devops image, which erun-build-env
-// builds and erun push publishes on the tenant's version line. Empty means the
-// deploy has no line of its own to default to (the erun product tenant rides
-// the stock image itself, so it emits no override and the chart's own default
-// wins).
-func defaultDeployRuntimeImageName(registry, version, tenant, chartName string) string {
+// defaultDeployRuntimeImageBareName names the bare (no registry, no tag)
+// image the deploy's own line publishes: the umbrella's own name, when the
+// tenant deploys its own <tenant>-devops chart, else the tenant's own
+// <tenant>-devops name, which erun-build-env builds and erun push publishes
+// on the tenant's version line. Empty means the deploy has no line of its own
+// to default to (the erun product tenant rides the stock image itself, so it
+// emits no override and the chart's own default wins).
+func defaultDeployRuntimeImageBareName(tenant, chartName string) string {
 	if chartName != "" && chartName != DevopsComponentName {
-		return registry + "/" + chartName + ":" + version
+		return chartName
 	}
 	tenantImage := RuntimeReleaseName(tenant)
 	if tenant == "" || tenantImage == DevopsComponentName {
 		return ""
 	}
-	return registry + "/" + tenantImage + ":" + version
+	return tenantImage
+}
+
+// defaultDeployRuntimeImageName names the full, tagged image reference for
+// defaultDeployRuntimeImageBareName. Empty means the deploy has no line of
+// its own to default to -- see that function.
+func defaultDeployRuntimeImageName(registry, version, tenant, chartName string) string {
+	name := defaultDeployRuntimeImageBareName(tenant, chartName)
+	if name == "" {
+		return ""
+	}
+	return registry + "/" + name + ":" + version
 }
 
 // defaultDeployRuntimeImage resolves defaultDeployRuntimeImageName and traces

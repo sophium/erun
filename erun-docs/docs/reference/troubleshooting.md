@@ -194,6 +194,30 @@ docker login ghcr.io
 
 Then re-run the deploy — once a credential resolves, `erun deploy` auto-provisions and attaches the pull secret itself; no `--image-pull-secret` needed. If the image is not actually private, make the `ghcr.io/sophium/<name>` package public instead.
 
+## `erun deploy` refuses: runtime image release line mismatch {#runtime-image-line-mismatch}
+
+**Symptoms:** `erun deploy` exits non-zero immediately, before any `helm upgrade` or `kubectl` line appears in its output, with an error like:
+
+```
+deploy: runtime image ghcr.io/sophium/erun-devops:1.0.86 is on the erun release line, but <tenant>/<env>'s last confirmed deploy ran ghcr.io/sophium/<tenant>-devops:1.0.86 (the <tenant> line) -- pass --runtime-image or --runtime-chart to move release lines on purpose; if runtimeimage config just drifted, `erun doctor` explains how to realign it
+```
+
+**Cause:** the environment's last confirmed deploy ran a runtime image on one release line (most commonly the tenant's own `<tenant>-devops` line), but this deploy resolved an image on a *different* line — most often because the persisted `runtimeimage` still names the stock `erun-devops` image from before the environment moved onto its own line (see [Configuration · runtime image and version are one coordinate](/reference/configuration#advanced-runtime-image-line)). The version number alone can't reveal this: `erun-devops` and `<tenant>-devops` can both publish the exact same version number, so the wrong image resolves to a real, existing tag rather than failing outright. Because the runtime chart's rollout strategy is `Recreate`, installing the wrong image would tear down the running (correct) pod first — `erun deploy` refuses before touching the cluster instead.
+
+**Fix:** if you mean to move the environment to a different release line right now, say so explicitly:
+
+```bash
+erun deploy <tenant> <env> --version <version> --runtime-image <registry>/<image>
+# or
+erun deploy <tenant> <env> --version <version> --runtime-chart <chart-reference>
+```
+
+If you don't — the pairing just drifted — realign the persisted `runtimeimage` the same way, or run `erun doctor <tenant> <env>` first to confirm which line the environment is actually on (it flags the same mismatch from config alone, no cluster access needed):
+
+```bash
+erun doctor <tenant> <env>
+```
+
 ## AWS calls fail with `Invalid endpoint: https://sts..amazonaws.com` {#aws-region-empty}
 
 **Symptoms:** every AWS call in the environment fails with an endpoint that has an empty region in it, and passing `--region <region>` by hand makes the same call succeed.

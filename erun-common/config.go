@@ -413,6 +413,27 @@ func (c EnvConfig) RuntimeImageRegistryMismatch() (imageRegistry, runtimeRegistr
 	return imageRegistry, runtimeRegistry, !strings.EqualFold(imageRegistry, runtimeRegistry)
 }
 
+// RuntimeImageLineMismatch reports whether the operative RuntimeImage (the
+// value a future deploy reads back to pick the runtime pod's image) and the
+// observed RuntimeRunningImage (the last image a deploy actually confirmed
+// running, healed alongside RuntimeVersion by
+// PersistRuntimeVersionFromDeploySpecs) name different release lines --
+// stock erun-devops vs a tenant's own <tenant>-devops. A version number alone
+// cannot name a line (the same number is valid on both), but an image name
+// always can, so this needs no live cluster read: it is the persisted half
+// of the pairing erun#1754 was filed over, readable from config alone.
+// mismatched is false whenever either field is empty or fails to parse as a
+// runtime image reference -- an environment with no recorded history yet has
+// nothing to disagree with, and this must never guess.
+func (c EnvConfig) RuntimeImageLineMismatch() (recordedLine, observedLine string, mismatched bool) {
+	recordedLine, recordedOK := runtimeImageReleaseLine(c.RuntimeImage)
+	observedLine, observedOK := runtimeImageReleaseLine(c.RuntimeRunningImage)
+	if !recordedOK || !observedOK {
+		return recordedLine, observedLine, false
+	}
+	return recordedLine, observedLine, recordedLine != observedLine
+}
+
 // legacyEnvTypeFromRemoteSnapshot migrates configs written before the `type`
 // field existed, mapping the old remote+snapshot pair to a concrete type. It must
 // reproduce the old deciders exactly: a missing snapshot key meant "does not build

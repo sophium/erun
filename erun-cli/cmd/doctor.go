@@ -141,6 +141,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportRuntimeImageRegistryMismatch(ctx, result); err != nil {
 		return err
 	}
+	if err := reportRuntimeImageLineMismatch(ctx, result); err != nil {
+		return err
+	}
 	if err := reportHostCredentials(ctx, configStore, result); err != nil {
 		return err
 	}
