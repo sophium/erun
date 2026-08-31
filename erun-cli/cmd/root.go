@@ -157,6 +157,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newAppCmd(launchAppProcess),
 		newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil, d.resolveOpen),
 		newCloudCmd(d.configStore, runPrompt, runSelect, cloudDependencies()),
+		newOrchestratorCmd(d.configStore),
 		newContextCmd(d.configStore, runPrompt, runSelect, common.CloudContextDependencies{}),
 		newPlatformCmd(d.configStore, runPrompt, cloudDependencies()),
 		newReviewCmd(d.configStore, cloudDependencies()),

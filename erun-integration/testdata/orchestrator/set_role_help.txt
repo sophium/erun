@@ -1,0 +1,17 @@
+Set what a host-side orchestrator uses a linked environment for: a code environment writes code and iterates fast; a build environment checks out pushed branches, runs the gates, and cuts releases. Pass "none" to declare it undeclared again. The environment must already be linked to the orchestrator -- see `erun list`.
+
+Usage:
+  erun orchestrator set-role ORCHESTRATOR_ID TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun orchestrator set-role my-orchestrator my-tenant prod --role build
+
+Flags:
+      --dry-run       Resolve and trace mutating actions without executing them.
+  -h, --help          help for set-role
+      --role string   Role to set: "code", "build", or "none" for undeclared
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
