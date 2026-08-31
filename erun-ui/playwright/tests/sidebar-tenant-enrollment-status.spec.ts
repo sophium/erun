@@ -258,8 +258,11 @@ test.describe('sidebar tenant enrollment status icon', () => {
 
       // Proves the poll actually fired again (not merely that the icon
       // happens to match) -- a terminal 'unknown' would never issue this
-      // second call at all.
-      expect(stub.calls()).toBeGreaterThan(callsBeforeWait);
+      // second call at all. fastForward only guarantees the fake timer fired;
+      // the route interception that increments `calls` is a real async
+      // round trip through Playwright's own routing layer, so poll for it
+      // rather than reading the counter the instant fastForward resolves.
+      await expect.poll(() => stub.calls()).toBeGreaterThan(callsBeforeWait);
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
     } finally {
       removeTenant(tenant);
