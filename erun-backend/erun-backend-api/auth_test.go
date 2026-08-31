@@ -1,12 +1,16 @@
 package backendapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -370,6 +374,60 @@ func TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound(t *testing.
 	}
 }
 
+// TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError is
+// the erun#1752 regression test at the middleware boundary: a
+// repository.ErrIdentityResolutionFailed (already sanitized by
+// IdentityRepository before it reaches here) must render as its own
+// RESOLUTION_FAILED code, distinct from NOT_ENROLLED and TENANT_UNRESOLVED --
+// neither "you need enrolling" nor "your tenant could not be determined" is
+// true when the real cause was an internal database error -- and the
+// client-facing message and the auth-rejected log line must both carry only
+// the sanitized sentinel's safe text, never a raw constraint name or
+// SQLSTATE.
+func TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError(t *testing.T) {
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://auth.erunpaas.com", Subject: "387534471668170904"}, nil
+		}),
+		IdentityResolver: IdentityResolverFunc(func(ctx context.Context, claims Claims) (Tenant, User, error) {
+			return Tenant{}, User{}, repository.ErrIdentityResolutionFailed
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rec := httptest.NewRecorder()
+	middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	envelope := decodedAuthError(t, rec)
+	if envelope.Code != "RESOLUTION_FAILED" {
+		t.Fatalf("code = %q, want RESOLUTION_FAILED -- this is an internal error, not a real answer about enrolment or tenant resolution", envelope.Code)
+	}
+	for _, leak := range []string{"SQLSTATE", "constraint", "duplicate key"} {
+		if strings.Contains(envelope.Message, leak) {
+			t.Fatalf("response message leaked raw database detail (%q): %q", leak, envelope.Message)
+		}
+	}
+	logged := logBuf.String()
+	for _, leak := range []string{"SQLSTATE", "constraint", "duplicate key"} {
+		if strings.Contains(logged, leak) {
+			t.Fatalf("auth-rejected log leaked raw database detail (%q): %q", leak, logged)
+		}
+	}
+}
+
 func TestAuthMiddlewareReportsUnauthenticatedForMissingBearerToken(t *testing.T) {
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
@@ -426,6 +484,23 @@ func TestClassifyIdentityErrorPassesThroughUnexpectedErrors(t *testing.T) {
 	unexpected := errors.New("database connection reset")
 	if got := classifyIdentityError(unexpected); !errors.Is(got, unexpected) {
 		t.Fatalf("err = %v, want the unexpected error passed through unclassified", got)
+	}
+}
+
+// TestAuthErrorCodeDistinguishesResolutionFailedFromNotEnrolledAndUnresolved
+// locks in that all three 401-shaped outcomes get their own code: a real
+// "you need enrolling" (NOT_ENROLLED), a real "your tenant could not be
+// determined" (TENANT_UNRESOLVED), and a sanitized internal error
+// (RESOLUTION_FAILED) that is neither.
+func TestAuthErrorCodeDistinguishesResolutionFailedFromNotEnrolledAndUnresolved(t *testing.T) {
+	if code := authErrorCode(repository.ErrIdentityResolutionFailed); code != "RESOLUTION_FAILED" {
+		t.Fatalf("code = %q, want RESOLUTION_FAILED", code)
+	}
+	if code := authErrorCode(ErrUserNotResolved); code != "NOT_ENROLLED" {
+		t.Fatalf("code = %q, want NOT_ENROLLED", code)
+	}
+	if code := authErrorCode(ErrTenantNotResolved); code != "TENANT_UNRESOLVED" {
+		t.Fatalf("code = %q, want TENANT_UNRESOLVED", code)
 	}
 }
 

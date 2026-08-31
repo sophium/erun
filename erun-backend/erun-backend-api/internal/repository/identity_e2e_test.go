@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
@@ -537,6 +538,178 @@ func TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL(t *testing.T) {
 	}
 	if !strings.Contains(logged, "username refresh skipped") {
 		t.Fatalf("log output = %q, want a safe skipped-refresh reason", logged)
+	}
+}
+
+// TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail reproduces
+// erun#1752's exact reported shape at the read path GET /v1/whoami drives on
+// every call: a tenant with three enrolled users -- "erun" (its bootstrap
+// user), "va-admin", and "rihards@frs.lv", the last already holding a
+// user_external_ids link for the reported subject, exactly like the real
+// erun platform's own tenant frs -- and a token whose username claim
+// collides with a different enrolled user's username. Enrolment through
+// ResolveIdentity's own bootstrap only ever creates a *tenant's first* user
+// (insertFirstTenantUser refuses once any user exists), so rihards@frs.lv
+// and her link are seeded directly, matching how she was really enrolled
+// (through the ordinary UserRepository.Create path, not bootstrap).
+func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	const issuer = "https://auth.erunpaas.com"
+
+	// Seed the tenant's other enrolled users, the same shape as tenant frs:
+	// "erun" bootstraps the tenant itself, "va-admin" is a second, unrelated
+	// user already holding the username the collision will target.
+	tenant, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:   issuer,
+		Subject:  "erun-subject",
+		Username: "erun",
+	})
+	mustNoErr(t, err, "bootstrap the tenant and its first user")
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		tenant.TenantID, "va-admin",
+	).Err(), "seed a second, unrelated enrolled user")
+
+	// The reported subject's link already exists, exactly per the issue's
+	// ground truth -- seeded directly, since this is not a tenant's first
+	// user and ResolveIdentity's own bootstrap would refuse to create it.
+	const subject = "387534471668170904"
+	var rihardsID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		tenant.TenantID, "rihards@frs.lv",
+	).Scan(&rihardsID), "seed rihards@frs.lv")
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO user_external_ids (tenant_id, user_id, issuer, external_id) VALUES ($1, $2, $3, $4)`,
+		tenant.TenantID, rihardsID, issuer, subject,
+	).Err(), "seed her existing external-id link")
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	// GET /v1/whoami, repeated, exactly as the issue reported it firing on
+	// every call: the token's username claim now collides with va-admin's
+	// username, so every one of these calls attempts (and must survive) the
+	// same refresh collision.
+	for i := 0; i < 3; i++ {
+		_, resolved, err := repo.ResolveIdentity(context.Background(), security.Claims{
+			Issuer:   issuer,
+			Subject:  subject,
+			Username: "va-admin", // already taken by the seeded second user
+		})
+		if err != nil {
+			t.Fatalf("whoami read #%d failed: %v (this is the collision GET /v1/whoami must never fail on)", i+1, err)
+		}
+		if resolved.UserID != rihardsID || resolved.Username != "rihards@frs.lv" {
+			t.Fatalf("whoami read #%d resolved = %+v, want rihards@frs.lv's original user/username left unchanged", i+1, resolved)
+		}
+	}
+
+	logged := logBuf.String()
+	if strings.Contains(logged, "SQLSTATE") || strings.Contains(logged, "users_tenant_username_key") || strings.Contains(logged, "duplicate key") {
+		t.Fatalf("log output leaked a raw Postgres error across the repeated reads: %q", logged)
+	}
+}
+
+// TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint
+// proves erun#1752 items 2 and 3 for the *other* candidate branch named in
+// the issue: two callers racing to become a zero-user tenant's first user,
+// both deriving the same username, must not let the loser's raw
+// unique-violation (constraint name, SQLSTATE) escape ResolveIdentity -- it
+// is sanitized into ErrIdentityResolutionFailed exactly like the
+// refresh-collision branch above, but distinguishably logged with step
+// "bootstrap first tenant user" rather than "username refresh" (the two
+// otherwise violate the identical constraint and would be indistinguishable
+// from the auth-rejected log line alone). The race is forced
+// deterministically, never by racing two goroutines and hoping for a
+// particular interleaving: a second, independent connection holds an
+// uncommitted insert of the exact colliding row so the racing
+// ResolveIdentity call's own insert genuinely blocks on the real unique
+// index, observed through pg_stat_activity, and only then does that
+// connection commit -- there is exactly one possible outcome once it does.
+func TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "frs")
+
+	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:  "https://issuer.example/1752-race",
+		Subject: "operator-subject",
+	})
+	mustNoErr(t, err, "bootstrap the platform tenant")
+
+	var secondTenantID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
+		"1752-race-tenant",
+	).Scan(&secondTenantID), "seed a second, zero-user tenant")
+	const issuer = "https://issuer.example/1752-race-second"
+	mustNoErr(t, db.QueryRow(`INSERT INTO issuers (issuer) VALUES ($1)`, issuer).Err(), "register second tenant issuer")
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenant_issuers (tenant_id, issuer, name) VALUES ($1, $2, $3)`,
+		secondTenantID, issuer, "second tenant issuer",
+	).Err(), "map second tenant issuer")
+
+	// Hold an uncommitted insert of the exact row the racing bootstrap call
+	// will also try to insert, on a second, independent connection.
+	ctx := context.Background()
+	blocker, err := db.Conn(ctx)
+	mustNoErr(t, err, "open blocker connection")
+	t.Cleanup(func() { _ = blocker.Close() })
+	blockTx, err := blocker.BeginTx(ctx, nil)
+	mustNoErr(t, err, "begin blocker tx")
+	_, err = blockTx.ExecContext(ctx, `INSERT INTO users (tenant_id, username) VALUES ($1, $2)`, secondTenantID, "racer")
+	mustNoErr(t, err, "blocker's own insert of the colliding row")
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, _, raceErr := repo.ResolveIdentity(context.Background(), security.Claims{
+			Issuer:   issuer,
+			Subject:  "racer-subject",
+			Username: "racer",
+		})
+		resultCh <- raceErr
+	}()
+
+	// Wait until PostgreSQL itself reports the racing insert genuinely
+	// blocked on the blocker's uncommitted row -- an observable condition,
+	// never a sleep-and-hope interleaving.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var blocked int
+		mustNoErr(t, db.QueryRowContext(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			 WHERE state = 'active' AND wait_event_type = 'Lock'
+		`).Scan(&blocked), "poll pg_stat_activity for the blocked racer")
+		if blocked > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the racing insert to block on the unique index")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	mustNoErr(t, blockTx.Commit(), "commit the blocker's row, letting the racing insert re-check and fail")
+
+	raceErr := <-resultCh
+	if !errors.Is(raceErr, ErrIdentityResolutionFailed) {
+		t.Fatalf("err = %v, want ErrIdentityResolutionFailed", raceErr)
+	}
+	logged := logBuf.String()
+	if strings.Contains(logged, "SQLSTATE") || strings.Contains(logged, "users_tenant_username_key") || strings.Contains(logged, "duplicate key") {
+		t.Fatalf("log output leaked a raw Postgres error: %q", logged)
+	}
+	if !strings.Contains(logged, `step="bootstrap first tenant user"`) {
+		t.Fatalf("log output = %q, want the bootstrap step label, distinguishing it from a username-refresh collision", logged)
 	}
 }
 

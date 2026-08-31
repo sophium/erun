@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NotEnrolledScreen, TenantUnresolvedScreen } from './PreShellScreens';
+import {
+  NotEnrolledScreen,
+  ResolutionErrorScreen,
+  TenantUnresolvedScreen,
+} from './PreShellScreens';
 
 // Builds a JWT-shaped string with the given payload — the same shape
 // src/auth/identity.test.ts uses, since NotEnrolledScreen decodes the token
@@ -233,6 +237,66 @@ describe('TenantUnresolvedScreen', () => {
         brand="Acme"
         token={tokenWith({ sub: '387534471668170904' })}
         message="unresolved"
+        onSignOut={onSignOut}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
+});
+
+// erun#1752: shown when resolution failed for an internal reason (already
+// sanitized server-side into a safe message) rather than a real answer about
+// enrolment. It must never claim the caller isn't enrolled, and -- unlike
+// NotEnrolledScreen -- must never offer an enroll command: whatever link
+// this identity has, it was not what failed.
+describe('ResolutionErrorScreen', () => {
+  it('shows the API-reported reason instead of the not-enrolled copy, with no enroll command', () => {
+    render(
+      <ResolutionErrorScreen
+        brand="Acme"
+        token={tokenWith({ sub: '387534471668170904', iss: 'https://auth.erunpaas.com' })}
+        message="identity could not be resolved because of an internal error"
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/could not resolve your identity/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/identity could not be resolved because of an internal error/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/an operator has to enrol you/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/erun platform user enroll/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+  });
+
+  it('names the identity from the token the same way the other pre-shell screens do', () => {
+    render(
+      <ResolutionErrorScreen
+        brand="Acme"
+        token={tokenWith({
+          sub: '387534471668170904',
+          email: 'rihards@frs.lv',
+          iss: 'https://auth.erunpaas.com',
+        })}
+        message="internal error"
+        onSignOut={vi.fn()}
+      />,
+    );
+
+    const identityLine = screen.getByText(/Identity:/);
+    expect(identityLine).toHaveTextContent('rihards@frs.lv');
+    expect(identityLine).toHaveTextContent('https://auth.erunpaas.com');
+  });
+
+  it('offers a sign-out', () => {
+    const onSignOut = vi.fn();
+    render(
+      <ResolutionErrorScreen
+        brand="Acme"
+        token={tokenWith({ sub: '387534471668170904' })}
+        message="internal error"
         onSignOut={onSignOut}
       />,
     );

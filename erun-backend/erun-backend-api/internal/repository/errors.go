@@ -41,6 +41,15 @@ var (
 	// user_external_ids' primary key — reported as genuinely unknown rather
 	// than guessed at as the most likely-sounding cause.
 	ErrUnrecognizedConflict = fmt.Errorf("an unrecognized uniqueness constraint was violated: %w", ErrConflict)
+	// ErrIdentityResolutionFailed replaces a raw database error (a constraint
+	// name and SQLSTATE, meaningless to an operator or the console rendering
+	// it) that IdentityRepository.ResolveIdentity would otherwise return
+	// verbatim. The auth middleware logs and returns an identity error's
+	// message directly as both the rejection reason and the client-facing
+	// response (erun-backend-api's auth.go Wrap), so this sentinel's own safe
+	// message is what reaches both; the raw detail is logged server-side by
+	// the repository before it is replaced.
+	ErrIdentityResolutionFailed = errors.New("identity could not be resolved because of an internal error")
 )
 
 func normalizeNoRows(err error) error {

@@ -237,3 +237,44 @@ describe('App tenant-unresolved route', () => {
     expect(screen.queryByText('Not yet part of a tenant')).not.toBeInTheDocument();
   });
 });
+
+// erun#1752: a resolution failure caused by an internal error (already
+// sanitized server-side of any raw database detail into RESOLUTION_FAILED)
+// must render its own card -- neither the not-enrolled card (a link may
+// already exist for this identity, so "an operator has to enrol you" would
+// send them in a loop that cannot terminate) nor the tenant-unresolved card
+// (this was never about which tenant the token resolves to).
+describe('App resolution-error route', () => {
+  it('shows the resolution-error card, offering no enroll command, for a RESOLUTION_FAILED 401', async () => {
+    vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = input instanceof URL ? input.href : input;
+        if (url.includes('/v1/platform')) {
+          return Promise.resolve(jsonResponse(PLATFORM));
+        }
+        if (url.includes('/v1/config')) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () =>
+              Promise.resolve({
+                code: 'RESOLUTION_FAILED',
+                message: 'identity could not be resolved because of an internal error',
+              }),
+          } as unknown as Response);
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+
+    renderWithStore(<App />);
+
+    await screen.findByText('Could not resolve your identity');
+    expect(screen.queryByText('Not yet part of a tenant')).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not determine your tenant')).not.toBeInTheDocument();
+    expect(screen.queryByText(/erun platform user enroll/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+  });
+});

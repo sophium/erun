@@ -16,6 +16,7 @@ import {
   ErrorScreen,
   LoadingScreen,
   NotEnrolledScreen,
+  ResolutionErrorScreen,
   TenantUnresolvedScreen,
 } from './shell/PreShellScreens';
 import { beginTenantSwitch, consumeTenantSwitchIntent } from './shell/tenantSwitch';
@@ -37,6 +38,14 @@ type LoadState =
   // commonly). Distinct from not-enrolled because "ask an operator to enrol
   // you" is advice that cannot work here (erun#1721).
   | { status: 'tenant-unresolved'; token: string; message: string }
+  // Authenticated, but the API's own resolution failed because of an
+  // internal error (repository.ErrIdentityResolutionFailed, sanitized
+  // server-side of any raw database detail) rather than a real answer about
+  // enrolment or tenant resolution. Distinct from both states above: neither
+  // "ask an operator to enrol you" nor "you may already be enrolled
+  // elsewhere" is true advice here, and no enrolment command is offered
+  // (erun#1752).
+  | { status: 'resolution-error'; token: string; message: string }
   | { status: 'error'; message: string };
 
 interface AuthPhase {
@@ -55,15 +64,18 @@ interface ConfigQueryPhase {
   data?: TenantConfigView;
 }
 
-// A 401 means at least two completely different things depending on whether a
-// token was held, and — once one is — which of two causes the API itself
-// reports via its {code, message} envelope (erun#1721). With no token the
-// caller is simply signed out. With a token, the identity provider
-// authenticated them and the API still said no: either this identity really
-// is not enrolled anywhere (NOT_ENROLLED, telling them to sign in again is a
-// loop, #1167), or the API could not determine which tenant this token
-// resolves to at all (TENANT_UNRESOLVED) — a state the caller may already be
-// enrolled past, so "ask an operator to enrol you" would be wrong advice.
+// A 401 means at least three completely different things depending on
+// whether a token was held, and — once one is — which of three causes the
+// API itself reports via its {code, message} envelope (erun#1721, erun#1752).
+// With no token the caller is simply signed out. With a token, the identity
+// provider authenticated them and the API still said no: either this
+// identity really is not enrolled anywhere (NOT_ENROLLED, telling them to
+// sign in again is a loop, #1167), or the API could not determine which
+// tenant this token resolves to at all (TENANT_UNRESOLVED) — a state the
+// caller may already be enrolled past, so "ask an operator to enrol you"
+// would be wrong advice — or resolution failed for an internal reason
+// unrelated to either (RESOLUTION_FAILED, erun#1752) — neither piece of
+// advice above is true here either, and no enrolment command is offered.
 // Anything else 401-shaped falls back to the same not-enrolled card the API
 // has always produced for an unclassified auth rejection.
 function loadStateFromConfigQuery(token: string, configQuery: ConfigQueryPhase): LoadState {
@@ -74,6 +86,9 @@ function loadStateFromConfigQuery(token: string, configQuery: ConfigQueryPhase):
     const described = describeQueryError(configQuery.error);
     if (described.status === 401 && described.code === 'TENANT_UNRESOLVED') {
       return { status: 'tenant-unresolved', token, message: described.message };
+    }
+    if (described.status === 401 && described.code === 'RESOLUTION_FAILED') {
+      return { status: 'resolution-error', token, message: described.message };
     }
     return described.status === 401
       ? { status: 'not-enrolled', token }
@@ -201,6 +216,15 @@ function AppContent({
     case 'tenant-unresolved':
       return (
         <TenantUnresolvedScreen
+          brand={brand}
+          token={state.token}
+          message={state.message}
+          onSignOut={onSignOut}
+        />
+      );
+    case 'resolution-error':
+      return (
+        <ResolutionErrorScreen
           brand={brand}
           token={state.token}
           message={state.message}
