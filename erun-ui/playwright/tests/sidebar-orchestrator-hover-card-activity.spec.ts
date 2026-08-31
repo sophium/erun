@@ -193,7 +193,15 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     });
   });
 
-  test('an environment never opened from this desktop reads unreachable, not idle', async ({
+  // This card is titled with the *orchestrator*, a host-side session with its
+  // own MCP client, so a line here must never assert anything about the
+  // orchestrator's own reach -- only what this desktop itself observed. An
+  // environment with no activity reading at all (no local forward, and no
+  // answer from the pod-exec fallback either) is genuinely unknown from the
+  // orchestrator's point of view, not confirmed closed, so the line names the
+  // desktop explicitly rather than asserting a bare "not open" that would
+  // read as a claim about the orchestrator.
+  test('an environment with no reading from this desktop names the desktop, not a bare "not open"', async ({
     app,
     page,
   }) => {
@@ -214,11 +222,12 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // own turn state, which must not be confused with this environment's
     // activity state.
     const environmentRow = dialog.locator('dd').filter({ hasText: 'acme / never-opened' });
-    await expect(environmentRow).toContainText('Not open here');
+    await expect(environmentRow).toContainText('No forward from this desktop');
+    await expect(environmentRow).not.toContainText('Not open here');
     await expect(environmentRow).not.toContainText('Idle');
 
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/unreachable-environment.png',
+      path: '/home/erun/.erun/outputs/1383-visual/no-forward-environment.png',
     });
   });
 
