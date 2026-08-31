@@ -24,7 +24,13 @@ import * as React from 'react';
 // fourth size/face combination -- it earns its emphasis by weight only
 // (font-medium), the same way a row's own name can (see OrchestratorHoverCard
 // environment names).
-export const HOVER_CARD_CAPTION_CLASS = 'text-xs text-muted-foreground';
+// Exported separately from HOVER_CARD_CAPTION_CLASS so a caption-sized line
+// that needs its own text color (the amber stale/usage-warning variants) can
+// still share the one size declaration instead of restating `text-xs` --
+// concatenating the full caption class would fight that same variant's color
+// override for the `color` property at equal specificity.
+export const HOVER_CARD_CAPTION_SIZE_CLASS = 'text-xs';
+export const HOVER_CARD_CAPTION_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLASS} text-muted-foreground`;
 
 export function HoverCardRow({
   label,

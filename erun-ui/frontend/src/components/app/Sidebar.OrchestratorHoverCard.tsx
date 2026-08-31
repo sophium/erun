@@ -9,6 +9,7 @@ import { orchestratorNudgeSummary } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import {
   HOVER_CARD_CAPTION_CLASS,
+  HOVER_CARD_CAPTION_SIZE_CLASS,
   HoverCardBadge,
   HoverCardMuted,
   HoverCardRow,
@@ -95,7 +96,7 @@ export function OrchestratorHoverCard({
             {orchestrator.transient && <HoverCardBadge>Transient</HoverCardBadge>}
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
           <HoverCardRow label="Status">{running ? 'Running' : 'Stopped'}</HoverCardRow>
           {running && orchestrator.restartRequired && (
             <HoverCardRow label="Restart">
@@ -209,7 +210,7 @@ function OrchestratorEnvironments({
                 <span
                   className={
                     line.usageStale
-                      ? 'block truncate text-xs tabular-nums text-amber-700 dark:text-amber-400'
+                      ? `block truncate tabular-nums ${HOVER_CARD_CAPTION_SIZE_CLASS} text-amber-700 dark:text-amber-400`
                       : `block truncate tabular-nums ${HOVER_CARD_CAPTION_CLASS}`
                   }
                 >

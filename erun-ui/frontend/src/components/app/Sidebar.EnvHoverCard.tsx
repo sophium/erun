@@ -6,6 +6,7 @@ import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import {
   HOVER_CARD_CAPTION_CLASS,
+  HOVER_CARD_CAPTION_SIZE_CLASS,
   HoverCardBadge,
   HoverCardMuted,
   HoverCardRow,
@@ -122,7 +123,7 @@ export function EnvHoverCard({
             <EnvTypeBadge isLocal={isLocal} isHost={isHost} />
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-3 py-2.5">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
           <HoverCardRow label="Version">
             {runtimeVersion ? (
               <span className="font-mono tabular-nums">{runtimeVersion}</span>
@@ -198,7 +199,7 @@ function UsageState({
       <span
         className={
           summary.stale
-            ? 'flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400'
+            ? `flex items-center gap-1 ${HOVER_CARD_CAPTION_SIZE_CLASS} text-amber-700 dark:text-amber-400`
             : HOVER_CARD_CAPTION_CLASS
         }
       >
