@@ -210,11 +210,14 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 				},
 			}
 
-			got := resolveDeployRuntimeImage(ctx, target, chartRegistry, erunVersion, DevopsComponentName, "", "", false)
+			got, persistImage := resolveDeployRuntimeImage(ctx, target, chartRegistry, erunVersion, DevopsComponentName, "", "", false)
 
 			if tc.wantHonored {
 				if got != recordedImage {
 					t.Fatalf("resolveDeployRuntimeImage() = %q, want the recorded image %q honored verbatim", got, recordedImage)
+				}
+				if persistImage != recordedImage {
+					t.Fatalf("persistImage = %q, want the recorded image %q unchanged (honoring an override is a no-op write)", persistImage, recordedImage)
 				}
 				if strings.Contains(trace.String(), "ignoring stale runtimeimage") {
 					t.Fatalf("trace unexpectedly discarded the recorded image: %s", trace.String())
@@ -240,7 +243,7 @@ func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T)
 		},
 	}
 
-	got := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
+	got, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
 
 	const want = "ghcr.io/sophium/acme-devops:1.0.201"
 	if got != want {
@@ -248,5 +251,50 @@ func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T)
 	}
 	if !strings.Contains(trace.String(), "ignoring stale runtimeimage") {
 		t.Fatalf("expected a trace explaining the stock-image staleness, got: %s", trace.String())
+	}
+	// erun#1754: the persisted runtimeimage field must heal too, not just this
+	// deploy's own resolved image -- otherwise the next deploy reads the same
+	// stale stock pin back and re-derives the same workaround forever instead
+	// of ever recording the tenant's own line.
+	const wantPersist = "acme-devops"
+	if persistImage != wantPersist {
+		t.Fatalf("persistImage = %q, want %q (the bare name so the pin stays self-maintaining)", persistImage, wantPersist)
+	}
+}
+
+// TestResolveDeployRuntimeImagePersistNameForDefaultFallback pins the
+// bare-name-only persist contract for the plain default path (no runtimeimage
+// override at all): PersistRuntimeVersionFromDeploySpecs must be able to heal
+// EnvConfig.RuntimeImage without freezing whatever registry happened to be
+// current at this deploy, so a later registry change still resolves
+// dynamically -- only the bare component name is safe to persist here.
+func TestResolveDeployRuntimeImagePersistNameForDefaultFallback(t *testing.T) {
+	ctx := Context{}
+	target := OpenResult{Tenant: "acme", EnvConfig: EnvConfig{}}
+
+	image, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
+
+	const wantImage = "ghcr.io/sophium/acme-devops:1.0.201"
+	if image != wantImage {
+		t.Fatalf("resolveDeployRuntimeImage() image = %q, want %q", image, wantImage)
+	}
+	const wantPersist = "acme-devops"
+	if persistImage != wantPersist {
+		t.Fatalf("persistImage = %q, want the bare name %q (no registry, no tag)", persistImage, wantPersist)
+	}
+}
+
+// TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments proves
+// the erun product's own environments (no tenant line of their own) get no
+// PersistRuntimeImage at all, so the persist step leaves RuntimeImage exactly
+// as recorded rather than write an empty string over an operator's own pin.
+func TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments(t *testing.T) {
+	ctx := Context{}
+	target := OpenResult{Tenant: "erun", EnvConfig: EnvConfig{}}
+
+	_, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", DevopsComponentName, "1.0.201", "", false)
+
+	if persistImage != "" {
+		t.Fatalf("persistImage = %q, want empty for erun's own environments", persistImage)
 	}
 }

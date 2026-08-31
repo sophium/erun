@@ -101,6 +101,94 @@ func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(str
 	}
 }
 
+// TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage pins the fix for
+// erun#1754: RuntimeVersion and RuntimeImage are one coordinate, so whatever
+// writes the version back after a deploy must write the image in the same
+// commit -- but only when the resolution actually knows a concrete name for
+// it (PersistRuntimeImage), never clobbering an operator's own pin with a
+// guess.
+func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
+	const tenant = "frs"
+	const version = "1.0.86"
+
+	t.Run("heals a stale RuntimeImage left on the wrong line", func(t *testing.T) {
+		var savedTenant string
+		var saved *EnvConfig
+		save := capturingSave(&savedTenant, &saved)
+		spec := DeploySpec{
+			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+				Name:         "build",
+				RuntimeImage: "ghcr.io/sophium/erun-devops",
+			}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:          RuntimeReleaseName(tenant),
+				Version:              version,
+				ContainerRegistry:    "ghcr.io/sophium",
+				ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,
+				PersistRuntimeImage:  "frs-devops",
+			},
+		}
+		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		if saved == nil {
+			t.Fatalf("expected a save")
+		}
+		if saved.RuntimeImage != "frs-devops" {
+			t.Fatalf("RuntimeImage = %q, want healed to %q", saved.RuntimeImage, "frs-devops")
+		}
+		if saved.RuntimeRunningImage != "ghcr.io/sophium/frs-devops:"+version {
+			t.Fatalf("RuntimeRunningImage = %q, want the resolved image", saved.RuntimeRunningImage)
+		}
+	})
+
+	t.Run("empty PersistRuntimeImage never clobbers a recorded RuntimeImage", func(t *testing.T) {
+		var saved *EnvConfig
+		save := capturingSave(new(string), &saved)
+		spec := DeploySpec{
+			Target: OpenResult{Tenant: "erun", EnvConfig: EnvConfig{
+				Name:         "prod",
+				RuntimeImage: "custom-fork-image",
+			}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:          RuntimeReleaseName("erun"),
+				Version:              version,
+				ResolvedRuntimeImage: "ghcr.io/sophium/erun-devops:" + version,
+				// PersistRuntimeImage left empty: the erun product's own
+				// environments have no line of their own to persist.
+			},
+		}
+		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		if saved == nil {
+			t.Fatalf("expected a save (version changed from empty)")
+		}
+		if saved.RuntimeImage != "custom-fork-image" {
+			t.Fatalf("RuntimeImage = %q, want left untouched at %q", saved.RuntimeImage, "custom-fork-image")
+		}
+	})
+
+	t.Run("no-op when nothing changed, including RuntimeImage", func(t *testing.T) {
+		saved := false
+		save := func(string, EnvConfig) error { saved = true; return nil }
+		spec := DeploySpec{
+			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+				Name:                "build",
+				RuntimeVersion:      version,
+				RuntimeImage:        "frs-devops",
+				RuntimeRunningImage: "ghcr.io/sophium/frs-devops:" + version,
+			}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:          RuntimeReleaseName(tenant),
+				Version:              version,
+				ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,
+				PersistRuntimeImage:  "frs-devops",
+			},
+		}
+		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		if saved {
+			t.Fatalf("expected no save: nothing changed")
+		}
+	})
+}
+
 // TestCachedDeployRunThenPersistHealsToRunningVersion drives RunDeploySpecs then
 // PersistRuntimeVersionFromDeploySpecs — the exact sequence the CLI deploy command
 // runs — to prove that a cached deploy never reaches the registry or rolls the pod

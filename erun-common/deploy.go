@@ -170,6 +170,15 @@ type HelmDeploySpec struct {
 	// know the image (a repo-local runtime chart's own values decide it) --
 	// callers must not guess a value for that case.
 	ResolvedRuntimeImage string
+	// PersistRuntimeImage is the bare component name (no registry, no tag)
+	// PersistRuntimeVersionFromDeploySpecs writes back to
+	// EnvConfig.RuntimeImage -- the operative field a future deploy reads back
+	// to pick the pod's image, unlike ResolvedRuntimeImage above which is
+	// display-only. Empty leaves the persisted field untouched: either an
+	// operator's own override already names it (nothing to heal), or this
+	// deploy's resolution has no line of its own to default to (the erun
+	// product's own environments).
+	PersistRuntimeImage string
 	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
@@ -444,11 +453,13 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	// unauthenticated release actually rolled out.
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
 	runningImage := strings.TrimSpace(spec.Deploy.ResolvedRuntimeImage)
+	runtimeImage := strings.TrimSpace(spec.Deploy.PersistRuntimeImage)
 	envConfig := spec.Target.EnvConfig
 	if strings.TrimSpace(envConfig.RuntimeVersion) == version &&
 		strings.TrimSpace(envConfig.RuntimeRegistry) == registry &&
 		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath &&
-		strings.TrimSpace(envConfig.RuntimeRunningImage) == runningImage {
+		strings.TrimSpace(envConfig.RuntimeRunningImage) == runningImage &&
+		(runtimeImage == "" || strings.TrimSpace(envConfig.RuntimeImage) == runtimeImage) {
 		return nil
 	}
 	envConfig.RuntimeVersion = version
@@ -460,6 +471,13 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	// none, since `erun list` would otherwise show a line that no longer
 	// reflects what is actually running.
 	envConfig.RuntimeRunningImage = runningImage
+	// Unlike RuntimeRunningImage above, RuntimeImage is the operative field a
+	// future deploy reads back to pick the pod's image, so an empty
+	// PersistRuntimeImage here must never clobber it -- see
+	// resolveDeployRuntimeImage's doc comment for what empty means.
+	if runtimeImage != "" {
+		envConfig.RuntimeImage = runtimeImage
+	}
 	if err := save(spec.Target.Tenant, envConfig); err != nil {
 		return fmt.Errorf("persist runtime version after deploy: %w", err)
 	}
@@ -1770,6 +1788,15 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 	}
 	if build.Image.ImageName == DevopsComponentName {
 		deployInput.ResolvedRuntimeImage = build.Image.Tag
+		// A build --deploy of the devops component is itself the operator's
+		// explicit choice of which image this env runs -- record it the same
+		// self-maintaining, bare-name way an operator's own --runtime-image
+		// override does, so a later plain `erun deploy`/`erun open` reads back
+		// the line this build just moved the env onto instead of the stale
+		// value erun#1754 found left behind by this exact orchestration.
+		if name := runtimeImageComponentName(build.Image.Tag); name != "" {
+			deployInput.PersistRuntimeImage = name
+		}
 	}
 
 	return DeploySpec{

@@ -1,0 +1,17 @@
+audit: erun deploy --dry-run --version <VERSION> frs local
+trace-log: would append the full trace to <TMP>
+deploy: tenant=frs environment=local version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart frs-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: runtime image override ghcr.io/sophium/erun-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: resolved 1 spec(s)
+image pull: ghcr.io/sophium/erun-devops:<VERSION> has no resolvable ghcr.io credential
+image pull: anonymous pullability of ghcr.io/sophium/erun-devops:<VERSION> is not probed in dry-run; a real deploy refuses before rollout if it turns out not to be anonymously pullable
+kubectl --context test-context get namespace frs-local -o name
+deploy: namespace frs-local is created if the check above reports it missing
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace frs-local --debug --kube-context test-context --set-string tenant=frs --set-string environment=local --set-string worktreeStorage=none --set-string worktreeRepoName=worktree --set-string worktreeHostPath= --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-string containerRegistry=ghcr.io/sophium --set-json 'containerRegistries=[{"registry":"ghcr.io/sophium","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 frs-devops oci://ghcr.io/sophium/charts/erun-devops --version <VERSION>
+deploy: watching pods in frs-local on context test-context for early container failure (release frs-devops)
+kubectl --context test-context --namespace frs-local get pods -o json
+dedup: ready (release=test-context-frs-local-frs-devops, hash=<HASH>)

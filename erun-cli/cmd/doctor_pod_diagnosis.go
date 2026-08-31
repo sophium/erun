@@ -41,3 +41,25 @@ func reportRuntimeImageRegistryMismatch(ctx common.Context, result common.OpenRe
 		result.Tenant, result.Environment, imageRegistry)
 	return err
 }
+
+// reportRuntimeImageLineMismatch names a runtimeimage stuck on a different
+// release line than the environment's last confirmed deploy actually ran —
+// config alone is enough to tell (see EnvConfig.RuntimeImageLineMismatch), so
+// this never execs and runs the same in --dry-run as for real. It is the
+// static half of erun#1754: a future deploy that re-resolves runtimeimage
+// without an explicit --runtime-image/--runtime-chart can silently move the
+// pod back onto the wrong line, and the runtime chart's Recreate strategy
+// tears the running pod down before that mistake is visible.
+func reportRuntimeImageLineMismatch(ctx common.Context, result common.OpenResult) error {
+	recordedLine, observedLine, mismatched := result.EnvConfig.RuntimeImageLineMismatch()
+	if !mismatched {
+		return nil
+	}
+	_, err := fmt.Fprintf(ctx.Stdout,
+		"== Runtime image release line ==\nruntimeimage names the %s release line, but this env's last confirmed deploy actually ran the %s line (recorded as runtimerunningimage).\n"+
+			"The next deploy that does not explicitly restate --runtime-image or --runtime-chart reads runtimeimage back to pick the pod's image; if that "+
+			"still resolves to a real, existing tag on the %s line, the deploy would succeed and silently move the environment off the %s line it is "+
+			"actually running. Realign it with `erun deploy %s %s --runtime-image <the %s image>` (or --runtime-chart), which records the choice explicitly.\n\n",
+		recordedLine, observedLine, recordedLine, observedLine, result.Tenant, result.Environment, observedLine)
+	return err
+}

@@ -2156,6 +2156,109 @@ esac
 		golden.Equal(t, "deploy/real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_heals_stale_runtimeimage_when_moving_onto_the_tenants_own_line", func(t *testing.T) {
+		// erun#1754: frs/build's exact drift. The env's persisted runtimeimage
+		// still names the stock erun-devops image, but this deploy confirms
+		// the tenant's own frs-devops chart (the existing staleness check
+		// already resolves the CORRECT image for THIS deploy) -- what
+		// erun#1754 found missing is that the persisted runtimeimage field
+		// never healed to match, so a later deploy that does not repeat this
+		// exact chart confirmation would read the same stale stock pin back.
+		// Real-run: persistence only happens outside --dry-run. runtimeimage
+		// must heal to the bare tenant name (self-maintaining, no registry, no
+		// tag) in the same write as runtimeversion -- one coordinate, one
+		// commit.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build", "runtimeimage: ghcr.io/sophium/erun-devops\n")
+		envVars := deployStubEnv(t, setup,
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=frs-devops:1.0.86",
+			"ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/frs-devops:1.0.86",
+		)
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "frs", "build",
+			"runtimeversion: 1.0.86",
+			"runtimeimage: frs-devops",
+		)
+		assertEnvConfigLacks(t, setup, "frs", "build", "runtimeimage: ghcr.io/sophium/erun-devops")
+		golden.Equal(t, "deploy/real_run_heals_stale_runtimeimage_when_moving_onto_the_tenants_own_line", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refuses_cross_line_runtime_image_switch_before_any_mutation", func(t *testing.T) {
+		// erun#1754's severity case: this env's last confirmed deploy actually
+		// ran the tenant's own frs-devops image (runtimerunningimage), but the
+		// persisted runtimeimage still names stock erun-devops and this
+		// deploy's own chart confirmation does not this time land on the
+		// tenant's own chart (so the existing staleness check, which is keyed
+		// off the chart, does not fire) -- the wrong tag resolves fine
+		// (erun-devops:1.0.86 is a real erun release), so only comparing
+		// release lines against the last confirmed deploy catches it. No
+		// kubectl/helm stub is declared: if the refusal did not fire before
+		// any cluster interaction, the command would instead fail with
+		// "executable file not found", which would show up in the golden.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build",
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+				"runtimerunningimage: ghcr.io/sophium/frs-devops:1.0.84\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a deploy that would silently switch release lines, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "kubectl") || strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("refusal must fire before any cluster interaction: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refuses_cross_line_runtime_image_switch_before_any_mutation", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_consistent_stock_runtime_image_env_deploys_unchanged", func(t *testing.T) {
+		// The legitimate case erun#1754 says must keep working with no new
+		// friction: an env that deliberately rides the stock erun-devops
+		// image on erun's own release line (frs/local in the issue), redeployed
+		// at a newer erun version. Both the recorded runtimeimage and the last
+		// confirmed runtimerunningimage name the same (stock) release line, so
+		// neither the persisted-image healing nor the new cross-line guard
+		// changes anything observable here.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "local")
+		appendEnvConfig(t, setup, "frs", "local",
+			"runtimeimage: erun-devops\n"+
+				"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "local", "--version", "1.0.204", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_consistent_stock_runtime_image_env_deploys_unchanged", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unclassifiable_prior_runtime_image_warns_but_proceeds", func(t *testing.T) {
+		// root AGENTS.md: an unclassifiable pairing must never silently pass as
+		// fine, but must also never block a configuration this guard merely
+		// could not classify. runtimerunningimage here parses to no component
+		// name at all (an ends-in-"/" reference), so the guard cannot compare
+		// release lines -- it must trace that explicitly and let the deploy
+		// proceed rather than refuse or stay silent.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build", "runtimerunningimage: ghcr.io/sophium/\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected an unclassifiable prior image to proceed rather than refuse, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "could not be classified") {
+			t.Fatalf("expected a trace explaining the prior image could not be classified, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_unclassifiable_prior_runtime_image_warns_but_proceeds", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's
