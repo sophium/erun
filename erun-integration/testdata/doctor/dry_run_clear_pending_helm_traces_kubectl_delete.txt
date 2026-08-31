@@ -3,6 +3,7 @@ Target: team/dev
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
 
 Running: Clear pending helm release
 No cleanup actions selected.
