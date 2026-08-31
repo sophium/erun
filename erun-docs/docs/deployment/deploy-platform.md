@@ -164,6 +164,14 @@ Name it to the component as `registry.signingKeySecretName`. The deploy fails lo
 | Registry pod cannot verify tokens | Every push/pull `401`s even with a valid tenant API token | Confirm the Secret holds the **current** public half of the API's registry-signing key — a rotated key on one side with no matching update on the other looks exactly like this |
 | Push/pull to `registry.erunpaas.com` fails on TLS/hostname | The apex DNS record or its dedicated certificate is missing (see "DNS and the certificate" above) | Confirm both exist and name the apex host exactly, not a services-zone name |
 
+## Secrets your Terraform creates {#produced-secrets}
+
+Most secrets go *into* the platform: you hold the Cloudflare token and supply it at apply time. Some go the other way — Terraform provisions something and the credential comes back out of the apply. An SES SMTP password, a generated database user, an API key for a service you just stood up.
+
+Do not carry those to their destination yourself. Terraform writes the credential to AWS Secrets Manager under a path scoped to the tenant and environment, and a sync running in the cluster turns it into a Kubernetes Secret in that environment's namespace. The workload reads the Secret and never knows Secrets Manager exists. One place holds the value, rotating it is a re-apply rather than a hunt, and it never passes through your clipboard or a console field.
+
+Two things to know before you start. **The cluster does not come with a sync** — no erun chart installs one, so the Terraform tree installs it alongside everything else. And **the usual AWS answer does not apply here**: erun's clusters are not EKS, so a service account cannot assume an IAM role, and the sync instead reads through one narrow credential that can do nothing but read that tenant and environment's own secrets. That is a smaller exposure than a credential per workload, not no exposure — the [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform) skill lays out the wiring, the rotation, and the one decision it makes you take about Terraform state.
+
 ## Which skills, and where
 
 | Skill | Environment | Purpose | Status |
@@ -177,4 +185,4 @@ The other `erun-blueprint-*` skills scaffold a tenant's *application* (API, docs
 
 ## What the operator does *not* do
 
-You do not run `kubectl`, `helm`, or `terraform` by hand: the built image + the skills handle the Kubernetes and Terraform. The Cloudflare token is supplied only in `<tenant>-prod`, at bootstrap time. The genuinely manual, one-time external setup is the domain + Cloudflare account + the DNS delegation cutover — see [Cloud setup](/deployment/cloud-setup).
+You do not run `kubectl`, `helm`, or `terraform` by hand: the built image + the skills handle the Kubernetes and Terraform. The Cloudflare token is supplied only in `<tenant>-prod`, at bootstrap time. You also do not read a credential out of a Terraform apply and paste it somewhere — see [Secrets your Terraform creates](#produced-secrets). The genuinely manual, one-time external setup is the domain + Cloudflare account + the DNS delegation cutover — see [Cloud setup](/deployment/cloud-setup).
