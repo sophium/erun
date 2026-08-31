@@ -162,6 +162,11 @@ export interface UIState {
   versionSuggestions?: UIVersionSuggestion[];
   versionSuggestionNotices?: UIVersionSuggestionNotice[];
   cloudProviders?: UICloudProviderStatus[];
+  // configUnreadable is set when one or more config files could not be read
+  // (e.g. a torn write) even after erun-common's own retries, so tenants is
+  // empty for a reason other than "no environments configured" — render this
+  // distinctly rather than falling into the empty-state affordance.
+  configUnreadable?: boolean;
 }
 
 export interface UIIdleStatus {

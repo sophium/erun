@@ -1,4 +1,4 @@
 audit: erun upgrade --dry-run
 upgrade: tenant= environment= version-override= force=false
-upgrade: plan resolution failed: config file cannot be unmarshaled
-config file cannot be unmarshaled
+upgrade: plan resolution failed: config file cannot be unmarshaled: yaml: line 1: did not find expected ',' or '}'
+config file cannot be unmarshaled: yaml: line 1: did not find expected ',' or '}'

@@ -10,6 +10,12 @@ type uiState struct {
 	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
 	VersionSuggestionNotices []uiVersionNotice       `json:"versionSuggestionNotices,omitempty"`
 	CloudProviders           []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
+	// ConfigUnreadable is set when one or more config files could not be read
+	// (e.g. a torn write) even after erun-common's own retries, so Tenants is
+	// empty for a reason other than "no environments configured". The
+	// sidebar must render this distinctly from a genuine empty state rather
+	// than showing "Create your first environment" for a read failure.
+	ConfigUnreadable bool `json:"configUnreadable,omitempty"`
 }
 
 type uiTenant struct {

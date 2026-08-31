@@ -1,2 +1,2 @@
 audit: erun list
-config file cannot be unmarshaled
+config file cannot be unmarshaled: yaml: line 1: did not find expected ',' or '}'
