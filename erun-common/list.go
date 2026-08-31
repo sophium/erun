@@ -86,7 +86,11 @@ type ListEnvironmentResult struct {
 	LocalRepoPath       string              `json:"localRepoPath,omitempty"`
 	ContainerRegistries ContainerRegistries `json:"containerRegistries,omitempty"`
 	RuntimeVersion      string              `json:"runtimeVersion,omitempty"`
-	RuntimePod          RuntimePodResources `json:"runtimePod,omitempty"`
+	// RuntimeVersionLine names which release line RuntimeVersion's number
+	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
+	// nothing to annotate for an environment that has never deployed.
+	RuntimeVersionLine *RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
+	RuntimePod         RuntimePodResources `json:"runtimePod,omitempty"`
 	// Sizing is the environment's standing recommendation, derived from the usage
 	// history the in-pod monitor retains. Nil where erun has never observed this
 	// environment — which is every environment seen from a host other than its
@@ -238,6 +242,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		LocalRepoPath:       strings.TrimSpace(env.LocalRepoPath),
 		ContainerRegistries: EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
+		RuntimeVersionLine:  listRuntimeVersionLine(tenant.Name, env),
 		RuntimePod:          env.RuntimePod,
 		Sizing:              EnvironmentRuntimeSizing(tenant.Name, env),
 		ManagedCloud:        env.ManagedCloud,
@@ -254,6 +259,18 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		SSH:                 listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
 		AutoStart:           copyAutoStartPtr(env.AutoStart),
 	}
+}
+
+// listRuntimeVersionLine wraps ResolveRuntimeVersionLine, but only when there
+// is a RuntimeVersion to annotate at all -- an environment that has never
+// deployed has no version, and "undetermined" would misread as "deployed,
+// but the line is unknown" rather than "never deployed".
+func listRuntimeVersionLine(tenant string, env EnvConfig) *RuntimeVersionLine {
+	if strings.TrimSpace(env.RuntimeVersion) == "" {
+		return nil
+	}
+	line := ResolveRuntimeVersionLine(tenant, env)
+	return &line
 }
 
 // EnvironmentRuntimeSizing attaches the standing recommendation when there is

@@ -211,6 +211,18 @@ type EnvConfig struct {
 	// published <registry>/erun-devops:<version> default. A full reference is used
 	// verbatim; a bare name resolves against the env's registry and runtime version.
 	RuntimeImage string `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
+	// RuntimeRunningImage is a display-only memo of the runtime image a deploy
+	// last actually resolved for this env's pod (imageOverrides.erun-devops, or
+	// the chart's own stock default when no override applied) -- healed
+	// alongside RuntimeVersion by PersistRuntimeVersionFromDeploySpecs. `erun
+	// list` reads it to name which release line RuntimeVersion's number
+	// belongs to (erun's own vs. a tenant's own <tenant>-devops line; see
+	// erun#1746). Unlike RuntimeImage above, it is never read back to
+	// influence a deploy's own image choice, and stays empty whenever the
+	// resolution path that produced the deploy could not know the image (a
+	// repo-local runtime chart's own values decide it) -- callers must render
+	// that as undetermined, never guess a line from the tenant name alone.
+	RuntimeRunningImage string `yaml:"runtimerunningimage,omitempty" json:"runtimeRunningImage,omitempty"`
 	// RuntimeChart names the runtime chart this env rides, as an OCI reference
 	// that may carry its own version. The chart and the runtime image are separate
 	// artifacts on separate lines: the chart is erun's, published at erun's
