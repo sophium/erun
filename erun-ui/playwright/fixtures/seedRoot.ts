@@ -118,6 +118,28 @@ function repoDir(): string {
   return path.join(isolatedRoot(), 'repo');
 }
 
+// atomicWriteCounter disambiguates temp names when writeConfigFile is called
+// more than once in the same millisecond (seedBaseline seeds several files
+// back to back).
+let atomicWriteCounter = 0;
+
+// writeConfigFile mirrors erun-common's writeFileAtomic (erun-common/config.go):
+// write a sibling temp file in the same directory, then rename over the
+// destination. A plain fs.writeFileSync truncates before writing, so the
+// backend's fsnotify-triggered config reader can observe an empty or
+// half-written file mid-seed — a torn read that no reader-side retry budget
+// can fully absorb under enough concurrent write pressure. Same-directory
+// rename is atomic on both POSIX and Windows NTFS.
+function writeConfigFile(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(filePath)}.tmp-${process.pid}-${atomicWriteCounter++}`,
+  );
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, filePath);
+}
+
 function erunConfigDir(): string {
   return path.join(isolatedHomeDir(), '.config', 'erun');
 }
@@ -261,7 +283,7 @@ export function seedEnvironmentForK3d(
 ): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -281,7 +303,7 @@ export function seedEnvironmentForK3d(
 export function seedRuntimeForK3d(tenant: string, environment: string, context: string): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -304,7 +326,7 @@ export function seedRuntimeForK3d(tenant: string, environment: string, context: 
 export function seedRemoteAgentForK3d(tenant: string, environment: string, context: string): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -331,7 +353,7 @@ export function seedGitRemoteAgentForK3d(
 ): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       'type: remote-agent\n' +
@@ -419,7 +441,7 @@ function writeStubBinary(name: string): void {
 export function seedBaseline(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(root, 'config.yaml'),
     `defaulttenant: ${SEED_TENANT}\n` +
       'cloudproviders:\n' +
@@ -442,7 +464,7 @@ export function seedBaseline(): void {
       `        environment: ${SEED_ENV_ALPHA}\n` +
       `        directory: ${repoDir()}\n`,
   );
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(root, SEED_TENANT, 'config.yaml'),
     `projectroot: ${repoDir()}\n` +
       `name: ${SEED_TENANT}\n` +
@@ -474,8 +496,8 @@ export function seedBaseline(): void {
 export function seedBaselineForK3d(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
-  fs.writeFileSync(path.join(root, 'config.yaml'), `defaulttenant: ${SEED_TENANT}\n`);
-  fs.writeFileSync(
+  writeConfigFile(path.join(root, 'config.yaml'), `defaulttenant: ${SEED_TENANT}\n`);
+  writeConfigFile(
     path.join(root, SEED_TENANT, 'config.yaml'),
     `projectroot: ${repoDir()}\n` + `name: ${SEED_TENANT}\n`,
   );
@@ -487,7 +509,7 @@ export function seedBaselineForK3d(): void {
 export function seedEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -507,7 +529,7 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
 export function seedRuntimeEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: /home/erun/git/${tenant}\n` +
@@ -527,7 +549,7 @@ export function seedRuntimeEnvironment(tenant: string, environment: string, extr
 export function seedHostEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -580,7 +602,7 @@ export function removeHeldLease(tenant: string, environment: string, name: strin
 export function seedTenant(tenant: string, defaultEnvironment: string): void {
   const tenantDir = path.join(erunConfigDir(), tenant);
   fs.mkdirSync(tenantDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(tenantDir, 'config.yaml'),
     `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n`,
   );
@@ -616,9 +638,9 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
         `        directory: ${repoDir()}\n`,
     )
     .join('');
-  fs.appendFileSync(configPath, entries);
+  writeConfigFile(configPath, before + entries);
   return () => {
-    fs.writeFileSync(configPath, before);
+    writeConfigFile(configPath, before);
   };
 }
 
