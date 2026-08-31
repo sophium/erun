@@ -1506,6 +1506,65 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/refresh_real_run_keeps_credentials_out_of_output", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refresh_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for aws-export-credentials: the plan
+		// must stay byte-identical to the subprocess-mode golden even with
+		// execution.modes.aws-export-credentials=library, because
+		// RefreshHostAWSCredentials returns before ever calling
+		// ExportCloudProviderCredentials on a dry run (see
+		// refresh_dry_run_traces_pod_write_and_resolved_region.txt).
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		seedExecutionMode(t, setup, "aws-export-credentials", "library")
+		result := erun.Run(t, []string{"cloud", "refresh", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/refresh_dry_run_traces_pod_write_and_resolved_region", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refresh_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path: with execution.modes.aws-export-credentials=library
+		// and a real static-credential AWS profile on disk, ExportCloudProviderCredentials
+		// resolves via aws-sdk-go-v2's shared-config credential chain instead of
+		// shelling out, so the scenario declares no "aws" stub at all — only
+		// "kubectl", for the pod write this command always performs. The PATH
+		// scrub in internal/env would fail the run with "executable file not
+		// found" if production code fell through to a subprocess.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		seedExecutionMode(t, setup, "aws-export-credentials", "library")
+		seedAWSStaticCredentialProfile(t, setup, "erun-sso-test")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		argvLog := filepath.Join(stubs, "kubectl-argv.log")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`printf '%s\n' "$*" >> '` + argvLog + `'`,
+			`cat >/dev/null 2>&1 || true`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"cloud", "refresh", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, leak := range []string{"AKIAFAKE", "fakesecret"} {
+			if strings.Contains(result.Combined, leak) {
+				t.Fatalf("credential value %q leaked into command output:\n%s", leak, result.Combined)
+			}
+		}
+		recorded, err := os.ReadFile(argvLog)
+		if err != nil {
+			t.Fatalf("read recorded kubectl argv: %v", err)
+		}
+		for _, leak := range []string{"AKIAFAKE", "fakesecret"} {
+			if strings.Contains(string(recorded), leak) {
+				t.Fatalf("credential value %q leaked into a kubectl argument:\n%s", leak, recorded)
+			}
+		}
+		golden.Equal(t, "cloud/refresh_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+	})
+
 	t.Run("set_dry_run_traces_env_alias_write", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

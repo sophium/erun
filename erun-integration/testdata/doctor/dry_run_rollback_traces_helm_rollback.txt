@@ -2,6 +2,7 @@ Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
 
 Running: Roll back to the last successful revision
 No cleanup actions selected.

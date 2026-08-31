@@ -2,6 +2,7 @@ Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
 
 Running: Clear cached JetBrains Gateway backend metadata
 Cached backend path: <TMP>
