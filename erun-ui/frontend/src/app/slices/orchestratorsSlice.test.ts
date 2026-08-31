@@ -25,6 +25,7 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
     ...overrides,
   };
 }
@@ -42,6 +43,7 @@ test('a live env-activity patch replaces a stale snapshot on the matching ref', 
           tenant: 'frs',
           environment: 'local',
           directory: '/tmp/a',
+          role: '',
           activity: { reachable: false, observed: false, outage: true, busy: false },
         },
       ],
@@ -71,7 +73,13 @@ test('a patch for a different environment leaves an unrelated ref untouched', ()
     orchestrator({
       id: 'orch-a',
       environments: [
-        { tenant: 'frs', environment: 'local', directory: '/tmp/a', activity: staleActivity },
+        {
+          tenant: 'frs',
+          environment: 'local',
+          directory: '/tmp/a',
+          role: '',
+          activity: staleActivity,
+        },
       ],
     }),
   ]);
@@ -97,6 +105,7 @@ test('one environment linked from two orchestrators updates on both refs', () =>
           tenant: 'frs',
           environment: 'local',
           directory: '/tmp/a',
+          role: '',
           activity: { reachable: false, observed: false, outage: true, busy: false },
         },
       ],
@@ -108,6 +117,7 @@ test('one environment linked from two orchestrators updates on both refs', () =>
           tenant: 'frs',
           environment: 'local',
           directory: '/tmp/b',
+          role: '',
           activity: { reachable: false, observed: false, outage: true, busy: false },
         },
       ],
@@ -139,6 +149,7 @@ test('a fresh fetch still reflects the joined snapshot with no event required', 
           tenant: 'frs',
           environment: 'local',
           directory: '/tmp/a',
+          role: '',
           activity: {
             reachable: true,
             observed: true,

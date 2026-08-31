@@ -26,6 +26,7 @@ function orchestrator(
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
   } satisfies OrchestratorInfo;
 }
 
@@ -51,8 +52,8 @@ test('an active orchestrator session resolves its linked environments as targets
     sessionId: 42,
     orchestrators: [
       orchestrator('erun-issues', 42, [
-        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha' },
-        { tenant: 'acme', environment: 'beta', directory: '/tmp/beta' },
+        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha', role: '' },
+        { tenant: 'acme', environment: 'beta', directory: '/tmp/beta', role: '' },
       ]),
     ],
   });
@@ -90,7 +91,7 @@ test('an active orchestrator session ignores a stale sidebar environment selecti
     sessionId: 42,
     orchestrators: [
       orchestrator('erun-issues', 42, [
-        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha' },
+        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha', role: '' },
       ]),
     ],
     selected: { tenant: 'acme', environment: 'unrelated' },
@@ -108,7 +109,7 @@ test('a stopped orchestrator contributes no targets', () => {
     sessionId: 0,
     orchestrators: [
       orchestrator('erun-issues', 0, [
-        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha' },
+        { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha', role: '' },
       ]),
     ],
   });

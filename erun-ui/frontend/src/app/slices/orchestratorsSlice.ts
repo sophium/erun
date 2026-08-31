@@ -4,10 +4,16 @@ import type { OrchestratorNotice } from '@/app/orchestratorRestore';
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
+// OrchestratorEnvRole mirrors the Go eruncommon.OrchestratorEnvRole values:
+// what an orchestrator uses a linked environment for. '' is undeclared, never
+// a default of either 'code' or 'build'.
+export type OrchestratorEnvRole = 'code' | 'build' | '';
+
 export interface OrchestratorEnvRef {
   tenant: string;
   environment: string;
   directory: string;
+  role: OrchestratorEnvRole;
   // activity is the environment-activity poller's last observation for this
   // env (see uiEnvironment.Activity), joined onto the link rather than
   // collected separately — the same reused shape, so this card and the
@@ -67,6 +73,12 @@ export interface OrchestratorInfo {
   // unlinked from and none for one newly linked — only Restart re-wires it
   // (erun#1319).
   restartRequired: boolean;
+  // roleChanged is true when a linked environment's role was edited while
+  // this session was running. Distinct from restartRequired: unlike the
+  // environment set, a role edit never changes which MCP tools the session
+  // holds, so this exists to offer the same Restart affordance without the
+  // "tools missing" wording that would not apply here.
+  roleChanged: boolean;
 }
 
 export interface OrchestratorsState {

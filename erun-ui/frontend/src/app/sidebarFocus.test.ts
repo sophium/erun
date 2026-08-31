@@ -22,6 +22,7 @@ function orchestrator(id: string, sessionId: number): OrchestratorInfo {
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
   };
 }
 

@@ -12,6 +12,8 @@ Above your environments, the sidebar's **ERUN** section lists your host-side orc
 
 **Editing a running orchestrator's environments takes a restart to apply.** Its session already holds the AI tooling for the environments it started with, and that can't be swapped out from under it — so saving a different set in **Manage** doesn't touch a session that's already running. The row's status dot and the hover card both say so ("Restart to apply") until you do, and the manage dialog carries the same **Restart** action right there, next to the reason. Editing a stopped orchestrator needs no restart: its next start already picks up the new set.
 
+**Role, per linked environment.** Beside each checked environment's directory field, a **Role** control says what this orchestrator uses that environment for: **Code** (writes code, iterates fast, not sized for a full regression run), **Build** (checks out pushed branches, runs the gates, cuts releases), or **Not declared** — the default, and never silently coerced to either of the other two. The control shows only for a checked environment, and a line beside it states what the selected value means. Changing a role while the orchestrator is running carries the same restart-to-apply notice as changing the linked environment set, so the dialog never implies an edit took effect before you've confirmed it did. `erun orchestrator set-role` (see [CLI · `erun orchestrator`](/cli/orchestrator)) sets the same field from the terminal, so `config.yaml` is never the only writer.
+
 Each orchestrator runs under two layers of guidance, and the dialog opens either one in your editor (VS Code or IntelliJ):
 
 - **Role** — what this orchestrator does. Yours to edit; ERun creates it once and never overwrites it.

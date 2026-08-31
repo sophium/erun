@@ -22,6 +22,7 @@ import {
 import {
   closeOrchestratorDialog,
   type OrchestratorEnvRef,
+  type OrchestratorEnvRole,
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
 import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
@@ -46,6 +47,7 @@ interface OrchestratorForm {
   selected: OrchestratorEnvRef[];
   toggle: (candidate: EnvCandidate, checked: boolean) => void;
   setDirectory: (ref: OrchestratorEnvRef, directory: string) => void;
+  setRole: (ref: OrchestratorEnvRef, role: OrchestratorEnvRole) => void;
 }
 
 function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): OrchestratorForm {
@@ -77,6 +79,9 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
               tenant: candidate.tenant,
               environment: candidate.environment,
               directory: candidate.defaultDirectory,
+              // Not declared, never a silent default of either known role —
+              // an operator who wants one picks it explicitly.
+              role: '',
             },
           ]
         : rest;
@@ -93,7 +98,17 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     );
   };
 
-  return { candidates, name, setName, selected, toggle, setDirectory };
+  const setRole = (ref: OrchestratorEnvRef, role: OrchestratorEnvRole): void => {
+    setSelected((current) =>
+      current.map((entry) =>
+        envKey(entry.tenant, entry.environment) === envKey(ref.tenant, ref.environment)
+          ? { ...entry, role }
+          : entry,
+      ),
+    );
+  };
+
+  return { candidates, name, setName, selected, toggle, setDirectory, setRole };
 }
 
 // OrchestratorDialog is the single management surface for an orchestrator,
@@ -157,10 +172,8 @@ function OrchestratorForm({
   const dispatch = useAppDispatch();
   const busy = useAppSelector((state) => state.orchestrators.busy);
   const error = useAppSelector((state) => state.orchestrators.error);
-  const { candidates, name, setName, selected, toggle, setDirectory } = useOrchestratorForm(
-    open,
-    editing,
-  );
+  const { candidates, name, setName, selected, toggle, setDirectory, setRole } =
+    useOrchestratorForm(open, editing);
   const submit = (): void => {
     if (editing) {
       void dispatch(updateOrchestrator(editing.id, name, selected));
@@ -198,6 +211,7 @@ function OrchestratorForm({
           selected={selected}
           onToggle={toggle}
           onDirectoryChange={setDirectory}
+          onRoleChange={setRole}
         />
         {editing && !editing.transient ? (
           <>
@@ -270,7 +284,7 @@ function OrchestratorManageActions({
           }}
         >
           <RotateCcw aria-hidden="true" />
-          {editing.restartRequired ? 'Restart to apply' : 'Restart'}
+          {editing.restartRequired || editing.roleChanged ? 'Restart to apply' : 'Restart'}
         </Button>
       ) : null}
       <Button
@@ -285,6 +299,24 @@ function OrchestratorManageActions({
       </Button>
     </div>
   );
+}
+
+// restartNoticeText picks the accurate reason for the amber notice below.
+// restartRequired (an environment link added or removed) always takes the
+// tools-specific wording, since it is the one guaranteed true; a role-only
+// edit (roleChanged) gets its own honest wording instead of being folded into
+// the same sentence — a role never changes which MCP tools the session holds,
+// so claiming "tools are missing" for it would be a false diagnosis (root
+// AGENTS.md § "Smooth, Seamless, No Dead Ends": distinguish causes before
+// writing copy).
+function restartNoticeText(editing: OrchestratorInfo): string | null {
+  if (editing.restartRequired) {
+    return 'Its environments changed while it was running. The session still holds tools for what it was linked to before and none for what was added since.';
+  }
+  if (editing.roleChanged) {
+    return "A linked environment's role changed while it was running. It's saved, but the session's current context may still reflect the old one — restart to be sure it picks up the change.";
+  }
+  return null;
 }
 
 // RestartRequiredNotice tells the operator, at the top of the form they just
@@ -303,7 +335,8 @@ function RestartRequiredNotice({
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const busy = useAppSelector((state) => state.orchestrators.busy);
-  if (editing?.status !== 'running' || !editing.restartRequired) {
+  const text = editing?.status === 'running' ? restartNoticeText(editing) : null;
+  if (!editing || !text) {
     return null;
   }
   const orchestratorId = editing.id;
@@ -315,10 +348,7 @@ function RestartRequiredNotice({
       <span className="flex items-start gap-2">
         <AlertTriangle aria-hidden="true" className="mt-[1px] size-3.5 shrink-0" />
         <span className="grid gap-1">
-          <span>
-            Its environments changed while it was running. The session still holds tools for what it
-            was linked to before and none for what was added since.
-          </span>
+          <span>{text}</span>
           <span>
             <Button
               type="button"

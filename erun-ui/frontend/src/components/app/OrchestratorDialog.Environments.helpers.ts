@@ -17,3 +17,12 @@ export interface EnvCandidate {
 export function envKey(tenant: string, environment: string): string {
   return `${tenant} ${environment}`;
 }
+
+// envRoleFieldId is the role SelectField's DOM id for one candidate row. A
+// plain envKey (space-joined) is not safe as a raw CSS id -- unescaped in a
+// selector, the space would end the id token early -- so this uses a
+// dash-joined id instead, which is what OrchestratorDialog.spec.ts locates
+// the trigger by.
+export function envRoleFieldId(tenant: string, environment: string): string {
+  return `orchestrator-env-role-${tenant}-${environment}`;
+}
