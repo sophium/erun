@@ -1,0 +1,22 @@
+audit: erun build --deploy --dry-run --version <VERSION>
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+docker image inspect ghcr.io/sophium/erun-devops:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/erun-devops:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/erun-devops:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/erun-devops:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/erun-devops:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/erun-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/erun-devops:<VERSION> ghcr.io/sophium/erun-devops:fp-<HEX16>-amd64
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/erun-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/erun-devops:<VERSION> ghcr.io/sophium/erun-devops:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/erun-devops:<VERSION>
+cd <TMP> && helm package erun-devops --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push erun-devops-<VERSION>.tgz oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/erun-devops --version <VERSION> --destination <TMP>
+cd <TMP> && helm package erun-devops --version <VERSION> --app-version <VERSION>
+kubectl --context test-context get namespace erun-dev -o name
+deploy: namespace erun-dev is created if the check above reports it missing
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace erun-dev --debug --kube-context test-context -f <TMP> --set-string tenant=erun --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 erun-devops <TMP>
+deploy: watching pods in erun-dev on context test-context for early container failure (release erun-devops)
+kubectl --context test-context --namespace erun-dev get pods -o json
+dedup: ready (release=test-context-erun-dev-erun-devops, hash=<HASH>)

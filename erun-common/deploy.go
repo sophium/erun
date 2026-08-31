@@ -160,6 +160,16 @@ type HelmDeploySpec struct {
 	// (TLS) registries, so those envs render nothing.
 	InsecureRegistry string
 	ImageOverrides   map[string]string
+	// ResolvedRuntimeImage is the runtime pod's image as this deploy resolved
+	// it for the erun-devops component -- the operator's override, the
+	// tenant's own default, or the chart's stock default -- recorded here for
+	// PersistRuntimeVersionFromDeploySpecs to heal into
+	// EnvConfig.RuntimeRunningImage. It is a display memo only: helm only ever
+	// receives ImageOverrides, never this field, so it cannot change what a
+	// deploy installs. Empty when the resolution ran on a path that does not
+	// know the image (a repo-local runtime chart's own values decide it) --
+	// callers must not guess a value for that case.
+	ResolvedRuntimeImage string
 	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
@@ -433,15 +443,23 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	// explicit opt-out's clear — and forgetting the key is only true once the
 	// unauthenticated release actually rolled out.
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
+	runningImage := strings.TrimSpace(spec.Deploy.ResolvedRuntimeImage)
 	envConfig := spec.Target.EnvConfig
 	if strings.TrimSpace(envConfig.RuntimeVersion) == version &&
 		strings.TrimSpace(envConfig.RuntimeRegistry) == registry &&
-		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath {
+		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath &&
+		strings.TrimSpace(envConfig.RuntimeRunningImage) == runningImage {
 		return nil
 	}
 	envConfig.RuntimeVersion = version
 	envConfig.RuntimeRegistry = registry
 	envConfig.MCPAuthPublicKeyPath = mcpAuthKeyPath
+	// Healed unconditionally, including back to "" when this deploy's
+	// resolution path could not know the image (a repo-local runtime chart):
+	// a stale memo from a previous, different resolution path is worse than
+	// none, since `erun list` would otherwise show a line that no longer
+	// reflects what is actually running.
+	envConfig.RuntimeRunningImage = runningImage
 	if err := save(spec.Target.Tenant, envConfig); err != nil {
 		return fmt.Errorf("persist runtime version after deploy: %w", err)
 	}
@@ -1746,6 +1764,9 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 	}
 	deployInput.ImageOverrides = map[string]string{
 		build.Image.ImageName: build.Image.Tag,
+	}
+	if build.Image.ImageName == DevopsComponentName {
+		deployInput.ResolvedRuntimeImage = build.Image.Tag
 	}
 
 	return DeploySpec{

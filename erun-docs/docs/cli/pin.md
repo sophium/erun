@@ -83,4 +83,6 @@ A tagged `runtimeimage` is only a pin site when it names the stock `erun-devops`
 
 The same reasoning applies to the environment's own `runtimeversion`: it is only a pin site when the environment runs erun's own runtime image. An environment running a tenant-owned image has its `runtimeversion` alone too, for the same reason and with the same explicit `skipped:` line in the plan.
 
+[`erun list`](/cli/list#release-lines) shows the same thing without needing to run a pin first: it names which release line each environment's `runtime-version` belongs to, right beside the number.
+
 After a re-pin, run `helm dependency update` on each umbrella to refresh its `Chart.lock`, then `erun terraform apply` and `erun deploy` to realize the version.

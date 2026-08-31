@@ -461,8 +461,16 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
 	deployInput.RuntimeChartRegistry = chart.registry
-	if image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit); image != "" {
+	image := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
+	if image != "" {
 		deployInput.ImageOverrides = map[string]string{DevopsComponentName: image}
+		deployInput.ResolvedRuntimeImage = image
+	} else {
+		// No override applies, so the chart's own stock default wins -- see
+		// service.yaml's devopsImage default, `<registry>/erun-devops:<appVersion>`.
+		// That is fully known here even though nothing is threaded to helm for
+		// it, so record it rather than leaving the memo empty.
+		deployInput.ResolvedRuntimeImage = registry + "/" + DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo
 	// at the deployed release tag on first boot; resolveWorktreeStorage already

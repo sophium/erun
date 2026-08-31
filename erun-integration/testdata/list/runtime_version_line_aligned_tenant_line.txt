@@ -9,8 +9,7 @@ Current Directory:
   configured tenant: none
   effective target: team/dev
   kubernetes context: test-context
-  cloud provider: test-user+123456789012@aws
-  type: none
+  type: local-agent
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
@@ -19,13 +18,13 @@ Current Directory:
   assigned contribute-app local port: 17050 (when contribute mode is active and `erun app --headless` is running)
   repo path: <TMP>
 Cloud Providers:
-  - test-user+123456789012@aws provider=aws account=123456789012 status=not_configured message=The config profile (test-profile) could not be found
+  none
 Tenants:
   team [default, effective]
     default environment: dev
     environments:
-      - dev [default, effective] context=test-context cloud=test-user+123456789012@aws
-          type: none
+      - dev [default, effective] context=test-context
+          type: local-agent
           repo: <TMP>
           ports: 17000-17099
           mcp-port: 17000
@@ -34,12 +33,12 @@ Tenants:
           ssh-port: 17022
           contribute-app-port: 17050
           container-registries: registry.example/test[build,deploy]
-          runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
-          runtime-pod: cpu=2 memory=4Gi
+          runtime-version: <VERSION> (team line, ghcr.io/sophium/team-devops)
+          runtime-pod: none
           managed-cloud: off
           ai-tool: none
           claude: none
-          idle: timeout=10m working-hours=09:00-18:00 timezone=Europe/Riga idle-traffic-bytes=2048
+          idle: none
           sshd: off
 Orchestrators:
   none

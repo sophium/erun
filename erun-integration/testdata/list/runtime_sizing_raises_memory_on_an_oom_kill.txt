@@ -33,7 +33,7 @@ Tenants:
           ssh-port: 17022
           contribute-app-port: 17050
           container-registries: registry.example/test[build,deploy]
-          runtime-version: <VERSION>
+          runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
           runtime-pod: none
           sizing: memory raise to 3072Mi from 2048Mi (1 oom kill(s) at 2048Mi, high confidence); cpu insufficient-evidence from 1 (0.00% of scheduling periods throttled (0 of 5000), but only 12m observed of the 24h0m a shrink needs)
           sizing-evidence: 12m observed, 2 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)

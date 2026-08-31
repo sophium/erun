@@ -71,6 +71,100 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/platform_account_env_shows_enabled", normalize.Apply(result.Combined))
 	})
 
+	// erun#1746: runtime-version alone reads as an erun version even when it
+	// is not one, and a Helm release name can disagree with the image it
+	// actually runs. These four scenarios lock the shapes `erun list` must
+	// tell apart: a tenant's own aligned line, erun's own stock line, the
+	// release-name-disagrees-with-image trap, and honestly not knowing.
+
+	t.Run("runtime_version_line_aligned_tenant_line", func(t *testing.T) {
+		// The tenant's own devops release runs the tenant's own image at the
+		// same name (team-devops release, team-devops image) -- the ordinary,
+		// unsurprising case. The line reads as "team", not "erun".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimerunningimage: ghcr.io/sophium/team-devops:1.0.84\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_version_line_aligned_tenant_line", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_version_line_stock_erun_line", func(t *testing.T) {
+		// The tenant literally named "erun" rides the stock erun-devops image
+		// by construction (RuntimeReleaseName("erun") == "erun-devops"), so
+		// the release name and the image agree and the line reads "erun"
+		// with no disagreement flag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "erun", "build")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "erun", "build", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.221\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_version_line_stock_erun_line", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_version_line_release_name_disagrees_with_image", func(t *testing.T) {
+		// erun#1746's reported trap: the tenant's own frs-devops release is
+		// running the stock erun-devops image (a leftover explicit override,
+		// or a deploy that never needed a tenant-specific image). The line is
+		// still "erun" -- that is genuinely what is running -- but flagged
+		// distinctly because it is the row most likely to be misread as
+		// "frs's own line".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "build")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "build", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_version_line_release_name_disagrees_with_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("runtime_version_line_undetermined_on_malformed_recorded_image", func(t *testing.T) {
+		// A hand-edited or corrupted runtimerunningimage that doesn't parse as
+		// a real image reference (no tag) must still read as undetermined,
+		// not crash and not guess a line from the tenant name.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimerunningimage: not-a-valid-image-reference\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/runtime_version_line_undetermined_on_malformed_recorded_image", normalize.Apply(result.Combined))
+	})
+
+	// The undetermined shape (a deployed env whose deploy never recorded a
+	// resolved image -- predates this feature, or went through a repo-local
+	// runtime chart whose own values decide the image) is already covered by
+	// every plain SeedTenantEnv scenario above, e.g. with_seeded_tenant_env:
+	// it never sets runtimerunningimage, so "line undetermined" is exactly
+	// what its golden now shows. Must never guess a line from the tenant name
+	// instead, the way erun#1746 was filed over.
+
 	t.Run("with_orchestrator_environment_roles", func(t *testing.T) {
 		// Locks erun#1688's contract: erun list shows each orchestrator's
 		// linked environments with their role, and an undeclared role

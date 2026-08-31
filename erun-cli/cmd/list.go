@@ -314,7 +314,7 @@ func environmentDetailLines(tenantName string, env common.ListEnvironmentResult)
 		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
 		indent + "contribute-app-port: " + fmt.Sprintf("%d", env.LocalPorts.ContributeApp),
 		indent + "container-registries: " + containerRegistriesLabel(env.ContainerRegistries),
-		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
+		indent + "runtime-version: " + runtimeVersionLabel(tenantName, env),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
 	}
 	lines = append(lines, runtimeSizingLines(env.Sizing, indent)...)
@@ -388,6 +388,29 @@ func runtimeSizingLines(sizing *common.RuntimeSizingRecommendation, indent strin
 		indent + "sizing: " + strings.Join(verdicts, "; "),
 		indent + "sizing-evidence: " + common.FormatRuntimeSizingEvidence(*sizing),
 	}
+}
+
+// runtimeVersionLabel names the release line beside the bare runtime-version
+// number: a number alone reads as an erun version even when it rides a
+// tenant's own devops line, and two environments in the same tenant can ride
+// different lines from each other (erun#1746). An environment that has never
+// deployed still reads "none", unchanged; one that has deployed but recorded
+// no resolved image reads distinctly as "line undetermined" rather than
+// guessing a line from the tenant name.
+func runtimeVersionLabel(tenantName string, env common.ListEnvironmentResult) string {
+	version := valueOrNone(env.RuntimeVersion)
+	if env.RuntimeVersionLine == nil {
+		return version
+	}
+	line := *env.RuntimeVersionLine
+	if line.Undetermined {
+		return version + " (line undetermined — no resolved runtime image recorded; redeploy to record it)"
+	}
+	detail := line.Line + " line, " + line.Image
+	if line.Disagrees {
+		detail += " — release name " + common.RuntimeReleaseName(tenantName) + " disagrees with the image"
+	}
+	return version + " (" + detail + ")"
 }
 
 func runtimePodLabel(pod common.RuntimePodResources) string {
