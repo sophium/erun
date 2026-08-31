@@ -29,23 +29,18 @@ func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
 	return role, nil
 }
 
-// OrchestratorRoleStore is the root-config read/write pair
-// SetOrchestratorEnvRole needs -- the same two-method shape as CloudStore and
-// DeleteStore, named for this operation the way each of those command areas
-// names its own.
-//
-// SetOrchestratorEnvRole does not re-check the linked environment's type
-// (OrchestratorEnvRoleAllowed) the way the desktop's link/edit gate does: it
-// only edits the role of a link that already exists, and every existing
-// link was created through a surface that already enforced the type/role
-// pairing at link time. A CLI operator could still use this to set an
-// unsound role on an already-linked runtime environment; closing that gap
-// needs the CLI to resolve the environment's config too, which the
-// integration fixtures for this command do not seed today, so it is left
-// as a known narrow gap rather than widened speculatively here.
+// OrchestratorRoleStore is the root-config read/write pair plus the linked
+// environment's own config read that SetOrchestratorEnvRole needs to
+// re-check OrchestratorEnvRoleAllowed against the target's real type, the
+// same gate the desktop's link/edit path enforces. Without LoadEnvConfig, a
+// CLI operator could walk straight past that gate on an already-linked
+// environment -- setting role=code on a link the desktop would never have
+// allowed to be created that way -- since editing an existing link never
+// re-derives the type/role pairing on its own.
 type OrchestratorRoleStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	SaveERunConfig(ERunConfig) error
+	LoadEnvConfig(tenant, environment string) (EnvConfig, string, error)
 }
 
 // SetOrchestratorEnvRoleParams identifies one orchestrator-to-environment
@@ -61,9 +56,15 @@ type SetOrchestratorEnvRoleParams struct {
 // already-linked environments for. It is the CLI's writer for
 // OrchestratorEnvConfig.Role, the counterpart to the desktop's
 // UpdateOrchestrator. It validates the role itself (OrchestratorEnvRole.IsValid)
-// but, unlike the desktop's link/edit gate, does not re-check the role against
-// the linked environment's type -- see OrchestratorRoleStore's doc comment for
-// why that is a known, tracked gap rather than an oversight.
+// and then, exactly like the desktop's link/edit gate, re-checks the role
+// against the linked environment's real type (OrchestratorEnvRoleAllowed) --
+// the single decision point both surfaces consult, so neither can drift from
+// the other on what a role is allowed to be. A config already carrying an
+// invalid pairing from before this gate existed still loads and lists fine
+// (see erun list, which reads the persisted role directly and never
+// resolves the environment's type to render it); this gate only blocks a new
+// write that keeps or reintroduces an invalid pairing, and it blocks that
+// write the same way regardless of what was persisted before it ran.
 func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params SetOrchestratorEnvRoleParams) (OrchestratorConfig, error) {
 	if store == nil {
 		return OrchestratorConfig{}, fmt.Errorf("store is required")
@@ -84,6 +85,15 @@ func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params Set
 	orchestratorIndex, envIndex, err := findOrchestratorEnvLink(config, orchestratorID, tenant, environment)
 	if err != nil {
 		return OrchestratorConfig{}, err
+	}
+	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return OrchestratorConfig{}, fmt.Errorf("resolve %s/%s's environment type to validate role %q: %w", tenant, environment, roleLabel(params.Role), err)
+	}
+	envType := envConfig.ResolvedType()
+	if reason := OrchestratorEnvRoleIneligibilityReason(envType, params.Role); reason != "" {
+		return OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %s/%s is a %q environment, so it cannot take role %q -- %s",
+			orchestratorID, tenant, environment, envType, roleLabel(params.Role), reason)
 	}
 	orchestrator := config.Orchestrators[orchestratorIndex]
 	orchestrator.Environments[envIndex].Role = params.Role
@@ -124,6 +134,16 @@ func findOrchestratorEnvLink(config ERunConfig, orchestratorID, tenant, environm
 		return -1, -1, fmt.Errorf("orchestrator %q is not linked to %s/%s", orchestratorID, tenant, environment)
 	}
 	return orchestratorIndex, envIndex, nil
+}
+
+// roleLabel renders role the way an operator reads it back: the bare value
+// for a declared role, "undeclared" for the empty zero value, matching what
+// the set-role command itself echoes on a real run.
+func roleLabel(role OrchestratorEnvRole) string {
+	if role == "" {
+		return "undeclared"
+	}
+	return string(role)
 }
 
 func normalizeOrchestratorEnvRoleParams(params SetOrchestratorEnvRoleParams) (string, string, string, error) {
