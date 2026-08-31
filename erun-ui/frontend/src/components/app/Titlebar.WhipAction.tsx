@@ -27,6 +27,10 @@ const whipButtonClassName =
 
 const whipLabel = 'Whip: push the focused target, or choose which ones to push';
 
+function whipButtonLabel(count: number): string {
+  return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
+}
+
 // TitlebarWhipAction is the operator-triggered whip control. Whipping is a
 // write into a live AI session, not a read, so a click never fans out to
 // every configured environment and orchestrator on its own (erun#1700):
@@ -164,20 +168,31 @@ function WhipPopoverBody({
   onWhip: () => void;
   onClose: () => void;
 }): React.ReactElement {
+  // The report view replaces the picker (and its own selection controls)
+  // below, so the header's whip action follows the same gate: it only makes
+  // sense to show while there is a selection left to act on.
+  const showPicker = !outcome && !pending;
   return (
     <div role="region" aria-label="Whip" className="flex max-h-[70vh] flex-col">
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <h2 className="text-sm font-semibold">Whip</h2>
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Whip</h2>
+        {showPicker && (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={targetsLoading || count === 0}
+            onClick={onWhip}
+          >
+            {whipButtonLabel(count)}
+          </Button>
+        )}
         <Button type="button" variant="ghost" size="icon" aria-label="Close whip" onClick={onClose}>
           <X aria-hidden="true" className="size-3.5" />
         </Button>
       </div>
       <div className="flex-1 overflow-y-auto p-3">
-        {outcome || pending ? (
-          <div role="status" aria-live="polite" aria-label="Whip results">
-            <WhipReportBody pending={pending} outcome={outcome} />
-          </div>
-        ) : (
+        {showPicker ? (
           <TitlebarWhipTargetPicker
             targets={targets}
             targetsLoading={targetsLoading}
@@ -197,10 +212,11 @@ function WhipPopoverBody({
             onSelectAll={() => {
               setSelection((prev) => selectAllWhipTargets(prev));
             }}
-            count={count}
-            pending={pending}
-            onWhip={onWhip}
           />
+        ) : (
+          <div role="status" aria-live="polite" aria-label="Whip results">
+            <WhipReportBody pending={pending} outcome={outcome} />
+          </div>
         )}
       </div>
     </div>

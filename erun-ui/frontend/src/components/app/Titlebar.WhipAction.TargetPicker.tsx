@@ -1,4 +1,5 @@
-import { Button, Checkbox } from 'erun-kit';
+import { Button, Checkbox, IconTooltip } from 'erun-kit';
+import { Bot, ListChecks, Server } from 'lucide-react';
 import * as React from 'react';
 
 import type { WhipTargetSelection } from '@/app/model';
@@ -49,22 +50,15 @@ function environmentRows(
   }));
 }
 
-function whipButtonLabel(pending: boolean, count: number): string {
-  if (pending) {
-    return 'Whipping…';
-  }
-  return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
-}
-
 // TitlebarWhipTargetPicker is the selection surface issue erun#1700 asks for:
 // individual environments and orchestrators, checkable, plus the three group
-// shortcuts, with the primary action stating how many targets it will whip
-// before it acts (Nielsen #1, visibility of system status) rather than
-// leaving the operator to guess from an unlabeled button. Plain checkboxes
-// and buttons rather than a Command/cmdk list: the population here is short
-// and never needs type-to-filter, and every row is reachable with a plain Tab
-// (WCAG 2.1.1 keyboard) the same way the existing deploy-components and
-// orchestrator-environments checklists already are.
+// shortcuts. Plain checkboxes and buttons rather than a Command/cmdk list:
+// the population here is short and never needs type-to-filter, and every row
+// is reachable with a plain Tab (WCAG 2.1.1 keyboard) the same way the
+// existing deploy-components and orchestrator-environments checklists
+// already are. The primary whip action lives in the popover header
+// (Titlebar.WhipAction.tsx) rather than here, so it stays reachable without
+// scrolling this list (erun#1748).
 export function TitlebarWhipTargetPicker({
   targets,
   targetsLoading,
@@ -74,9 +68,6 @@ export function TitlebarWhipTargetPicker({
   onSelectAllEnvironments,
   onSelectAllOrchestrators,
   onSelectAll,
-  count,
-  pending,
-  onWhip,
 }: {
   targets: main.uiWhipTargetList | null;
   targetsLoading: boolean;
@@ -86,9 +77,6 @@ export function TitlebarWhipTargetPicker({
   onSelectAllEnvironments: () => void;
   onSelectAllOrchestrators: () => void;
   onSelectAll: () => void;
-  count: number;
-  pending: boolean;
-  onWhip: () => void;
 }): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
@@ -97,16 +85,40 @@ export function TitlebarWhipTargetPicker({
           Nothing is focused right now. Choose one or more targets below.
         </p>
       )}
-      <div className="flex flex-wrap gap-1.5">
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAllOrchestrators}>
-          Select all orchestrators
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAllEnvironments}>
-          Select all environments
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAll}>
-          Select all
-        </Button>
+      <div className="flex items-center gap-1.5">
+        <IconTooltip label="Select all orchestrators">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all orchestrators"
+            onClick={onSelectAllOrchestrators}
+          >
+            <Bot aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
+        <IconTooltip label="Select all environments">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all environments"
+            onClick={onSelectAllEnvironments}
+          >
+            <Server aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
+        <IconTooltip label="Select all orchestrators and environments">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all"
+            onClick={onSelectAll}
+          >
+            <ListChecks aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
       </div>
       {targetsLoading || !targets ? (
         <p className="text-xs text-muted-foreground">Loading targets…</p>
@@ -126,14 +138,6 @@ export function TitlebarWhipTargetPicker({
           />
         </div>
       )}
-      <Button
-        type="button"
-        variant="default"
-        disabled={pending || targetsLoading || count === 0}
-        onClick={onWhip}
-      >
-        {whipButtonLabel(pending, count)}
-      </Button>
     </div>
   );
 }

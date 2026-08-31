@@ -154,6 +154,25 @@ test('the whip control renders a pending state and then every target with its ow
   await expect(app.titlebar.whipReportHeading()).toBeHidden();
 });
 
+test('the whip action renders outside the scrollable target list and states the selected count', async ({
+  app,
+}) => {
+  // erun#1748: the action used to be a sibling AFTER the scrollable target
+  // list, so a long enough population pushed it below the fold. It now lives
+  // in the popover header, a sibling BEFORE the scrollable region -- assert
+  // the structure directly (not just that it's visible today, which would
+  // also pass with the old, buggy layout at this small seeded population).
+  await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+  await app.titlebar.whipButton().click();
+  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
+
+  const scrollRegion = app.titlebar.whipPanel().locator('.overflow-y-auto').first();
+  await expect(scrollRegion.getByRole('button', { name: /^Whip \d+ target/ })).toHaveCount(0);
+
+  await app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR).check();
+  await expect(app.titlebar.whipRunButton()).toHaveText('Whip 2 targets');
+});
+
 test('the control stays reachable from an orchestrator tab, not only an environment tab', async ({
   app,
 }) => {
