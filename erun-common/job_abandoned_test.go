@@ -52,7 +52,7 @@ func TestEnvironmentJobThatBackgroundsWorkAndExitsIsNotReportedAsSuccess(t *test
 		}
 	})
 
-	if job.Succeeded() {
+	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running: %+v", job.State, job.ExitCode, job)
 	}
 	if job.State != EnvironmentJobStateAbandoned {
@@ -84,7 +84,7 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if !job.Succeeded() {
+	if !job.Succeeded {
 		t.Fatalf("job with no abandoned work did not report success: %+v", job)
 	}
 	if job.State != EnvironmentJobStateExited {
@@ -149,7 +149,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if parent.Succeeded() {
+	if parent.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though a job it started was still running: %+v", parent.State, parent.ExitCode, parent)
 	}
 	if parent.State != EnvironmentJobStateGateIncomplete {

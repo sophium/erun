@@ -149,6 +149,17 @@ type EnvironmentJob struct {
 	// the supervisor's liveness, so a record can never claim to be running after
 	// the process behind it is gone.
 	State string `json:"state"`
+	// Succeeded is the one field that answers "did this actually work",
+	// computed fresh on every read exactly like AliveAgeMs so it can never lag
+	// what State/ExitCode/WorktreeDirty actually say. It exists because those
+	// three fields do not, on their own, rule out false success: ExitCode can
+	// be a clean 0 while State is abandoned or gate-incomplete (the process
+	// that ended cleanly is not the same claim as the work it started
+	// reaching a real outcome), or while WorktreeDirty says the agent's own
+	// changes were never committed. A caller — especially a JSON/MCP one that
+	// cannot call the Go helper this mirrors — checks this field alone rather
+	// than re-deriving the combination itself.
+	Succeeded bool `json:"succeeded"`
 	// Kind is command or agent. An agent job runs an AI tool in its streaming
 	// mode, which is what lets it report progress rather than only a state.
 	Kind string `json:"kind,omitempty"`
@@ -294,18 +305,19 @@ func (j EnvironmentJob) Finished() bool {
 		j.State == EnvironmentJobStateAbandoned || j.State == EnvironmentJobStateGateIncomplete
 }
 
-// Succeeded is the only definition of success: an outcome was captured and it
-// was zero, with nothing left running behind it and nothing left uncommitted
-// in its own working tree. An unknown job is never a success, and neither is
-// an abandoned or gate-incomplete one — a zero exit code from the process
-// that started work it never waited for, whether that work is an unreaped
-// process in its own group or a sibling job record, is not the same claim as
-// a zero exit code from a job that finished cleanly. A dirty working tree is
-// the same shape of not-actually-clean finish: whatever the supervisor
-// managed to preserve on the agent's behalf (see job_worktree.go), the agent
-// itself did not commit its own work, and that is worth a caller's attention
-// even when everything else about the run looks fine.
-func (j EnvironmentJob) Succeeded() bool {
+// environmentJobSucceeded is the only definition of success: an outcome was
+// captured and it was zero, with nothing left running behind it and nothing
+// left uncommitted in its own working tree. An unknown job is never a
+// success, and neither is an abandoned or gate-incomplete one — a zero exit
+// code from the process that started work it never waited for, whether that
+// work is an unreaped process in its own group or a sibling job record, is
+// not the same claim as a zero exit code from a job that finished cleanly. A
+// dirty working tree is the same shape of not-actually-clean finish: whatever
+// the supervisor managed to preserve on the agent's behalf (see
+// job_worktree.go), the agent itself did not commit its own work, and that is
+// worth a caller's attention even when everything else about the run looks
+// fine. Backs the EnvironmentJob.Succeeded field.
+func environmentJobSucceeded(j EnvironmentJob) bool {
 	return j.State == EnvironmentJobStateExited && j.ExitCode != nil && *j.ExitCode == 0 && !j.WorktreeDirty
 }
 
@@ -382,10 +394,12 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	// time that produced it, exactly like OutputBytes below.
 	job.AliveAgeMs = environmentJobAliveAgeMs(job.LastAliveAt, now)
 	if job.State != EnvironmentJobStateRunning {
+		job.Succeeded = environmentJobSucceeded(job)
 		return job
 	}
 	if job.PID > 0 && alive != nil && alive(job.PID) {
 		job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
+		job.Succeeded = environmentJobSucceeded(job)
 		return job
 	}
 	job.State = EnvironmentJobStateUnknown
@@ -407,6 +421,7 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; the runtime pod was most likely replaced", job.PID)
 	}
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
+	job.Succeeded = environmentJobSucceeded(job)
 	_ = writeEnvironmentJob(dir, job)
 	return job
 }

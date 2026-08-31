@@ -87,7 +87,7 @@ func TestAgentJobWithADirtyWorkingTreeIsNotReportedAsSuccessAndIsCheckpointedAnd
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if job.Succeeded() {
+	if job.Succeeded {
 		t.Fatalf("job reported success even though it ended with an uncommitted working tree: %+v", job)
 	}
 	if !job.WorktreeDirty {
@@ -138,7 +138,7 @@ func TestAgentJobWithACleanWorkingTreeStillSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if !job.Succeeded() {
+	if !job.Succeeded {
 		t.Fatalf("job with a clean working tree did not report success: %+v", job)
 	}
 	if job.WorktreeDirty {
@@ -171,7 +171,7 @@ func TestAgentJobWithADirtyDetachedHeadIsReportedButNotCheckpointed(t *testing.T
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if job.Succeeded() {
+	if job.Succeeded {
 		t.Fatalf("job reported success even though it ended with an uncommitted, detached-HEAD working tree: %+v", job)
 	}
 	if !job.WorktreeDirty || !job.WorktreeDetached {
@@ -210,7 +210,7 @@ func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpoi
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if job.Succeeded() {
+	if job.Succeeded {
 		t.Fatalf("job reported success even though it left main dirty: %+v", job)
 	}
 	if job.WorktreeCommit != "" {
@@ -245,7 +245,7 @@ func TestCommandJobIgnoresItsWorkingTreeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if !job.Succeeded() {
+	if !job.Succeeded {
 		t.Fatalf("a plain command job must not have its own working tree checked: %+v", job)
 	}
 	if job.WorktreeDirty {
