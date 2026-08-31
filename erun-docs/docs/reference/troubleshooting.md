@@ -174,6 +174,26 @@ erun init <tenant> <env> --runtime-registry <image's registry>
 
 See [`erun doctor`](/cli/doctor) and [Configuration · private image pull secrets](/reference/configuration#advanced-image-pull-secrets).
 
+## `erun deploy` refuses: image is not anonymously pullable {#image-not-anonymously-pullable}
+
+**Symptoms:** `erun deploy` (or `erun init`, `erun open --deploy`, `erun upgrade`) exits non-zero immediately, before any `helm upgrade` or `kubectl` line appears in its output, with an error like:
+
+```
+deploy <tenant>-devops: ghcr.io/sophium/<tenant>-devops:<version> is not anonymously pullable and no ghcr.io credential resolved to provision a pull secret -- refusing before the rollout recreates the running pod
+```
+
+**Cause:** the runtime image is a private `ghcr.io` package — most commonly your own `<tenant>-devops` umbrella image — and nowhere `erun deploy` looked (your local docker session, a `gh` session, `GH_TOKEN`/`GITHUB_TOKEN`) resolved a credential for it. The runtime chart's rollout strategy is `Recreate`: it tears down the running pod before scheduling the replacement, so an image that can't be pulled would take the environment down rather than leave a stalled rollout beside a healthy pod. `erun deploy` checks this **before** touching the cluster instead of finding out mid-rollout — see [Configuration · the runtime image is checked automatically](/reference/configuration#advanced-image-pull-secrets-preflight).
+
+**Fix:** authenticate wherever `erun deploy` runs, the same as for any other `ghcr.io` push/pull:
+
+```bash
+gh auth login -h github.com -s write:packages,read:packages
+# or
+docker login ghcr.io
+```
+
+Then re-run the deploy — once a credential resolves, `erun deploy` auto-provisions and attaches the pull secret itself; no `--image-pull-secret` needed. If the image is not actually private, make the `ghcr.io/sophium/<name>` package public instead.
+
 ## AWS calls fail with `Invalid endpoint: https://sts..amazonaws.com` {#aws-region-empty}
 
 **Symptoms:** every AWS call in the environment fails with an endpoint that has an empty region in it, and passing `--region <region>` by hand makes the same call succeed.

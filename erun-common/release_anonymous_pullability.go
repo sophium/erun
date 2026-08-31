@@ -111,7 +111,36 @@ type anonymousPullProbeFunc func(ctx context.Context, client *http.Client, repoP
 // probeAnonymousManifestPull is the real anonymousPullProbeFunc, against the
 // live ghcr.io endpoints.
 func probeAnonymousManifestPull(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error) {
+	if override, ok := os.LookupEnv(anonymousPullableOverrideEnv); ok {
+		return anonymousPullableOverrideHasImage(override, repoPath, tag), nil
+	}
 	return probeAnonymousManifestPullAt(ctx, client, repoPath, tag, "", "")
+}
+
+// anonymousPullableOverrideEnv is a test-only seam that answers "is
+// <repoPath>:<tag> anonymously pullable?" from a static list instead of a
+// live ghcr.io read, the same shape publishedChartProbeOverrideEnv gives the
+// runtime chart search: an integration golden must never depend on a real
+// registry's actual visibility setting. Not a production knob: when the
+// variable is unset, the real network probe runs. Format: comma-separated
+// "<repoPath>:<tag>" entries treated as anonymously pullable; anything absent
+// (including an empty value) is treated as not pullable -- the same
+// fail-closed default the live probe applies to a definitive 401/403, so a
+// scenario that wants the "confirmed private" or "confirmed public" branch
+// states it explicitly rather than getting it by omission.
+const anonymousPullableOverrideEnv = "ERUN_ANONYMOUS_PULLABLE_OVERRIDE"
+
+func anonymousPullableOverrideHasImage(override, repoPath, tag string) bool {
+	for _, entry := range strings.Split(override, ",") {
+		wantPath, wantTag, ok := cutLast(strings.TrimSpace(entry), ":")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(wantPath) == repoPath && strings.TrimSpace(wantTag) == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // probeAnonymousManifestPullAt is probeAnonymousManifestPull with the registry

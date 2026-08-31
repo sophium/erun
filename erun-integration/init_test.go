@@ -902,6 +902,12 @@ func TestInit(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		// This scenario is about the in-pod registry credential check above, not
+		// the separate deploy-time pull-secret preflight (which runs first and
+		// checks the *host's* own ghcr.io credential): mark the tenant's runtime
+		// image anonymously pullable so that preflight is a no-op and the deploy
+		// reaches the in-pod check this scenario actually exercises.
+		envVars = append(envVars, "ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/team-devops:1.0.0")
 		args := []string{
 			"init", "team", "dev",
 			"--remote",
@@ -928,6 +934,11 @@ func TestInit(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		// As above: this scenario is about the in-pod registry credential check,
+		// not the separate host-side deploy-time pull-secret preflight, so mark
+		// the tenant's runtime image anonymously pullable to keep that preflight
+		// a no-op.
+		envVars = append(envVars, "ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/team-devops:1.0.0")
 		args := []string{
 			"init", "team", "dev",
 			"--remote",

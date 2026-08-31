@@ -1041,13 +1041,39 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 // a real cluster. Without it, these tests depend on the host's kubeconfig
 // happening to have a context named "cluster-remote"/"cluster-dev", which no real
 // machine does.
+//
+// `get secret ... -o json` is answered as NotFound rather than the same bare
+// success every other invocation gets: eruncommon's image-pull-secret refresh
+// (deploy_image_pull_secret.go's existingImagePullSecretAuths) reads a named
+// Secret back before merging into it, and a bare `exit 0` with no stdout is not
+// valid JSON, so it failed to parse. NotFound is exactly what a first deploy
+// into a fresh namespace sees, and it is the shape every other image-pull-secret
+// test already uses (see imagePullSecretKubectlStub in erun-common).
 func stubKubectlAlwaysSucceeds(t *testing.T) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kubectl")
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	script := "#!/bin/sh\ncase \"$*\" in\n  *\"get secret\"*\"-o json\"*)\n    echo 'Error from server (NotFound): secrets not found' >&2\n    exit 1\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write kubectl stub: %v", err)
 	}
 	t.Setenv("ERUN_KUBECTL_BIN", path)
+}
+
+// stubGHCRDockerCredential points DOCKER_CONFIG at a fixture carrying a fake
+// ghcr.io credential, so eruncommon.resolveOCIRegistryBasicAuth resolves one
+// deterministically for these tests regardless of what the host machine
+// actually has logged in -- without this, a remote init's runtime deploy
+// (which defaults the tenant's own image onto ghcr.io) would take its
+// pull-secret decision from whatever real ~/.docker/config.json this test
+// happens to run next to, and fall back to a live, network-dependent
+// anonymous-pullability probe on any host with no cached credential.
+func stubGHCRDockerCredential(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{"ghcr.io":{"auth":"dGVzdDp0b2tlbg=="}}}`), 0o600); err != nil {
+		t.Fatalf("write docker config fixture: %v", err)
+	}
+	t.Setenv("DOCKER_CONFIG", dir)
 }
 
 // fakeRemoteRepositoryStateRunner fakes RunRemoteCommand for a remote-init
@@ -1067,6 +1093,7 @@ func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(eruncomm
 
 func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
+	stubGHCRDockerCredential(t)
 	// The remote init flow deploys the runtime chart, which now refuses rather
 	// than guess when no candidate is confirmed published; this test cares
 	// about the returned repository interaction, not registry resolution, so
@@ -1110,6 +1137,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 
 func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
+	stubGHCRDockerCredential(t)
 	// The remote init flow deploys the runtime chart, which now refuses rather
 	// than guess when no candidate is confirmed published; this test cares
 	// about the deployed version, not registry resolution, so the seam

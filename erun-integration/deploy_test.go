@@ -2114,6 +2114,48 @@ esac
 		golden.Equal(t, "deploy/dry_run_remote_env_no_repo_path_deploys_published_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_private_ghcr_runtime_image_with_no_host_credential_traces_pull_secret_decision", func(t *testing.T) {
+		// A runtime-only env's image defaults onto ghcr.io/sophium/<tenant>-devops
+		// (DefaultContainerRegistry) the moment it is not the erun product's own
+		// tenant, with no operator action needed -- so --dry-run must show whether
+		// that image can even be pulled instead of staying silent about it, the
+		// one moment the operator could still fix a missing credential cheaply.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_private_ghcr_runtime_image_with_no_host_credential_traces_pull_secret_decision", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", func(t *testing.T) {
+		// The severity this preflight exists for: the runtime chart's Recreate
+		// strategy tears down the running pod before the new one is scheduled, so
+		// discovering an unpullable image only after the rollout starts takes the
+		// environment down rather than leaving a stalled rollout beside a healthy
+		// pod. No kubectl/helm stub is declared at all -- if the refusal did not
+		// fire before any cluster interaction, the command would instead fail with
+		// "executable file not found", which would show up in the golden below.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
+			// Absent from the override, an anonymous-pull probe of this specific
+			// image resolves to "not pullable" (anonymousPullableOverrideEnv).
+			"ERUN_ANONYMOUS_PULLABLE_OVERRIDE=",
+		)
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a private runtime image with no resolvable pull credential, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "kubectl") || strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("refusal must fire before any cluster interaction: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's

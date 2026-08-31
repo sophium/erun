@@ -20,6 +20,8 @@ deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the te
 deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image ghcr.io/sophium/team-devops:<VERSION> (imageOverrides.erun-devops)
+image pull: ghcr.io/sophium/team-devops:<VERSION> has no resolvable ghcr.io credential
+image pull: anonymous pullability of ghcr.io/sophium/team-devops:<VERSION> is not probed in dry-run; a real deploy refuses before rollout if it turns out not to be anonymously pullable
 kubectl --context test-context get namespace team-dev -o name
 deploy: namespace team-dev is created if the check above reports it missing
 kubectl --context test-context --namespace team-dev get pvc team-devops-worktree -o name
