@@ -71,19 +71,26 @@ function fakeTerminal(cols: number, rows: number) {
   };
 }
 
-function harness() {
+function harness(
+  proposeDimensions: () => { cols: number; rows: number } | undefined = () => ({
+    cols: 120,
+    rows: 40,
+  }),
+  afterRestore: () => void = noop,
+) {
   const terminal = fakeTerminal(120, 40);
   fitCount = 0;
   const repaint = new TerminalReattachRepaint({
     getTerminal: () => terminal as never,
     getFitAddon: () =>
       ({
+        proposeDimensions,
         fit: () => {
           fitCount += 1;
         },
       }) as never,
     activeSessionId: () => 7,
-    afterRestore: noop,
+    afterRestore,
   });
   return { terminal, repaint };
 }
@@ -167,4 +174,28 @@ test('without input the cycle still completes, so the repaint is not simply disa
   mock.timers.tick(650);
   assert.equal(terminal.rows, 40, 'the hold must restore on its own when nobody types');
   assert.equal(fitCount, 1);
+});
+
+test('restore skips fit() when the container is momentarily unmeasurable, but still restores geometry', () => {
+  let afterRestoreCalls = 0;
+  const { terminal, repaint } = harness(
+    () => ({ cols: 2, rows: 1 }), // the container mid-transition FitAddon.fit() would otherwise apply
+    () => {
+      afterRestoreCalls += 1;
+    },
+  );
+  repaint.schedule(7);
+
+  mock.timers.tick(1300);
+  assert.equal(terminal.rows, 26, 'expected the shrink to be applied');
+  mock.timers.tick(650);
+
+  // term.resize(cols, rows) already restores the pre-shrink geometry directly,
+  // independent of fit(); the guard only stops the *extra* re-measure from
+  // clobbering it with a bad proposal.
+  assert.equal(terminal.cols, 120);
+  assert.equal(terminal.rows, 40, 'the hold must restore even though fit() was skipped');
+  assert.equal(fitCount, 0, 'fit() must not run against an unusable proposal');
+  assert.equal(afterRestoreCalls, 1, 'afterRestore still runs so dims are republished either way');
+  assert.deepEqual(lastResizeCall(), [7, 120, 40]);
 });
