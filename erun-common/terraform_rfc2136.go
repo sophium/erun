@@ -29,12 +29,17 @@ const (
 
 // terraformRFC2136Requirement is what a resolved <env>.tfvars says about the
 // cluster-edge module's RFC2136 TSIG secret: whether this env's dns01_provider
-// needs it, and where erun should read it from.
+// needs it, and where erun should read it from. KubernetesContext is not part
+// of the tfvars — it is the env's own resolved kubectl context, filled in by
+// the caller so the read targets the same cluster every other kubectl call
+// against this env uses, instead of silently falling back to whatever
+// kubectl's ambient current-context happens to be on the operator's machine.
 type terraformRFC2136Requirement struct {
-	Needed     bool
-	Namespace  string
-	SecretName string
-	SecretKey  string
+	Needed            bool
+	Namespace         string
+	SecretName        string
+	SecretKey         string
+	KubernetesContext string
 }
 
 // resolveTerraformRFC2136Requirement reads the resolved var file — the same
@@ -90,29 +95,74 @@ func resolveTerraformRFC2136Requirement(dir, varFile string) (terraformRFC2136Re
 }
 
 // readTerraformRFC2136Secret reads the RFC2136 TSIG key material back from
-// its Kubernetes Secret so the operator never has to export it by hand. It
-// fails naming the Secret and key so the operator can fix the actual gap
-// (mint it via the erun-powerdns chart / apply once with it supplied
-// directly) instead of hitting terraform's own precondition after a partial
-// plan.
-func readTerraformRFC2136Secret(requirement terraformRFC2136Requirement) (string, error) {
+// its Kubernetes Secret so the operator never has to export it by hand. The
+// read is pinned to the env's own resolved kubernetes context (the same one
+// every other kubectl call against this env uses) rather than left to
+// kubectl's ambient current-context, and it is traced so the exact command —
+// including which context it targeted — is visible even in --dry-run, since
+// this read always runs up front regardless of DryRun. On failure it
+// distinguishes the Secret genuinely being absent (create it) from the read
+// itself failing for some other reason such as an RBAC denial or the wrong
+// context (fix credentials/context) — two different remedies that a bare
+// "could not be read: exit status 1" collapsed into one.
+func readTerraformRFC2136Secret(ctx Context, requirement terraformRFC2136Requirement) (string, error) {
 	jsonPath := "jsonpath={.data." + strings.ReplaceAll(requirement.SecretKey, ".", `\.`) + "}"
-	output, err := Command("kubectl", "-n", requirement.Namespace, "get", "secret", requirement.SecretName, "-o", jsonPath).Output()
+	args := make([]string, 0, 8)
+	if strings.TrimSpace(requirement.KubernetesContext) != "" {
+		args = append(args, "--context", requirement.KubernetesContext)
+	}
+	args = append(args, "-n", requirement.Namespace, "get", "secret", requirement.SecretName, "-o", jsonPath)
+	ctx.TraceCommand("", "kubectl", args...)
+
+	output, stderr, err := runObserveKubectl(args)
 	if err != nil {
-		return "", fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s could not be read (key %q): %w",
-			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, requirement.SecretKey, err)
+		return "", terraformRFC2136ReadError(requirement, stderr, err)
 	}
 	encoded := strings.TrimSpace(string(output))
+	contextLabel := terraformKubernetesContextLabel(requirement.KubernetesContext)
 	if encoded == "" {
-		return "", fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s has no value at key %q",
-			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, requirement.SecretKey)
+		return "", fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, and Kubernetes Secret %s/%s was read via %s, but has no value at key %q",
+			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, contextLabel, requirement.SecretKey)
 	}
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || strings.TrimSpace(string(decoded)) == "" {
-		return "", fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s holds no readable value at key %q",
-			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, requirement.SecretKey)
+		return "", fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, and Kubernetes Secret %s/%s was read via %s, but holds no readable value at key %q",
+			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, contextLabel, requirement.SecretKey)
 	}
 	return string(decoded), nil
+}
+
+// terraformRFC2136ReadError distinguishes the Secret being absent (kubectl's
+// own NotFound) from every other read failure (RBAC denial, wrong/unknown
+// context, unreachable cluster, ...), since those two situations have
+// different remedies. The non-absent branch carries kubectl's own stderr
+// verbatim — a Forbidden response already names the exact denied principal
+// (e.g. `User "system:serviceaccount:...": cannot get resource "secrets"`),
+// which is more precise than erun guessing at who attempted the read.
+func terraformRFC2136ReadError(requirement terraformRFC2136Requirement, stderr string, err error) error {
+	contextLabel := terraformKubernetesContextLabel(requirement.KubernetesContext)
+	if isKubectlNotFound(stderr) {
+		return fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s does not exist, read via %s — create it (e.g. via the erun-powerdns chart) or point issuer_name/env_namespace in the resolved .tfvars at where it actually lives",
+			terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, contextLabel)
+	}
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		detail = err.Error()
+	}
+	return fmt.Errorf("terraform: dns01_provider %q requires the RFC2136 TSIG secret, but Kubernetes Secret %s/%s could not be read (key %q) via %s — this is not a not-found, so treat it as a credentials/context/RBAC problem rather than a missing secret: %s",
+		terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, requirement.SecretKey, contextLabel, detail)
+}
+
+// terraformKubernetesContextLabel renders the context a kubectl read targeted
+// for an error/trace message. An empty context means erun had none resolved
+// for this env and let kubectl fall back to its own ambient current-context —
+// naming that explicitly, rather than silently omitting it, is what makes
+// that fallback visible to an operator debugging a wrong-cluster read.
+func terraformKubernetesContextLabel(context string) string {
+	if strings.TrimSpace(context) == "" {
+		return "kubectl's ambient current-context (no kubernetes context is configured for this environment)"
+	}
+	return fmt.Sprintf("kubernetes context %q", context)
 }
 
 // parseTerraformTFVarsStrings scans a resolved .tfvars file for top-level

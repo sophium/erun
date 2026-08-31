@@ -366,6 +366,34 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/apply_dry_run_rfc2136_missing_secret_fails_up_front", normalize.Apply(result.Combined))
 	})
 
+	t.Run("apply_dry_run_rfc2136_forbidden_secret_names_permission_problem", func(t *testing.T) {
+		// A Secret that exists but is denied by RBAC (kubectl's "Forbidden", not
+		// "NotFound") must produce a different, distinguishable message from the
+		// missing-secret case above: the remedy for a permissions/context problem
+		// is not "create the secret". kubectl's own Forbidden stderr already names
+		// the exact denied principal, so erun surfaces it verbatim rather than
+		// guessing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
+		tfvars := filepath.Join(setup.Cwd, "terraform-team", "dev", "dev.tfvars")
+		if err := os.WriteFile(tfvars, []byte("base_domain = \"erunpaas.com\"\ndns01_provider = \"powerdns-rfc2136\"\nenv_label = \"team-dev\"\n"), 0o644); err != nil {
+			t.Fatalf("write tfvars: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr:   `Error from server (Forbidden): secrets "erun-cloudflare-rfc2136-tsig" is forbidden: User "system:serviceaccount:team-dev:default" cannot get resource "secrets" in API group "" in the namespace "team-dev"`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"terraform", "plan", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an RBAC-denied RFC2136 TSIG secret read, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dry_run_rfc2136_forbidden_secret_names_permission_problem", normalize.Apply(result.Combined))
+	})
+
 	t.Run("apply_confirm_mismatch", func(t *testing.T) {
 		// A confirm value that doesn't match the target env aborts before the
 		// mutating apply.

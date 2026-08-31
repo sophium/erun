@@ -9,11 +9,14 @@ import (
 )
 
 // TerraformStore is the read surface RunTerraform needs to resolve the target
-// scope (default tenant/environment) and confirm the environment is configured.
+// scope (default tenant/environment), confirm the environment is configured,
+// and resolve the same kubernetes context every other kubectl-touching
+// command uses for it.
 type TerraformStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	LoadTenantConfig(string) (TenantConfig, string, error)
 	LoadEnvConfig(string, string) (EnvConfig, string, error)
+	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
 
 // TerraformOperation is the verb RunTerraform performs against a per-env root.
@@ -74,6 +77,11 @@ type TerraformResult struct {
 	WorkDir   string `json:"workDir,omitempty"`
 	StateFile string `json:"stateFile,omitempty"`
 	DataDir   string `json:"dataDir,omitempty"`
+	// KubernetesContext is the env's resolved kubectl context — the same one
+	// RFC2136SecretName/RFC2136SecretNamespace below are read from, and the one
+	// every other kubectl call against this env's cluster uses. Surfaced so a
+	// read failure can be diagnosed against the exact context that attempted it.
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	// LockReadonly is set when a baked .terraform.lock.hcl pins providers, so init
 	// runs -lockfile=readonly and never rewrites the read-only playbook tree.
 	LockReadonly bool `json:"lockReadonly,omitempty"`
@@ -122,7 +130,7 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 		return TerraformResult{}, err
 	}
 
-	rfc2136Secret, err := prepareTerraformRFC2136Secret(&result)
+	rfc2136Secret, err := prepareTerraformRFC2136Secret(ctx, &result)
 	if err != nil {
 		return TerraformResult{}, err
 	}
@@ -144,8 +152,10 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 // terraform's own mid-plan precondition after a partial plan is already
 // printed. init never uses a var file, so it is exempt. The returned value is
 // never stored on result (which --output json can serialize); only the
-// Secret's name/namespace ride there.
-func prepareTerraformRFC2136Secret(result *TerraformResult) (string, error) {
+// Secret's name/namespace ride there. The read targets result.KubernetesContext
+// — the same context every other kubectl call against this env uses — rather
+// than kubectl's own ambient current-context.
+func prepareTerraformRFC2136Secret(ctx Context, result *TerraformResult) (string, error) {
 	if result.Operation == string(TerraformInit) {
 		return "", nil
 	}
@@ -156,7 +166,8 @@ func prepareTerraformRFC2136Secret(result *TerraformResult) (string, error) {
 	if !requirement.Needed {
 		return "", nil
 	}
-	secret, err := readTerraformRFC2136Secret(requirement)
+	requirement.KubernetesContext = result.KubernetesContext
+	secret, err := readTerraformRFC2136Secret(ctx, requirement)
 	if err != nil {
 		return "", err
 	}
@@ -193,8 +204,8 @@ func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformSt
 		ctx.Trace("terraform: injecting TF_VAR_cloudflare_api_token from CLOUDFLARE_API_TOKEN")
 	}
 	if result.RFC2136SecretName != "" {
-		ctx.Trace(fmt.Sprintf("terraform: injecting TF_VAR_rfc2136_tsig_secret from Secret %s/%s (key %s)",
-			result.RFC2136SecretNamespace, result.RFC2136SecretName, terraformRFC2136SecretKey))
+		ctx.Trace(fmt.Sprintf("terraform: injecting TF_VAR_rfc2136_tsig_secret from Secret %s/%s (key %s), read via %s",
+			result.RFC2136SecretNamespace, result.RFC2136SecretName, terraformRFC2136SecretKey, terraformKubernetesContextLabel(result.KubernetesContext)))
 	}
 	ctx.TraceCommand("", "mkdir", "-p", result.WorkDir)
 	for _, step := range steps {
@@ -292,20 +303,23 @@ func executeTerraformSteps(ctx Context, result TerraformResult, steps []terrafor
 }
 
 // resolveTerraformTargetEnvironment resolves the tenant and environment the run
-// targets and confirms the environment can host one at all. Confirming the env
-// is configured before its root is derived turns a typo into a named error
-// rather than an opaque "no such directory".
-func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (string, string, error) {
-	tenant, environment, err := resolveTerraformScope(store, params)
+// targets, confirms the environment can host one at all, and resolves the
+// kubernetes context this env's kubectl-touching reads (e.g. the RFC2136 TSIG
+// secret) should use — the same context every other kubectl call against this
+// env uses, via the same resolution every other command applies. Confirming
+// the env is configured before its root is derived turns a typo into a named
+// error rather than an opaque "no such directory".
+func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (tenant, environment, kubeContext string, err error) {
+	tenant, environment, err = resolveTerraformScope(store, params)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if err := ValidateTenantName(tenant); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	// terraform apply/plan/destroy read back cluster state (e.g. an RFC2136
 	// TSIG secret) and apply/destroy target the runtime pod's own cluster; a
@@ -313,9 +327,10 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
 	// as it did before host existed.
 	if envConfig.ResolvedType() == EnvironmentTypeHost {
-		return "", "", fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
+		return "", "", "", fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
 	}
-	return tenant, environment, nil
+	kubeContext = store.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	return tenant, environment, kubeContext, nil
 }
 
 func resolveTerraformPlan(params TerraformParams, store TerraformStore) (TerraformResult, []terraformStep, error) {
@@ -328,7 +343,7 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		return TerraformResult{}, nil, fmt.Errorf("project root is required")
 	}
 
-	tenant, environment, err := resolveTerraformTargetEnvironment(params, store)
+	tenant, environment, kubeContext, err := resolveTerraformTargetEnvironment(params, store)
 	if err != nil {
 		return TerraformResult{}, nil, err
 	}
@@ -366,6 +381,7 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		WorkDir:                 workDir,
 		StateFile:               stateFile,
 		DataDir:                 dataDir,
+		KubernetesContext:       kubeContext,
 		LockReadonly:            lockReadonly,
 		LegacyStateInTree:       fileExists(filepath.Join(dir, "terraform.tfstate")),
 		Commands:                terraformStepCommands(steps),
