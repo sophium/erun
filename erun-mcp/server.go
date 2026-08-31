@@ -312,7 +312,8 @@ func registerJobTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, jobStatusTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "exec_job_await",
-		Description: "Wait a bounded time (default 30s, max 600s) for a job to finish. " +
+		Description: "Wait a bounded time (default 30s, max 600s -- a longer timeoutSeconds is refused, not silently capped) for a job to finish. " +
+			"A job that runs longer than 600s (a full test-suite gate routinely does) is not a case this tool refuses to cover: call it again, at up to the 600s max, each time it reports timedOut=true, instead of asking for one longer wait or treating the timeout as the answer -- timedOut=true is never a verdict on the job, only on this one call's own bounded wait. " +
 			"The call always returns inside the timeout — either the outcome or timedOut=true with the job still running — so no connection is held open for the work's lifetime and a dropped stream is never confused with a dead job. " +
 			"timedOut is reported separately from every outcome, so 'not finished yet' can never be read as a failure — but it is not the only non-outcome case: a job whose supervisor died reads back as state=unknown with timedOut=false, its own third case, distinct from both success and 'still running'. Never re-await a job already reporting unknown expecting a different answer. Call it again only while the job is genuinely still running. " +
 			"The returned job's aliveAgeMs (see exec_job_status) is the faster of the two signals: it crosses the 5000ms caller threshold before state necessarily catches up, so a caller in a hurry can act on it directly instead of waiting for the next reconcile. " +

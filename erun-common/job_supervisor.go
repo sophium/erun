@@ -59,6 +59,11 @@ type StartEnvironmentJobParams struct {
 	// LeaseTTL is how long the job's activity lease holds between renewals; the
 	// supervisor renews well inside it for as long as the work runs.
 	LeaseTTL time.Duration
+	// Handoff marks this job as deliberately meant to outlive whatever starts
+	// it, excluding it from that caller's own finish check entirely (see
+	// EnvironmentJob.Handoff). Only meaningful when this start itself runs
+	// from inside another job's own work.
+	Handoff bool
 	// SupervisorPath is the erun executable that will supervise the job. Each
 	// transport resolves it — the CLI is already that executable, the MCP server
 	// finds it on the environment's PATH — so this package stays free of any
@@ -425,6 +430,7 @@ func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) Env
 		LogPath:          logPath,
 		OutputLimitBytes: params.MaxOutputBytes,
 		LeaseID:          environmentJobLeaseID(params.ID),
+		Handoff:          params.Handoff,
 	}
 }
 
@@ -450,6 +456,9 @@ func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	if strings.TrimSpace(params.Agent) != "" {
 		args = append(args, "--agent", params.Agent)
 	}
+	if params.Handoff {
+		args = append(args, "--handoff")
+	}
 	for _, pair := range sortedEnvironmentJobEnvPairs(params.Env) {
 		args = append(args, "--env", pair)
 	}
@@ -471,6 +480,9 @@ type EnvironmentJobSupervisorParams struct {
 	Env            map[string]string
 	MaxOutputBytes int64
 	LeaseTTL       time.Duration
+	// Handoff carries StartEnvironmentJobParams.Handoff into the record the
+	// supervisor registers (see registerEnvironmentJob).
+	Handoff bool
 }
 
 // jobRecorder is the supervisor's single writer of the job record. The progress
@@ -559,6 +571,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		// so a value here means this job was started from inside another job's
 		// work rather than from outside any job.
 		StartedByJobID: strings.TrimSpace(os.Getenv(environmentJobIDEnvVar)),
+		Handoff:        params.Handoff,
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		return nil, err
@@ -666,11 +679,14 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
-	code, signal, reason, jobState := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
 	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
-	// Captured once, before the reclaim decision runs, so EndedAt reflects
-	// when the child process actually exited rather than drifting later by
-	// however long reclaim's own git plumbing and removal take.
+	// Captured once resolveEnvironmentJobOutcome returns, before the reclaim
+	// decision runs, so EndedAt reflects when this job's own outcome was
+	// actually settled — which, for a job that waited out one it started (see
+	// resolveEnvironmentJobOutcome), can be well after its own process exited
+	// — rather than drifting later still by however long reclaim's own git
+	// plumbing and removal take.
 	endedAt := time.Now()
 	settle := func(job *EnvironmentJob) {
 		job.State = jobState
@@ -683,6 +699,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		}
 		job.Reason = reason
 		job.ExitCode = &code
+		job.StartedJobFailed = startedJobFailed
 		worktree.apply(job)
 	}
 
@@ -698,14 +715,22 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	return nil
 }
 
-// resolveEnvironmentJobOutcome decides the exit code, signal, reason, and
-// terminal state finishEnvironmentJob records. State and reason can be
-// overridden twice, independently, by work the job left behind that it never
-// waited for: a process still alive in its own process group (abandoned), or
-// a sibling job record naming this job as its StartedByJobID (gate-incomplete,
-// which takes priority — a still-running job record is something a caller can
-// actually await for a real outcome, unlike an orphaned process group member).
-func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error) (code int, signal, reason, jobState string) {
+// resolveEnvironmentJobOutcome decides the exit code, signal, reason,
+// terminal state, and started-job failure finishEnvironmentJob records. State
+// and reason can be overridden by work the job left behind that it never
+// waited for: a process still alive in its own process group (abandoned) is
+// decided immediately, since nothing about an orphaned process group member
+// is worth waiting on. A sibling job record naming this job as its
+// StartedByJobID is different: rather than declaring the outcome incomplete
+// on the spot, this waits for it (see awaitEnvironmentJobRunningChildren) —
+// the whole motivation being that a caller reading this job's own record
+// should not have to separately chase down and await what it started merely
+// because this job's own process happened to exit first. Only once that wait
+// times out does gate-incomplete apply; if it ends because the started job
+// finished, its failure (if any) is folded into startedJobFailed instead, so
+// a clean exit code from this job's own process never overshadows a real
+// failure in work it waited for.
+func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error) (code int, signal, reason, jobState, startedJobFailed string) {
 	code = -1
 	switch {
 	case state != nil:
@@ -722,11 +747,41 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		reason = "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work"
 	}
 	self := recorder.snapshot()
-	if running := environmentJobRunningChildren(recorder.dir, self.ID, time.Now()); len(running) > 0 {
+	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
 		jobState = EnvironmentJobStateGateIncomplete
 		reason = environmentJobGateIncompleteReason(running)
+		return code, signal, reason, jobState, startedJobFailed
 	}
-	return code, signal, reason, jobState
+	if failed := environmentJobFailedChildren(recorder.dir, self.ID, time.Now()); len(failed) > 0 {
+		startedJobFailed = environmentJobFailedChildReason(failed)
+	}
+	return code, signal, reason, jobState, startedJobFailed
+}
+
+// awaitEnvironmentJobRunningChildren blocks until no non-handoff job started
+// by parentID is still running, or cap elapses, returning whatever is still
+// running at that point (nil once none are). Unlike AwaitEnvironmentJob, this
+// has no caller holding a connection or a terminal open on the other end of
+// it — the supervisor calling this is already a detached background process
+// — so it polls internally for as long as cap allows instead of returning a
+// "still running" answer for someone else to re-ask.
+func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Duration) []EnvironmentJob {
+	poll := resolveEnvironmentJobGateIncompletePoll()
+	deadline := time.Now().Add(waitCap)
+	for {
+		running := environmentJobRunningChildren(dir, parentID, time.Now())
+		if len(running) == 0 {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return running
+		}
+		remaining := time.Until(deadline)
+		if remaining < poll {
+			poll = remaining
+		}
+		time.Sleep(poll)
+	}
 }
 
 // environmentJobGateIncompleteReason names the still-running job(s) a caller
@@ -742,6 +797,22 @@ func environmentJobGateIncompleteReason(running []EnvironmentJob) string {
 		noun = "jobs"
 	}
 	return fmt.Sprintf("this job ended while the %s it started (%s) had not reached a verdict; await it directly for the real outcome instead of treating this job's own exit as the answer", noun, strings.Join(ids, ", "))
+}
+
+// environmentJobFailedChildReason names the job(s) this job started, waited
+// for, and that did not succeed, so a caller reading this job's own failure
+// knows which started job to look at rather than only that this job's own
+// exit code (which can still read as clean) is not the whole story.
+func environmentJobFailedChildReason(failed []EnvironmentJob) string {
+	ids := make([]string, 0, len(failed))
+	for _, job := range failed {
+		ids = append(ids, job.ID)
+	}
+	noun := "job"
+	if len(ids) != 1 {
+		noun = "jobs"
+	}
+	return fmt.Sprintf("the %s this job started (%s) did not succeed", noun, strings.Join(ids, ", "))
 }
 
 // startEnvironmentJobAliveBeat stamps the job's alive fields immediately and

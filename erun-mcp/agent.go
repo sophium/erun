@@ -25,6 +25,7 @@ type AgentInput struct {
 	ID              string            `json:"id,omitempty" jsonschema:"handle to address the job by; defaults to the name, so re-running the same named work keeps one stable handle"`
 	MaxOutputBytes  int64             `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes; past it output is dropped and the job reports outputTruncated. Does not affect progress, which is folded from the tool's stream directly and keeps updating past the cap. Defaults to 16777216"`
 	LeaseTTLSeconds int64             `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL the job renews inside while it runs; defaults to 900"`
+	Handoff         bool              `json:"handoff,omitempty" jsonschema:"mark this job as deliberately meant to outlive whatever starts it. When this call itself runs from inside another job's own work, that job otherwise waits for this one to reach a verdict before reporting its own outcome; set true for work meant to keep running past the caller's own turn on purpose (a release, a long render)"`
 	Preview         bool              `json:"preview,omitempty" jsonschema:"when true, resolve and trace the job without starting it"`
 }
 
@@ -60,6 +61,7 @@ func agentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			Env:            input.Env,
 			MaxOutputBytes: input.MaxOutputBytes,
 			LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
+			Handoff:        input.Handoff,
 			SupervisorPath: supervisor,
 		})
 		if err != nil {

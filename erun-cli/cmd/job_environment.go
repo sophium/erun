@@ -71,6 +71,7 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx common.Context, 
 	putEnvironmentToolArgument(arguments, "env", params.Env)
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
+	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
 	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_agent", arguments, false)
 	return result.Job, resolved, err
 }
@@ -84,6 +85,7 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context
 	putEnvironmentToolArgument(arguments, "env", params.Env)
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
+	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
 	arguments["wait"] = false
 	started, resolved, err := callEnvironmentTool[environmentJobEnvelopeResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_raw", arguments, false)
 	if err != nil || !resolved {

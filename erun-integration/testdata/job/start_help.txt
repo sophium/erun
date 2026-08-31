@@ -21,6 +21,13 @@ supervisor's argv, visible to anything that can list processes in this
 environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a
 few other names that could redirect what the job executes are refused.
 
+When this start itself runs from inside another job's own work (an agent
+job running `job start` for a gate, the common case), that other job waits
+for this one to reach a verdict before it reports its own outcome — its exit
+code alone is never trusted while work it started has not finished. Pass
+--handoff for work that is meant to outlive the caller on purpose (a release,
+a long render): it excludes this job from that wait entirely.
+
 Usage:
   erun job start [flags] -- <command> [args...]
 
@@ -37,12 +44,16 @@ Examples:
   erun exec job start --tenant team --environment dev --name sweep --agent claude \
     --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'
 
+  # Kick off a release that is meant to keep running past this run's own turn.
+  erun exec job start --tenant team --environment dev --name release --handoff -- erun release
+
 Flags:
       --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt
       --dir string             Working directory in the environment to run the command from
       --dry-run                Resolve and trace mutating actions without executing them.
       --env stringArray        Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv
       --environment string     Environment the job runs in
+      --handoff                Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check
   -h, --help                   help for start
       --id string              Handle to address the job by (defaults to the name)
       --lease-ttl duration     Activity lease TTL the job renews inside while it runs (default 15m0s)

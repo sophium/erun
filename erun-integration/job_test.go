@@ -179,6 +179,24 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/start_env_dry_run_plans_the_supervisor_argv", normalize.Apply(result.Combined))
 	})
 
+	t.Run("start_handoff_dry_run_plans_the_supervisor_argv", func(t *testing.T) {
+		// --handoff must reach the supervisor argv, the same way --env does above,
+		// so the deliberate-handoff record actually lands: without --handoff on
+		// the supervisor's own invocation, the started job would default into its
+		// parent's finish check like any other.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "release", "--dry-run", "--handoff",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_handoff_dry_run_plans_the_supervisor_argv", normalize.Apply(result.Combined))
+	})
+
 	t.Run("start_env_refuses_a_name_that_could_redirect_the_job", func(t *testing.T) {
 		// PATH/LD_PRELOAD/etc. are refused up front: letting a caller
 		// override them would let it redirect what the job's own process executes
@@ -752,7 +770,14 @@ func TestJob(t *testing.T) {
 		// which would make outer's recorded outputBytes -- and so the golden --
 		// flaky across runs.
 		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sleep 30 >/dev/null 2>&1\nexit 0\n", bin)
-		envVars := jobStubEnv(t, setup, script)
+		// The outer job's own finish check now waits for the gate to reach a
+		// verdict (see resolveEnvironmentJobOutcome) before it decides
+		// gate-incomplete -- the gate here sleeps far longer than this scenario
+		// could afford to wait for real, so the cap/poll are shrunk to
+		// milliseconds. The point under test is the eventual gate-incomplete
+		// outcome once the wait is exhausted, not genuinely waiting one out.
+		envVars := append(jobStubEnv(t, setup, script),
+			"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=100ms", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms")
 
 		start := startJob(t, setup, envVars, "outer", "--", "work")
 		if start.ExitCode != 0 {
@@ -797,6 +822,106 @@ func TestJob(t *testing.T) {
 			t.Fatalf("expected a gate-incomplete job with exitCode 0 to report succeeded=false, got %+v", payload)
 		}
 		golden.Equal(t, "job/a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", normalize.Apply(status.Combined+await.Combined))
+	})
+
+	t.Run("a_job_that_waits_for_a_job_it_started_reports_the_real_outcome_once_it_finishes", func(t *testing.T) {
+		// The fix this locks: the scenario above ends because the wait cap is
+		// exhausted, but the common case is the started job actually finishing.
+		// Here the gate finishes (successfully) well within any reasonable wait,
+		// so outer's own finish check waits it out and reports the *real* combined
+		// outcome instead of ever surfacing an intermediate gate-incomplete a
+		// caller would otherwise have to separately chase down.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sleep 0.2 >/dev/null 2>&1\nexit 0\n", bin)
+		envVars := jobStubEnv(t, setup, script)
+
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected outer to report the gate's real success once it finished, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State     string `json:"state"`
+			Succeeded bool   `json:"succeeded"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "exited" || !payload.Succeeded {
+			t.Fatalf("expected outer to report exited/succeeded once the gate it waited for finished, got %+v", payload)
+		}
+	})
+
+	t.Run("a_job_that_waits_for_a_failed_job_it_started_surfaces_startedJobFailed", func(t *testing.T) {
+		// The other half of the fix above: when the started job finishes but
+		// fails, that failure must not vanish behind outer's own clean exit code
+		// just because outer's process happened to exit 0.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sh -c 'sleep 0.2; exit 1' >/dev/null 2>&1\nexit 0\n", bin)
+		envVars := jobStubEnv(t, setup, script)
+
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected outer to report a failure once the gate it waited for failed, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State            string `json:"state"`
+			Succeeded        bool   `json:"succeeded"`
+			StartedJobFailed string `json:"startedJobFailed"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "exited" || payload.Succeeded {
+			t.Fatalf("expected outer to still report its own exited state but succeeded=false, got %+v", payload)
+		}
+		if !strings.Contains(payload.StartedJobFailed, "gate") {
+			t.Fatalf("expected startedJobFailed to name the failed gate job, got %+v", payload)
+		}
+	})
+
+	t.Run("handoff_excludes_a_job_from_its_parents_finish_check", func(t *testing.T) {
+		// The other side of the contract: a job started with --handoff is meant
+		// to outlive its caller on purpose, so it must never be what a parent's
+		// own finish check waits for -- unlike the gate above, outer must report
+		// its own real success immediately even though the handed-off job is
+		// still running (a long sleep standing in for a release or a render).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		script := fmt.Sprintf("%q job start --tenant team --environment dev --name released --id released --handoff -- sleep 30 >/dev/null 2>&1\nexit 0\n", bin)
+		envVars := jobStubEnv(t, setup, script)
+
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "released", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected outer to succeed on its own despite the handed-off job still running, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		released := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "released"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.HasPrefix(released.Combined, "running:") {
+			t.Fatalf("expected the handed-off job to still be running on its own after outer finished, got: %s", released.Combined)
+		}
 	})
 
 	t.Run("an_agent_job_that_ends_with_an_uncommitted_working_tree_is_checkpointed_pushed_and_not_reported_as_success", func(t *testing.T) {
