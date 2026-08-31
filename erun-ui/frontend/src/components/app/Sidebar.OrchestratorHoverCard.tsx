@@ -244,7 +244,7 @@ function OrchestratorNudges({
       </span>
     );
   }
-  if (orchestrator.nudgeCount > 0) {
+  if (orchestrator.autoNudgeCount > 0 || orchestrator.whipCount > 0) {
     return <span>{summary}</span>;
   }
   return <Muted>{summary}</Muted>;

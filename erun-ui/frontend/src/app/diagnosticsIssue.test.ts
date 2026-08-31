@@ -24,6 +24,8 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     shellCommand: '',
     shellStartedAtUnix: 0,
     nudgeCount: 0,
+    autoNudgeCount: 0,
+    whipCount: 0,
     nudgeCapped: false,
     restartRequired: false,
     roleChanged: false,

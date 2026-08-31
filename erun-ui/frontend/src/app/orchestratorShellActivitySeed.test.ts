@@ -24,6 +24,8 @@ function orchestrator(
     shellCommand,
     shellStartedAtUnix,
     nudgeCount: 0,
+    autoNudgeCount: 0,
+    whipCount: 0,
     nudgeCapped: false,
     restartRequired: false,
     roleChanged: false,

@@ -83,9 +83,23 @@ func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
 
 func TestOrchestratorInfoForCarriesThePacingSnapshotVerbatim(t *testing.T) {
 	info := orchestratorInfoFor("id", "name", nil, "running", 1, orchestratorBusySnapshot{}, false,
-		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{NudgeCount: 3, Capped: true, LastNudgeAtUnix: 42}, nil, nil, false, false)
+		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{
+			NudgeCount: 3, Capped: true, LastNudgeAtUnix: 42,
+			AutoNudgeCount: 5, LastAutoNudgeAtUnix: 40,
+			WhipCount: 2, LastWhipAtUnix: 41,
+			LastCappedAtUnix: 39,
+		}, nil, nil, false, false)
 	if info.NudgeCount != 3 || !info.NudgeCapped || info.LastNudgeAtUnix != 42 {
 		t.Fatalf("expected the pacing snapshot to pass through unchanged, got %+v", info)
+	}
+	if info.AutoNudgeCount != 5 || info.LastAutoNudgeAtUnix != 40 {
+		t.Fatalf("expected the cumulative auto-nudge history to pass through unchanged, got %+v", info)
+	}
+	if info.WhipCount != 2 || info.LastWhipAtUnix != 41 {
+		t.Fatalf("expected the cumulative whip history to pass through unchanged, got %+v", info)
+	}
+	if info.LastCappedAtUnix != 39 {
+		t.Fatalf("expected the cumulative capped history to pass through unchanged, got %+v", info)
 	}
 }
 
@@ -94,5 +108,8 @@ func TestOrchestratorInfoForStoppedOrchestratorReportsNeverNudged(t *testing.T) 
 		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, nil, nil, false, false)
 	if info.NudgeCount != 0 || info.NudgeCapped {
 		t.Fatalf("expected a stopped orchestrator to report never-nudged, got %+v", info)
+	}
+	if info.AutoNudgeCount != 0 || info.WhipCount != 0 || info.LastCappedAtUnix != 0 {
+		t.Fatalf("expected a stopped orchestrator to report no pacing history either, got %+v", info)
 	}
 }

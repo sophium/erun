@@ -140,9 +140,14 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await stubOrchestratorList(
       page,
       snapshot({
-        nudgeCount: 3,
+        // nudgeCount/nudgeCapped are the cap's own live budget (0/false here,
+        // as if the session had already answered); autoNudgeCount is the
+        // cumulative history the card reads for "Nudged Nx" -- see
+        // orchestratorNudgeSummary.ts.
+        nudgeCount: 0,
         nudgeCapped: false,
-        lastNudgeAtUnix: Math.floor(Date.now() / 1000) - 125,
+        autoNudgeCount: 3,
+        lastAutoNudgeAtUnix: Math.floor(Date.now() / 1000) - 125,
         environments: [
           {
             tenant: 'acme',
