@@ -142,7 +142,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
     await expect(card).toBeVisible();
     await expect(card).toContainText('Working, for');
@@ -167,7 +167,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
     await expect(card).toBeVisible();
     await expect(card).toContainText('Working, for');
@@ -191,7 +191,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
     await expect(card).toBeVisible();
     await expect(card).toContainText(SEED_ENV_ALPHA);

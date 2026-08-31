@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../fixtures/erunApp.js';
+import { captureHoverCard, expect, test } from '../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 
 // The orchestrator hover card named its linked environments and said
@@ -81,7 +81,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('acme / build');
@@ -89,9 +89,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // name, with no rendered activity at all.
     await expect(card(page)).toContainText('Busy — holding: gradle-build');
 
-    await card(page).screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/one-environment-busy.png',
-    });
+    await captureHoverCard(
+      card(page),
+      '/home/erun/.erun/outputs/1383-visual/one-environment-busy.png',
+    );
   });
 
   test('two environments render distinct states side by side', async ({ app, page }) => {
@@ -122,15 +123,13 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Busy — holding: gradle-build');
     await expect(card(page)).toContainText('Idle');
 
-    await card(page).screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/two-environments.png',
-    });
+    await captureHoverCard(card(page), '/home/erun/.erun/outputs/1383-visual/two-environments.png');
   });
 
   test('three environments stay scannable and each state reads distinctly, including nudge state', async ({
@@ -178,7 +177,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -188,9 +187,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // Nudged more than once, and not capped, is its own distinguishable state.
     await expect(dialog).toContainText('Nudged 3x');
 
-    await card(page).screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/three-environments-and-nudges.png',
-    });
+    await captureHoverCard(
+      card(page),
+      '/home/erun/.erun/outputs/1383-visual/three-environments-and-nudges.png',
+    );
   });
 
   // This card is titled with the *orchestrator*, a host-side session with its
@@ -213,7 +213,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -226,9 +226,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await expect(environmentRow).not.toContainText('Not open here');
     await expect(environmentRow).not.toContainText('Idle');
 
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/no-forward-environment.png',
-    });
+    await captureHoverCard(
+      dialog,
+      '/home/erun/.erun/outputs/1383-visual/no-forward-environment.png',
+    );
   });
 
   // The regression this locks in: an environment not open in this desktop —
@@ -266,7 +267,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -274,9 +275,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await expect(environmentRow).toContainText('Busy — holding: full-test-suite');
     await expect(environmentRow).not.toContainText('Not open here');
 
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/busy-from-elsewhere.png',
-    });
+    await captureHoverCard(dialog, '/home/erun/.erun/outputs/1383-visual/busy-from-elsewhere.png');
   });
 
   // The other half of the fix: a real attempt to reach an unopened environment
@@ -308,7 +307,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -316,9 +315,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await expect(environmentRow).toContainText('open it to check directly');
     await expect(environmentRow).not.toContainText('Not open here');
 
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/check-failed-environment.png',
-    });
+    await captureHoverCard(
+      dialog,
+      '/home/erun/.erun/outputs/1383-visual/check-failed-environment.png',
+    );
   });
 
   test('an environment in outage reads distinctly from idle and unreachable', async ({
@@ -340,7 +340,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -349,9 +349,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await expect(environmentRow).not.toContainText('Not open here');
     await expect(environmentRow).not.toContainText('Idle');
 
-    await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1383-visual/outage-environment.png',
-    });
+    await captureHoverCard(dialog, '/home/erun/.erun/outputs/1383-visual/outage-environment.png');
   });
 
   test('a long environment name and a long busy detail elide instead of blowing out the card', async ({
@@ -383,7 +381,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -394,7 +392,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     const cardBox = await dialog.boundingBox();
     expect(cardBox?.width).toBeLessThan(320);
 
-    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1383-visual/long-values.png' });
+    await captureHoverCard(dialog, '/home/erun/.erun/outputs/1383-visual/long-values.png');
   });
 
   test('a capped orchestrator names the recovery, distinct from a session that was never nudged', async ({
@@ -411,21 +409,21 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     );
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('Stopped nudging after 6 attempts');
     await expect(dialog).toContainText('reply or restart');
 
-    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1383-visual/capped-nudge.png' });
+    await captureHoverCard(dialog, '/home/erun/.erun/outputs/1383-visual/capped-nudge.png');
   });
 
   test('a stopped orchestrator reports no nudge row at all', async ({ app, page }) => {
     await stubOrchestratorList(page, snapshot({ status: 'stopped', sessionId: 0 }));
     await app.reboot();
 
-    await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
     const dialog = card(page);
     await expect(dialog).toBeVisible();
@@ -459,7 +457,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // guarantees every retry re-triggers a real enter.
     async function rehover(): Promise<void> {
       await page.mouse.move(0, 0);
-      await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+      await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     }
 
     // This is the transition the bug lost: a card that already rendered once
@@ -475,9 +473,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
         await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
         // Taken while still converged and hovered — a screenshot outside this
         // callback can race the popover's own close-on-mouse-leave timer.
-        await dialog.screenshot({
-          path: '/home/erun/.erun/outputs/orchestrator-card-live-state/card-outage.png',
-        });
+        await captureHoverCard(
+          dialog,
+          '/home/erun/.erun/outputs/orchestrator-card-live-state/card-outage.png',
+        );
       },
     );
 
@@ -489,9 +488,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
         await expect(dialog).toContainText('Idle', { timeout: 1_000 });
         await expect(dialog).not.toContainText('Lost connection', { timeout: 1_000 });
         await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
-        await dialog.screenshot({
-          path: '/home/erun/.erun/outputs/orchestrator-card-live-state/card-recovered.png',
-        });
+        await captureHoverCard(
+          dialog,
+          '/home/erun/.erun/outputs/orchestrator-card-live-state/card-recovered.png',
+        );
       },
     );
   });

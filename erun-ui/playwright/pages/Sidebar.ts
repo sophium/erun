@@ -104,8 +104,26 @@ export class Sidebar {
     return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
   }
 
+  // hoverEnvironmentRow raises the row's hover card and hands back only once
+  // the card is actually up.
+  //
+  // A bare hover() proves nothing. The card's open state lives in the hovered
+  // row's own React state, so anything that re-renders that row drops it --
+  // most reliably the boot-time auto-open of the default environment landing
+  // while a spec is already hovering, since reboot() deliberately returns
+  // before that has happened. Nothing reopens it either: the pointer never
+  // left the row, so no fresh mouseenter fires. That is why a card lost this
+  // way does not fail the spec quickly but stalls it until its own timeout.
+  //
+  // Moving the pointer away first and re-hovering until the card is visible
+  // converges on the observable condition instead. A row that genuinely raises
+  // no card still never converges, so the step still fails.
   async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
-    await this.envRowButton(tenant, env).hover();
+    await expect(async () => {
+      await this.page.mouse.move(0, 0);
+      await this.envRowButton(tenant, env).hover();
+      await this.envHoverCard(tenant, env).waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   }
 
   envHoverCard(tenant: string, env: string): Locator {
@@ -274,6 +292,18 @@ export class Sidebar {
   // The hover card raised by hovering orchestratorRowButton, mirroring envHoverCard().
   orchestratorHoverCard(name: string): Locator {
     return this.page.getByRole('dialog', { name: `${name} details` });
+  }
+
+  // hoverOrchestratorRow is the orchestrator-row mirror of
+  // hoverEnvironmentRow, convergent for the same reason: the card's open state
+  // belongs to the row that raised it, and a re-render drops it with no way
+  // back while the pointer still sits there.
+  async hoverOrchestratorRow(name: string): Promise<void> {
+    await expect(async () => {
+      await this.page.mouse.move(0, 0);
+      await this.orchestratorRowButton(name).hover();
+      await this.orchestratorHoverCard(name).waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   }
 
   // The tenant name button that opens its dashboard, carrying aria-current

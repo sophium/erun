@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { AppShell } from '../pages/index.js';
 import { test as base } from './workerBackend.js';
 import {
@@ -91,6 +91,20 @@ export async function waitForSeededRow(
       .envRowButton(tenant, environment)
       .waitFor({ state: 'visible', timeout: 2_000 });
   }).toPass({ timeout: timeoutMs });
+}
+
+// captureHoverCard writes a hover card's own screenshot with a bounded wait.
+//
+// A hover card exists only while the pointer rests on the row that raised it,
+// and locator.screenshot() carries no timeout of its own: it waits for the
+// element to be visible and stable for as long as its caller allows. A card
+// that closes or reflows mid-capture therefore does not fail the capture, it
+// silently consumes the entire convergence budget its caller was relying on to
+// re-drive the step -- so the step never gets a second attempt and the spec
+// reports a timeout with every assertion before it having passed. Bounding the
+// capture costs one attempt instead of the whole budget.
+export async function captureHoverCard(card: Locator, filePath: string): Promise<void> {
+  await card.screenshot({ path: filePath, timeout: 2_000 });
 }
 
 export { expect };

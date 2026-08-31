@@ -140,7 +140,7 @@ test('the orchestrator hover card still renders every field: status, doing, link
   });
   await app.reboot();
 
-  await app.sidebar.orchestratorRowButton(SEED_ORCHESTRATOR).hover();
+  await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
   const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
   await expect(card).toBeVisible();
 
