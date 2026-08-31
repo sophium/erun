@@ -414,8 +414,9 @@ execution:
 
   | Operation | What it covers | What stays on subprocess |
   |---|---|---|
-  | `aws-sts` | `aws sts get-caller-identity`, used to resolve the caller's AWS identity and check whether a stored AWS session is still active. | Every other `aws` operation (`sso login`/`logout`, `configure set`, `configure export-credentials`) — these drive a real browser SSO flow or write the shared `~/.aws` ini files, neither of which the switch touches. |
+  | `aws-sts` | `aws sts get-caller-identity`, used to resolve the caller's AWS identity and check whether a stored AWS session is still active. | `aws sso login`/`logout` (drives a real browser SSO flow) and `aws configure set` (writes the shared `~/.aws/config` ini file) — neither is an AWS API call the switch can replace. |
   | `aws-sts-web-identity-token` | `aws sts get-web-identity-token`, used by `cloud oidc` to mint the OIDC bearer token that federates an AWS-provider alias with erun. | The federation-enable recovery (`aws iam enable-outbound-web-identity-federation`) this operation retries through on failure — still subprocess-only. |
+  | `aws-export-credentials` | `aws configure export-credentials --format process`, used by `erun cloud refresh` and the desktop's background credential refresher to mint the credentials it writes into a runtime pod's `~/.aws/credentials`. | Nothing else — this is the whole call site. |
 
 ---
 

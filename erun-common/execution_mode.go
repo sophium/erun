@@ -27,6 +27,7 @@ type ExecutionConfig struct {
 var knownExecutionOperations = []string{
 	"aws-sts",
 	"aws-sts-web-identity-token",
+	"aws-export-credentials",
 }
 
 // ExecutionModeFor resolves which path a promoted operation should take.

@@ -2,6 +2,7 @@ Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
 
 == Workspace sync (host mirror) ==
   host alias: erun-team-dev

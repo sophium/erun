@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -208,5 +210,108 @@ func TestIsAWSProfileNotConfiguredError(t *testing.T) {
 	}
 	if !isAWSProfileNotConfiguredError(err) {
 		t.Fatalf("isAWSProfileNotConfiguredError(%v) = false, want true", err)
+	}
+}
+
+// staticCredentialsProfileFixture points the SDK's shared-config resolution at
+// a temp credentials file holding a static keypair under profile, and clears
+// AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_PROFILE so the env-var and
+// ambient-profile provider ranked above shared config in the chain can never
+// shadow it — this fixture exists to prove the shared-config profile itself
+// resolved, the same thing `aws configure export-credentials --profile
+// <profile>` reads.
+func staticCredentialsProfileFixture(t *testing.T, profile string) {
+	t.Helper()
+	dir := t.TempDir()
+	credentialsPath := filepath.Join(dir, "credentials")
+	body := fmt.Sprintf("[%s]\naws_access_key_id = AKIAFIXTURE\naws_secret_access_key = fixturesecret\n", profile)
+	if err := os.WriteFile(credentialsPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write fixture credentials file: %v", err)
+	}
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credentialsPath)
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(dir, "config"))
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_REGION", "us-east-1")
+}
+
+func TestLibraryRunAWSExportCredentialsMatchesSubprocessObservableResult(t *testing.T) {
+	staticCredentialsProfileFixture(t, "erun-test-export")
+	ctx, trace := traceCapturingContext()
+
+	creds, err := libraryRunAWSExportCredentials(ctx, "erun-test-export")
+	if err != nil {
+		t.Fatalf("libraryRunAWSExportCredentials: %v", err)
+	}
+
+	// This is exactly what defaultRunAWSExportCredentials parses out of `aws
+	// configure export-credentials --format process` stdout — the two paths
+	// must agree on the observable result for the same underlying profile.
+	if creds.AccessKeyID != "AKIAFIXTURE" || creds.SecretAccessKey != "fixturesecret" {
+		t.Fatalf("creds = %+v, want AKIAFIXTURE/fixturesecret", creds)
+	}
+	if creds.SessionToken != "" {
+		t.Fatalf("creds.SessionToken = %q, want empty for a static-key profile", creds.SessionToken)
+	}
+	if !creds.Expiration.IsZero() {
+		t.Fatalf("creds.Expiration = %v, want zero for a static-key profile that cannot expire", creds.Expiration)
+	}
+
+	// The trace line must be byte-identical to what defaultRunAWSExportCredentials
+	// renders for the subprocess path (root AGENTS.md's dry-run/audit contract:
+	// the equivalent CLI invocation, regardless of execution mode).
+	wantTrace := formatShellCommand("", "aws", awsConfigureExportCredentialsArgs("erun-test-export")...)
+	if got := strings.TrimSpace(trace.String()); got != wantTrace {
+		t.Fatalf("trace = %q, want %q", got, wantTrace)
+	}
+}
+
+// TestAWSConfigureExportCredentialsArgsSharedByBothPaths locks the one argv
+// builder defaultRunAWSExportCredentials (subprocess) and
+// traceAWSExportCredentials (library) both call, so a profile can never
+// render differently between execution modes.
+func TestAWSConfigureExportCredentialsArgsSharedByBothPaths(t *testing.T) {
+	got := awsConfigureExportCredentialsArgs("my-profile")
+	want := []string{"configure", "export-credentials", "--format", "process", "--profile", "my-profile"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestLibraryRunAWSExportCredentialsDryRunTracesWithoutResolvingCredentials(t *testing.T) {
+	// No fixture set up: a dry run must never resolve credentials, so an
+	// unconfigured profile would fail the test if it were reached.
+	ctx, trace := traceCapturingContext()
+	ctx.DryRun = true
+
+	creds, err := libraryRunAWSExportCredentials(ctx, "my-profile")
+	if err != nil {
+		t.Fatalf("libraryRunAWSExportCredentials: %v", err)
+	}
+	if creds != (CloudProviderCredentials{}) {
+		t.Fatalf("creds = %+v, want zero value on dry run", creds)
+	}
+
+	wantTrace := formatShellCommand("", "aws", awsConfigureExportCredentialsArgs("my-profile")...)
+	if got := strings.TrimSpace(trace.String()); got != wantTrace {
+		t.Fatalf("trace = %q, want %q", got, wantTrace)
+	}
+}
+
+func TestLibraryRunAWSExportCredentialsMissingProfile(t *testing.T) {
+	ctx, _ := traceCapturingContext()
+
+	_, err := libraryRunAWSExportCredentials(ctx, "erun-cloud-aws-sdk-test-missing-profile")
+	if err == nil {
+		t.Fatal("expected an error for a profile absent from any shared config file")
+	}
+	if !strings.Contains(err.Error(), "export AWS credentials:") {
+		t.Fatalf("err = %q, want it wrapped as \"export AWS credentials: ...\"", err)
 	}
 }

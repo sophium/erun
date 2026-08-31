@@ -969,7 +969,7 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 		deps.RunAWSEnableOIDC = defaultRunAWSEnableOIDC
 	}
 	if deps.RunAWSExportCredentials == nil {
-		deps.RunAWSExportCredentials = defaultRunAWSExportCredentials
+		deps.RunAWSExportCredentials = runAWSExportCredentialsForExecutionMode()
 	}
 	if deps.ResolveAWSIdentity == nil {
 		deps.ResolveAWSIdentity = resolveAWSIdentityForExecutionMode()
@@ -996,6 +996,13 @@ func runAWSBearerTokenForExecutionMode() func(Context, string, string) (string, 
 		return libraryRunAWSBearerToken
 	}
 	return defaultRunAWSBearerToken
+}
+
+func runAWSExportCredentialsForExecutionMode() func(Context, string) (CloudProviderCredentials, error) {
+	if currentExecutionMode(awsExportCredentialsExecutionOperation) == ExecutionModeLibrary {
+		return libraryRunAWSExportCredentials
+	}
+	return defaultRunAWSExportCredentials
 }
 
 func checkAWSStatusForExecutionMode() func(Context, CloudProviderConfig) CloudProviderStatus {
@@ -1139,10 +1146,7 @@ func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, er
 }
 
 func defaultRunAWSExportCredentials(ctx Context, profile string) (CloudProviderCredentials, error) {
-	args := []string{"configure", "export-credentials", "--format", "process"}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsConfigureExportCredentialsArgs(profile)
 	ctx.TraceCommand("", "aws", args...)
 	if ctx.DryRun {
 		return CloudProviderCredentials{}, nil

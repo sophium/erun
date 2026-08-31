@@ -66,3 +66,19 @@ func TestExecutionModeReportListsAWSWebIdentityTokenOperation(t *testing.T) {
 	}
 	t.Fatal("expected \"aws-sts-web-identity-token\" in the execution mode report")
 }
+
+func TestExecutionModeForAWSExportCredentialsDefaultsToSubprocess(t *testing.T) {
+	if mode := ExecutionModeFor(ERunConfig{}, "aws-export-credentials"); mode != ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", mode, ExecutionModeSubprocess)
+	}
+}
+
+func TestExecutionModeReportListsAWSExportCredentialsOperation(t *testing.T) {
+	statuses := ExecutionModeReport(ERunConfig{})
+	for _, status := range statuses {
+		if status.Operation == "aws-export-credentials" {
+			return
+		}
+	}
+	t.Fatal("expected \"aws-export-credentials\" in the execution mode report")
+}

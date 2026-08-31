@@ -2,6 +2,7 @@ Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
 aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
 
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev

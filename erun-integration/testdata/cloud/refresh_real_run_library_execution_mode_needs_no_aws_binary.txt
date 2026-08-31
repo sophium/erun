@@ -1,0 +1,5 @@
+Refreshed ops+123456789012@aws credentials for team/dev in profile erun-host (~/.aws/credentials)
+audit: erun cloud refresh team dev
+trace-log: appending the full trace to <TMP>
+cloud refresh: alias=ops+123456789012@aws profile=erun-host region=eu-west-2
+cloud refresh: credentials are exported from the host profile and streamed to the pod on stdin (never an argument or a trace line)
