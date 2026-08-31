@@ -26,6 +26,7 @@ type ExecutionConfig struct {
 // depending on config.yaml already naming them explicitly.
 var knownExecutionOperations = []string{
 	"aws-sts",
+	"aws-sts-web-identity-token",
 }
 
 // ExecutionModeFor resolves which path a promoted operation should take.
