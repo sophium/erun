@@ -125,6 +125,49 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	assertPlanScopedToFrsOnly(t, output, frsRoot)
 }
 
+// The gap found while fixing the same coordinate for the CLI transport:
+// nothing in this tool ever wrote the env-config half of a pin back to the
+// store at all, so a real (non-preview)
+// MCP re-pin left even runtimeversion unmoved -- the CLI transport's own
+// applyPinCommand does this via saveEnvConfig, but the MCP path had no
+// equivalent call. A real run must persist runtimeversion, a stated-stock
+// runtimeimage, and runtimechart together, the same coordinate the CLI's
+// integration suite locks.
+func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
+	root := t.TempDir()
+	store := listToolStore{
+		envConfigs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:           "prod",
+				RuntimeVersion: "1.0.201",
+				RuntimeImage:   "ghcr.io/sophium/erun-devops:1.0.201",
+				RuntimeChart:   "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+			},
+		},
+	}
+	runtime := RuntimeConfig{
+		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
+		Store:   store,
+	}
+	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Version: "1.0.228"})
+	if err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+	if output.Pin == nil || !output.Pin.Applied {
+		t.Fatalf("expected the plan to have applied, got %+v", output.Pin)
+	}
+	saved := store.envConfigs["frs/prod"]
+	if saved.RuntimeVersion != "1.0.228" {
+		t.Fatalf("runtimeversion = %q, want 1.0.228", saved.RuntimeVersion)
+	}
+	if saved.RuntimeImage != "ghcr.io/sophium/erun-devops:1.0.228" {
+		t.Fatalf("runtimeimage = %q", saved.RuntimeImage)
+	}
+	if saved.RuntimeChart != "oci://ghcr.io/sophium/charts/erun-devops:1.0.228" {
+		t.Fatalf("runtimechart = %q", saved.RuntimeChart)
+	}
+}
+
 func assertPlanScopedToFrsOnly(t *testing.T, output JobEnvelopeOutput, frsRoot string) {
 	t.Helper()
 	if output.Pin == nil {

@@ -486,6 +486,200 @@ func TestResolvePinPlanRefusesAnUnresolvedTenantOrEnvironment(t *testing.T) {
 	}
 }
 
+// The reported bug: erun's own runtimechart, versioned on erun's own release
+// line just like runtimeversion and a stated runtimeimage, was not a pin site
+// at all — a re-pin could move every other reference and still leave the
+// chart an environment actually installs pointed at the old version.
+func TestResolvePinPlanMovesTheStockRuntimeChartVersion(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201"}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	var found []PinSite
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeChart {
+			found = append(found, site)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected exactly one runtime-chart site, got %+v", plan.Sites)
+	}
+	if found[0].Current != "1.0.201" || found[0].Target != "1.0.175" {
+		t.Fatalf("runtime-chart site = %+v, want current 1.0.201 target 1.0.175", found[0])
+	}
+}
+
+// The reported case: an environment that deliberately runs the chart on a
+// different release line than erun's own — the tenant's own umbrella, exactly what
+// --runtime-chart exists to let an operator state — is a real configuration,
+// not drift. A re-pin must leave it alone, the same way it leaves a
+// tenant-imaged runtimeimage alone.
+func TestResolvePinPlanLeavesATenantOwnRuntimeChartAlone(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/acme-devops:1.0.76"}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeChart {
+			t.Fatalf("a tenant's own runtimechart must not be a pin site: %+v", site)
+		}
+	}
+	foundSkipNote := false
+	for _, note := range plan.Skipped {
+		if strings.Contains(note, "runtimechart") && strings.Contains(note, "acme-devops") {
+			foundSkipNote = true
+		}
+	}
+	if !foundSkipNote {
+		t.Fatalf("expected a skipped note naming the tenant chart, got %+v", plan.Skipped)
+	}
+}
+
+// A runtimechart naming the stock chart with no version stated already rides
+// the deploy version, exactly like a tagless runtimeimage — there is nothing
+// for pin to move, and nothing to warn about either.
+func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops"}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeChart {
+			t.Fatalf("a floating stock runtimechart must not be a pin site: %+v", site)
+		}
+	}
+	for _, note := range plan.Skipped {
+		if strings.Contains(note, "runtimechart") {
+			t.Fatalf("a floating stock runtimechart needs no skip note either, got %+v", note)
+		}
+	}
+}
+
+// An unclassifiable runtimechart (one pin cannot even read a chart name out
+// of) must proceed rather than block a plan it merely could not read — the
+// same "unknown is not fine, but unknown is not wrong either" rule
+// established for the runtime-image line guard.
+func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "dev", RuntimeChart: "oci://"}
+
+	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeChart {
+			t.Fatalf("an unreadable runtimechart must not be a pin site: %+v", site)
+		}
+	}
+	foundSkipNote := false
+	for _, note := range plan.Skipped {
+		if strings.Contains(note, "runtimechart") {
+			foundSkipNote = true
+		}
+	}
+	if !foundSkipNote {
+		t.Fatalf("expected a skipped note explaining the unreadable chart, got %+v", plan.Skipped)
+	}
+}
+
+// The reported shape, exactly: a tenant-imaged env (runtimeimage on the
+// tenant's own line) whose runtimechart still names erun's own stock chart at
+// an old version. Resolving the plan must report the split pairing — and,
+// since ResolvePinPlan never writes, it must do so without mutating anything.
+func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{
+		Name:         "prod",
+		RuntimeImage: "ghcr.io/sophium/petios-devops",
+		RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+	}
+	before := readPinFile(t, root, "acme-devops/docker/erun-devops/Dockerfile")
+
+	plan, err := ResolvePinPlan(root, "petios", "prod", env, "1.0.228")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	changes := plan.Changes()
+	var chartChange PinSite
+	found := false
+	for _, site := range changes {
+		if site.Kind == PinSiteRuntimeChart {
+			chartChange = site
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the split pairing's runtimechart to be reported as a change, got %+v", changes)
+	}
+	if chartChange.Current != "1.0.201" || chartChange.Target != "1.0.228" {
+		t.Fatalf("runtime-chart change = %+v", chartChange)
+	}
+	after := readPinFile(t, root, "acme-devops/docker/erun-devops/Dockerfile")
+	if before != after {
+		t.Fatalf("resolving a plan must never write to the repo:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// The whole coordinate, applied: a stated-stock runtimeimage, runtimechart,
+// and runtimeversion all move to the target in the one write
+// ApplyPinnedEnvConfig computes.
+func TestApplyPinnedEnvConfigMovesRuntimeVersionImageAndChartTogether(t *testing.T) {
+	env := EnvConfig{
+		Name:           "dev",
+		RuntimeVersion: "1.0.201",
+		RuntimeImage:   "ghcr.io/sophium/erun-devops:1.0.201",
+		RuntimeChart:   "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+	}
+	plan, err := ResolvePinPlan(t.TempDir(), "acme", "dev", env, "1.0.228")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	updated, changed := ApplyPinnedEnvConfig(env, plan)
+	if !changed {
+		t.Fatal("expected the coordinate to move")
+	}
+	if updated.RuntimeVersion != "1.0.228" {
+		t.Fatalf("runtimeversion = %q", updated.RuntimeVersion)
+	}
+	if updated.RuntimeImage != "ghcr.io/sophium/erun-devops:1.0.228" {
+		t.Fatalf("runtimeimage = %q", updated.RuntimeImage)
+	}
+	if updated.RuntimeChart != "oci://ghcr.io/sophium/charts/erun-devops:1.0.228" {
+		t.Fatalf("runtimechart = %q", updated.RuntimeChart)
+	}
+}
+
+// A deliberately-separate chart line (the tenant's own umbrella) must survive
+// a re-pin unchanged, even while the rest of the coordinate moves.
+func TestApplyPinnedEnvConfigLeavesADeliberatelySeparateChartLineUnchanged(t *testing.T) {
+	env := EnvConfig{
+		Name:           "dev",
+		RuntimeVersion: "1.0.201",
+		RuntimeChart:   "oci://ghcr.io/sophium/charts/acme-devops:1.0.76",
+	}
+	plan, err := ResolvePinPlan(t.TempDir(), "acme", "dev", env, "1.0.228")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	updated, _ := ApplyPinnedEnvConfig(env, plan)
+	if updated.RuntimeChart != "oci://ghcr.io/sophium/charts/acme-devops:1.0.76" {
+		t.Fatalf("a tenant's own chart line must survive unchanged, got %q", updated.RuntimeChart)
+	}
+	if updated.RuntimeVersion != "1.0.228" {
+		t.Fatalf("runtimeversion should still move, got %q", updated.RuntimeVersion)
+	}
+}
+
 func readPinFile(t *testing.T, root, relative string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))

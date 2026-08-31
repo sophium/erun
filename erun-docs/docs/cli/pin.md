@@ -16,6 +16,7 @@ One erun version is written down in several places, and they only work when they
 | Helm chart dependencies | each `<tenant>-<component>` umbrella's `Chart.yaml` erun dependency `version:` |
 | Build-env image | `FROM …/erun-devops:<version>` in a custom runtime image |
 | Environment runtime version | the env's `runtimeversion` |
+| Environment runtime chart | the env's `runtimechart`, when it names erun's own stock `erun-devops` chart |
 
 Nothing kept them in step, so they drifted. One repo was found with Terraform on `1.0.102`, its charts on `1.0.106`, and the running binary on `1.0.115` — realigning it by hand meant editing seven files.
 
@@ -82,6 +83,8 @@ Only erun's own references move. A tenant's own Terraform module sources, its ow
 A tagged `runtimeimage` is only a pin site when it names the stock `erun-devops` image. A tenant's own `<tenant>-devops` image rides the tenant's own release line, not erun's, so its tag is left alone — rewriting it to the erun target version would name a tag that line never publishes. The dry-run plan says so explicitly (`skipped: runtimeimage <image> is not the stock erun-devops image; …`) rather than leaving you to assume it was covered.
 
 The same reasoning applies to the environment's own `runtimeversion`: it is only a pin site when the environment runs erun's own runtime image. An environment running a tenant-owned image has its `runtimeversion` alone too, for the same reason and with the same explicit `skipped:` line in the plan.
+
+A stated `runtimechart` (an OCI reference, set by [`--runtime-chart`](/cli/deploy) or directly in config) is classified the same way, by its own chart name rather than its version number: only a reference naming erun's own stock `erun-devops` chart is a pin site. A tenant's own umbrella chart — exactly what `--runtime-chart` exists to let an environment run on its own release line, separate from the image — is left alone, with the same explicit `skipped:` line. A stated chart with no version rides the deploy version already, so there is nothing to move.
 
 [`erun list`](/cli/list#release-lines) shows the same thing without needing to run a pin first: it names which release line each environment's `runtime-version` belongs to, right beside the number.
 
