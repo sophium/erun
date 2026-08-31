@@ -45,13 +45,13 @@ type stubInviteUserCreator struct {
 	calls              int
 }
 
-func (s *stubInviteUserCreator) Create(ctx context.Context, params repository.CreateUserParams) (model.User, error) {
+func (s *stubInviteUserCreator) Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error) {
 	s.gotParams = params
 	s.calls++
 	if sc, ok := security.FromContext(ctx); ok {
 		s.gotSecurityContext = sc
 	}
-	return s.user, s.err
+	return s.user, false, s.err
 }
 
 func testConsumedInvite() repository.ConsumedInvite {

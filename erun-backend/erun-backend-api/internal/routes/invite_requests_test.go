@@ -241,11 +241,11 @@ func (f *fakeApproveCreateTenantTenants) GetByName(_ context.Context, _ string) 
 
 type fakeApproveCreateTenantUsers struct{ gotTenantID string }
 
-func (f *fakeApproveCreateTenantUsers) Create(ctx context.Context, _ repository.CreateUserParams) (model.User, error) {
+func (f *fakeApproveCreateTenantUsers) Create(ctx context.Context, _ repository.CreateUserParams) (model.User, bool, error) {
 	if sc, ok := security.FromContext(ctx); ok {
 		f.gotTenantID = sc.TenantID
 	}
-	return model.User{UserID: "user-1"}, nil
+	return model.User{UserID: "user-1"}, false, nil
 }
 
 type fakeApproveCreateTenantInvites struct{}

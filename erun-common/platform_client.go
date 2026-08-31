@@ -109,15 +109,22 @@ type PlatformTenant struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// PlatformUser mirrors model.User's JSON shape.
+// PlatformUser mirrors model.User's JSON shape (plus AlreadyEnrolled, which
+// only POST /v1/users' response sets).
 type PlatformUser struct {
-	UserID    string    `json:"userId"`
-	TenantID  string    `json:"tenantId"`
-	Username  string    `json:"username"`
-	Issuer    string    `json:"issuer,omitempty"`
-	Subject   string    `json:"subject,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	UserID   string `json:"userId"`
+	TenantID string `json:"tenantId"`
+	Username string `json:"username"`
+	Issuer   string `json:"issuer,omitempty"`
+	Subject  string `json:"subject,omitempty"`
+	// AlreadyEnrolled is true when POST /v1/users found the requested external
+	// identity already enrolled in the target tenant and left it untouched
+	// (a no-op) instead of creating a new user — the caller asked to enroll an
+	// identity that was already usable, so this reports the existing user
+	// rather than a false username-collision conflict.
+	AlreadyEnrolled bool      `json:"alreadyEnrolled,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // PlatformEnvironment mirrors model.Environment's JSON shape.

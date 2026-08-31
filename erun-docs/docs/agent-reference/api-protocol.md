@@ -863,6 +863,22 @@ Both act on the caller's own resolved tenant by default. An explicit `tenantId` 
 
 Omitting `issuer`/`subject` enrolls a username with **no external identity yet** — the row exists, but no token can resolve to it until one is linked, and there is no separate endpoint to link one after the fact in this build.
 
+**Re-enrolling an already-linked identity is a no-op, not a conflict.** When `issuer`/`subject` are given and that exact pair is already enrolled in the target tenant, the response is `200` (not `201`) with `alreadyEnrolled: true` and the user that already holds the mapping — its real `username`, which may differ from the one this request asked for. The operator's intent ("this identity usable in this tenant") was already satisfied, so nothing is created and existing roles are left untouched:
+
+```jsonc
+// 200 response — issuer/subject already enrolled as a different username
+{
+  "userId": "019a7fa5-c2c0-7c55-bc70-714873a71f60",
+  "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
+  "username": "alice@idp.example",  // the username already on file, not the one requested
+  "issuer": "https://idp.example",
+  "subject": "alice@idp.example",
+  "alreadyEnrolled": true,
+  "createdAt": "2026-06-24T10:00:00Z",
+  "updatedAt": "2026-06-24T10:00:00Z"
+}
+```
+
 **Role assignment default.** An enrolled user gets exactly the roles named in `roleIds`. Omitting `roleIds` enrolls with **zero roles** — a user who can sign in but do nothing until someone with a grant-capable role grants one, the same "may do nothing" state [the capability set](#capability-set) already models. The one exception is the target tenant's **first** user: that enrollment still gets the predefined `ReadAll`/`WriteAll` roles regardless of `roleIds`, matching [empty-database bootstrap](#tenant-issuers) above — without it, a tenant whose first (and only) user held nothing could never grant anything, since granting a role is itself a permission-gated call. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator lists existing roles and grants/revokes them after enrollment.
 
 This endpoint requires the caller to already know the enrollee's `issuer`/`subject` from the identity provider. [`POST /v1/identity/users`](/agent-reference/identity-administration) is the higher-level alternative for a platform running its own IdP (Zitadel): it creates the IdP identity itself and calls this same mapping with the subject the IdP returns, in one action, restricted to an `OPERATIONS` tenant.
@@ -890,7 +906,8 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 | `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
 | `404` | `POST /v1/users`: a `roleIds` entry does not name a role in the target tenant. | Fix the role id, or create the role first via [`POST /v1/roles`](#roles-endpoints). |
-| `409` | `POST /v1/users`: a user with that `username` already exists in the target tenant (`users_tenant_username_key`). | Use a different username, or omit `tenantId` if you meant your own tenant. |
+| `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. | Use a different username, or omit `tenantId` if you meant your own tenant. |
+| `409` `CONFLICT` | `POST /v1/users`: a uniqueness violation this endpoint does not recognize as either of the above. | Retry is unlikely to help without changing the request; treat as a server-side gap and report it. |
 
 ### Roles and role assignment {#roles-endpoints}
 

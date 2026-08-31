@@ -86,7 +86,7 @@ func enrollUser(t *testing.T, txManager *repository.TxManager, tenantID string, 
 	t.Helper()
 	users := repository.NewUserRepository(txManager)
 	ctx := security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: string(tenantType)})
-	user, err := users.Create(ctx, params)
+	user, _, err := users.Create(ctx, params)
 	mustNoErr(t, err, "enroll user")
 	return user
 }

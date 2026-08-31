@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -36,28 +37,73 @@ type CreateUserParams struct {
 	RoleIDs  []string
 }
 
+// errIdentityAlreadyEnrolledRace is Create's internal-only signal that the
+// insertUserExternalID unique-violation branch fired: a concurrent enrollment
+// won the same (tenant, issuer, subject) between Create's up-front
+// findUserByExternalID check and this insert. It aborts the transaction (so
+// the just-inserted, now-orphaned users row rolls back) and never leaves this
+// file — Create catches it and re-resolves the winner the same way the
+// up-front check would have, so the caller sees the same no-op success either
+// way rather than a race-dependent error.
+var errIdentityAlreadyEnrolledRace = errors.New("identity already enrolled (race)")
+
 // Create enrolls a user and, when Issuer/Subject are given, links the external
 // identity that lets them actually sign in — otherwise the row exists but no
 // token can ever resolve to it.
+//
+// Re-enrolling an identity already mapped in this tenant is a no-op, not a
+// conflict: the operator's intent ("this identity usable in this tenant") is
+// already satisfied, so Create reports it back (alreadyEnrolled=true) with
+// the user that already holds it rather than erroring. The lookup is scoped
+// to tenantID exactly like every other query here, so it can only ever
+// surface a user within the caller's own resolved target tenant — never a
+// different tenant's enrollment of the same external identity.
 //
 // Role assignment: a caller-named RoleIDs list is granted as given.
 // Otherwise, the tenant's first user gets TenantAdmin — without a
 // grant-capable role nobody could ever grant a role at all, since granting is
 // itself permission-gated — and every later enrollment defaults to
 // TenantUser, so an invited colleague can use erun immediately rather than
-// sitting fully capability-less until someone grants a role by hand.
-func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (model.User, error) {
+// sitting fully capability-less until someone grants a role by hand. A no-op
+// re-enrollment does not re-run role assignment; it leaves the existing
+// user's roles untouched.
+func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (model.User, bool, error) {
 	username := strings.TrimSpace(params.Username)
 	issuer := strings.TrimSpace(params.Issuer)
 	subject := strings.TrimSpace(params.Subject)
 	tenantID := strings.TrimSpace(params.TenantID)
-	roleIDs := make([]string, 0, len(params.RoleIDs))
-	for _, roleID := range params.RoleIDs {
-		if roleID = strings.TrimSpace(roleID); roleID != "" {
-			roleIDs = append(roleIDs, roleID)
+	roleIDs := trimmedRoleIDs(params.RoleIDs)
+
+	if issuer != "" && subject != "" {
+		if existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject); err != nil || found {
+			return existing, found, err
 		}
 	}
 
+	user, err := r.insertUserAndRoles(ctx, tenantID, username, issuer, subject, roleIDs)
+	if err == nil {
+		return user, false, nil
+	}
+	if errors.Is(err, errIdentityAlreadyEnrolledRace) {
+		return r.resolveIdentityRaceWinner(ctx, tenantID, issuer, subject)
+	}
+	return model.User{}, false, err
+}
+
+// trimmedRoleIDs drops blank entries from a caller-supplied roleIds list.
+func trimmedRoleIDs(roleIDs []string) []string {
+	trimmed := make([]string, 0, len(roleIDs))
+	for _, roleID := range roleIDs {
+		if roleID = strings.TrimSpace(roleID); roleID != "" {
+			trimmed = append(trimmed, roleID)
+		}
+	}
+	return trimmed
+}
+
+// insertUserAndRoles is Create's actual insert path, run once
+// findUserByExternalID's up-front check has ruled out a no-op re-enrollment.
+func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string, username string, issuer string, subject string, roleIDs []string) (model.User, error) {
 	var user model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		isFirstUser, err := tenantHasNoUsers(ctx, tx, tenantID)
@@ -75,10 +121,55 @@ func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (m
 		}
 		return assignEnrollmentRoles(ctx, tx, tenantID, user.UserID, roleIDs, isFirstUser)
 	})
-	if err != nil {
-		return model.User{}, err
+	return user, err
+}
+
+// resolveIdentityRaceWinner re-resolves the winner of errIdentityAlreadyEnrolledRace
+// the same way Create's up-front check would have, so the caller sees the same
+// no-op success either way. The lookup failing to find anything should not
+// happen (the unique violation that got here proves a winner exists), so it
+// falls back to reporting a genuinely unrecognized conflict rather than
+// guessing.
+func (r *UserRepository) resolveIdentityRaceWinner(ctx context.Context, tenantID string, issuer string, subject string) (model.User, bool, error) {
+	if existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject); err == nil && found {
+		return existing, true, nil
 	}
-	return user, nil
+	return model.User{}, false, ErrUnrecognizedConflict
+}
+
+// findUserByExternalID looks up the user already holding tenantID's
+// (issuer, externalID) mapping, if any. Scoped by tenantID like every other
+// tenant-owned lookup here (falling back to RLS's own erun_current_tenant_id()
+// scoping when tenantID is empty), so it can never surface a different
+// tenant's enrollment.
+func (r *UserRepository) findUserByExternalID(ctx context.Context, tenantID string, issuer string, externalID string) (model.User, bool, error) {
+	var user model.User
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var scanErr error
+		if tenantID != "" {
+			scanErr = tx.NewRaw(`
+				SELECT u.user_id, u.tenant_id, u.username, u.created_at, u.updated_at
+				  FROM user_external_ids uei
+				  JOIN users u ON u.tenant_id = uei.tenant_id AND u.user_id = uei.user_id
+				 WHERE uei.tenant_id = ? AND uei.issuer = ? AND uei.external_id = ?
+			`, tenantID, issuer, externalID).Scan(ctx, &user)
+		} else {
+			scanErr = tx.NewRaw(`
+				SELECT u.user_id, u.tenant_id, u.username, u.created_at, u.updated_at
+				  FROM user_external_ids uei
+				  JOIN users u ON u.tenant_id = uei.tenant_id AND u.user_id = uei.user_id
+				 WHERE uei.issuer = ? AND uei.external_id = ?
+			`, issuer, externalID).Scan(ctx, &user)
+		}
+		return normalizeNoRows(scanErr)
+	})
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return model.User{}, false, nil
+		}
+		return model.User{}, false, err
+	}
+	return user, true, nil
 }
 
 func insertUserRow(ctx context.Context, tx bun.Tx, tenantID string, username string) (model.User, error) {
@@ -99,13 +190,21 @@ func insertUserRow(ctx context.Context, tx bun.Tx, tenantID string, username str
 	}
 	if err != nil {
 		if isUniqueViolation(err) {
-			return model.User{}, ErrConflict
+			if name, ok := pgConstraintName(err); ok && name == "users_tenant_username_key" {
+				return model.User{}, ErrUsernameConflict
+			}
+			return model.User{}, ErrUnrecognizedConflict
 		}
 		return model.User{}, normalizeNoRows(err)
 	}
 	return user, nil
 }
 
+// insertUserExternalID's only unique constraint is user_external_ids' own
+// primary key (tenant_id, issuer, external_id), so any unique violation here
+// is unambiguously a concurrent enrollment winning the same identity mapping
+// Create's up-front findUserByExternalID check already looked for and did
+// not find — see errIdentityAlreadyEnrolledRace.
 func insertUserExternalID(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
 	var err error
 	if tenantID != "" {
@@ -121,7 +220,7 @@ func insertUserExternalID(ctx context.Context, tx bun.Tx, tenantID string, userI
 	}
 	if err != nil {
 		if isUniqueViolation(err) {
-			return ErrConflict
+			return errIdentityAlreadyEnrolledRace
 		}
 		return err
 	}

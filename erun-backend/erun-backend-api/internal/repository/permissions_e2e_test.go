@@ -41,7 +41,11 @@ func permissionsDatabase(t *testing.T) (*sql.DB, string) {
 
 func clearPermissionsTenant(t *testing.T, db *sql.DB, tenantID string) {
 	t.Helper()
-	for _, table := range []string{"user_roles", "role_permissions", "roles", "users", "tenants"} {
+	// user_external_ids and tenant_issuers come before users/tenants: both
+	// foreign-key into them, so a test that seeds an external identity (e.g.
+	// UserRepository.Create's issuer/subject path) would otherwise leave the
+	// users/tenants delete below silently failing on the FK.
+	for _, table := range []string{"user_external_ids", "user_roles", "role_permissions", "roles", "users", "tenant_issuers", "tenants"} {
 		if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
 			t.Logf("clearing %s for tenant %s: %v", table, tenantID, err)
 		}

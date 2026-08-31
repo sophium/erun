@@ -197,6 +197,8 @@ func TestDecideWorkCloneReclaimSquashMergedBranchWithADeletedRemoteBranchIsRecla
 	// repository lands.
 	merger := t.TempDir()
 	runGitForTest(t, filepath.Dir(merger), "clone", "-q", "--branch", "main", bare, merger)
+	runGitForTest(t, merger, "config", "user.email", "test@example.com")
+	runGitForTest(t, merger, "config", "user.name", "Test")
 	runGitForTest(t, merger, "fetch", "-q", "origin", "feature/lane")
 	runGitForTest(t, merger, "merge", "-q", "--squash", "origin/feature/lane")
 	runGitForTest(t, merger, "commit", "-q", "-m", "Squash merge feature/lane (#1)")
@@ -223,6 +225,8 @@ func TestDecideWorkCloneReclaimUnpushedBranchThatOnlyLooksLikeASquashMergeIsKept
 	// feature/lane's own changeset never gets merged anywhere.
 	other := t.TempDir()
 	runGitForTest(t, filepath.Dir(other), "clone", "-q", "--branch", "main", bare, other)
+	runGitForTest(t, other, "config", "user.email", "test@example.com")
+	runGitForTest(t, other, "config", "user.name", "Test")
 	writeAndCommit(t, other, "unrelated.txt", "unrelated\n", "unrelated main work")
 	runGitForTest(t, other, "push", "-q", "origin", "main")
 

@@ -23,7 +23,7 @@ type IdentityAdmin interface {
 // user row and its external-identity mapping. repository.UserRepository
 // satisfies it.
 type IdentityUserCreator interface {
-	Create(ctx context.Context, params repository.CreateUserParams) (model.User, error)
+	Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error)
 }
 
 // ErrIdentityMappingFailed marks an enrollment where the IdP half landed but
@@ -148,7 +148,7 @@ func (s *IdentityService) Enroll(ctx context.Context, params EnrollIdentityParam
 		}, nil
 	}
 
-	erunUser, err := s.users.Create(ctx, repository.CreateUserParams{
+	erunUser, _, err := s.users.Create(ctx, repository.CreateUserParams{
 		Username: params.Username,
 		Issuer:   params.Issuer,
 		Subject:  idpUser.ID,

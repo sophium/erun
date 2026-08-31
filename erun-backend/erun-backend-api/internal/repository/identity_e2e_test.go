@@ -1,10 +1,13 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -485,6 +488,55 @@ func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
 	}
 	if !errors.Is(unresolvedErr, security.ErrTenantUnresolved) {
 		t.Fatalf("unresolved err = %v, want security.ErrTenantUnresolved even though this exact subject is enrolled", unresolvedErr)
+	}
+}
+
+// TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL proves the auth
+// path's own instance of this issue: a token's claimed username refresh
+// colliding with a different user already enrolled under it in the same
+// tenant must not fail authentication, and must never let the raw Postgres
+// unique-violation error (constraint name, SQLSTATE) reach the log as the
+// rejection reason -- an already-resolved identity signs in under its
+// existing username instead.
+func TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL(t *testing.T) {
+	db := identityBootstrapDatabase(t)
+	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
+	repo := NewIdentityRepository(db, DialectPostgres, "")
+
+	const issuer = "https://issuer.example/refresh-collision"
+
+	tenant, alice, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:   issuer,
+		Subject:  "subject-alice",
+		Username: "alice",
+	})
+	mustNoErr(t, err, "bootstrap the first tenant and its first user")
+
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		tenant.TenantID, "bob",
+	).Err(), "seed a second user holding the username the refresh will collide on")
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	_, resolved, err := repo.ResolveIdentity(context.Background(), security.Claims{
+		Issuer:   issuer,
+		Subject:  "subject-alice",
+		Username: "bob", // already taken by the seeded second user
+	})
+	mustNoErr(t, err, "resolving an identity whose claimed username now collides must still authenticate")
+	if resolved.UserID != alice.UserID || resolved.Username != "alice" {
+		t.Fatalf("resolved = %+v, want alice's original user/username left unchanged", resolved)
+	}
+
+	logged := logBuf.String()
+	if strings.Contains(logged, "SQLSTATE") || strings.Contains(logged, "constraint") || strings.Contains(logged, "duplicate key") {
+		t.Fatalf("log output leaked a raw Postgres error: %q", logged)
+	}
+	if !strings.Contains(logged, "username refresh skipped") {
+		t.Fatalf("log output = %q, want a safe skipped-refresh reason", logged)
 	}
 }
 
