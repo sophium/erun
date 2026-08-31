@@ -60,6 +60,21 @@ export class OrchestratorDialog {
     });
   }
 
+  // The role SelectField's trigger, present only for a checked (linked) env --
+  // id matches OrchestratorDialog.Environments.helpers.ts's envRoleFieldId.
+  envRoleTrigger(tenant: string, environment: string): Locator {
+    return this.page.locator(`#orchestrator-env-role-${tenant}-${environment}`);
+  }
+
+  async setEnvRole(
+    tenant: string,
+    environment: string,
+    role: 'Not declared' | 'Code' | 'Build',
+  ): Promise<void> {
+    await this.envRoleTrigger(tenant, environment).click();
+    await this.page.getByRole('option', { name: role, exact: true }).click();
+  }
+
   // An ineligible env (e.g. runtime) is still listed, disabled, with its
   // reason as a first-class line under the checkbox row rather than a
   // tooltip. The checkbox carries an accessible name naming both the env and
@@ -104,6 +119,14 @@ export class OrchestratorDialog {
   async create(name: string): Promise<void> {
     await this.nameInput().fill(name);
     await this.createButton().click();
+  }
+
+  saveButton(): Locator {
+    return this.locator('Edit orchestrator').getByRole('button', { name: 'Save' });
+  }
+
+  async save(): Promise<void> {
+    await this.saveButton().click();
   }
 
   // The two guidance layers (#1231): "role" is this orchestrator's own

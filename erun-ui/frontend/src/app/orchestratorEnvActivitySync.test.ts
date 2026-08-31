@@ -27,7 +27,7 @@ function buildStore(orchestratorId: string, tenant: string, environment: string)
       {
         id: orchestratorId,
         name: orchestratorId,
-        environments: [{ tenant, environment, directory: '/tmp/a' }],
+        environments: [{ tenant, environment, directory: '/tmp/a', role: '' }],
         tenants: [tenant],
         directories: ['/tmp/a'],
         sessionId: 1,
@@ -40,6 +40,7 @@ function buildStore(orchestratorId: string, tenant: string, environment: string)
         nudgeCount: 0,
         nudgeCapped: false,
         restartRequired: false,
+        roleChanged: false,
       },
     ]),
   );
@@ -150,6 +151,7 @@ test('a clean boot seeds the card from the fetch alone, before any event arrives
             tenant: 'frs',
             environment: 'local',
             directory: '/tmp/a',
+            role: '',
             activity: { reachable: false, observed: false, outage: true, busy: false },
           },
         ],
@@ -165,6 +167,7 @@ test('a clean boot seeds the card from the fetch alone, before any event arrives
         nudgeCount: 0,
         nudgeCapped: false,
         restartRequired: false,
+        roleChanged: false,
       },
     ]),
   );

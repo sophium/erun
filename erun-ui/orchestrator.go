@@ -89,10 +89,13 @@ type orchestratorSession struct {
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
+// Role is empty for undeclared -- the same "empty means undeclared, never a
+// default" contract eruncommon.OrchestratorEnvConfig.Role documents.
 type orchestratorEnvInput struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Directory   string `json:"directory"`
+	Tenant      string                         `json:"tenant"`
+	Environment string                         `json:"environment"`
+	Directory   string                         `json:"directory"`
+	Role        eruncommon.OrchestratorEnvRole `json:"role"`
 }
 
 // orchestratorEnvCandidate is an env the operator considered linking, eligible
@@ -117,10 +120,12 @@ type orchestratorEnvCandidate struct {
 // rather than duplicated so the two surfaces cannot drift on what "not yet
 // observed" means.
 type orchestratorEnvInfo struct {
-	Tenant      string                         `json:"tenant"`
-	Environment string                         `json:"environment"`
-	Directory   string                         `json:"directory"`
-	Activity    *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Directory   string `json:"directory"`
+	// Role is empty for undeclared -- see orchestratorEnvInput.Role.
+	Role     eruncommon.OrchestratorEnvRole `json:"role"`
+	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
 	// Usage is the environment-usage poller's last cached reading for this env
 	// (environment_usage.go), joined the same way Activity is — nil until the
 	// poller has observed it at least once.
@@ -172,6 +177,12 @@ type orchestratorInfo struct {
 	// for an unlinked environment and has none for a newly linked one until
 	// then. See orchestratorScopeMismatch.
 	RestartRequired bool `json:"restartRequired"`
+	// RoleChanged is true when a linked environment's Role was edited since
+	// the live session launched. Distinct from RestartRequired: a role edit
+	// never changes which MCP tools the session holds, so the dialog offers
+	// the same Restart affordance without claiming the specific "tools
+	// missing" reason that does not apply here. See orchestratorRolesChanged.
+	RoleChanged bool `json:"roleChanged"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -982,7 +993,7 @@ func copyDirTree(src, dst string) error {
 func envInfos(envs []eruncommon.OrchestratorEnvConfig, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading) []orchestratorEnvInfo {
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
-		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory}
+		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory, Role: env.Role}
 		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})
 		if state, ok := envActivity[key]; ok {
 			info.Activity = &uiEnvironmentActivitySnapshot{
@@ -1055,7 +1066,7 @@ type orchestratorPacingSnapshot struct {
 	LastNudgeAtUnix int64
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired bool) orchestratorInfo {
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                 id,
 		Name:               name,
@@ -1074,6 +1085,7 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		NudgeCapped:        pacing.Capped,
 		LastNudgeAtUnix:    pacing.LastNudgeAtUnix,
 		RestartRequired:    restartRequired,
+		RoleChanged:        roleChanged,
 	}
 }
 
@@ -1085,6 +1097,27 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 // linked to, or both — and only a fresh spawn (RestartOrchestrator) fixes it.
 func orchestratorScopeMismatch(wiredEnvs, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
 	return !equalOrchestratorScope(orchestratorScopeOf(wiredEnvs), orchestratorScopeOf(configuredEnvs))
+}
+
+// orchestratorRolesChanged reports whether any environment linked in both
+// wiredEnvs and configuredEnvs now carries a different Role. Unlike scope,
+// nothing the running session already resolved is keyed on Role -- it wires no
+// MCP tool differently for a code environment than a build one -- so this is
+// not the same "the process is stale" fact orchestratorScopeMismatch reports.
+// It exists so the Edit orchestrator dialog can tell the operator their edit
+// is not guaranteed live yet without overloading RestartRequired's specific,
+// accurate "tools are missing" wording with a change that never affects tools.
+func orchestratorRolesChanged(wiredEnvs, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
+	wiredRoles := make(map[string]eruncommon.OrchestratorEnvRole, len(wiredEnvs))
+	for _, env := range wiredEnvs {
+		wiredRoles[env.Tenant+"/"+env.Environment] = env.Role
+	}
+	for _, env := range configuredEnvs {
+		if wired, ok := wiredRoles[env.Tenant+"/"+env.Environment]; ok && wired != env.Role {
+			return true
+		}
+	}
+	return false
 }
 
 // orchestratorModel is the model an orchestrator's Claude session launches on,
@@ -1357,7 +1390,10 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 		} else if dir == "" {
 			return nil, fmt.Errorf("%s/%s has no repository path on this machine; set one before linking it to an orchestrator", tenant, environment)
 		}
-		refs = append(refs, eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir})
+		if !input.Role.IsValid() {
+			return nil, fmt.Errorf("%s/%s: invalid role %q", tenant, environment, input.Role)
+		}
+		refs = append(refs, eruncommon.OrchestratorEnvConfig{Tenant: tenant, Environment: environment, Directory: dir, Role: input.Role})
 	}
 	if len(refs) == 0 {
 		return nil, fmt.Errorf("an orchestrator must link at least one environment")
@@ -1430,7 +1466,7 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false), nil
+	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments and
@@ -1465,18 +1501,18 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
-	status, sessionID, busy, shell, pacing, restartRequired := a.updatedOrchestratorRunningSnapshot(id, refs)
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired), nil
+	status, sessionID, busy, shell, pacing, restartRequired, roleChanged := a.updatedOrchestratorRunningSnapshot(id, refs)
+	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
 }
 
 // updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
 // session state, split out to keep that function's complexity within budget.
 // "stopped" (the zero snapshots, restartRequired false) when nothing is
 // running for id.
-func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eruncommon.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired bool) {
+func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eruncommon.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired, roleChanged bool) {
 	info, ok := a.runningOrchestratorInfo(id)
 	if !ok {
-		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, false
+		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, false, false
 	}
 	busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
 	shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
@@ -1485,11 +1521,14 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eru
 	// saving a different scope here does not touch it (see
 	// orchestratorScopeMismatch). Restart is the only thing that re-wires it,
 	// so the operator is told rather than shown "running" as if the save took
-	// effect immediately.
+	// effect immediately. A role-only edit doesn't affect wiring the same way
+	// (see orchestratorRolesChanged), but is still reported so the dialog can
+	// tell the operator their edit is not guaranteed live yet.
 	if wired, ok := a.orchestratorWiredEnvs(id); ok {
 		restartRequired = orchestratorScopeMismatch(wired, configuredEnvs)
+		roleChanged = orchestratorRolesChanged(wired, configuredEnvs)
 	}
-	return "running", info.SessionID, busy, shell, pacing, restartRequired
+	return "running", info.SessionID, busy, shell, pacing, restartRequired, roleChanged
 }
 
 // StartOrchestrator spawns the session for a persisted orchestrator definition,
@@ -1579,7 +1618,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false), true
+	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
 // orchestratorWiredEnvs returns the environment scope id's live session was
@@ -1835,7 +1874,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -1913,6 +1952,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		shell := orchestratorShellSnapshot{}
 		pacing := orchestratorPacingSnapshot{}
 		restartRequired := false
+		roleChanged := false
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
@@ -1925,9 +1965,10 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				// shows the new set as if it were live is exactly the defect
 				// this flag exists to stop (see orchestratorScopeMismatch).
 				restartRequired = orchestratorScopeMismatch(session.envs, config.Environments)
+				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -1940,7 +1981,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false))
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

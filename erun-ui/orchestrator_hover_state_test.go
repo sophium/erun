@@ -83,7 +83,7 @@ func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
 
 func TestOrchestratorInfoForCarriesThePacingSnapshotVerbatim(t *testing.T) {
 	info := orchestratorInfoFor("id", "name", nil, "running", 1, orchestratorBusySnapshot{}, false,
-		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{NudgeCount: 3, Capped: true, LastNudgeAtUnix: 42}, nil, nil, false)
+		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{NudgeCount: 3, Capped: true, LastNudgeAtUnix: 42}, nil, nil, false, false)
 	if info.NudgeCount != 3 || !info.NudgeCapped || info.LastNudgeAtUnix != 42 {
 		t.Fatalf("expected the pacing snapshot to pass through unchanged, got %+v", info)
 	}
@@ -91,7 +91,7 @@ func TestOrchestratorInfoForCarriesThePacingSnapshotVerbatim(t *testing.T) {
 
 func TestOrchestratorInfoForStoppedOrchestratorReportsNeverNudged(t *testing.T) {
 	info := orchestratorInfoFor("id", "name", nil, "stopped", 0, orchestratorBusySnapshot{}, false,
-		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, nil, nil, false)
+		orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, nil, nil, false, false)
 	if info.NudgeCount != 0 || info.NudgeCapped {
 		t.Fatalf("expected a stopped orchestrator to report never-nudged, got %+v", info)
 	}

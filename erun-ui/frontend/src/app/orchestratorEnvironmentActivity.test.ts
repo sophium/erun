@@ -5,7 +5,13 @@ import { orchestratorEnvironmentLine } from './orchestratorEnvironmentActivity';
 import type { OrchestratorEnvRef } from './slices/orchestratorsSlice';
 
 function env(overrides: Partial<OrchestratorEnvRef> = {}): OrchestratorEnvRef {
-  return { tenant: 'petios', environment: 'rihards-review', directory: '/tmp/dir', ...overrides };
+  return {
+    tenant: 'petios',
+    environment: 'rihards-review',
+    directory: '/tmp/dir',
+    role: '',
+    ...overrides,
+  };
 }
 
 // This is the join the hover card renders straight from -- red-then-green

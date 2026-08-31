@@ -26,6 +26,7 @@ function orchestrator(
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
   };
 }
 

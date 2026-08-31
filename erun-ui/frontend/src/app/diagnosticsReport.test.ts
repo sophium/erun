@@ -8,7 +8,7 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
   return {
     id: 'erun-issues',
     name: 'erun-issues',
-    environments: [{ tenant: 'erun', environment: 'ux', directory: '/tmp/erun-ux' }],
+    environments: [{ tenant: 'erun', environment: 'ux', directory: '/tmp/erun-ux', role: '' }],
     tenants: ['erun'],
     directories: ['/tmp/erun-ux'],
     sessionId: 42,
@@ -21,6 +21,7 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
     ...overrides,
   };
 }

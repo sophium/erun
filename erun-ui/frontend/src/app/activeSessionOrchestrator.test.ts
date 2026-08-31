@@ -9,7 +9,7 @@ function orchestrator(id: string, sessionId: number): OrchestratorInfo {
   return {
     id,
     name: id,
-    environments: [{ tenant: 'erun', environment: 'ux', directory: '/tmp/erun-ux' }],
+    environments: [{ tenant: 'erun', environment: 'ux', directory: '/tmp/erun-ux', role: '' }],
     tenants: ['erun'],
     directories: ['/tmp/erun-ux'],
     sessionId,
@@ -22,6 +22,7 @@ function orchestrator(id: string, sessionId: number): OrchestratorInfo {
     nudgeCount: 0,
     nudgeCapped: false,
     restartRequired: false,
+    roleChanged: false,
   };
 }
 

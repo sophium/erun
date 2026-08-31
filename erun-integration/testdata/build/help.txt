@@ -22,41 +22,42 @@ Examples:
   alias tenant-environment='eval "$(erun open tenant environment --no-shell)"'
 
 Available Commands:
-  api         Run ERun backend API over HTTP
-  app         Launch the ERun desktop app
-  cloud       Cloud provider utilities
-  completion  Generate the autocompletion script for the specified shell
-  context     Manage ERun cloud Kubernetes contexts
-  contribute  Run contribute-mode workflows that target the ERun source repository
-  delete      Delete a tenant environment and tear down its remote runtime
-  deploy      Install a published version into an environment
-  devops      DevOps utilities
-  doctor      Diagnose and repair an environment's runtime and config
-  exec        Repository execution utilities
-  expose      Expose an environment's Service at a public HTTPS hostname
-  help        Help about any command
-  idle        Show environment idle stop status
-  init        Initialize configuration for the current project
-  inputs      Place a host file inside the runtime pod
-  list        List configured tenants and environments
-  mcp         Run ERun as an MCP server over HTTP
-  observe     Report an environment's Kubernetes state, read-only
-  open        Open a shell in the tenant environment
-  outputs     List and download files an agent produced in the runtime pod
-  pin         Re-pin every erun version reference for an environment
-  platform    Operate a hosted erun platform's control-plane API
-  publish     Mirror a built version's images to the shared registry
-  release     Cut a release: publish the version's images and charts, then tag and announce it
-  resize      Change a runtime pod's CPU/memory limits and roll it out
-  review      Review code changes on the erun platform
-  sshd        Remote SSH utilities
-  stop        Stop an environment's runtime and return its capacity to the node
-  terraform   Run a platform's per-env Terraform from the right folder automatically
-  unexpose    Remove an environment's per-env wildcard DNS record
-  upgrade     Redeploy opted-in environments to the latest version for their channel
-  usage       Report an environment's live CPU, memory, and disk usage
-  version     Print build information
-  whip        Push every live orchestrator and environment agent to keep moving
+  api          Run ERun backend API over HTTP
+  app          Launch the ERun desktop app
+  cloud        Cloud provider utilities
+  completion   Generate the autocompletion script for the specified shell
+  context      Manage ERun cloud Kubernetes contexts
+  contribute   Run contribute-mode workflows that target the ERun source repository
+  delete       Delete a tenant environment and tear down its remote runtime
+  deploy       Install a published version into an environment
+  devops       DevOps utilities
+  doctor       Diagnose and repair an environment's runtime and config
+  exec         Repository execution utilities
+  expose       Expose an environment's Service at a public HTTPS hostname
+  help         Help about any command
+  idle         Show environment idle stop status
+  init         Initialize configuration for the current project
+  inputs       Place a host file inside the runtime pod
+  list         List configured tenants and environments
+  mcp          Run ERun as an MCP server over HTTP
+  observe      Report an environment's Kubernetes state, read-only
+  open         Open a shell in the tenant environment
+  orchestrator Manage host-side AI orchestrator definitions
+  outputs      List and download files an agent produced in the runtime pod
+  pin          Re-pin every erun version reference for an environment
+  platform     Operate a hosted erun platform's control-plane API
+  publish      Mirror a built version's images to the shared registry
+  release      Cut a release: publish the version's images and charts, then tag and announce it
+  resize       Change a runtime pod's CPU/memory limits and roll it out
+  review       Review code changes on the erun platform
+  sshd         Remote SSH utilities
+  stop         Stop an environment's runtime and return its capacity to the node
+  terraform    Run a platform's per-env Terraform from the right folder automatically
+  unexpose     Remove an environment's per-env wildcard DNS record
+  upgrade      Redeploy opted-in environments to the latest version for their channel
+  usage        Report an environment's live CPU, memory, and disk usage
+  version      Print build information
+  whip         Push every live orchestrator and environment agent to keep moving
 
 Flags:
       --dry-run         Resolve and trace mutating actions without executing them.

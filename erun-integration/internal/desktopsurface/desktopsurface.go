@@ -1,9 +1,10 @@
 // Package desktopsurface implements the classifier behind
-// TestDesktopSurfaceGate: it flags a user-facing CLI command, MCP tool, or
-// API route that has no way in from an operator surface -- erun-ui/frontend
-// or erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
-// mode 3) -- and separately flags a Wails binding location with no binding --
-// an unexported *App method no other Go code calls.
+// TestDesktopSurfaceGate: it flags a user-facing CLI command, MCP tool, API
+// route, or operator-settable config field that has no way in from an
+// operator surface -- erun-ui/frontend or erun-console (erun AGENTS.md §
+// "Smooth, Seamless, No Dead Ends", failure mode 3) -- and separately flags a
+// Wails binding location with no binding -- an unexported *App method no
+// other Go code calls.
 package desktopsurface
 
 import (
@@ -91,7 +92,8 @@ func (m Missing) Message() string {
 	if hint == "" {
 		hint = "erun-common/mcp_tools.go's AgentFacing field for an MCP tool, " +
 			"erun-cli/cmd/command_tree.go's cliOnlyAgentFacingCommands for a CLI-only command, " +
-			"or erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes for an API route"
+			"erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes for an API route, " +
+			"or erun-common/operator_settable_config.go's OperatorSettableConfigFields for a config field"
 	}
 	what := fmt.Sprintf("%q", m.Capability.Token)
 	if m.Capability.Pattern != "" {

@@ -378,14 +378,39 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 	return capabilities
 }
 
-// TestDesktopSurfaceGate fails when a user-facing CLI command, MCP tool, or
-// API route has no way in from an operator surface -- erun-ui/frontend or
-// erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
-// mode 3). See erun-integration/AGENTS.md, erun-common/mcp_tools.go's
-// AgentFacing field, erun-cli/cmd/command_tree.go's
-// cliOnlyAgentFacingCommands, and
-// erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes for
-// the three declaration mechanisms.
+// operatorConfigCapabilities returns one Capability per registry entry in
+// eruncommon.OperatorSettableConfigFields -- a config field an operator is
+// expected to set through some product surface, not by hand-editing
+// config.yaml. Unlike the other three enumerations, there is no fully-
+// automatic discovery for this source (a struct field carries no
+// "operator-settable" marker to walk), so the registry itself is the
+// enumeration: erun#1745 is the field that motivated adding it, after
+// OrchestratorEnvConfig.Role shipped with a reader (`erun list`) and no
+// writer, and none of the other three enumerations could see the gap because
+// a bare config field is none of a route, an MCP tool, or a CLI command.
+func operatorConfigCapabilities() []desktopsurface.Capability {
+	fields := eruncommon.OperatorSettableConfigFields
+	capabilities := make([]desktopsurface.Capability, 0, len(fields))
+	for _, field := range fields {
+		capabilities = append(capabilities, desktopsurface.Capability{
+			Name:            field.Name,
+			Source:          "Operator config field",
+			Token:           field.Token,
+			AgentFacing:     field.Internal,
+			DeclarationHint: fmt.Sprintf("erun-common/operator_settable_config.go's OperatorSettableConfigFields registry (mark %q Internal, with a reason, if it genuinely needs no operator surface)", field.Name),
+		})
+	}
+	return capabilities
+}
+
+// TestDesktopSurfaceGate fails when a user-facing CLI command, MCP tool, API
+// route, or operator-settable config field has no way in from an operator
+// surface -- erun-ui/frontend or erun-console (erun AGENTS.md § "Smooth,
+// Seamless, No Dead Ends", failure mode 3). See erun-integration/AGENTS.md,
+// erun-common/mcp_tools.go's AgentFacing field, erun-cli/cmd/command_tree.go's
+// cliOnlyAgentFacingCommands, erun-backend-api/internal/routes/route_audit.go's
+// InternalAPIRoutes, and erun-common/operator_settable_config.go's
+// OperatorSettableConfigFields for the four declaration mechanisms.
 func TestDesktopSurfaceGate(t *testing.T) {
 	root := repoRoot(t)
 	operatorSurface := readOperatorSurfaceSource(t,
@@ -395,6 +420,7 @@ func TestDesktopSurfaceGate(t *testing.T) {
 
 	capabilities := append(mcpCapabilities(), cliOnlyCapabilities(t)...)
 	capabilities = append(capabilities, apiRouteCapabilities(t, root)...)
+	capabilities = append(capabilities, operatorConfigCapabilities()...)
 	if len(capabilities) == 0 {
 		t.Fatal("found zero capabilities to audit -- the enumeration is broken, not the desktop surface")
 	}

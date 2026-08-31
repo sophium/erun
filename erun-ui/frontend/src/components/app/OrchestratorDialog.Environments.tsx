@@ -1,14 +1,30 @@
-import { Button, Checkbox, Input, Label } from 'erun-kit';
+import { Button, Checkbox, Input, Label, SelectField } from 'erun-kit';
 import { Ban, FolderOpen } from 'lucide-react';
 import * as React from 'react';
 
-import type { OrchestratorEnvRef } from '@/app/slices/orchestratorsSlice';
+import type { OrchestratorEnvRef, OrchestratorEnvRole } from '@/app/slices/orchestratorsSlice';
 import {
   type EnvCandidate,
   envKey,
+  envRoleFieldId,
 } from '@/components/app/OrchestratorDialog.Environments.helpers';
 
 import { ChooseLocalRepoPath } from '../../../wailsjs/go/main/App';
+
+// orchestratorEnvRoleHelper states, briefly, what the selected role means --
+// where it is chosen, not only in the erun-orchestrate skill -- so an
+// operator can pick between "code" and "build" by what each does rather than
+// by guessing from the name.
+function orchestratorEnvRoleHelper(role: OrchestratorEnvRole): string {
+  switch (role) {
+    case 'code':
+      return 'Writes code and iterates fast; not sized for a full regression run.';
+    case 'build':
+      return 'Checks out pushed branches, runs the gates, and cuts releases.';
+    default:
+      return 'No default is assumed until a role is picked.';
+  }
+}
 
 // EnvironmentsFieldStatus distinguishes the three states the field can be in,
 // so "no environments configured" never reads the same as "you have several,
@@ -45,11 +61,13 @@ export function EnvironmentsField({
   selected,
   onToggle,
   onDirectoryChange,
+  onRoleChange,
 }: {
   candidates: EnvCandidate[];
   selected: OrchestratorEnvRef[];
   onToggle: (candidate: EnvCandidate, checked: boolean) => void;
   onDirectoryChange: (ref: OrchestratorEnvRef, directory: string) => void;
+  onRoleChange: (ref: OrchestratorEnvRef, role: OrchestratorEnvRole) => void;
 }): React.ReactElement {
   const eligibleCount = candidates.filter((candidate) => candidate.eligible).length;
   return (
@@ -71,6 +89,7 @@ export function EnvironmentsField({
                 selectedRef={ref}
                 onToggle={onToggle}
                 onDirectoryChange={onDirectoryChange}
+                onRoleChange={onRoleChange}
               />
             );
           })}
@@ -108,11 +127,13 @@ function EnvironmentRow({
   selectedRef,
   onToggle,
   onDirectoryChange,
+  onRoleChange,
 }: {
   candidate: EnvCandidate;
   selectedRef: OrchestratorEnvRef | undefined;
   onToggle: (candidate: EnvCandidate, checked: boolean) => void;
   onDirectoryChange: (ref: OrchestratorEnvRef, directory: string) => void;
+  onRoleChange: (ref: OrchestratorEnvRef, role: OrchestratorEnvRole) => void;
 }): React.ReactElement {
   if (!candidate.eligible) {
     return <IneligibleEnvironmentRow candidate={candidate} />;
@@ -171,6 +192,29 @@ function EnvironmentRow({
               {candidate.defaultDirectory}
             </p>
           )}
+        </div>
+      ) : null}
+      {selectedRef ? (
+        <div className="mt-1.5 pl-6">
+          <SelectField
+            id={envRoleFieldId(candidate.tenant, candidate.environment)}
+            label="Role"
+            // Radix's Select.Item rejects an empty-string value, so undeclared
+            // (OrchestratorEnvRole's own '') is represented here as the
+            // sentinel "none" and translated back at the boundary -- the
+            // option list and the round-trip below are the only two places
+            // that need to know about it.
+            value={selectedRef.role === '' ? 'none' : selectedRef.role}
+            options={[
+              { value: 'none', label: 'Not declared' },
+              { value: 'code', label: 'Code' },
+              { value: 'build', label: 'Build' },
+            ]}
+            helper={orchestratorEnvRoleHelper(selectedRef.role)}
+            onChange={(value) => {
+              onRoleChange(selectedRef, (value === 'none' ? '' : value) as OrchestratorEnvRole);
+            }}
+          />
         </div>
       ) : null}
     </div>
