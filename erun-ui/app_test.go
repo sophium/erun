@@ -120,6 +120,40 @@ func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 	}
 }
 
+// TestLoadStateConfigCorruptedRendersDistinctFromEmptyList is the regression
+// for erun#1774: a torn/corrupt config file must not surface as "zero
+// environments configured" (which the sidebar renders identically to a
+// genuinely empty install), and the raw yaml/unmarshal error text must never
+// reach the caller -- it crosses the headless HTTP bridge verbatim into a
+// browser console otherwise (headlessserver.handleInvoke writes err.Error()
+// into the response body).
+func TestLoadStateConfigCorruptedRendersDistinctFromEmptyList(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			listTenantsErr: eruncommon.ErrConfigCorrupted,
+		},
+		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+	})
+
+	state, err := app.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+	if !state.ConfigUnreadable {
+		t.Fatal("expected ConfigUnreadable=true so the sidebar renders a distinct state from a genuine empty list")
+	}
+	if state.Tenants == nil {
+		t.Fatal("expected a non-nil Tenants slice so the frontend's boot-time iteration and JSON marshaling both stay safe")
+	}
+	if len(state.Tenants) != 0 {
+		t.Fatalf("expected zero tenants (the read genuinely failed), got: %+v", state.Tenants)
+	}
+	if strings.Contains(state.Message, "unmarshal") || strings.Contains(state.Message, "yaml:") {
+		t.Fatalf("expected no raw unmarshal error text in the message, got: %q", state.Message)
+	}
+}
+
 func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{

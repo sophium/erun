@@ -35,6 +35,24 @@ func (a *App) LoadState() (uiState, error) {
 				VersionSuggestionNotices: notices,
 			}, nil
 		}
+		if errors.Is(err, eruncommon.ErrConfigCorrupted) {
+			// A torn or genuinely corrupt config file is not "zero
+			// environments configured" -- rendering it that way tells the
+			// operator their tenants are gone when they are merely unread,
+			// and the underlying yaml error is an implementation detail that
+			// must not reach the browser (it crosses the headless HTTP
+			// bridge as a raw response/console message otherwise). Return a
+			// successful, degraded state instead of propagating err, so the
+			// sidebar can render a distinct "could not read configuration"
+			// notice rather than the empty-state affordance above.
+			info := a.deps.resolveBuildInfo()
+			return uiState{
+				Tenants:          []uiTenant{},
+				Build:            buildDetailsFrom(info),
+				ConfigUnreadable: true,
+				Message:          "Some configuration could not be read. Run `erun doctor` to inspect and repair it, then reload.",
+			}, nil
+		}
 		return uiState{}, err
 	}
 	info := a.deps.resolveBuildInfo()

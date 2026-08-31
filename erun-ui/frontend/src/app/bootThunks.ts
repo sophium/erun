@@ -1,4 +1,4 @@
-import type { UITenant } from '@/types';
+import type { UIState, UITenant } from '@/types';
 
 import { stateApi } from './api/stateApi';
 import { planEnvActivitySeed } from './envActivitySeed';
@@ -62,6 +62,26 @@ function noSelectionBootMessage(tenants: UITenant[]): string {
     : 'Create your first environment from the left pane.';
 }
 
+// reportBootLoadOutcome handles the two "stop here and just show a message"
+// outcomes getInitialState can carry: a config read that never resolved
+// (configUnreadable) even after erun-common's own retries, reported as an
+// error rather than the neutral empty-state message below so the operator
+// does not mistake a read failure for having no environments; and a plain
+// informational message (e.g. the first-run empty state). Returns true when
+// it dispatched one, so boot() knows to stop rather than continuing into
+// orchestrator/selection restore.
+function reportBootLoadOutcome(dispatch: AppDispatch, loaded: UIState): boolean {
+  if (loaded.configUnreadable) {
+    dispatch(showTerminalError(loaded.message ?? 'Some configuration could not be read.'));
+    return true;
+  }
+  if (loaded.message !== undefined && loaded.message !== '') {
+    dispatch(showTerminalMessage(loaded.message));
+    return true;
+  }
+  return false;
+}
+
 // boot deliberately does not seed the env-init dialog's kubectl context
 // list — that dialog owns and refreshes its own.
 export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
@@ -86,8 +106,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     // build/deploy/release with no record until now; report it once, right
     // after the state it interrupted has loaded (erun#1214).
     await dispatch(loadInterruptedActivityNotice());
-    if (loaded.message !== undefined && loaded.message !== '') {
-      dispatch(showTerminalMessage(loaded.message));
+    if (reportBootLoadOutcome(dispatch, loaded)) {
       return;
     }
 
@@ -133,6 +152,15 @@ export const reloadStateAfterEnvironmentChange =
     );
     try {
       const loaded = await request.unwrap();
+      // A degraded read carries an empty tenants list for a reason other
+      // than "the environment really has none" — replacing the sidebar's
+      // already-good list with that empty one would be the same silent
+      // collapse this reload exists to avoid. Keep the current list and
+      // report the failure instead.
+      if (loaded.configUnreadable) {
+        dispatch(showTerminalError(loaded.message ?? 'Some configuration could not be read.'));
+        return;
+      }
       const current = getState().tenants;
       dispatch(setTenants(loaded.tenants));
       dispatch(setCloudProviders(loaded.cloudProviders ?? current.cloudProviders));

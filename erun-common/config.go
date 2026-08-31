@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -813,23 +814,15 @@ func LoadERunConfig() (ERunConfig, string, error) {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	// A zero-length file is the residue of an interrupted non-atomic
-	// write. Treating it as "successfully loaded empty config" lets
-	// the next writer rebuild a fresh ERunConfig{} with only the
-	// field it cares about, silently dropping every other section.
-	// Surface it as corruption so callers route into the doctor
-	// recovery path instead.
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	// A zero-length or unparseable file is the residue of an interrupted
+	// write, possibly one not even erun's own -- loadConfigFile retries it a
+	// few times before giving up. Treating it as "successfully loaded empty
+	// config" lets the next writer rebuild a fresh ERunConfig{} with only the
+	// field it cares about, silently dropping every other section, so a read
+	// that never recovers is surfaced as corruption instead, routing callers
+	// into the doctor recovery path.
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
@@ -886,17 +879,8 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return NormalizeTenantConfig(config), configFilePath, nil
@@ -992,17 +976,8 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
@@ -1078,17 +1053,8 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 		return config, "", err
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
@@ -1175,4 +1141,44 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	committed = true
 	return nil
+}
+
+// configReadRetryAttempts/configReadRetrySleep bound how long a read waits out
+// a torn write before surfacing ErrConfigCorrupted. writeFileAtomic makes erun's
+// own writers atomic, but a reader still has to tolerate a write it does not
+// control -- an external editor saving in place, another process's own
+// non-atomic writer, a crash mid-write -- and a torn read from any of those is
+// transient by construction: it resolves itself within microseconds, well
+// under this budget. A file that still fails to parse after every retry is
+// genuinely corrupt, not merely caught mid-write.
+const (
+	configReadRetryAttempts = 5
+	configReadRetrySleep    = 20 * time.Millisecond
+)
+
+// loadConfigFile reads path and unmarshals it into out, retrying through
+// configReadRetryAttempts when the file is momentarily empty or fails to
+// parse. Every Load*Config function in this file routes its read through
+// here so the retry policy lives in one place. A missing file is a real
+// absence (ErrNotInitialized) and is never retried; an empty or unparseable
+// file is retried and, if it never recovers, reported as ErrConfigCorrupted.
+func loadConfigFile(path string, out any) error {
+	var lastErr error
+	for attempt := 0; attempt < configReadRetryAttempts; attempt++ {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ErrNotInitialized
+		}
+		if len(bytes.TrimSpace(data)) == 0 {
+			lastErr = ErrConfigCorrupted
+		} else if err := yaml.Unmarshal(data, out); err != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
+		} else {
+			return nil
+		}
+		if attempt < configReadRetryAttempts-1 {
+			time.Sleep(configReadRetrySleep)
+		}
+	}
+	return lastErr
 }
