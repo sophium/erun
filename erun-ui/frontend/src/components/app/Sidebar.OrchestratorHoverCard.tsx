@@ -206,6 +206,11 @@ function OrchestratorEnvironments({
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{line.name}</span>
               <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
+              {line.roleLabel && (
+                <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>
+                  {line.roleLabel}
+                </span>
+              )}
               {line.usage && (
                 <span
                   className={

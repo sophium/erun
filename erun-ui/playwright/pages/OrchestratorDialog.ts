@@ -24,15 +24,25 @@ export class OrchestratorDialog {
   }
 
   // Each candidate renders as a checkbox row labelled "<tenant> / <environment>"
-  // followed by which kind of review directory it has.
-  envRow(tenant: string, environment: string): Locator {
-    return this.locator()
+  // followed by which kind of review directory it has. mode defaults to
+  // 'New orchestrator' for the same reason locator/waitForOpen/waitForClosed
+  // do -- a caller re-checking a row after reopening in Edit mode must say so.
+  envRow(
+    tenant: string,
+    environment: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode)
       .locator('label')
       .filter({ hasText: `${tenant} / ${environment}` });
   }
 
-  envCheckbox(tenant: string, environment: string): Locator {
-    return this.envRow(tenant, environment).getByRole('checkbox');
+  envCheckbox(
+    tenant: string,
+    environment: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.envRow(tenant, environment, mode).getByRole('checkbox');
   }
 
   async toggleEnv(tenant: string, environment: string): Promise<void> {
@@ -41,8 +51,12 @@ export class OrchestratorDialog {
 
   // The row's own container, which holds the review-directory controls the
   // checkbox reveals.
-  envBlock(tenant: string, environment: string): Locator {
-    return this.locator()
+  envBlock(
+    tenant: string,
+    environment: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode)
       .locator('div')
       .filter({ hasText: `${tenant} / ${environment}` })
       .last();
@@ -75,8 +89,8 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: role, exact: true }).click();
   }
 
-  // An ineligible env (e.g. runtime) is still listed, disabled, with its
-  // reason as a first-class line under the checkbox row rather than a
+  // An ineligible env (an unrecognized type) is still listed, disabled, with
+  // its reason as a first-class line under the checkbox row rather than a
   // tooltip. The checkbox carries an accessible name naming both the env and
   // that it can't be linked, so it never collides with an eligible row's
   // plain "<tenant> / <environment>" checkbox name.
@@ -88,6 +102,18 @@ export class OrchestratorDialog {
 
   envIneligibleReason(tenant: string, environment: string): Locator {
     return this.envBlock(tenant, environment).locator('p');
+  }
+
+  // A runtime environment carries exactly one legal role, so the checked row
+  // states it as a plain fact instead of offering the Select every other
+  // candidate gets — see EnvironmentRowRole in
+  // OrchestratorDialog.Environments.tsx.
+  envRequiredRoleText(
+    tenant: string,
+    environment: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.envBlock(tenant, environment, mode).getByText(/^Role: Runtime —/);
   }
 
   // Distinguishes "nothing configured yet" from "several environments, none

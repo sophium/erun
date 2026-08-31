@@ -57,6 +57,68 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
     await app.orchestratorDialog.cancel('Edit orchestrator');
   });
 
+  // erun#1770: a runtime environment used to be listed disabled, unable to
+  // link at all. It is now checkable, but carries exactly one legal role, so
+  // it gets a plain statement of fact instead of the Code/Build/Not declared
+  // Select every other candidate offers, and it persists with no review
+  // directory — the operate link's whole point.
+  test('a runtime environment offers only the runtime role, with no review directory, and persists that way', async ({
+    app,
+    seededRuntimeEnv,
+  }) => {
+    const name = 'runtime-role-test';
+
+    await app.sidebar.newOrchestratorButton().click();
+    await app.orchestratorDialog.waitForOpen();
+
+    // Checkable, not greyed out -- the fix's whole point.
+    await expect(
+      app.orchestratorDialog.envCheckbox(SEED_TENANT, seededRuntimeEnv.environment),
+    ).toBeEnabled();
+    await app.orchestratorDialog.toggleEnv(SEED_TENANT, seededRuntimeEnv.environment);
+
+    // No mirror/worktree directory controls -- there is nothing to review.
+    await expect(
+      app.orchestratorDialog.envDirectoryInput(SEED_TENANT, seededRuntimeEnv.environment),
+    ).toHaveCount(0);
+
+    // No role Select either -- one legal value is stated, not offered as a choice.
+    await expect(
+      app.orchestratorDialog.envRoleTrigger(SEED_TENANT, seededRuntimeEnv.environment),
+    ).toHaveCount(0);
+    const requiredRoleText = app.orchestratorDialog.envRequiredRoleText(
+      SEED_TENANT,
+      seededRuntimeEnv.environment,
+    );
+    await expect(requiredRoleText).toBeVisible();
+    await expect(requiredRoleText).toContainText('no worktree to review');
+    await expect(requiredRoleText).toContainText('no in-pod agent to delegate to');
+
+    await app.orchestratorDialog.create(name);
+    await app.orchestratorDialog.waitForClosed();
+
+    // Reopening reloads from the persisted config: the runtime role and its
+    // absent review directory both survived the real CreateOrchestrator
+    // round trip, not just this render's component state.
+    await app.sidebar.openOrchestratorDialog(name);
+    await expect(
+      app.orchestratorDialog.envCheckbox(
+        SEED_TENANT,
+        seededRuntimeEnv.environment,
+        'Edit orchestrator',
+      ),
+    ).toBeChecked();
+    await expect(
+      app.orchestratorDialog.envRequiredRoleText(
+        SEED_TENANT,
+        seededRuntimeEnv.environment,
+        'Edit orchestrator',
+      ),
+    ).toBeVisible();
+
+    await app.orchestratorDialog.cancel('Edit orchestrator');
+  });
+
   test('the role control appears only for a checked environment', async ({ app }) => {
     await app.sidebar.newOrchestratorButton().click();
     await app.orchestratorDialog.waitForOpen();

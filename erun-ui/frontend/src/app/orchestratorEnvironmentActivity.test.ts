@@ -204,6 +204,31 @@ test('a joined usage reading older than its stale window is flagged stale', () =
   assert.equal(line.usageStale, true);
 });
 
+// roleLabel makes an operate-role (or any declared-role) link's association
+// visible on the hover card — erun#1770's own requirement. Undeclared stays
+// silent rather than rendering "Undeclared role" on every pre-existing row.
+test('an undeclared role renders no roleLabel', () => {
+  const line = orchestratorEnvironmentLine(env({ role: '' }));
+  assert.equal(line.roleLabel, '');
+});
+
+test('each declared role renders its own caption', () => {
+  assert.equal(orchestratorEnvironmentLine(env({ role: 'code' })).roleLabel, 'Code role');
+  assert.equal(orchestratorEnvironmentLine(env({ role: 'build' })).roleLabel, 'Build role');
+  assert.equal(orchestratorEnvironmentLine(env({ role: 'runtime' })).roleLabel, 'Runtime role');
+});
+
+test('the runtime role still renders alongside whatever activity state the environment reports', () => {
+  const line = orchestratorEnvironmentLine(
+    env({
+      role: 'runtime',
+      activity: { reachable: true, observed: true, outage: false, busy: false },
+    }),
+  );
+  assert.equal(line.state, 'idle');
+  assert.equal(line.roleLabel, 'Runtime role');
+});
+
 test('a long environment name and a long detail survive verbatim for the caller to truncate', () => {
   const longName = 'a'.repeat(120);
   const longDetail = 'holding: ' + 'b'.repeat(120);

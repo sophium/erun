@@ -42,7 +42,7 @@ Orchestrators:
 
 The full per-env field set (local port allocations, API URL, SSH details, …) prints under each tenant; the example abbreviates. See [Configuration](/reference/configuration) for what each value means.
 
-Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, or `role=undeclared` when nothing has been set.
+Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, `role=runtime`, or `role=undeclared` when nothing has been set. `role` and an environment's own `type` are independent fields shown in different places — a runtime-*type* environment linked with the runtime *role* shows `type: runtime` under its tenant entry and `role=runtime` under the orchestrator entry, and the two mean different things even though they share a spelling.
 
 ## Release lines {#release-lines}
 

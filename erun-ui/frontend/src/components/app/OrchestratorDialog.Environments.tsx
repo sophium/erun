@@ -13,14 +13,16 @@ import { ChooseLocalRepoPath } from '../../../wailsjs/go/main/App';
 
 // orchestratorEnvRoleHelper states, briefly, what the selected role means --
 // where it is chosen, not only in the erun-orchestrate skill -- so an
-// operator can pick between "code" and "build" by what each does rather than
-// by guessing from the name.
+// operator can pick between "code", "build", and "runtime" by what each does
+// rather than by guessing from the name.
 function orchestratorEnvRoleHelper(role: OrchestratorEnvRole): string {
   switch (role) {
     case 'code':
       return 'Writes code and iterates fast; not sized for a full regression run.';
     case 'build':
       return 'Checks out pushed branches, runs the gates, and cuts releases.';
+    case 'runtime':
+      return 'Operated directly — deploy, pin, observe — with no worktree to review and no in-pod agent to delegate to.';
     default:
       return 'No default is assumed until a role is picked.';
   }
@@ -122,6 +124,105 @@ function IneligibleEnvironmentRow({ candidate }: { candidate: EnvCandidate }): R
   );
 }
 
+// EnvironmentRowDirectory renders the review-directory controls for a
+// selected, non-required-role candidate: an editable mirror path (with a
+// browse button) or the derived worktree path, shown read-only. Split out of
+// EnvironmentRow to keep that function within the lint size budget.
+function EnvironmentRowDirectory({
+  candidate,
+  selectedRef,
+  onDirectoryChange,
+}: {
+  candidate: EnvCandidate;
+  selectedRef: OrchestratorEnvRef;
+  onDirectoryChange: (ref: OrchestratorEnvRef, directory: string) => void;
+}): React.ReactElement {
+  const browse = (): void => {
+    void ChooseLocalRepoPath(selectedRef.directory).then((dir) => {
+      if (dir.trim() !== '') {
+        onDirectoryChange(selectedRef, dir.trim());
+      }
+    });
+  };
+  if (!candidate.mirrored) {
+    // Derived from the env's repository path, so it is shown rather than
+    // offered for editing: there is no mirror to place, and the operator
+    // moves it by changing the env's repository path.
+    return (
+      <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+        {candidate.defaultDirectory}
+      </p>
+    );
+  }
+  return (
+    <>
+      <Input
+        className="h-7 font-mono text-xs"
+        value={selectedRef.directory}
+        onChange={(event) => {
+          onDirectoryChange(selectedRef, event.target.value);
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-xs"
+        className="size-7 flex-none"
+        aria-label={`Choose sync directory for ${candidate.tenant} / ${candidate.environment}`}
+        onClick={browse}
+      >
+        <FolderOpen aria-hidden="true" />
+      </Button>
+    </>
+  );
+}
+
+// EnvironmentRowRole renders the role control for a selected candidate: a
+// real Select when more than one role is legal, or a plain statement of fact
+// when a requiredRole leaves only one -- a single-option Select would offer
+// a choice that isn't one. Split out of EnvironmentRow for the same reason
+// as EnvironmentRowDirectory above.
+function EnvironmentRowRole({
+  candidate,
+  selectedRef,
+  onRoleChange,
+}: {
+  candidate: EnvCandidate;
+  selectedRef: OrchestratorEnvRef;
+  onRoleChange: (ref: OrchestratorEnvRef, role: OrchestratorEnvRole) => void;
+}): React.ReactElement {
+  if (candidate.requiredRole) {
+    return (
+      <p className="mt-1.5 pl-6 text-xs text-muted-foreground">
+        Role: Runtime — {orchestratorEnvRoleHelper(candidate.requiredRole)}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1.5 pl-6">
+      <SelectField
+        id={envRoleFieldId(candidate.tenant, candidate.environment)}
+        label="Role"
+        // Radix's Select.Item rejects an empty-string value, so undeclared
+        // (OrchestratorEnvRole's own '') is represented here as the
+        // sentinel "none" and translated back at the boundary -- the
+        // option list and the round-trip below are the only two places
+        // that need to know about it.
+        value={selectedRef.role === '' ? 'none' : selectedRef.role}
+        options={[
+          { value: 'none', label: 'Not declared' },
+          { value: 'code', label: 'Code' },
+          { value: 'build', label: 'Build' },
+        ]}
+        helper={orchestratorEnvRoleHelper(selectedRef.role)}
+        onChange={(value) => {
+          onRoleChange(selectedRef, (value === 'none' ? '' : value) as OrchestratorEnvRole);
+        }}
+      />
+    </div>
+  );
+}
+
 function EnvironmentRow({
   candidate,
   selectedRef,
@@ -138,16 +239,10 @@ function EnvironmentRow({
   if (!candidate.eligible) {
     return <IneligibleEnvironmentRow candidate={candidate} />;
   }
-  const browse = (): void => {
-    if (!selectedRef) {
-      return;
-    }
-    void ChooseLocalRepoPath(selectedRef.directory).then((dir) => {
-      if (dir.trim() !== '') {
-        onDirectoryChange(selectedRef, dir.trim());
-      }
-    });
-  };
+  // A required-role candidate (today, only a runtime environment) has no
+  // review directory at all -- EnvironmentRowDirectory below is skipped
+  // entirely for it rather than rendering a picker with nothing to show.
+  const requiredRole = candidate.requiredRole;
   return (
     <div className="rounded-sm border border-border/60 px-2 py-1.5">
       <label className="flex items-center gap-2 text-sm">
@@ -159,63 +254,28 @@ function EnvironmentRow({
         />
         {candidate.tenant} / {candidate.environment}
         <span className="text-xs text-muted-foreground">
-          {candidate.mirrored ? 'synced mirror' : 'worktree on this machine'}
+          {requiredRole
+            ? 'operated directly — no review directory'
+            : candidate.mirrored
+              ? 'synced mirror'
+              : 'worktree on this machine'}
         </span>
       </label>
-      {selectedRef ? (
+      {selectedRef && !requiredRole ? (
         <div className="mt-1.5 flex items-center gap-1.5 pl-6">
-          {candidate.mirrored ? (
-            <>
-              <Input
-                className="h-7 font-mono text-xs"
-                value={selectedRef.directory}
-                onChange={(event) => {
-                  onDirectoryChange(selectedRef, event.target.value);
-                }}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-xs"
-                className="size-7 flex-none"
-                aria-label={`Choose sync directory for ${candidate.tenant} / ${candidate.environment}`}
-                onClick={browse}
-              >
-                <FolderOpen aria-hidden="true" />
-              </Button>
-            </>
-          ) : (
-            // Derived from the env's repository path, so it is shown rather than
-            // offered for editing: there is no mirror to place, and the operator
-            // moves it by changing the env's repository path.
-            <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-              {candidate.defaultDirectory}
-            </p>
-          )}
+          <EnvironmentRowDirectory
+            candidate={candidate}
+            selectedRef={selectedRef}
+            onDirectoryChange={onDirectoryChange}
+          />
         </div>
       ) : null}
       {selectedRef ? (
-        <div className="mt-1.5 pl-6">
-          <SelectField
-            id={envRoleFieldId(candidate.tenant, candidate.environment)}
-            label="Role"
-            // Radix's Select.Item rejects an empty-string value, so undeclared
-            // (OrchestratorEnvRole's own '') is represented here as the
-            // sentinel "none" and translated back at the boundary -- the
-            // option list and the round-trip below are the only two places
-            // that need to know about it.
-            value={selectedRef.role === '' ? 'none' : selectedRef.role}
-            options={[
-              { value: 'none', label: 'Not declared' },
-              { value: 'code', label: 'Code' },
-              { value: 'build', label: 'Build' },
-            ]}
-            helper={orchestratorEnvRoleHelper(selectedRef.role)}
-            onChange={(value) => {
-              onRoleChange(selectedRef, (value === 'none' ? '' : value) as OrchestratorEnvRole);
-            }}
-          />
-        </div>
+        <EnvironmentRowRole
+          candidate={candidate}
+          selectedRef={selectedRef}
+          onRoleChange={onRoleChange}
+        />
       ) : null}
     </div>
   );

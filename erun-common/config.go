@@ -61,8 +61,11 @@ type OrchestratorEnvConfig struct {
 	// orthogonal to EnvironmentType: type is where the worktree lives, role is
 	// what this orchestrator asks the environment to do, and several
 	// orchestrators can link the same environment with different roles. Empty
-	// means undeclared, never a default of either OrchestratorEnvRoleCode or
-	// OrchestratorEnvRoleBuild.
+	// means undeclared, never a default of either OrchestratorEnvRoleCode,
+	// OrchestratorEnvRoleBuild, or OrchestratorEnvRoleRuntime. The two are
+	// independent even where they share a spelling: a runtime-*type*
+	// environment linked with role "code" is still refused (see
+	// OrchestratorEnvRoleAllowed) -- nothing here derives one from the other.
 	Role OrchestratorEnvRole `yaml:"role,omitempty" json:"role,omitempty"`
 }
 
@@ -77,16 +80,70 @@ const (
 	// feature branches, runs the gates, fixes what the gates surface, and cuts
 	// releases.
 	OrchestratorEnvRoleBuild OrchestratorEnvRole = "build"
+	// OrchestratorEnvRoleRuntime is an environment this orchestrator
+	// operates -- deploy, pin, observe -- rather than reviews or delegates
+	// to. A runtime environment has no worktree and no in-pod agent, so this
+	// is the only role that may be declared for one; see
+	// OrchestratorEnvRoleAllowed.
+	OrchestratorEnvRoleRuntime OrchestratorEnvRole = "runtime"
 )
 
 // IsValid reports whether r is either undeclared (empty) or a known role.
 func (r OrchestratorEnvRole) IsValid() bool {
 	switch r {
-	case "", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild:
+	case "", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime:
 		return true
 	default:
 		return false
 	}
+}
+
+// OrchestratorEnvRoleAllowed reports whether role may be declared for a link
+// to an environment of envType -- the single decision the CLI's
+// SetOrchestratorEnvRole and the desktop's link/edit gate both consult, so
+// neither can drift from the other on what a role is allowed to be. A
+// local-agent, remote-agent, or host environment has a worktree to review and
+// an in-pod agent to delegate to, so any role -- including undeclared -- is
+// fine. A runtime environment has neither, so only OrchestratorEnvRoleRuntime
+// may be declared for it; code and build, which both presuppose what it
+// lacks, are refused, the same as any type this function does not recognize.
+func OrchestratorEnvRoleAllowed(envType EnvironmentType, role OrchestratorEnvRole) bool {
+	switch envType {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
+		return true
+	case EnvironmentTypeRuntime:
+		return role == OrchestratorEnvRoleRuntime
+	default:
+		return false
+	}
+}
+
+// OrchestratorEnvRoleRequiredFor returns the one role a link to an
+// environment of envType must declare for OrchestratorEnvRoleAllowed to
+// accept it, or "" when every role -- including undeclared -- already works.
+// Only a runtime environment constrains this today.
+func OrchestratorEnvRoleRequiredFor(envType EnvironmentType) OrchestratorEnvRole {
+	if envType == EnvironmentTypeRuntime {
+		return OrchestratorEnvRoleRuntime
+	}
+	return ""
+}
+
+// OrchestratorEnvRoleIneligibilityReason explains, in the operator's words,
+// why role may not be declared for envType -- the shared reason both the
+// CLI's SetOrchestratorEnvRole and the desktop's link/edit gate surface, so
+// an operator sees the same explanation regardless of which surface refused
+// them. Empty when OrchestratorEnvRoleAllowed(envType, role) is true.
+func OrchestratorEnvRoleIneligibilityReason(envType EnvironmentType, role OrchestratorEnvRole) string {
+	if OrchestratorEnvRoleAllowed(envType, role) {
+		return ""
+	}
+	if envType == EnvironmentTypeRuntime {
+		return "Runtime environments have no worktree to review and no in-pod agent to delegate to, " +
+			"so they can't be linked to an orchestrator with the code or build role. Link with the " +
+			"runtime role instead to operate it directly."
+	}
+	return "This environment's type isn't recognized, so it can't be linked to an orchestrator."
 }
 
 // RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`

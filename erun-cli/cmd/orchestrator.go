@@ -27,7 +27,10 @@ func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Comman
 		Short: "Set the role an orchestrator uses one of its linked environments for",
 		Long: "Set what a host-side orchestrator uses a linked environment for: a code " +
 			"environment writes code and iterates fast; a build environment checks out " +
-			"pushed branches, runs the gates, and cuts releases. Pass \"" + common.OrchestratorEnvRoleNone +
+			"pushed branches, runs the gates, and cuts releases; the runtime role means the " +
+			"orchestrator operates the environment directly -- deploy, pin, observe -- with no " +
+			"worktree to review and no in-pod agent to delegate to, which is the only role a " +
+			"runtime-type environment may take. Pass \"" + common.OrchestratorEnvRoleNone +
 			"\" to declare it undeclared again. The environment must already be linked to " +
 			"the orchestrator -- see `erun list`.",
 		Example:      "  erun orchestrator set-role my-orchestrator my-tenant prod --role build",
@@ -46,8 +49,8 @@ func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Comman
 			})
 		},
 	}
-	cmd.Flags().StringVar(&role, "role", "", fmt.Sprintf("Role to set: %q, %q, or %q for undeclared",
-		common.OrchestratorEnvRoleCode, common.OrchestratorEnvRoleBuild, common.OrchestratorEnvRoleNone))
+	cmd.Flags().StringVar(&role, "role", "", fmt.Sprintf("Role to set: %q, %q, %q, or %q for undeclared",
+		common.OrchestratorEnvRoleCode, common.OrchestratorEnvRoleBuild, common.OrchestratorEnvRoleRuntime, common.OrchestratorEnvRoleNone))
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}

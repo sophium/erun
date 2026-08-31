@@ -113,6 +113,7 @@ func TestOrchestratorEnvRoleIsValid(t *testing.T) {
 		{role: "", want: true},
 		{role: OrchestratorEnvRoleCode, want: true},
 		{role: OrchestratorEnvRoleBuild, want: true},
+		{role: OrchestratorEnvRoleRuntime, want: true},
 		{role: "review", want: false},
 		{role: "Code", want: false},
 	}
@@ -120,5 +121,76 @@ func TestOrchestratorEnvRoleIsValid(t *testing.T) {
 		if got := tt.role.IsValid(); got != tt.want {
 			t.Errorf("OrchestratorEnvRole(%q).IsValid() = %v, want %v", tt.role, got, tt.want)
 		}
+	}
+}
+
+// TestOrchestratorEnvRoleAllowed locks the shared gate erun-ui's link/edit
+// path and (by design, per OrchestratorRoleStore's doc comment) not the
+// CLI's set-role path consult: any role -- including undeclared -- works for
+// an agent or host environment, since it already has a worktree to review
+// and an in-pod agent to delegate to; a runtime environment has neither, so
+// only OrchestratorEnvRoleRuntime is allowed for it; an unrecognized type
+// allows nothing.
+func TestOrchestratorEnvRoleAllowed(t *testing.T) {
+	anyRoleTypes := []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost}
+	anyRole := []OrchestratorEnvRole{"", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime}
+	for _, envType := range anyRoleTypes {
+		for _, role := range anyRole {
+			if !OrchestratorEnvRoleAllowed(envType, role) {
+				t.Errorf("OrchestratorEnvRoleAllowed(%q, %q) = false, want true", envType, role)
+			}
+		}
+	}
+
+	runtimeCases := []struct {
+		role OrchestratorEnvRole
+		want bool
+	}{
+		{role: OrchestratorEnvRoleRuntime, want: true},
+		{role: OrchestratorEnvRoleCode, want: false},
+		{role: OrchestratorEnvRoleBuild, want: false},
+		{role: "", want: false},
+	}
+	for _, tt := range runtimeCases {
+		if got := OrchestratorEnvRoleAllowed(EnvironmentTypeRuntime, tt.role); got != tt.want {
+			t.Errorf("OrchestratorEnvRoleAllowed(runtime, %q) = %v, want %v", tt.role, got, tt.want)
+		}
+	}
+
+	if OrchestratorEnvRoleAllowed("", OrchestratorEnvRoleRuntime) {
+		t.Fatalf("OrchestratorEnvRoleAllowed(unrecognized type, runtime) = true, want false")
+	}
+}
+
+// TestOrchestratorEnvRoleRequiredFor locks the one-role constraint a runtime
+// environment carries, and that every other type has none (any role,
+// including undeclared, already works for it).
+func TestOrchestratorEnvRoleRequiredFor(t *testing.T) {
+	if got := OrchestratorEnvRoleRequiredFor(EnvironmentTypeRuntime); got != OrchestratorEnvRoleRuntime {
+		t.Errorf("OrchestratorEnvRoleRequiredFor(runtime) = %q, want %q", got, OrchestratorEnvRoleRuntime)
+	}
+	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost, ""} {
+		if got := OrchestratorEnvRoleRequiredFor(envType); got != "" {
+			t.Errorf("OrchestratorEnvRoleRequiredFor(%q) = %q, want \"\"", envType, got)
+		}
+	}
+}
+
+// TestOrchestratorEnvRoleIneligibilityReason locks the operator-facing copy:
+// empty when the role is allowed, a concrete reason naming the runtime role
+// as the way out when a runtime environment is refused a different role, and
+// a generic reason for a type this package does not recognize at all.
+func TestOrchestratorEnvRoleIneligibilityReason(t *testing.T) {
+	if got := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeRuntime, OrchestratorEnvRoleRuntime); got != "" {
+		t.Errorf("OrchestratorEnvRoleIneligibilityReason(runtime, runtime) = %q, want \"\"", got)
+	}
+	for _, role := range []OrchestratorEnvRole{OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, ""} {
+		got := OrchestratorEnvRoleIneligibilityReason(EnvironmentTypeRuntime, role)
+		if !strings.Contains(got, "no worktree") || !strings.Contains(got, "runtime role") {
+			t.Errorf("OrchestratorEnvRoleIneligibilityReason(runtime, %q) = %q, want it to name the gap and the runtime role", role, got)
+		}
+	}
+	if got := OrchestratorEnvRoleIneligibilityReason("", ""); !strings.Contains(got, "isn't recognized") {
+		t.Errorf("OrchestratorEnvRoleIneligibilityReason(unrecognized, \"\") = %q, want an unrecognized-type reason", got)
 	}
 }

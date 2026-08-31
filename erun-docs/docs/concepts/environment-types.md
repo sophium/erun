@@ -51,6 +51,8 @@ You don't develop in a runtime env. To make a change, you:
 2. Build a new artifact (locked to a version).
 3. Deploy that artifact to the runtime env.
 
+An orchestrator can still link a runtime env — but only with the **runtime** role (see [Desktop app · Orchestrators](/desktop/orchestrators)), which means operating it directly (deploy, pin, observe) rather than developing in it or reviewing it. There is no worktree and no in-pod Agent, so a runtime env linked with any other role is refused; the runtime env's own `type` and the orchestrator's `runtime` role are independent fields that happen to share a spelling, not the same thing.
+
 ## host
 
 A directory on the Operator's own machine, with **no pod and no cluster at all**. It exists for work that a pod genuinely cannot do: building the ERun desktop app itself (its GUI toolchain isn't in the runtime image), and tasks that need host-wide credentials — the OS login keychain, a code-signing identity, a macOS privacy grant. Both of these already happened by hand before this type existed; a host env just gives them a declared shape instead of an unwritten exception.
