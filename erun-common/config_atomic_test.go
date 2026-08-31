@@ -146,3 +146,33 @@ func TestLoadConfigFileMissingFileReturnsNotInitializedImmediately(t *testing.T)
 		t.Fatalf("expected no retry delay for a missing file, took: %v", elapsed)
 	}
 }
+
+// TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized is the
+// regression for a read failure that is not a real absence -- a permission
+// error, a path that is a directory, or any other os.ReadFile failure that
+// is not os.IsNotExist. Reporting it as ErrNotInitialized would tell the
+// operator to run `erun init` for a problem `erun init` cannot fix; it must
+// surface as the real error instead.
+func TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized(t *testing.T) {
+	dir := t.TempDir()
+	// A directory at the config path fails os.ReadFile for a reason other
+	// than "the file doesn't exist" -- a portable way to exercise this
+	// without depending on permission enforcement (which differs when a
+	// test runs as root).
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("seed directory at config path: %v", err)
+	}
+
+	var config EnvConfig
+	err := loadConfigFile(path, &config)
+	if err == nil {
+		t.Fatal("expected an error reading a directory as a config file")
+	}
+	if errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("a read failure that is not a real absence must not be reported as ErrNotInitialized, got: %v", err)
+	}
+	if errors.Is(err, ErrConfigCorrupted) {
+		t.Fatalf("a read failure is not corruption either, got: %v", err)
+	}
+}

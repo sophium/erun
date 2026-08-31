@@ -1219,12 +1219,19 @@ const (
 // here so the retry policy lives in one place. A missing file is a real
 // absence (ErrNotInitialized) and is never retried; an empty or unparseable
 // file is retried and, if it never recovers, reported as ErrConfigCorrupted.
+// A read that fails for any other reason (permission denied, the path is a
+// directory, too many open files, ...) is neither of those things and is
+// returned as-is: reporting it as ErrNotInitialized would tell the operator
+// to run `erun init` for a problem `erun init` cannot fix.
 func loadConfigFile(path string, out any) error {
 	var lastErr error
 	for attempt := 0; attempt < configReadRetryAttempts; attempt++ {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return ErrNotInitialized
+			if os.IsNotExist(err) {
+				return ErrNotInitialized
+			}
+			return err
 		}
 		if len(bytes.TrimSpace(data)) == 0 {
 			lastErr = ErrConfigCorrupted

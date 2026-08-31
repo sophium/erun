@@ -422,3 +422,70 @@ func TestPlatformClientTrimsTrailingSlashFromBaseURL(t *testing.T) {
 		t.Fatalf("Platform: %v", err)
 	}
 }
+
+// TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401 is the
+// regression for a caller that could only see ErrPlatformUnauthorized: the
+// platform's {code, message} envelope (erun-backend-api's auth.go) reports
+// TENANT_UNRESOLVED, NOT_ENROLLED, and RESOLUTION_FAILED as three different
+// situations behind the same HTTP status, and a caller must be able to tell
+// them apart.
+func TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401(t *testing.T) {
+	for _, code := range []string{"TENANT_UNRESOLVED", "NOT_ENROLLED", "RESOLUTION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "denied"})
+			}))
+			defer srv.Close()
+
+			client := NewPlatformClient(srv.URL, staticToken("token-1"))
+			_, err := client.Whoami(context.Background())
+			if !errors.Is(err, ErrPlatformUnauthorized) {
+				t.Fatalf("err = %v, want ErrPlatformUnauthorized", err)
+			}
+			if got := PlatformAuthErrorCode(err); got != code {
+				t.Fatalf("PlatformAuthErrorCode() = %q, want %q", got, code)
+			}
+		})
+	}
+}
+
+// TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty confirms an older
+// platform's plain-text 401 (no {code} envelope at all) reports "" rather
+// than guessing -- callers must treat "" the same as an unclassified 401.
+func TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.Whoami(context.Background())
+	if !errors.Is(err, ErrPlatformUnauthorized) {
+		t.Fatalf("err = %v, want ErrPlatformUnauthorized", err)
+	}
+	if got := PlatformAuthErrorCode(err); got != "" {
+		t.Fatalf("PlatformAuthErrorCode() = %q, want empty for an unclassified 401", got)
+	}
+}
+
+// TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty confirms the helper never
+// misreports a non-401 (or non-platform) error as one of the auth codes.
+func TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.Whoami(context.Background())
+	if !errors.Is(err, ErrPlatformForbidden) {
+		t.Fatalf("err = %v, want ErrPlatformForbidden", err)
+	}
+	if got := PlatformAuthErrorCode(err); got != "" {
+		t.Fatalf("PlatformAuthErrorCode() = %q, want empty for a non-401 error", got)
+	}
+	if got := PlatformAuthErrorCode(nil); got != "" {
+		t.Fatalf("PlatformAuthErrorCode(nil) = %q, want empty", got)
+	}
+}

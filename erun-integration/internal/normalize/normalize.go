@@ -5,6 +5,7 @@ package normalize
 import (
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -213,9 +214,131 @@ func Apply(s string, extra ...Replacement) string {
 	for _, r := range rules {
 		s = r.Pattern.ReplaceAllString(s, r.Token)
 	}
+	// Runs after the bracket-duration rule above, on the same reasoning as
+	// the synthetic-row drop above it: a step-timing row's real duration is
+	// already redacted to "[<ELAPSED>]", so sibling order is the one
+	// remaining wall-clock-derived signal in the block, and it is exactly as
+	// host/run-dependent as the duration it was sorted by.
+	s = canonicalizeStepTimingOrder(s)
 	// Absorb the jitter in whether the final line ends with a newline.
 	s = strings.TrimRight(s, "\n") + "\n"
 	return s
+}
+
+// timingLinePattern matches an already-redacted step-timing row: leading
+// indentation (always an even number of spaces — renderStepTimingRows in
+// erun-common/timing.go indents each depth by two), then a label, then the
+// "[<ELAPSED>]" token the bracket-duration rule above just produced. The
+// bracket shape is deliberately unique to the timing table (see that rule's
+// own comment), so any line matching this is a timing row and nothing else.
+var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\]$`)
+
+// canonicalizeStepTimingOrder reorders each step-timing block's sibling rows
+// by name instead of leaving them in the real wall-clock order they were
+// recorded in. orderedTimingRows (erun-common/timing.go) already breaks a
+// same-process tie within its noise floor by name for exactly this
+// determinism reason, but a subprocess integration test measures real
+// wall-clock time with no fake clock to inject — the timing root lives
+// inside the compiled binary the test runs, not the test process — so two
+// steps intended to tie (or, against an already-warm fingerprint cache where
+// even "publish" itself does no real image build, three or more steps) can
+// drift past that floor on one run of a loaded machine and not the next,
+// flipping which regime (name order vs. duration order) applies and
+// therefore the reported order, between otherwise-identical runs.
+// Canonicalizing every level to name order here removes that remaining
+// variance the same way the synthetic-row drop above removes the variance in
+// whether a gap row appears at all.
+func canonicalizeStepTimingOrder(s string) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); {
+		rootDepth, ok := timingLineDepth(lines[i])
+		if !ok {
+			out = append(out, lines[i])
+			i++
+			continue
+		}
+		// A tree's root is a timing line whose own depth nothing before it in
+		// this block undercuts; every subsequent line strictly deeper than it
+		// is one of its descendants, and the first line that is not (a
+		// shallower or equal-depth timing line, reportStepTiming's own
+		// "step timing (ordered by duration):" header included, or plain
+		// non-timing text) starts the next tree or leaves the block entirely.
+		end := i + 1
+		for end < len(lines) {
+			d, ok := timingLineDepth(lines[end])
+			if !ok || d <= rootDepth {
+				break
+			}
+			end++
+		}
+		out = append(out, sortedTimingBlock(lines[i:end])...)
+		i = end
+	}
+	return strings.Join(out, "\n")
+}
+
+// timingLineDepth reports a timing row's nesting depth (an offset from the
+// row's real depth in erun-common/timing.go by the constant amount
+// reportStepTiming's own extra indent adds — irrelevant here, since only
+// relative depth, to build the tree, matters) and whether line is a timing
+// row at all.
+func timingLineDepth(line string) (int, bool) {
+	m := timingLinePattern.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	return len(m[1]) / 2, true
+}
+
+// timingNode is one row of a step-timing tree, parsed from its serialized
+// (depth-indented, DFS pre-order) text form so its children can be sorted
+// and the tree re-serialized.
+type timingNode struct {
+	line     string
+	depth    int
+	children []*timingNode
+}
+
+// sortedTimingBlock parses one root row plus its full, contiguous subtree
+// (lines[0] is the root; every later line is some descendant of it) and
+// returns it re-serialized with every level's children sorted by name.
+func sortedTimingBlock(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	root := &timingNode{line: lines[0]}
+	stack := []*timingNode{root}
+	for _, line := range lines[1:] {
+		depth, _ := timingLineDepth(line)
+		node := &timingNode{line: line, depth: depth}
+		for len(stack) > 1 && stack[len(stack)-1].depth >= depth {
+			stack = stack[:len(stack)-1]
+		}
+		parent := stack[len(stack)-1]
+		parent.children = append(parent.children, node)
+		stack = append(stack, node)
+	}
+	sortTimingNodeChildren(root)
+	out := make([]string, 0, len(lines))
+	appendTimingNode(&out, root)
+	return out
+}
+
+func sortTimingNodeChildren(node *timingNode) {
+	sort.SliceStable(node.children, func(i, j int) bool {
+		return strings.TrimSpace(node.children[i].line) < strings.TrimSpace(node.children[j].line)
+	})
+	for _, child := range node.children {
+		sortTimingNodeChildren(child)
+	}
+}
+
+func appendTimingNode(out *[]string, node *timingNode) {
+	*out = append(*out, node.line)
+	for _, child := range node.children {
+		appendTimingNode(out, child)
+	}
 }
 
 // forwardSlashWindowsPaths rewrites backslash separators in drive-letter Windows

@@ -57,6 +57,7 @@ release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>
 step timing (ordered by duration):
   release [<ELAPSED>]
+    post-release-version-bump [<ELAPSED>]
     publish [<ELAPSED>]
       api (cache hit) [<ELAPSED>]
         linux/amd64 (cache hit) [<ELAPSED>]
@@ -66,7 +67,6 @@ step timing (ordered by duration):
         linux/arm64 (cache hit) [<ELAPSED>]
       chart api [<ELAPSED>]
       chart base [<ELAPSED>]
-    post-release-version-bump [<ELAPSED>]
     push [<ELAPSED>]
     release [<ELAPSED>]
     sync-remote [<ELAPSED>]

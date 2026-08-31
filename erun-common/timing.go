@@ -224,8 +224,16 @@ type timingRow struct {
 // the same run produces the same order every time — sorting two genuinely
 // concurrent children by raw duration would otherwise flip their order
 // between runs depending only on which one the scheduler happened to finish
-// first.
-const timingOrderNoiseFloor = 100 * time.Millisecond
+// first. A subprocess integration test measures real wall-clock time with no
+// fake clock to inject (the timing root lives inside the compiled binary erun
+// runs, not the test process), and two of its near-instant steps (a real `git
+// push` against a local bare origin, and the version-bump commit beside it)
+// were observed to drift past the previous 100ms floor under the CPU
+// contention of a full `make check` run, flipping their reported order
+// between otherwise-identical runs. 1s keeps the floor well below any
+// genuinely different-duration real step while comfortably covering that
+// contention.
+const timingOrderNoiseFloor = 1 * time.Second
 
 // orderedTimingRows returns a step's children plus a synthetic gap row (when
 // the gap is large enough to matter), sorted by duration descending — with
