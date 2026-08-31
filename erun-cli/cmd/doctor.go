@@ -130,6 +130,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
+	if err := reportExecutionModes(ctx); err != nil {
+		return err
+	}
 	req := common.ShellLaunchParamsFromResult(result)
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {

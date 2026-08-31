@@ -33,6 +33,10 @@ type ERunConfig struct {
 	// defaults (see WhipConfig, ResolveWhipConfig). Nil keeps every unconfigured
 	// install on exactly today's behaviour.
 	Whip *WhipConfigOverride `yaml:"whip,omitempty" json:"whip,omitempty"`
+	// Execution holds per-operation subprocess/library execution mode
+	// overrides (see execution_mode.go). Absent keeps every operation on the
+	// subprocess path it has always used.
+	Execution ExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An

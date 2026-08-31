@@ -30,6 +30,7 @@ Global defaults that apply across all tenants.
 | `runtimeregistry.repository` | string | same as above | Overrides the repository name in the namespace. |
 | `runtimeregistry.baseurl` | string | same as above | Registry HTTP endpoint. Defaults differ for Docker Hub vs GHCR. |
 | `runtimeregistry.tokenurl` | string | same as above | GHCR token endpoint. Only used on the GHCR flow. |
+| `execution.modes.<operation>` | string | Operations with a library alternative (see [Execution modes](#execution-modes)) | `"library"` switches that operation from its CLI subprocess to an equivalent Go library call; anything else (including unset) keeps the subprocess. |
 
 ### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)
 
@@ -374,6 +375,29 @@ Component charts are published per release (each `erun-<component>` chart rides 
 2. The CLI's own built-in build version (the `erun version` value).
 
 For Docker build context / version resolution, see [Build path resolution](/reference/configuration-build-paths).
+
+---
+
+## Execution modes {#execution-modes}
+
+A handful of operations can run either as a subprocess shelling out to a CLI (`aws`, and more tools over time) or through an equivalent Go library call. Both paths trace the identical CLI-equivalent command for `--dry-run`/audit purposes, and produce the same result — the switch only changes what actually executes.
+
+`execution.modes` in `~/.config/erun/config.yaml` is a map from operation name to mode:
+
+```yaml
+execution:
+  modes:
+    aws-sts: library
+```
+
+- Every operation defaults to `subprocess` when unset (or set to anything other than `library`), so upgrading erun never silently changes what runs.
+- The switch takes effect immediately — no rebuild or release needed.
+- `erun doctor` reports the resolved mode for every operation that has a library alternative; see [`erun doctor`](/cli/doctor#what-it-checks).
+- Today's promoted operations:
+
+  | Operation | What it covers | What stays on subprocess |
+  |---|---|---|
+  | `aws-sts` | `aws sts get-caller-identity`, used to resolve the caller's AWS identity and check whether a stored AWS session is still active. | Every other `aws` operation (`sso login`/`logout`, `configure set`, `configure export-credentials`) — these drive a real browser SSO flow or write the shared `~/.aws` ini files, neither of which the switch touches. |
 
 ---
 

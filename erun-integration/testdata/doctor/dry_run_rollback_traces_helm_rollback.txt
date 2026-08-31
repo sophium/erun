@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 Running: Roll back to the last successful revision
 No cleanup actions selected.
 audit: erun doctor --dry-run --rollback team dev

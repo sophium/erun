@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 Running: Clear pending helm release
 No cleanup actions selected.
 audit: erun doctor --clear-pending-helm --dry-run team dev

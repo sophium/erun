@@ -27,6 +27,19 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_library_execution_mode", func(t *testing.T) {
+		// An operator who flipped execution.modes.aws-sts to "library" in
+		// config.yaml must see it reflected here, not just take it on faith.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_library_execution_mode", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_prune_images_traces_dind_exec", func(t *testing.T) {
 		// Exercises doctor.go --prune-images action: --dry-run must trace
 		// the kubectl wait + the dind exec command line that would prune

@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 == Workspace sync (host mirror) ==
   host alias: erun-team-dev
   mirror: <TMP>

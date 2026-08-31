@@ -972,12 +972,30 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 		deps.RunAWSExportCredentials = defaultRunAWSExportCredentials
 	}
 	if deps.ResolveAWSIdentity == nil {
-		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
+		deps.ResolveAWSIdentity = resolveAWSIdentityForExecutionMode()
 	}
 	if deps.CheckAWSStatus == nil {
-		deps.CheckAWSStatus = defaultCheckAWSStatus
+		deps.CheckAWSStatus = checkAWSStatusForExecutionMode()
 	}
 	return deps
+}
+
+// resolveAWSIdentityForExecutionMode and checkAWSStatusForExecutionMode pick
+// the subprocess or library implementation per the aws-sts execution mode
+// (see execution_mode.go), split out of normalizeAWSCloudDependencies to keep
+// its own branching within the cyclomatic complexity budget.
+func resolveAWSIdentityForExecutionMode() func(Context, string) (AWSIdentity, error) {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryResolveAWSIdentity
+	}
+	return defaultResolveAWSIdentity
+}
+
+func checkAWSStatusForExecutionMode() func(Context, CloudProviderConfig) CloudProviderStatus {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryCheckAWSStatus
+	}
+	return defaultCheckAWSStatus
 }
 
 // normalizeCloudflareCloudDependencies leaves CloudSecretStore nil on purpose:
@@ -1233,10 +1251,7 @@ func generatedAWSProfileName() string {
 }
 
 func defaultResolveAWSIdentity(ctx Context, profile string) (AWSIdentity, error) {
-	args := []string{"sts", "get-caller-identity", "--output", "json"}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsGetCallerIdentityArgs(profile)
 	ctx.TraceCommand("", "aws", args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
