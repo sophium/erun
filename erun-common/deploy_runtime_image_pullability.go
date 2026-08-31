@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+// deployRuntimeImagePullProbe is the anonymousPullProbeFunc RunHelmDeploy
+// calls; a var (like ensureDeployNamespace above it in deploy.go) so a test
+// can swap in a deterministic result instead of reaching live ghcr.io.
+var deployRuntimeImagePullProbe anonymousPullProbeFunc = probeAnonymousManifestPull
+
 // autoImagePullSecretName is the dockerconfigjson Secret erun provisions and
 // attaches to the runtime pod on its own, without requiring an operator to
 // have named one via `--image-pull-secret`. It is distinct from any
@@ -17,8 +22,9 @@ func autoImagePullSecretName(tenant string) string {
 	return RuntimeReleaseName(tenant) + "-image-pull"
 }
 
-// ensureRuntimeImagePullSecret is the deploy-time preflight for #1749: an
-// environment that had never needed a pull secret (it rode the anonymously
+// ensureRuntimeImagePullSecret is the deploy-time preflight against a private
+// runtime image with no pull credential: an environment that had never needed
+// a pull secret (it rode the anonymously
 // pullable stock erun-devops image) kept deploying with none configured even
 // after it moved onto a tenant's own private image line, because
 // EnvConfig.ImagePullSecrets is only ever populated by an operator's explicit

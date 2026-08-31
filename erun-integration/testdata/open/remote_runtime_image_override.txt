@@ -14,6 +14,8 @@ deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the 
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: runtime image override ghcr.io/example/custom-runtime:<VERSION> (imageOverrides.erun-devops)
 deploying the devops runtime before opening the shell
+image pull: ghcr.io/example/custom-runtime:<VERSION> has no resolvable ghcr.io credential
+image pull: anonymous pullability of ghcr.io/example/custom-runtime:<VERSION> is not probed in dry-run; a real deploy refuses before rollout if it turns out not to be anonymously pullable
 kubectl --context test-context get namespace team-dev -o name
 deploy: namespace team-dev is created if the check above reports it missing
 kubectl --context test-context --namespace team-dev get pvc team-devops-worktree -o name
