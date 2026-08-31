@@ -70,16 +70,35 @@ test('an outage reads as outage even while otherwise reachable and busy', () => 
   assert.notEqual(line.status, 'Busy — holding: x');
 });
 
-test('never observed (no activity at all) reads unreachable, not idle', () => {
+// The orchestrator card used to reuse the desktop's own reachability reading
+// and render it as a confident "Not open here", which read as a claim about
+// the *orchestrator's* reach even though the desktop's local forward has
+// nothing to do with a host-side orchestrator's own MCP client. The desktop
+// genuinely has no reading here (no local forward, no answer from any
+// fallback channel either), so the honest line says only what the desktop
+// itself observed — never that the environment is closed to anyone else —
+// and it says so about "this desktop" explicitly rather than with a bare,
+// unscoped "not open".
+test('never observed (no activity at all) reads as no signal from this desktop, not a confident "not open"', () => {
   const line = orchestratorEnvironmentLine(env());
-  assert.equal(line.state, 'unreachable');
+  assert.equal(line.state, 'no-forward');
   assert.notEqual(line.state, 'idle');
+  assert.notEqual(line.state, 'busy');
+  assert.equal(line.status, 'No forward from this desktop');
+  assert.notEqual(line.status, 'Not open here');
+  assert.ok(!/\bnot open\b/i.test(line.status), 'must not assert a bare "not open"');
+  assert.ok(
+    /this desktop/i.test(line.status),
+    'must scope the claim to the desktop, not the orchestrator',
+  );
 });
 
-// An environment held busy by an agent driving it from elsewhere (a CLI
-// orchestrator, another machine over MCP) must not read as "not open here"
-// just because this desktop never opened a local forward to it. The poller
-// now asks such an environment directly and can still find it busy.
+// An orchestrator actively driving a linked environment (a lease held from
+// elsewhere, a CLI session, another machine over MCP) must never read as "Not
+// open here" — that string used to fire whenever this desktop itself had no
+// local forward, which said nothing true about whether the *orchestrator*
+// could reach the environment. The poller now asks such an environment
+// directly and can still find it busy.
 test('a lease held by a session driving the environment from elsewhere still reads busy', () => {
   const line = orchestratorEnvironmentLine(
     env({
@@ -110,7 +129,7 @@ test('a failed attempt to reach an unopened environment reads distinctly from ne
     }),
   );
   assert.equal(line.state, 'check-failed');
-  assert.notEqual(line.state, 'unreachable');
+  assert.notEqual(line.state, 'no-forward');
   assert.notEqual(line.state, 'idle');
   assert.ok(
     line.status.toLowerCase().includes('open it'),
