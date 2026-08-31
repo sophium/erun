@@ -3,6 +3,7 @@ import type { Terminal } from '@xterm/xterm';
 import { noop } from 'erun-kit';
 
 import { ResizeSession } from '../../wailsjs/go/main/App';
+import { safeFit } from './terminalFit';
 
 interface ReattachRepaintDeps {
   getTerminal: () => Terminal | null;
@@ -153,7 +154,7 @@ export class TerminalReattachRepaint {
       return;
     }
     term.resize(cols, rows);
-    fitAddon.fit();
+    safeFit(fitAddon);
     this.deps.afterRestore();
     void ResizeSession(sessionId, term.cols, term.rows).catch(noop);
     this.cycling = false;

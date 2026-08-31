@@ -30,6 +30,7 @@ import {
   trimChunksToBudget,
 } from './terminalBuffers';
 import { TerminalClipboard } from './terminalClipboard';
+import { safeFit } from './terminalFit';
 import { scheduleTerminalFocus } from './terminalFocus';
 import { applyTerminalLayoutVars } from './terminalLayoutVars';
 import { installTerminalLinkHandling } from './terminalLinkHandling';
@@ -129,7 +130,7 @@ export class TerminalController {
   }
 
   fitTerminal(): void {
-    this.fitAddon?.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
   }
 
@@ -200,7 +201,7 @@ export class TerminalController {
     this.serializeAddon = new SerializeAddon();
     this.terminal.loadAddon(this.serializeAddon);
     this.terminal.open(elements.terminalRoot);
-    this.fitAddon.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
     this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
@@ -427,7 +428,7 @@ export class TerminalController {
 
   private runTerminalResize(): void {
     this.applyLayoutVars();
-    this.fitAddon?.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
     const sessionId = store.getState().terminal.sessionId;
     if (sessionId > 0 && this.terminal) {
