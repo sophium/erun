@@ -1,4 +1,5 @@
-import { Button, Checkbox } from 'erun-kit';
+import { Button, Checkbox, IconTooltip } from 'erun-kit';
+import { Bot, ListChecks, Server } from 'lucide-react';
 import * as React from 'react';
 
 import type { WhipTargetSelection } from '@/app/model';
@@ -84,16 +85,40 @@ export function TitlebarWhipTargetPicker({
           Nothing is focused right now. Choose one or more targets below.
         </p>
       )}
-      <div className="flex flex-wrap gap-1.5">
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAllOrchestrators}>
-          Select all orchestrators
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAllEnvironments}>
-          Select all environments
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onSelectAll}>
-          Select all
-        </Button>
+      <div className="flex items-center gap-1.5">
+        <IconTooltip label="Select all orchestrators">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all orchestrators"
+            onClick={onSelectAllOrchestrators}
+          >
+            <Bot aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
+        <IconTooltip label="Select all environments">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all environments"
+            onClick={onSelectAllEnvironments}
+          >
+            <Server aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
+        <IconTooltip label="Select all orchestrators and environments">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            aria-label="Select all"
+            onClick={onSelectAll}
+          >
+            <ListChecks aria-hidden="true" className="size-4" />
+          </Button>
+        </IconTooltip>
       </div>
       {targetsLoading || !targets ? (
         <p className="text-xs text-muted-foreground">Loading targets…</p>

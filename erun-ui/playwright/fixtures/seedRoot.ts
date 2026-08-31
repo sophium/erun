@@ -593,6 +593,35 @@ export function removeTenant(tenant: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant), { recursive: true, force: true });
 }
 
+// addOrchestrators appends throwaway orchestrator entries directly to the
+// top-level user config.yaml -- the same shape seedBaseline() writes for
+// SEED_ORCHESTRATOR -- so a spec can stage a realistic population (erun#1748:
+// the field report was 7 orchestrators, 9+ environments) without depending on
+// whatever another spec in this worker happened to leave behind.
+// `orchestrators:` is the file's last top-level key, so a plain append keeps
+// the YAML list valid. WhipTargets reads this file fresh on every call, so no
+// reload/wait is needed after writing it. Returns a restore function that
+// puts the file back exactly as found.
+export function addOrchestrators(ids: string[], tenant: string, environment: string): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  const entries = ids
+    .map(
+      (id) =>
+        `  - id: ${id}\n` +
+        `    name: ${id}\n` +
+        '    environments:\n' +
+        `      - tenant: ${tenant}\n` +
+        `        environment: ${environment}\n` +
+        `        directory: ${repoDir()}\n`,
+    )
+    .join('');
+  fs.appendFileSync(configPath, entries);
+  return () => {
+    fs.writeFileSync(configPath, before);
+  };
+}
+
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the
 // suite recognizably created are removed, so a caller-provided custom path
 // is never destroyed by accident.
