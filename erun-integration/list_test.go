@@ -219,6 +219,35 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_orchestrator_runtime_role_on_a_runtime_type_environment", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_orchestrator_pairing_invalid_before_the_role_gate_existed", func(t *testing.T) {
+		// `erun orchestrator set-role` now refuses a role
+		// `eruncommon.OrchestratorEnvRoleAllowed` would not have let the
+		// desktop link this environment with in the first place, but a
+		// config written before that gate existed can still carry the
+		// invalid pairing on disk (role=code against a runtime-type
+		// environment, which the desktop's link gate would refuse to create
+		// today). `erun list` reads the persisted role directly and never
+		// re-resolves the environment's type to render it, so this must
+		// still load and display the mismatch rather than erroring out --
+		// only a write through set-role is gated, never a read.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "ops-1",
+				name: "Ops One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "frs", environment: "prod", role: "code"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_orchestrator_pairing_invalid_before_the_role_gate_existed", normalize.Apply(result.Combined))
+	})
+
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
 		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)

@@ -125,12 +125,11 @@ func TestOrchestratorEnvRoleIsValid(t *testing.T) {
 }
 
 // TestOrchestratorEnvRoleAllowed locks the shared gate erun-ui's link/edit
-// path and (by design, per OrchestratorRoleStore's doc comment) not the
-// CLI's set-role path consult: any role -- including undeclared -- works for
-// an agent or host environment, since it already has a worktree to review
-// and an in-pod agent to delegate to; a runtime environment has neither, so
-// only OrchestratorEnvRoleRuntime is allowed for it; an unrecognized type
-// allows nothing.
+// path and the CLI's set-role path both consult: any role -- including
+// undeclared -- works for an agent or host environment, since it already has
+// a worktree to review and an in-pod agent to delegate to; a runtime
+// environment has neither, so only OrchestratorEnvRoleRuntime is allowed for
+// it; an unrecognized type allows nothing.
 func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 	anyRoleTypes := []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost}
 	anyRole := []OrchestratorEnvRole{"", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime}

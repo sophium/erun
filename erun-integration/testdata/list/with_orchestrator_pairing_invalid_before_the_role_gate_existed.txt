@@ -1,15 +1,15 @@
 Configuration:
   directory: <TMP>
 Defaults:
-  tenant: team
-  environment: dev
+  tenant: frs
+  environment: prod
 Current Directory:
   path: none
   repo: none
   configured tenant: none
-  effective target: team/dev
+  effective target: frs/prod
   kubernetes context: test-context
-  type: local-agent
+  type: runtime
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
@@ -20,11 +20,11 @@ Current Directory:
 Cloud Providers:
   none
 Tenants:
-  team [default, effective]
-    default environment: dev
+  frs [default, effective]
+    default environment: prod
     environments:
-      - dev [default, effective] context=test-context
-          type: local-agent
+      - prod [default, effective] context=test-context
+          type: runtime
           repo: <TMP>
           ports: 17000-17099
           mcp-port: 17000
@@ -41,8 +41,7 @@ Tenants:
           idle: none
           sshd: off
 Orchestrators:
-  - eng-1 "Eng One"
+  - ops-1 "Ops One"
     environments:
-      - team/dev role=build directory=/repo/team-dev
-      - team/staging role=undeclared directory=/repo/team-staging
+      - frs/prod role=code
 audit: erun list
