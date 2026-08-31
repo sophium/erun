@@ -744,6 +744,36 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
 
 Note that being **at or over quota is not an error** here — it returns `200` with `quotaOk: false` and the full plan (see `quotaOk` above), unlike `POST /v1/environments`, which rejects the actual write with `409`.
 
+### `GET /v1/tenants` {#get-v1tenants}
+
+Lists tenants. An **operations-tenant** caller sees **every** tenant this platform hosts; any other caller sees a single-item list containing only their own resolved tenant — `tenants` is a root resolution table with no RLS, so this scoping happens in application code rather than the database.
+
+```jsonc
+// 200 response (operations-tenant caller)
+[
+  {
+    "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
+    "name": "acme",
+    "type": "COMPANY",
+    "createdAt": "2026-06-24T10:00:00Z",
+    "updatedAt": "2026-06-24T10:00:00Z",
+    "userCount": 3
+  },
+  {
+    "tenantId": "019a8012-...-000",
+    "name": "validationagent",
+    "type": "COMPANY",
+    "createdAt": "2026-08-30T09:00:00Z",
+    "updatedAt": "2026-08-30T09:00:00Z",
+    "userCount": 0
+  }
+]
+```
+
+`userCount` is populated **only** for the operations-tenant branch above, in a single query (a `LEFT JOIN`/`GROUP BY` over `users`, not one query per tenant) — a tenant with genuinely zero users reports the explicit number `0`, never `null` and never an omitted field. Every other tenant-returning shape in this API (this endpoint's own single-tenant branch, `POST /v1/tenants`'s create response, `GET /v1/tenants/reachable`, `PATCH /v1/tenants/reconcile-bootstrap-name`) never computes it and omits the field entirely. A caller must treat "field absent" and "field present with value `0`" as different facts — the first means "not counted here", the second means "counted, and it is zero" — never coalesce a missing `userCount` to `0`.
+
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)); no endpoint-specific codes.
+
 ### `POST /v1/tenants`
 
 Registers a **new tenant** plus the OIDC issuer mapping that resolves its tokens. This is an **operations-only** endpoint: beyond the broad `WriteAll` permission that authorization enforces for any write, the handler adds an explicit gate — the caller's resolved tenant must be an `OPERATIONS` tenant, because `tenants`, `issuers`, and `tenant_issuers` are root resolution tables writable only by the operations role. A non-operations caller is rejected with `403` before any write is attempted.
