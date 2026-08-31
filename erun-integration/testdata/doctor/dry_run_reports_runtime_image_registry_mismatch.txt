@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 == Runtime image registry ==
 runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
 The deploy that installs this env sets imageOverrides.erun-devops from 123456789012.dkr.ecr.eu-west-2.amazonaws.com while runtimeRegistry stays ghcr.io/sophium; the runtime pod can only pull if a credential for 123456789012.dkr.ecr.eu-west-2.amazonaws.com also resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is available there, or realign the two with `erun init team dev --runtime-registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com` to match the image.

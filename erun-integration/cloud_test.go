@@ -683,6 +683,49 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/login_real_run_invokes_aws_sso_login_via_stub", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_aws_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract (root AGENTS.md issue #1691): the
+		// `aws sts get-caller-identity` trace line the CLI hand-renders under
+		// --dry-run must stay byte-identical to the subprocess-mode golden
+		// even when execution.modes.aws-sts opts into the library path,
+		// because ResolveAWSIdentity/CheckAWSStatus are never invoked during
+		// this command's dry-run path at all (see init_aws_dry_run.txt).
+		setup := env.New(t)
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		args := []string{
+			"cloud", "init", "aws",
+			"--account-id", "123456789012",
+			"--role-name", "Admin",
+			"--region", "eu-west-2",
+			"--sso-start-url", "https://example.awsapps.com/start",
+			"--sso-region", "eu-west-1",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "cloud/init_aws_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("login_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (root AGENTS.md issue #1691): with
+		// execution.modes.aws-sts=library and a real static-credential AWS
+		// profile on disk, CheckAWSStatus resolves via aws-sdk-go-v2 against a
+		// fake STS endpoint (AWS_ENDPOINT_URL) instead of shelling out, so the
+		// scenario declares no "aws" stub at all — the PATH scrub in
+		// internal/env would fail the run with "executable file not found" if
+		// production code fell through to a subprocess.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		seedAWSStaticCredentialProfile(t, setup, "test-profile")
+		envVars := append(setup.Env(), "AWS_ENDPOINT_URL="+stsCallerIdentityStubServer(t).URL)
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+	})
+
 	t.Run("login_dry_run_traces_aws_sso_login", func(t *testing.T) {
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
@@ -1434,4 +1477,65 @@ func seedCloudProviderAlias(t testing.TB, setup env.Setup, alias, profile string
 	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write erun config: %v", err)
 	}
+}
+
+// seedExecutionMode appends an execution.modes override to the root
+// config.yaml (root AGENTS.md issue #1691), preserving whatever
+// seedCloudProviderAlias or another fixture already wrote — config.yaml is
+// plain YAML, so appending a distinct top-level key is enough, without
+// needing to parse and re-merge the existing document.
+func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	path := filepath.Join(root, "config.yaml")
+	existing, _ := os.ReadFile(path)
+	body := string(existing) + "execution:\n  modes:\n    " + operation + ": " + mode + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
+// seedAWSStaticCredentialProfile writes a real ~/.aws/config + credentials
+// profile with static keys, standing in for a completed `aws configure sso`
+// so the aws-sdk-go-v2 library path (which reads the real shared config files
+// rather than trusting a stubbed CLI's exit code) has a profile to resolve.
+func seedAWSStaticCredentialProfile(t testing.TB, setup env.Setup, profile string) {
+	t.Helper()
+	dir := filepath.Join(setup.Home, ".aws")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	config := "[profile " + profile + "]\nregion = eu-west-2\n"
+	if err := os.WriteFile(filepath.Join(dir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write aws config: %v", err)
+	}
+	credentials := "[" + profile + "]\naws_access_key_id = AKIAFAKE\naws_secret_access_key = fakesecret\n"
+	if err := os.WriteFile(filepath.Join(dir, "credentials"), []byte(credentials), 0o644); err != nil {
+		t.Fatalf("write aws credentials: %v", err)
+	}
+}
+
+// stsCallerIdentityStubServer fakes the STS GetCallerIdentity endpoint the
+// aws-sdk-go-v2 library path calls, honored via the SDK's own
+// AWS_ENDPOINT_URL env var — no daemon, no real AWS account, no "aws" stub
+// binary needed on PATH.
+func stsCallerIdentityStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		fmt.Fprint(w, `<?xml version="1.0"?>
+<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetCallerIdentityResult>
+    <Arn>arn:aws:iam::123456789012:user/test-user</Arn>
+    <UserId>AIDAEXAMPLE</UserId>
+    <Account>123456789012</Account>
+  </GetCallerIdentityResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetCallerIdentityResponse>`)
+	}))
+	t.Cleanup(server.Close)
+	return server
 }

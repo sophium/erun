@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 == Helm release status ==
 NAME: team-devops
 STATUS: pending-install

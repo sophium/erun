@@ -1,4 +1,7 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+
 Running: Clear cached JetBrains Gateway backend metadata
 Cached backend path: <TMP>
 Would clear latest used IDE metadata in <TMP>
