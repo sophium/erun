@@ -1,23 +1,52 @@
 import { orchestratorBusyElapsed } from '@/app/orchestratorBusyLabel';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 
+type NudgeSummaryFields = Pick<
+  OrchestratorInfo,
+  | 'nudgeCount'
+  | 'nudgeCapped'
+  | 'autoNudgeCount'
+  | 'lastAutoNudgeAtUnix'
+  | 'whipCount'
+  | 'lastWhipAtUnix'
+  | 'lastCappedAtUnix'
+>;
+
 // orchestratorNudgeSummary names the pacing state orchestrator_pacing.go
-// already tracks per session: whether erun has had to restate the pacing
-// contract into a quiet pane, and whether it gave up after the cap. Capped and
-// never-nudged both read as "quiet" without this -- and a capped session is
-// the one an operator most needs to notice, since erun has stopped acting on
-// its behalf.
-export function orchestratorNudgeSummary(
-  orchestrator: Pick<OrchestratorInfo, 'nudgeCount' | 'nudgeCapped' | 'lastNudgeAtUnix'>,
-  nowMs: number,
-): string {
+// tracks per session. nudgeCount/nudgeCapped are the cap's own live budget --
+// they reset every time the session answers, so reading them directly once
+// collapsed "nudged repeatedly, answering every time" onto the same "Not
+// nudged" text as "never needed a nudge" the moment the budget cleared. The
+// cumulative fields (autoNudgeCount/whipCount and their last-at timestamps,
+// plus lastCappedAtUnix) never reset, so they are what this reports as
+// history; nudgeCapped alone is read live, since "currently at the cap" is
+// exactly the one fact that must still reflect a rearm.
+export function orchestratorNudgeSummary(orchestrator: NudgeSummaryFields, nowMs: number): string {
   if (orchestrator.nudgeCapped) {
     return `Stopped nudging after ${String(orchestrator.nudgeCount)} attempts — reply or restart`;
   }
-  if (orchestrator.nudgeCount > 0) {
-    const count = String(orchestrator.nudgeCount);
-    const elapsed = orchestratorBusyElapsed(orchestrator.lastNudgeAtUnix, nowMs);
-    return elapsed ? `Nudged ${count}x, last ${elapsed} ago` : `Nudged ${count}x`;
+  const facts: string[] = [];
+  if (orchestrator.autoNudgeCount > 0) {
+    facts.push(
+      historyFact('Nudged', orchestrator.autoNudgeCount, orchestrator.lastAutoNudgeAtUnix, nowMs),
+    );
   }
-  return 'Not nudged';
+  if (orchestrator.whipCount > 0) {
+    facts.push(historyFact('Whipped', orchestrator.whipCount, orchestrator.lastWhipAtUnix, nowMs));
+  }
+  if (orchestrator.lastCappedAtUnix) {
+    const elapsed = orchestratorBusyElapsed(orchestrator.lastCappedAtUnix, nowMs);
+    facts.push(elapsed ? `previously capped ${elapsed} ago` : 'previously capped');
+  }
+  return facts.length > 0 ? facts.join('; ') : 'Not nudged';
+}
+
+function historyFact(
+  verb: string,
+  count: number,
+  lastAtUnix: number | undefined,
+  nowMs: number,
+): string {
+  const elapsed = orchestratorBusyElapsed(lastAtUnix, nowMs);
+  return elapsed ? `${verb} ${String(count)}x, last ${elapsed} ago` : `${verb} ${String(count)}x`;
 }

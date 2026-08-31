@@ -473,9 +473,9 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	switch decision {
 	case orchestratorPacingNudge:
 		signal := orchestratorPacingSignalFor(ok, ok && report.activity.Busy)
-		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal, envBusy.stuckDetail())
+		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal, envBusy.stuckDetail(), explicit)
 	case orchestratorPacingCap:
-		a.capOrchestratorPacing(row.id, row.serial, row.name)
+		a.capOrchestratorPacing(row.id, row.serial, row.name, now)
 	}
 	return decision, reason
 }
@@ -509,6 +509,11 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 // activity report written after the last nudge (this reconciler) and for
 // real operator input into the pane (SendSessionInput) — the two rearm
 // paths the cap bound names.
+//
+// It deliberately does not touch pacingAutoNudgeCount/pacingWhipCount or
+// their timestamps: those are the cumulative history a hover card reports,
+// not the cap's budget, and a session that answers must still be reportable
+// as having been nudged.
 func (a *App) rearmOrchestratorPacing(id string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -524,7 +529,13 @@ func (a *App) rearmOrchestratorPacing(id string) {
 // when a linked environment's own busy lease was still active but the
 // suppression bound was crossed anyway (erun#1699) — the ordinary case leaves
 // it empty and the marker reads exactly as it did before.
-func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
+//
+// explicit distinguishes an operator-triggered whip from the automatic
+// pacer, both of which land here: it decides which cumulative history
+// counter this delivery adds to (pacingAutoNudgeCount vs pacingWhipCount) so
+// the two can be reported separately, without changing pacingNudgeCount's own
+// cap bookkeeping, which both paths share exactly as before.
+func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string, explicit bool) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
 	managed := a.sessions[orchestratorSessionKey(id)]
@@ -545,6 +556,13 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, 
 	}
 	session.pacingNudgeCount++
 	session.pacingLastNudgeAtUnix = now.Unix()
+	if explicit {
+		session.pacingWhipCount++
+		session.pacingLastWhipAtUnix = now.Unix()
+	} else {
+		session.pacingAutoNudgeCount++
+		session.pacingLastAutoNudgeAtUnix = now.Unix()
+	}
 	count := session.pacingNudgeCount
 	a.mu.Unlock()
 
@@ -592,7 +610,12 @@ func (a *App) liveSessionOf(managed *managedTerminal) (terminalSession, bool) {
 // reports why. Guarded on session.pacingCapped so a repeat tick (the
 // reconciler runs every 15s; the cap condition holds until rearmed) posts the
 // notice once rather than every tick until the operator answers.
-func (a *App) capOrchestratorPacing(id string, serial int, name string) {
+//
+// It also stamps pacingLastCappedAtUnix, the cumulative record of when this
+// session last hit the cap: unlike pacingCapped itself, rearmOrchestratorPacing
+// never clears it, so a session that later resumes still reports having been
+// capped rather than reading as if it never happened.
+func (a *App) capOrchestratorPacing(id string, serial int, name string, now time.Time) {
 	a.mu.Lock()
 	session := a.orchestrators[id]
 	if session == nil || session.pacingCapped {
@@ -600,6 +623,7 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string) {
 		return
 	}
 	session.pacingCapped = true
+	session.pacingLastCappedAtUnix = now.Unix()
 	a.mu.Unlock()
 	a.emitOrchestratorPacingCappedMarker(serial)
 	a.emitAppNotification("warning", orchestratorPacingCappedNotice(name))

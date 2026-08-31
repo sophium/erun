@@ -1,6 +1,7 @@
 import { WhipNow, WhipTargets } from '../../wailsjs/go/main/App';
 import type { main } from '../../wailsjs/go/models';
 import { readError } from './errors';
+import { loadOrchestrators } from './orchestratorThunks';
 import type { AppThunk } from './store';
 
 export interface WhipOutcome {
@@ -24,11 +25,18 @@ export const whipTargets = (): AppThunk<Promise<main.uiWhipTargetList>> => async
 // beside the button that started it rather than in a detached notification
 // (erun-ui/AGENTS.md's Design-Language Decision Record, "Where a detached
 // notification is earned").
+//
+// It also reloads the orchestrator list on success: an orchestrator's nudge
+// history changed on the backend the moment the whip pushed, but the sidebar
+// hover card reads from the store's own cached snapshot, not a live query --
+// without this, the durable record a whip should have just updated stays
+// stale until something else happens to refetch it.
 export const whipNow =
   (targets: main.uiWhipTargetRef[]): AppThunk<Promise<WhipOutcome>> =>
-  async () => {
+  async (dispatch) => {
     try {
       const report = await WhipNow(targets);
+      await dispatch(loadOrchestrators());
       return { report, error: null };
     } catch (error) {
       return { report: null, error: readError(error) };

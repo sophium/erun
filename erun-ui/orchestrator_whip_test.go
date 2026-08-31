@@ -108,6 +108,44 @@ func TestWhipOrchestratorsNowNamesEveryOutcome(t *testing.T) {
 	}
 }
 
+// TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately is the other
+// half of the issue: an explicit, operator-triggered whip goes through the
+// same sendOrchestratorPacingNudge write the automatic pacer uses (so it
+// still costs against the shared cap, unchanged), but must register in its
+// own cumulative pacingWhipCount/pacingLastWhipAtUnix history rather than
+// being indistinguishable from an automatic nudge -- or invisible, which was
+// the reported defect.
+func TestWhipOrchestratorsNowRecordsExplicitWhipHistorySeparately(t *testing.T) {
+	isolateOrchestratorWhipConfig(t)
+	orchestratorPacingNudgeSettle = 0
+
+	app := NewApp(erunUIDeps{})
+	session := newCallRecordingSession()
+	key := orchestratorSessionKey("agent")
+	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 1, kind: sessionKindOrchestrator}
+	// Fresh activity: an automatic pass would never nudge this session, but an
+	// explicit whip ignores staleness and pushes it anyway.
+	app.orchestrators["agent"] = &orchestratorSession{id: "agent", serial: 1, name: "agent", startedAt: time.Now()}
+
+	outcomes := app.whipOrchestratorsNow(map[string]struct{}{"agent": {}})
+	if len(outcomes) != 1 || outcomes[0].decision != orchestratorPacingNudge {
+		t.Fatalf("expected the explicit whip to push despite fresh activity, got %+v", outcomes)
+	}
+
+	app.mu.Lock()
+	s := app.orchestrators["agent"]
+	app.mu.Unlock()
+	if s.pacingWhipCount != 1 || s.pacingLastWhipAtUnix == 0 {
+		t.Fatalf("expected the explicit whip to be recorded in its own history, got count=%d lastAt=%d", s.pacingWhipCount, s.pacingLastWhipAtUnix)
+	}
+	if s.pacingAutoNudgeCount != 0 {
+		t.Fatalf("expected an explicit whip to leave the automatic-nudge history untouched, got %d", s.pacingAutoNudgeCount)
+	}
+	if s.pacingNudgeCount != 1 {
+		t.Fatalf("expected the explicit whip to still cost against the shared cap gauge, got %d", s.pacingNudgeCount)
+	}
+}
+
 // A configured orchestrator the desktop never opened has no session, and
 // orchestratorPacingRows only enumerates sessions. Naming it anyway is the
 // whole contract of an explicit whip: an omitted target reads as "not

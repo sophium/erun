@@ -86,6 +86,27 @@ type orchestratorSession struct {
 	// this orchestrator, so the reconciler logs a transition rather than
 	// repeating the same line every 15s tick. See logOrchestratorPacingTransition.
 	pacingLastReason orchestratorPacingReason
+	// pacingAutoNudgeCount / pacingLastAutoNudgeAtUnix are the cumulative
+	// record of every automatic pacer nudge ever delivered to this session,
+	// and when the last one went out. Unlike pacingNudgeCount/pacingCapped
+	// (the cap's live budget, zeroed by rearmOrchestratorPacing on every
+	// answer), nothing ever resets these: they are what lets the hover card
+	// tell "never nudged" apart from "nudged repeatedly, answering every
+	// time" once the budget has rearmed back to zero.
+	pacingAutoNudgeCount      int
+	pacingLastAutoNudgeAtUnix int64
+	// pacingWhipCount / pacingLastWhipAtUnix are the same cumulative record
+	// for explicit operator-triggered whips (WhipNow), kept separate from the
+	// automatic count so the card can say which mechanism acted.
+	pacingWhipCount      int
+	pacingLastWhipAtUnix int64
+	// pacingLastCappedAtUnix is when this session last crossed the cap,
+	// cumulative like the counters above: rearmOrchestratorPacing clears
+	// pacingCapped (the live "currently at the cap" gauge) on every answer,
+	// but this timestamp survives, so a session that resumed after being
+	// capped still reports having been capped rather than reading identically
+	// to one that never was.
+	pacingLastCappedAtUnix int64
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
@@ -153,23 +174,39 @@ type orchestratorEnvInfo struct {
 // to the operator to infer from the pane, so a hover can tell a session erun
 // has given up nudging from one that has never needed a nudge. Zero/false for
 // a stopped orchestrator, whose pacing state does not survive past its session.
+// NudgeCount/NudgeCapped are the cap's own live budget, reset on every answer —
+// they say only whether the session is *currently* at the cap.
+//
+// AutoNudgeCount/LastAutoNudgeAtUnix and WhipCount/LastWhipAtUnix are the
+// cumulative history behind that budget: how many automatic nudges, and how
+// many explicit operator whips, this session has ever received, and when the
+// last of each went out. Nothing resets these, so a session that answers
+// every nudge still reports having been nudged rather than collapsing back to
+// "never nudged". LastCappedAtUnix is the same treatment for the cap itself:
+// it survives the rearm that clears NudgeCapped, so a session that has since
+// resumed still reports having hit the cap before.
 type orchestratorInfo struct {
-	ID                 string                `json:"id"`
-	Name               string                `json:"name"`
-	Environments       []orchestratorEnvInfo `json:"environments"`
-	Tenants            []string              `json:"tenants"`
-	Directories        []string              `json:"directories"`
-	SessionID          int                   `json:"sessionId"`
-	Status             string                `json:"status"`
-	Busy               bool                  `json:"busy"`
-	BusyAtUnix         int64                 `json:"busyAtUnix,omitempty"`
-	Transient          bool                  `json:"transient"`
-	ShellRunning       bool                  `json:"shellRunning"`
-	ShellCommand       string                `json:"shellCommand,omitempty"`
-	ShellStartedAtUnix int64                 `json:"shellStartedAtUnix,omitempty"`
-	NudgeCount         int                   `json:"nudgeCount"`
-	NudgeCapped        bool                  `json:"nudgeCapped"`
-	LastNudgeAtUnix    int64                 `json:"lastNudgeAtUnix,omitempty"`
+	ID                  string                `json:"id"`
+	Name                string                `json:"name"`
+	Environments        []orchestratorEnvInfo `json:"environments"`
+	Tenants             []string              `json:"tenants"`
+	Directories         []string              `json:"directories"`
+	SessionID           int                   `json:"sessionId"`
+	Status              string                `json:"status"`
+	Busy                bool                  `json:"busy"`
+	BusyAtUnix          int64                 `json:"busyAtUnix,omitempty"`
+	Transient           bool                  `json:"transient"`
+	ShellRunning        bool                  `json:"shellRunning"`
+	ShellCommand        string                `json:"shellCommand,omitempty"`
+	ShellStartedAtUnix  int64                 `json:"shellStartedAtUnix,omitempty"`
+	NudgeCount          int                   `json:"nudgeCount"`
+	NudgeCapped         bool                  `json:"nudgeCapped"`
+	LastNudgeAtUnix     int64                 `json:"lastNudgeAtUnix,omitempty"`
+	AutoNudgeCount      int                   `json:"autoNudgeCount"`
+	LastAutoNudgeAtUnix int64                 `json:"lastAutoNudgeAtUnix,omitempty"`
+	WhipCount           int                   `json:"whipCount"`
+	LastWhipAtUnix      int64                 `json:"lastWhipAtUnix,omitempty"`
+	LastCappedAtUnix    int64                 `json:"lastCappedAtUnix,omitempty"`
 	// RestartRequired is true when this orchestrator's live session was spawned
 	// with an environment scope that no longer matches its persisted one. A
 	// live Claude Code session resolves --mcp-config once at launch, so nothing
@@ -1064,28 +1101,61 @@ type orchestratorPacingSnapshot struct {
 	NudgeCount      int
 	Capped          bool
 	LastNudgeAtUnix int64
+	// AutoNudgeCount/LastAutoNudgeAtUnix and WhipCount/LastWhipAtUnix are the
+	// cumulative history behind NudgeCount/Capped's live budget — see
+	// orchestratorSession's pacingAutoNudgeCount/pacingWhipCount doc comment.
+	AutoNudgeCount      int
+	LastAutoNudgeAtUnix int64
+	WhipCount           int
+	LastWhipAtUnix      int64
+	// LastCappedAtUnix is the same cumulative treatment for the cap: it
+	// survives a rearm that clears Capped, so a session that has since
+	// resumed still reports having hit the cap before.
+	LastCappedAtUnix int64
+}
+
+// orchestratorPacingSnapshotFromSession reads a live session's pacing state,
+// gauge and history alike, into the JSON-safe snapshot shape -- the one place
+// that mapping happens, so every caller (ListOrchestrators, runningOrchestratorInfo)
+// stays in lockstep as pacing gains fields.
+func orchestratorPacingSnapshotFromSession(session *orchestratorSession) orchestratorPacingSnapshot {
+	return orchestratorPacingSnapshot{
+		NudgeCount:          session.pacingNudgeCount,
+		Capped:              session.pacingCapped,
+		LastNudgeAtUnix:     session.pacingLastNudgeAtUnix,
+		AutoNudgeCount:      session.pacingAutoNudgeCount,
+		LastAutoNudgeAtUnix: session.pacingLastAutoNudgeAtUnix,
+		WhipCount:           session.pacingWhipCount,
+		LastWhipAtUnix:      session.pacingLastWhipAtUnix,
+		LastCappedAtUnix:    session.pacingLastCappedAtUnix,
+	}
 }
 
 func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
-		ID:                 id,
-		Name:               name,
-		Environments:       envInfos(envs, envActivity, envUsage),
-		Tenants:            tenantsFromEnvs(envs),
-		Directories:        directoriesFromEnvs(envs),
-		SessionID:          sessionID,
-		Status:             status,
-		Busy:               busy.Busy,
-		BusyAtUnix:         busy.AtUnix,
-		ShellRunning:       shell.Running,
-		ShellCommand:       shell.Command,
-		ShellStartedAtUnix: shell.StartedAtUnix,
-		Transient:          transient,
-		NudgeCount:         pacing.NudgeCount,
-		NudgeCapped:        pacing.Capped,
-		LastNudgeAtUnix:    pacing.LastNudgeAtUnix,
-		RestartRequired:    restartRequired,
-		RoleChanged:        roleChanged,
+		ID:                  id,
+		Name:                name,
+		Environments:        envInfos(envs, envActivity, envUsage),
+		Tenants:             tenantsFromEnvs(envs),
+		Directories:         directoriesFromEnvs(envs),
+		SessionID:           sessionID,
+		Status:              status,
+		Busy:                busy.Busy,
+		BusyAtUnix:          busy.AtUnix,
+		ShellRunning:        shell.Running,
+		ShellCommand:        shell.Command,
+		ShellStartedAtUnix:  shell.StartedAtUnix,
+		Transient:           transient,
+		NudgeCount:          pacing.NudgeCount,
+		NudgeCapped:         pacing.Capped,
+		LastNudgeAtUnix:     pacing.LastNudgeAtUnix,
+		AutoNudgeCount:      pacing.AutoNudgeCount,
+		LastAutoNudgeAtUnix: pacing.LastAutoNudgeAtUnix,
+		WhipCount:           pacing.WhipCount,
+		LastWhipAtUnix:      pacing.LastWhipAtUnix,
+		LastCappedAtUnix:    pacing.LastCappedAtUnix,
+		RestartRequired:     restartRequired,
+		RoleChanged:         roleChanged,
 	}
 }
 
@@ -1516,7 +1586,16 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eru
 	}
 	busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
 	shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
-	pacing = orchestratorPacingSnapshot{NudgeCount: info.NudgeCount, Capped: info.NudgeCapped, LastNudgeAtUnix: info.LastNudgeAtUnix}
+	pacing = orchestratorPacingSnapshot{
+		NudgeCount:          info.NudgeCount,
+		Capped:              info.NudgeCapped,
+		LastNudgeAtUnix:     info.LastNudgeAtUnix,
+		AutoNudgeCount:      info.AutoNudgeCount,
+		LastAutoNudgeAtUnix: info.LastAutoNudgeAtUnix,
+		WhipCount:           info.WhipCount,
+		LastWhipAtUnix:      info.LastWhipAtUnix,
+		LastCappedAtUnix:    info.LastCappedAtUnix,
+	}
 	// The session already running still holds whatever it was spawned with;
 	// saving a different scope here does not touch it (see
 	// orchestratorScopeMismatch). Restart is the only thing that re-wires it,
@@ -1617,7 +1696,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 		return orchestratorInfo{}, false
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-	pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+	pacing := orchestratorPacingSnapshotFromSession(session)
 	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
@@ -1959,7 +2038,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				sessionID = session.serial
 				busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
 				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-				pacing = orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+				pacing = orchestratorPacingSnapshotFromSession(session)
 				// The persisted config is the operator's intent; the session
 				// still runs on whatever it was spawned with. A poll that
 				// shows the new set as if it were live is exactly the defect
@@ -1980,7 +2059,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 			continue
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
-		pacing := orchestratorPacingSnapshot{NudgeCount: session.pacingNudgeCount, Capped: session.pacingCapped, LastNudgeAtUnix: session.pacingLastNudgeAtUnix}
+		pacing := orchestratorPacingSnapshotFromSession(session)
 		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

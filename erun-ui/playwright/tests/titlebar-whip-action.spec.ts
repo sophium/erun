@@ -338,6 +338,42 @@ test('renders correctly in both light and dark theme', async ({ app }) => {
   });
 });
 
+// nextOrchestratorListRefresh resolves on the next ListOrchestrators call --
+// the same request-body-predicate pattern review-diff-tree.spec.ts's
+// nextDiffRefresh uses for its own polled RPC.
+function nextOrchestratorListRefresh(
+  page: import('@playwright/test').Page,
+): Promise<import('@playwright/test').Response> {
+  return page.waitForResponse((response) => {
+    if (!response.url().includes('/__erun_invoke')) {
+      return false;
+    }
+    const body = JSON.parse(response.request().postData() ?? '{}') as { method?: string };
+    return body.method === 'ListOrchestrators';
+  });
+}
+
+// A whip's outcome used to be visible only in the transient report panel: the
+// durable hover card (Sidebar.OrchestratorHoverCard.tsx's Nudges row) reads
+// from the store's own cached orchestrator list, which nothing refetched
+// after a whip. This asserts the refetch itself -- the closest observable
+// signal reachable without a live orchestrator PTY (this harness must not
+// spawn a real one, see orchestrator-pacing-nudge.spec.ts) that the card is
+// wired to reflect a whip immediately rather than needing an unrelated
+// reload to notice.
+test('a whip pass refreshes the orchestrator list so the hover card is not left stale', async ({
+  app,
+}) => {
+  await app.sidebar.openTenantDashboard(SEED_TENANT);
+  await app.titlebar.whipButton().click();
+  await app.titlebar.selectAllOrchestratorsButton().click();
+
+  const refreshed = nextOrchestratorListRefresh(app.page);
+  await app.titlebar.whipRunButton().click();
+  await expect(app.titlebar.whipReportHeading()).toBeVisible();
+  await refreshed;
+});
+
 test('an un-mocked pass names the seeded, never-opened environment and orchestrator as skipped', async ({
   app,
 }) => {

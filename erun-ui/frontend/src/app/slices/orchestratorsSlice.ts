@@ -62,10 +62,26 @@ export interface OrchestratorInfo {
   // pacing state (orchestrator_pacing.go): how many consecutive un-answered
   // pacing nudges erun has sent this session, and whether it gave up after
   // the cap. Zero/false for a stopped orchestrator, whose pacing state does
-  // not survive past its session.
+  // not survive past its session. These are the cap's own live budget: they
+  // reset every time the session answers, so they say only whether it is
+  // *currently* at the cap.
   nudgeCount: number;
   nudgeCapped: boolean;
   lastNudgeAtUnix?: number;
+  // autoNudgeCount/lastAutoNudgeAtUnix and whipCount/lastWhipAtUnix are the
+  // cumulative history behind that budget: how many automatic nudges, and
+  // how many explicit operator whips, this session has ever received, and
+  // when the last of each went out. Nothing resets these, so a session that
+  // answers every nudge still reports having been nudged rather than
+  // collapsing back to "never nudged". lastCappedAtUnix is the same
+  // treatment for the cap itself: it survives the rearm that clears
+  // nudgeCapped, so a session that has since resumed still reports having
+  // hit the cap before.
+  autoNudgeCount: number;
+  lastAutoNudgeAtUnix?: number;
+  whipCount: number;
+  lastWhipAtUnix?: number;
+  lastCappedAtUnix?: number;
   // restartRequired mirrors the Go side's own comparison of what this
   // orchestrator's live session was actually spawned with against what it is
   // linked to right now: true means an edit changed the scope while the
