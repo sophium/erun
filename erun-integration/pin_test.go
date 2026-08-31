@@ -336,8 +336,8 @@ func TestPin(t *testing.T) {
 	// runtimechart move to the target alongside runtimeversion, in the one
 	// write that realigns the environment's own config. Before this fix, only
 	// runtimeversion moved — runtimechart (this report) and a stated
-	// runtimeimage (a latent instance of the same #1754 gap, found while
-	// fixing this) were both left behind.
+	// runtimeimage (a latent instance of the same gap, found while fixing
+	// this) were both left behind.
 	t.Run("real_run_pins_runtimeversion_runtimeimage_and_runtimechart_together", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

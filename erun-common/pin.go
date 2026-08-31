@@ -230,10 +230,11 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 }
 
 // resolveRuntimeChartPinSite classifies a stated runtimechart the same way
-// #1754/#1762 classify the image: by the reference's own name, never by
-// version number — a tenant's own line and erun's own line can each publish
-// the same number. A chart naming erun's own stock chart returns a site to
-// move when it carries an explicit version; a stated chart with no version
+// the runtime-image line guard classifies the image: by the reference's own
+// name, never by version number — a tenant's own line and erun's own line
+// can each publish the same number. A chart naming erun's own stock chart
+// returns a site to move when it carries an explicit version; a stated
+// chart with no version
 // rides the deploy version already, so there is nothing to move and no
 // skip note either. Any other name -- the tenant's own umbrella, or a
 // reference pin could not even read a name out of -- returns a skip note
@@ -445,12 +446,12 @@ func ApplyPinPlan(plan PinPlan) error {
 // ApplyPinnedEnvConfig returns the environment config a resolved plan's own
 // env-config sites (runtimeversion, a stated-stock runtimeimage, runtimechart)
 // would produce, and whether anything actually changed. These three are one
-// coordinate — erun#1754 found runtimeversion healed while runtimeimage was
-// left behind, and erun#1771 found the same gap for runtimechart — so a
-// caller applying a plan computes every field it carries a site for in one
-// pass and saves once. Two independent saves derived from the same starting
-// snapshot would each overwrite the other's change, since a config save
-// writes the whole struct rather than merging fields.
+// coordinate: a prior report found runtimeversion healed while runtimeimage
+// was left behind, and the same gap turned up for runtimechart, so a caller
+// applying a plan computes every field it carries a site for in one pass and
+// saves once. Two independent saves derived from the same starting snapshot
+// would each overwrite the other's change, since a config save writes the
+// whole struct rather than merging fields.
 func ApplyPinnedEnvConfig(env EnvConfig, plan PinPlan) (EnvConfig, bool) {
 	updated := env
 	changed := false

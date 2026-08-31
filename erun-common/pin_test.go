@@ -512,8 +512,8 @@ func TestResolvePinPlanMovesTheStockRuntimeChartVersion(t *testing.T) {
 	}
 }
 
-// #1771: an environment that deliberately runs the chart on a different
-// release line than erun's own — the tenant's own umbrella, exactly what
+// The reported case: an environment that deliberately runs the chart on a
+// different release line than erun's own — the tenant's own umbrella, exactly what
 // --runtime-chart exists to let an operator state — is a real configuration,
 // not drift. A re-pin must leave it alone, the same way it leaves a
 // tenant-imaged runtimeimage alone.
@@ -566,7 +566,7 @@ func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 
 // An unclassifiable runtimechart (one pin cannot even read a chart name out
 // of) must proceed rather than block a plan it merely could not read — the
-// same "unknown is not fine, but unknown is not wrong either" rule #1762
+// same "unknown is not fine, but unknown is not wrong either" rule
 // established for the runtime-image line guard.
 func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T) {
 	root := seedPinnedTenantRepo(t)

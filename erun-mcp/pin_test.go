@@ -125,8 +125,9 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	assertPlanScopedToFrsOnly(t, output, frsRoot)
 }
 
-// The gap found while fixing erun#1771: nothing in this tool ever wrote the
-// env-config half of a pin back to the store at all, so a real (non-preview)
+// The gap found while fixing the same coordinate for the CLI transport:
+// nothing in this tool ever wrote the env-config half of a pin back to the
+// store at all, so a real (non-preview)
 // MCP re-pin left even runtimeversion unmoved -- the CLI transport's own
 // applyPinCommand does this via saveEnvConfig, but the MCP path had no
 // equivalent call. A real run must persist runtimeversion, a stated-stock
