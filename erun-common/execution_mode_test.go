@@ -56,3 +56,13 @@ func TestExecutionModeReportListsKnownOperations(t *testing.T) {
 		t.Fatal("expected \"aws-sts\" in the execution mode report")
 	}
 }
+
+func TestExecutionModeReportListsAWSWebIdentityTokenOperation(t *testing.T) {
+	statuses := ExecutionModeReport(ERunConfig{})
+	for _, status := range statuses {
+		if status.Operation == "aws-sts-web-identity-token" {
+			return
+		}
+	}
+	t.Fatal("expected \"aws-sts-web-identity-token\" in the execution mode report")
+}

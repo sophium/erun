@@ -1,6 +1,7 @@
 Target: team/dev
 == Execution modes ==
 aws-sts: library
+aws-sts-web-identity-token: subprocess
 
 Running: Remove unused Docker images
 audit: erun doctor --dry-run --prune-images team dev

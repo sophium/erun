@@ -34,11 +34,12 @@ See [Troubleshooting](/reference/troubleshooting#runtime-image-registry-mismatch
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
-`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today just `aws-sts` (`aws sts get-caller-identity`), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
+`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`) and `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
 
 ```
 == Execution modes ==
 aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
 ```
 
 See [Configuration reference · Execution modes](/reference/configuration#execution-modes) for the config key that controls it.

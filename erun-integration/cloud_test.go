@@ -746,6 +746,60 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
 	})
 
+	t.Run("oidc_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for the second aws-sts operation:
+		// awsCloudProviderBearerToken's status check + bearer-token trace must
+		// stay byte-identical to the subprocess-mode golden even when
+		// execution.modes.aws-sts-web-identity-token opts into the library
+		// path, since both defaultRunAWSBearerToken and libraryRunAWSBearerToken
+		// trace through the same awsGetWebIdentityTokenArgs and return before
+		// ever calling AWS on a dry run.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts-web-identity-token", "library")
+		args := []string{"cloud", "oidc", "--alias", "rihards+123456789012@aws", "--audience", "https://api.example", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path: with both execution.modes.aws-sts and
+		// execution.modes.aws-sts-web-identity-token set to "library", and a
+		// real static-credential AWS profile on disk, both the status check
+		// (CheckAWSStatus) and the bearer-token mint (RunAWSBearerToken)
+		// resolve via aws-sdk-go-v2 against a fake STS endpoint
+		// (AWS_ENDPOINT_URL) instead of shelling out, so the scenario declares
+		// no "aws" stub at all — the PATH scrub in internal/env would fail the
+		// run with "executable file not found" if production code fell
+		// through to a subprocess for either call.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		seedExecutionMode(t, setup, "aws-sts-web-identity-token", "library")
+		seedAWSStaticCredentialProfile(t, setup, "test-profile")
+		issuer := "https://oidc.eu-west-2.amazonaws.com/test-issuer"
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+		jwt := header + "." + payload + ".sig"
+		envVars := append(setup.Env(), "AWS_ENDPOINT_URL="+awsSTSActionStubServer(t, jwt).URL)
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "oidcissuerurl: "+issuer) {
+			t.Errorf("expected persisted OIDC issuer %q, got:\n%s", issuer, raw)
+		}
+	})
+
 	t.Run("login_select_prompt_resolves_active_alias", func(t *testing.T) {
 		// Without --alias, `cloud login` shows a Select of configured aliases;
 		// "\r" confirms the single highlighted entry (the run's one interactive
@@ -1481,8 +1535,11 @@ func seedCloudProviderAlias(t testing.TB, setup env.Setup, alias, profile string
 // seedExecutionMode appends an execution.modes override to the root
 // config.yaml, preserving whatever seedCloudProviderAlias or another fixture
 // already wrote — config.yaml is plain YAML, so appending a distinct
-// top-level key is enough, without needing to parse and re-merge the
-// existing document.
+// top-level key is enough, without needing to parse and re-merge the existing
+// document. A second call (a scenario opting two operations into library mode
+// at once) inserts its line into the existing "modes:" map instead of adding
+// a second "execution:" top-level key, which yaml.Unmarshal rejects as a
+// duplicate key.
 func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -1491,7 +1548,15 @@ func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
 	}
 	path := filepath.Join(root, "config.yaml")
 	existing, _ := os.ReadFile(path)
-	body := string(existing) + "execution:\n  modes:\n    " + operation + ": " + mode + "\n"
+	body := string(existing)
+	line := "    " + operation + ": " + mode + "\n"
+	const modesHeader = "execution:\n  modes:\n"
+	if idx := strings.Index(body, modesHeader); idx >= 0 {
+		insertAt := idx + len(modesHeader)
+		body = body[:insertAt] + line + body[insertAt:]
+	} else {
+		body += modesHeader + line
+	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write erun config: %v", err)
 	}
@@ -1534,6 +1599,47 @@ func stsCallerIdentityStubServer(t testing.TB) *httptest.Server {
   </GetCallerIdentityResult>
   <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
 </GetCallerIdentityResponse>`)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// awsSTSActionStubServer discriminates by the AWS Query protocol's Action
+// form field, so one fake STS endpoint can back both GetCallerIdentity
+// (CheckAWSStatus) and GetWebIdentityToken (RunAWSBearerToken) in the same
+// real-run scenario — a scenario that flips both operations to library mode
+// exercises both against a single AWS_ENDPOINT_URL.
+func awsSTSActionStubServer(t testing.TB, webIdentityToken string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		switch r.PostForm.Get("Action") {
+		case "GetCallerIdentity":
+			_, _ = fmt.Fprint(w, `<?xml version="1.0"?>
+<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetCallerIdentityResult>
+    <Arn>arn:aws:iam::123456789012:user/test-user</Arn>
+    <UserId>AIDAEXAMPLE</UserId>
+    <Account>123456789012</Account>
+  </GetCallerIdentityResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetCallerIdentityResponse>`)
+		case "GetWebIdentityToken":
+			_, _ = fmt.Fprintf(w, `<?xml version="1.0"?>
+<GetWebIdentityTokenResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetWebIdentityTokenResult>
+    <WebIdentityToken>%s</WebIdentityToken>
+    <Expiration>2026-01-01T00:00:00Z</Expiration>
+  </GetWebIdentityTokenResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetWebIdentityTokenResponse>`, webIdentityToken)
+		default:
+			http.Error(w, "unexpected STS action "+r.PostForm.Get("Action"), http.StatusBadRequest)
+		}
 	}))
 	t.Cleanup(server.Close)
 	return server

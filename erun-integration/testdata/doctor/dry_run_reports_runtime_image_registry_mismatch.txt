@@ -1,6 +1,7 @@
 Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
 
 == Runtime image registry ==
 runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.

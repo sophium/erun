@@ -1,6 +1,7 @@
 Target: team/dev
 == Execution modes ==
 aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
 
 == Helm release status ==
 NAME: team-devops

@@ -963,7 +963,7 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 		deps.RunAWSLogout = defaultRunAWSLogout
 	}
 	if deps.RunAWSBearerToken == nil {
-		deps.RunAWSBearerToken = defaultRunAWSBearerToken
+		deps.RunAWSBearerToken = runAWSBearerTokenForExecutionMode()
 	}
 	if deps.RunAWSEnableOIDC == nil {
 		deps.RunAWSEnableOIDC = defaultRunAWSEnableOIDC
@@ -989,6 +989,13 @@ func resolveAWSIdentityForExecutionMode() func(Context, string) (AWSIdentity, er
 		return libraryResolveAWSIdentity
 	}
 	return defaultResolveAWSIdentity
+}
+
+func runAWSBearerTokenForExecutionMode() func(Context, string, string) (string, error) {
+	if currentExecutionMode(awsSTSWebIdentityTokenExecutionOperation) == ExecutionModeLibrary {
+		return libraryRunAWSBearerToken
+	}
+	return defaultRunAWSBearerToken
 }
 
 func checkAWSStatusForExecutionMode() func(Context, CloudProviderConfig) CloudProviderStatus {
@@ -1110,17 +1117,7 @@ func defaultRunAWSLogout(ctx Context, profile string) error {
 
 func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, error) {
 	audience = normalizeCloudBearerAudience(audience)
-	args := []string{
-		"sts", "get-web-identity-token",
-		"--audience", audience,
-		"--signing-algorithm", "RS256",
-		"--duration-seconds", "900",
-		"--query", "WebIdentityToken",
-		"--output", "text",
-	}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsGetWebIdentityTokenArgs(profile, audience)
 	ctx.TraceCommand("", "aws", args...)
 	if ctx.DryRun {
 		return "", nil
