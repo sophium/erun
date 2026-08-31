@@ -15,6 +15,18 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 // TestListOrchestratorEnvCandidatesCoversBothAgentTypes in
 // erun-ui/orchestrator_test.go. This spec cancels rather than creating, so the
 // shared seeded config stays untouched for the other specs.
+//
+// Linking also kicks off a best-effort MCP port-forward for the linked
+// environment, so an operator never has to run `erun open` by hand before
+// an orchestrator's tools work. The headless harness has no real
+// cluster to forward against (kubectl/erun are stubbed here), so that
+// reachability contract — opened when healthy, left alone when stopped,
+// surfaced when it fails — is covered by
+// TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen,
+// TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv,
+// TestLinkingAStoppedEnvironmentDoesNotForceStartIt, and
+// TestLinkingAnEnvironmentSurfacesAForwardOpenFailure in
+// erun-ui/orchestrator_link_forward_test.go.
 test.describe('orchestrator links a local-agent environment', () => {
   test('offers the env and shows its worktree as a derived path', async ({ app }) => {
     await app.sidebar.newOrchestratorButton().click();
