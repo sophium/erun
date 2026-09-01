@@ -281,7 +281,50 @@ cleanup_isolated_home() {
 		rm -rf "$ERUN_PLAYWRIGHT_HOME"
 	fi
 }
-trap cleanup_isolated_home EXIT
+
+# reap_process_group kills anything still alive in this script's own process
+# group before it exits. The seeded PATH stub for `erun open` (fixtures/
+# seedRoot.ts) execs `sleep` to hold a tab's session open for the life of the
+# suite, and that child is never explicitly waited on or killed by anything
+# that tears the suite down -- stopping the headless backend it belongs to
+# only waits for the backend's own process to exit, not its children. Left
+# alone, that orphan stays a member of this script's process group long after
+# this script itself is done, and a supervisor watching this script for
+# exactly that shape (background work started and never waited for) records
+# a fully passing run as abandoned.
+#
+# Only ever acts when this script's own pid is the process group's own
+# leader: that is true whenever something gave this invocation a fresh group
+# (a supervisor's Setpgid, or ordinary job-control launching it as its own
+# foreground job), and in that case every other member is provably this
+# script's own descendant -- nothing it would be unsafe to signal. When it is
+# not the leader (this pgid predates this script, e.g. a caller's shell with
+# job control off), this is a no-op rather than a guess at what else shares
+# that group.
+reap_process_group() {
+	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
+	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
+		return 0
+	fi
+	survivors() {
+		ps -axo pid=,pgid= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" '$2==pg && $1!=me {print $1}'
+	}
+	pids=$(survivors)
+	[ -n "$pids" ] || return 0
+	# shellcheck disable=SC2086
+	kill -TERM $pids 2>/dev/null || true
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		pids=$(survivors)
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
+	# shellcheck disable=SC2086
+	kill -KILL $pids 2>/dev/null || true
+}
+
+trap 'reap_process_group; cleanup_isolated_home' EXIT
 
 # Opt-in k3d e2e mode (issue #647): un-stub the backend (real docker/kubectl/
 # helm + the real erun CLI), register binfmt for the mandatory multi-arch build,
