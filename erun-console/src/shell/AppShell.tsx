@@ -80,7 +80,7 @@ function SectionContent({
       return (
         <div className="grid gap-6">
           <ConfigView config={config} />
-          <QuotaPanel token={token} />
+          <QuotaPanel token={token} tenants={tenants} scopeTenantId={scopeTenantId} />
         </div>
       );
     case 'environments':
