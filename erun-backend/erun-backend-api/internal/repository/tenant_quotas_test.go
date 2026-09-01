@@ -50,8 +50,8 @@ func TestDefaultTenantQuotaAdmitsTheStockRuntimePod(t *testing.T) {
 	// Pinned literals: today's actual chart shape, so a change to either
 	// container's defaults or the PVC sizes is visible here as well as in
 	// erun-devops/k8s/erun-devops-chart_test.sh's independent chart render.
-	if got != [3]int{8000, 17832, 72} {
-		t.Fatalf("default tenant quota = %v, want [8000 17832 72]", got)
+	if got != [3]int{8000, 29396, 72} {
+		t.Fatalf("default tenant quota = %v, want [8000 29396 72]", got)
 	}
 }
 

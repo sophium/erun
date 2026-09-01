@@ -17,17 +17,43 @@ const (
 // sidecar declared no resources of its own, so a namespace ResourceQuota's
 // LimitRange silently defaulted it to the *entire* configured quota width
 // (namespaceResourceQuotaManifest in kubernetes_resource_quota.go) — doubling
-// what the two-container pod actually asked a ResourceQuota to admit. Sized to
-// match the erun-devops container's own defaults: that is the shape the
-// sidecar was already implicitly assigned while the bug was live, and it is
-// dind that runs the actual docker builds, so it is not the smaller of the
-// two containers. These are only the fallback: an environment that sizes the
+// what the two-container pod actually asked a ResourceQuota to admit. It was
+// then sized to match the erun-devops container's own defaults (8916Mi) —
+// the shape the sidecar was already implicitly assigned while that bug was
+// live — but every image build runs in this sidecar, not the runtime
+// container, and a live cache-miss `erun release` OOMed against that number:
+// a single `make check` inside the erun-devops build (golangci-lint
+// type-checking the AWS SDK is the driver) measured a peak of ~15.2Gi, so
+// 8916Mi was under half of what one gate run alone needs. Raised to 20Gi —
+// comfortably above the measured peak, not merely above the old default —
+// now that the sidecar is independently sizeable (`erun resize
+// --dind-memory`) so an environment that still needs more is not stuck at a
+// fixed number. These are only the fallback: an environment that sizes the
 // sidecar independently (`erun init`/`erun resize --dind-cpu/--dind-memory`,
 // EnvConfig.RuntimeDindPod) overrides them the same way RuntimePod already
 // overrides DefaultRuntimePodCPU/Memory.
+//
+// Note this default does not by itself guarantee the limit is enforced on
+// every cluster: erun-dind's inner `dockerd` runs with no `--cgroup-parent`,
+// and on a cgroupfs-driver cgroup v2 host with an unnamespaced (privileged)
+// view of the real cgroup tree, that means BuildKit's own build containers
+// land as siblings of the pod's own Kubernetes-limited cgroup
+// (/sys/fs/cgroup/docker/buildkit/*, memory.max: max) rather than as its
+// descendants — verified live. Nesting them properly (so this limit is the
+// real ceiling rather than node memory) was investigated and shelved:
+// it requires moving the sidecar's own process out of its assigned cgroup so
+// that cgroup's cgroup.subtree_control can delegate the memory controller to
+// a child, and cgroup v2 then refuses to attach any *new* process directly
+// to that cgroup afterward (confirmed live) — which is exactly how
+// `kubectl exec`/`erun open`, the postStart hook, and the readiness probe
+// all reach this container. Raising this default is real capacity-planning
+// value (it sizes `erun init`/`erun resize`'s own suggestion and the backend
+// tenant-quota floor derived from MinimumRuntimeNamespaceQuota) even though
+// it is a bigger ceiling for the node to have room for, not a hard cgroup
+// enforcement of it.
 const (
 	DefaultRuntimeDindCPU           = "4"
-	DefaultRuntimeDindMemory        = "8916Mi"
+	DefaultRuntimeDindMemory        = "20Gi"
 	DefaultRuntimeDindRequestCPU    = "0.25"
 	DefaultRuntimeDindRequestMemory = "1024Mi"
 )

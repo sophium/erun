@@ -35,7 +35,7 @@ Tenants:
           container-registries: registry.example/test[build,deploy]
           runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
           runtime-pod: none
-          sizing: memory raise to 23808Mi from 20480Mi (3 oom kill(s) at 20480Mi; bounded by the 32Gi namespace quota less the dind sidecar's 8916Mi, high confidence); cpu insufficient-evidence from 4 (0.00% of scheduling periods throttled (0 of 50000), but only 5h12m observed of the 24h0m a shrink needs)
+          sizing: memory raise to 12288Mi from 20480Mi (3 oom kill(s) at 20480Mi; bounded by the 32Gi namespace quota less the dind sidecar's 20Gi, high confidence); cpu insufficient-evidence from 4 (0.00% of scheduling periods throttled (0 of 50000), but only 5h12m observed of the 24h0m a shrink needs)
           sizing-evidence: 5h12m observed, 30 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
           managed-cloud: off
           ai-tool: none

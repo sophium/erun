@@ -12,7 +12,7 @@ Loading environment configuration
 ==> Initializing beta/dev
 init: runtime version not given; keeping <VERSION>
 init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
-init: erun-dind sidecar resources not given; keeping cpu=4 memory=8916Mi
+init: erun-dind sidecar resources not given; keeping cpu=4 memory=20Gi
 init: --type not given; keeping env type unset
 init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized beta/dev

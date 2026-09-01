@@ -593,7 +593,7 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	EnvironmentRoutes{
 		environments: environments,
 		contexts:     &stubContextRepository{},
-		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 9000, maxMemoryMB: 20000, maxStorageGB: 100},
+		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 9000, maxMemoryMB: 30000, maxStorageGB: 100},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner:  prov,
 	}.createEnvironment(rec, req)
@@ -605,8 +605,8 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 		t.Fatalf("Start called %d times, want 1", len(prov.started))
 	}
 	got := prov.started[0]
-	if got.MaxCPUMillicores != 9000 || got.MaxMemoryMB != 20000 || got.MaxStorageGB != 100 {
-		t.Fatalf("resource caps = %+v, want 9000/20000/100", got)
+	if got.MaxCPUMillicores != 9000 || got.MaxMemoryMB != 30000 || got.MaxStorageGB != 100 {
+		t.Fatalf("resource caps = %+v, want 9000/30000/100", got)
 	}
 }
 
@@ -656,8 +656,8 @@ func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
-			maxTotalCPUMillicores: 8000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
+			maxTotalCPUMillicores: 8000, maxTotalMemoryMB: 29396, maxTotalStorageGB: 72,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -687,8 +687,8 @@ func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
-			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 35664, maxTotalStorageGB: 144,
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
+			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 58792, maxTotalStorageGB: 144,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -721,8 +721,8 @@ func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
-			maxTotalCPUMillicores: 4000, maxTotalMemoryMB: 17832, maxTotalStorageGB: 72,
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
+			maxTotalCPUMillicores: 4000, maxTotalMemoryMB: 29396, maxTotalStorageGB: 72,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -1221,8 +1221,8 @@ var runtimeFloorQuotaCases = map[string]struct {
 	},
 	"meets runtime floor": {
 		quota: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 17832, maxStorageGB: 72,
-			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 35664, maxTotalStorageGB: 144,
+			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
+			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 58792, maxTotalStorageGB: 144,
 		},
 		floorOK: true,
 	},
