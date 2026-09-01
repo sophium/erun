@@ -217,6 +217,22 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_configured_k8s_path", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_gitignored_project_config_warns", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. The
+		// deploy trace must surface that as a warning instead of staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_gitignored_project_config_warns", normalize.Apply(result.Combined))
+	})
+
 	t.Run("configured_k8s_path_wrong_name_errors", func(t *testing.T) {
 		// A paths.k8s override pointing at a directory not named "k8s" fails with an
 		// error explaining the naming constraint, rather than silently falling back

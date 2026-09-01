@@ -1,4 +1,5 @@
 audit: erun build --dry-run --environment local
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 docker pull --platform linux/amd64 ghcr.io/sophium/base:<VERSION>
 docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64

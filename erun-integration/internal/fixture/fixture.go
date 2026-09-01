@@ -1095,6 +1095,19 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
 }
 
+// SeedGitignoredProjectConfig commits a ".erun/" gitignore rule (the exact
+// shape seen in the wild: a blanket directory ignore that also excludes the
+// per-project config it holds) and then writes .erun/config.yaml, so the
+// config resolves from disk but git never tracks it. Requires a git repo
+// already initialized at setup.Cwd (fixture.SeedGitRepo).
+func SeedGitignoredProjectConfig(t testing.TB, setup env.Setup, body string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(setup.Cwd, ".gitignore"), ".erun/\n")
+	RunGit(t, setup.Cwd, "add", ".gitignore")
+	RunGit(t, setup.Cwd, "commit", "-q", "-m", "ignore .erun")
+	SeedProjectK8sConfig(t, setup, body)
+}
+
 // SeedTerraformEnvRoot materializes a platform's per-env Terraform root so erun
 // terraform resolves a folder to run in, mirroring the layout the
 // erun-blueprint-platform skill scaffolds. The per-env common.tf is a real

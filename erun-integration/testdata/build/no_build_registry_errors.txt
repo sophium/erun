@@ -1,2 +1,3 @@
 audit: erun build --dry-run
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
 environment "" has no build registry; mark a registry with the build role in .erun/config.yaml before building

@@ -3252,8 +3252,11 @@ func configuredK8sDir(projectRoot string) (string, bool, error) {
 
 // traceConfiguredDeployPaths surfaces a configured paths.k8s override as a
 // dry-run decision line so the deploy plan shows the chart dir was resolved from
-// config rather than the -devops convention.
+// config rather than the -devops convention. It also warns when the project
+// config itself is gitignored, since that silently voids the very override it
+// just traced.
 func traceConfiguredDeployPaths(ctx Context, repoPath string) {
+	WarnIfProjectConfigGitIgnored(ctx, repoPath)
 	paths, err := loadProjectPaths(repoPath)
 	if err != nil {
 		return

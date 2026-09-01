@@ -112,12 +112,14 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 // traceConfiguredBuildPaths surfaces configured paths.docker/paths.dockercontext/
 // paths.version overrides as dry-run decision lines so the build plan shows the
 // docker build root, build context, and version file were resolved from config
-// rather than convention.
+// rather than convention. It also warns when the project config itself is
+// gitignored, since that silently voids the very overrides it just traced.
 func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
+	WarnIfProjectConfigGitIgnored(ctx, projectRoot)
 	paths, err := loadProjectPaths(projectRoot)
 	if err != nil {
 		return

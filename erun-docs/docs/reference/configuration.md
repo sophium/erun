@@ -114,7 +114,12 @@ The env's Claude AI tab also launches with **Remote Control** enabled by default
 
 ### `ProjectConfig` (`<repo>/.erun/config.yaml`)
 
-Committed to the repo, applies to anyone who checks it out.
+Committed to the repo, applies to anyone who checks it out. A gitignored copy defeats that: git never sees it, so it resolves on the one machine that wrote it and nowhere else — the file still exists on disk and every command that reads it succeeds silently. `erun build`, `erun deploy`, and `erun doctor` each detect this via `git check-ignore` against `.erun/config.yaml` and report it rather than resolving silently:
+
+- `erun build` / `erun deploy` trace `config: .erun/config.yaml is excluded by .gitignore -- this resolves only on this machine; replace a bare ".erun/" ignore with ".erun/*" plus "!.erun/config.yaml"` (visible at default verbosity, in real runs and `--dry-run` alike).
+- `erun doctor` reports the same finding under an `== Project config ==` heading.
+- The fix names the actual trap: a bare `.erun/` directory ignore cannot be negated per file in git (`!.erun/config.yaml` alone would never re-include a file inside an already-ignored directory), so the remedy is `.erun/*` (ignore each entry individually) plus `!.erun/config.yaml` (re-include the one file that must be tracked).
+- Detection is best-effort: outside a git repository, or when `git` is unavailable, no warning is produced and the config still resolves from disk as it always did.
 
 | Field | Type | Used by | Effect |
 |---|---|---|---|

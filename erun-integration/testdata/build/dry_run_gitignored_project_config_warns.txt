@@ -1,7 +1,7 @@
 audit: erun build --dry-run
 cd <TMP> && git check-ignore -q -- .erun/config.yaml
+config: .erun/config.yaml is excluded by .gitignore -- this resolves only on this machine; replace a bare ".erun/" ignore with ".erun/*" plus "!.erun/config.yaml"
 build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
-build: docker build context configured as component (.erun/config.yaml paths.dockercontext)
 build: version file configured as build/VERSION (.erun/config.yaml paths.version)
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
