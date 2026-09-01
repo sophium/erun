@@ -230,9 +230,9 @@ func defaultRefreshERunTokens(ctx Context, discovery OIDCDiscovery, clientID str
 
 // runERunAuthorizationCodeLogin is the Authorization Code + PKCE fallback for
 // an issuer that does not advertise a device authorization endpoint. It opens
-// a loopback listener for the redirect (no browser is launched automatically;
-// the URL is printed for the operator to open) and exchanges the returned
-// code for tokens.
+// a loopback listener for the redirect, attempts to launch the operator's
+// default browser at the authorize URL, and exchanges the returned code for
+// tokens.
 func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientID, scope string) (ERunTokens, error) {
 	if strings.TrimSpace(discovery.AuthorizationEndpoint) == "" {
 		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise an authorization endpoint", discovery.Issuer)
@@ -284,8 +284,18 @@ func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, aut
 	server := &http.Server{Handler: erunCallbackHandler(state, resultCh)}
 	go func() { _ = server.Serve(listener) }()
 
-	ctx.Trace("open browser " + authURL)
-	writeERunLoginPrompt(ctx, fmt.Sprintf("Open the following URL to sign in:\n\n  %s\n\n", authURL))
+	// The trace and prompt must report what actually happened, not the
+	// action attempted: a launch failure (no browser installed, a headless
+	// pod, an unattended agent run) is non-fatal, since the printed URL still
+	// works, but the operator must be told to use it rather than wait on a
+	// browser that never opened.
+	if err := openERunLoginBrowser(authURL); err != nil {
+		ctx.Trace("could not open a browser: " + err.Error())
+		writeERunLoginPrompt(ctx, fmt.Sprintf("Could not open a browser automatically (%s). Open the following URL to sign in:\n\n  %s\n\n", err.Error(), authURL))
+	} else {
+		ctx.Trace("opened browser " + authURL)
+		writeERunLoginPrompt(ctx, fmt.Sprintf("Opened your browser to sign in. If it did not open, visit:\n\n  %s\n\n", authURL))
+	}
 
 	select {
 	case result := <-resultCh:
@@ -297,8 +307,47 @@ func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, aut
 		}
 		return result.code, nil
 	case <-time.After(5 * time.Minute):
-		return "", fmt.Errorf("timed out waiting for the browser sign-in to complete")
+		return "", fmt.Errorf("did not receive the sign-in callback within 5 minutes; open %s to sign in", authURL)
 	}
+}
+
+// erunLoginBrowserCommand resolves the platform-appropriate command to open a
+// URL in the operator's default browser, mirroring the equivalents already
+// used for host paths (erun-ui/host_open_path.go) and IDE URIs
+// (erun-cli/cmd/open_ide.go): open on darwin, xdg-open on linux, and cmd's
+// start verb on windows (the empty title argument keeps cmd from parsing the
+// URL itself as the window title).
+func erunLoginBrowserCommand(hostOS HostOS, url string) (string, []string, error) {
+	switch hostOS {
+	case HostOSDarwin:
+		return "open", []string{url}, nil
+	case HostOSLinux:
+		return "xdg-open", []string{url}, nil
+	case HostOSWindows:
+		return "cmd", []string{"/c", "start", "", url}, nil
+	default:
+		return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
+	}
+}
+
+// openERunLoginBrowser launches the operator's default browser at url and
+// detaches immediately (Start, then Release) so a browser that hangs, or a
+// host with no display at all, can never block the callback wait that
+// follows. Uses the same ERUN_<NAME>_BIN override Command already wires, so
+// a test can redirect the opener to a stub without a live desktop session.
+func openERunLoginBrowser(url string) error {
+	executable, args, err := erunLoginBrowserCommand(DetectHost().OS, url)
+	if err != nil {
+		return err
+	}
+	cmd := Command(executable, args...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch %s: %w", executable, err)
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	return nil
 }
 
 // erunCallbackHandler writes its response fully before signaling resultCh.

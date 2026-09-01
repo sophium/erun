@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -375,6 +378,114 @@ func TestRunERunAuthorizationCodeLoginRoundTrip(t *testing.T) {
 	}
 }
 
+func TestERunLoginBrowserCommandPerOS(t *testing.T) {
+	const authURL = "https://auth.example.test/authorize?state=1"
+	cases := []struct {
+		hostOS     HostOS
+		executable string
+		args       []string
+	}{
+		{HostOSDarwin, "open", []string{authURL}},
+		{HostOSLinux, "xdg-open", []string{authURL}},
+		{HostOSWindows, "cmd", []string{"/c", "start", "", authURL}},
+	}
+	for _, c := range cases {
+		executable, args, err := erunLoginBrowserCommand(c.hostOS, authURL)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.hostOS, err)
+		}
+		if executable != c.executable {
+			t.Fatalf("%s: executable = %q, want %q", c.hostOS, executable, c.executable)
+		}
+		if !slices.Equal(args, c.args) {
+			t.Fatalf("%s: args = %v, want %v", c.hostOS, args, c.args)
+		}
+	}
+	if _, _, err := erunLoginBrowserCommand(HostOSUnknown, authURL); err == nil {
+		t.Fatal("expected an unsupported host OS to error")
+	}
+}
+
+// writeExecutableStub writes a script that exits immediately with exitCode,
+// for pointing an ERUN_<NAME>_BIN override at a fake browser opener without a
+// live desktop session.
+func writeExecutableStub(t *testing.T, exitCode int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "browser-opener-stub")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("#!/bin/sh\nexit %d\n", exitCode)), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	return path
+}
+
+func TestOpenERunLoginBrowserSucceedsAndFailsNonFatally(t *testing.T) {
+	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
+
+	t.Setenv("ERUN_XDG_OPEN_BIN", writeExecutableStub(t, 0))
+	if err := openERunLoginBrowser("https://auth.example.test/authorize"); err != nil {
+		t.Fatalf("expected the stub launch to succeed, got: %v", err)
+	}
+
+	t.Setenv("ERUN_XDG_OPEN_BIN", filepath.Join(t.TempDir(), "does-not-exist"))
+	if err := openERunLoginBrowser("https://auth.example.test/authorize"); err == nil {
+		t.Fatal("expected a missing browser opener to fail")
+	}
+}
+
+// TestAwaitERunOIDCCallbackReportsBrowserLaunchOutcome pins the trace/prompt
+// contract the desktop and CLI both rely on: the operator is told what
+// actually happened, and a launch failure never blocks the callback wait
+// that follows.
+func TestAwaitERunOIDCCallbackReportsBrowserLaunchOutcome(t *testing.T) {
+	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
+	tokenSrv := httptest.NewServer(authorizationCodeExchangeHandler(t, "auth-code-2", ERunTokens{AccessToken: "access-2", RefreshToken: "refresh-2", ExpiresIn: time.Hour}))
+	defer tokenSrv.Close()
+	discovery := OIDCDiscovery{AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: tokenSrv.URL}
+
+	completeLoginAndSnapshot := func(t *testing.T) string {
+		t.Helper()
+		stdout := &syncBuffer{}
+		resultCh, errCh := startERunAuthorizationCodeLogin(discovery, "cli-1", stdout)
+		authURL := stdout.awaitURL(t, 2*time.Second)
+		redirectURI, state := mustParseRedirectAndState(t, authURL)
+		resp, err := http.Get(fmt.Sprintf("%s?code=auth-code-2&state=%s", redirectURI, state))
+		if err != nil {
+			t.Fatalf("simulate browser callback GET: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		select {
+		case <-resultCh:
+		case err := <-errCh:
+			t.Fatalf("runERunAuthorizationCodeLogin: %v", err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for the login flow to complete after the callback")
+		}
+		return stdout.snapshot()
+	}
+
+	t.Run("browser opens", func(t *testing.T) {
+		t.Setenv("ERUN_XDG_OPEN_BIN", writeExecutableStub(t, 0))
+		prompt := completeLoginAndSnapshot(t)
+		if !strings.Contains(prompt, "Opened your browser to sign in") {
+			t.Fatalf("expected an opened-browser prompt, got:\n%s", prompt)
+		}
+		if strings.Contains(prompt, "Could not open a browser") {
+			t.Fatalf("did not expect a fallback prompt, got:\n%s", prompt)
+		}
+	})
+
+	t.Run("browser fails to open", func(t *testing.T) {
+		t.Setenv("ERUN_XDG_OPEN_BIN", filepath.Join(t.TempDir(), "does-not-exist"))
+		prompt := completeLoginAndSnapshot(t)
+		if !strings.Contains(prompt, "Could not open a browser automatically") {
+			t.Fatalf("expected a fallback prompt, got:\n%s", prompt)
+		}
+		if !strings.Contains(prompt, "https://auth.example.test/authorize") {
+			t.Fatalf("expected the fallback prompt to still carry the sign-in url, got:\n%s", prompt)
+		}
+	})
+}
+
 func mustParseRedirectAndState(t *testing.T, authURL string) (string, string) {
 	t.Helper()
 	parsed, err := url.Parse(authURL)
@@ -401,6 +512,12 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	b.data = append(b.data, p...)
 	return len(p), nil
+}
+
+func (b *syncBuffer) snapshot() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.data)
 }
 
 func (b *syncBuffer) awaitURL(t *testing.T, timeout time.Duration) string {
