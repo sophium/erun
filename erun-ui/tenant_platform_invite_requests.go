@@ -323,16 +323,33 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 		status.State = tenantEnrollmentEnrolled
 		return status
 	}
-	// Whoami failing with unauthorized/forbidden is the expected shape of
-	// "not enrolled yet, go check the invite request" — anything else (a
-	// network fault, a 5xx) means the state genuinely could not be
-	// determined.
-	if !errors.Is(whoamiErr, eruncommon.ErrPlatformUnauthorized) && !errors.Is(whoamiErr, eruncommon.ErrPlatformForbidden) {
-		status.State = tenantEnrollmentUnknown
+	// This is the same whoami read tenantDashboardIdentityFailure classifies
+	// (tenant_dashboard.go): a 403 means the identity already resolved to a
+	// tenant user and only the read itself was refused for lacking
+	// permissions, which is enrolled, not "not yet" — collapsing it into the
+	// invite-request check below would render the not-enrolled glyph for an
+	// identity the platform already recognizes.
+	if errors.Is(whoamiErr, eruncommon.ErrPlatformForbidden) {
+		status.State = tenantEnrollmentEnrolled
 		return status
 	}
-
-	return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.client, status)
+	if errors.Is(whoamiErr, eruncommon.ErrPlatformUnauthorized) {
+		switch eruncommon.PlatformAuthErrorCode(whoamiErr) {
+		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
+			// Neither is an enrollment answer (same line tenantDashboardIdentityFailure
+			// and enrollERunPlatformUserError draw): the state genuinely could
+			// not be determined, so it must not fall through to "never
+			// requested" -> local-only.
+			status.State = tenantEnrollmentUnknown
+			return status
+		}
+		// NOT_ENROLLED, or an older platform's unclassified 401: the expected
+		// shape of "not enrolled yet, go check the invite request".
+		return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.client, status)
+	}
+	// A network fault or 5xx: the state genuinely could not be determined.
+	status.State = tenantEnrollmentUnknown
+	return status
 }
 
 // tenantPlatformEnrollmentStatusFromInviteRequest fills in status.State from

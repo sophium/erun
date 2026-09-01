@@ -1,5 +1,8 @@
 import {
   INVITE_REQUEST_KIND_JOIN_TENANT,
+  TENANT_PLATFORM_STATE_CHOOSE_ALIAS,
+  TENANT_PLATFORM_STATE_NOT_CONNECTED,
+  TENANT_PLATFORM_STATE_NOT_SIGNED_IN,
   type UITenant,
   type UITenantConfig,
   type UITenantDashboardInput,
@@ -7,6 +10,7 @@ import {
 
 import { cloudApi } from './api/cloudApi';
 import { tenantApi } from './api/tenantApi';
+import { tenantInviteRequestApi } from './api/tenantInviteRequestApi';
 import { replaceCloudProvider } from './cloudContextState';
 import { readError } from './errors';
 import { showNotification, showTerminalError, showTerminalMessage } from './notificationThunks';
@@ -365,6 +369,18 @@ export const setReviewFilter =
     await dispatch(loadTenantDashboard());
   };
 
+// tenantDashboardWhoamiResolved reports whether loadTenantDashboard's own
+// load actually reached the platform's GET /v1/whoami -- true for every
+// platformState except the three that mean the identity resolution never
+// got that far (not connected, ambiguous alias, or no session at all).
+function tenantDashboardWhoamiResolved(platformState: string | undefined): boolean {
+  return (
+    platformState !== TENANT_PLATFORM_STATE_NOT_CONNECTED &&
+    platformState !== TENANT_PLATFORM_STATE_CHOOSE_ALIAS &&
+    platformState !== TENANT_PLATFORM_STATE_NOT_SIGNED_IN
+  );
+}
+
 export const loadTenantDashboard =
   (tenant?: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -402,6 +418,13 @@ export const loadTenantDashboard =
           data,
         }),
       );
+      if (tenantDashboardWhoamiResolved(data.platformState)) {
+        // The dashboard's own load just made the exact call
+        // (GET /v1/whoami) the sidebar's enrollment poll uses to decide
+        // enrolled -- independent evidence of the same transition, and an
+        // invalidation here is a no-op when nothing changed.
+        dispatch(tenantInviteRequestApi.util.invalidateTags(['TenantEnrollment']));
+      }
     } catch (error) {
       if (getState().tenantDashboard.tenant !== target) {
         return;
