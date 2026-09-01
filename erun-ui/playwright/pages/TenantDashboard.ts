@@ -265,14 +265,6 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Register context' });
   }
 
-  previewProvisioningButton(): Locator {
-    return this.activePanel().getByRole('button', { name: 'Preview provisioning plan' });
-  }
-
-  previewEnvNameInput(): Locator {
-    return this.activePanel().getByLabel('Environment name');
-  }
-
   environmentsHeading(): Locator {
     return this.activePanel().getByRole('heading', { name: 'Hosted environments' });
   }
@@ -281,12 +273,41 @@ export class TenantDashboard {
     return this.activePanel().getByText('No hosted environments registered', { exact: true });
   }
 
-  registerEnvNameInput(): Locator {
+  // The environment form: one field set backs both Preview and Register.
+  // .last() picks it over the cloud-context form's own "Name" field.
+  envNameInput(): Locator {
     return this.activePanel().getByLabel('Name').last();
+  }
+
+  envAdoptToggle(): Locator {
+    return this.activePanel().getByRole('checkbox', { name: /already exists/ });
+  }
+
+  envKubernetesContextInput(): Locator {
+    return this.activePanel().getByLabel('Kubernetes context', { exact: false });
+  }
+
+  previewEnvironmentButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Preview plan' });
   }
 
   registerEnvironmentButton(): Locator {
     return this.activePanel().getByRole('button', { name: 'Register environment' });
+  }
+
+  recordEnvironmentButton(): Locator {
+    return this.activePanel().getByRole('button', { name: 'Record environment' });
+  }
+
+  localEnvironmentsHeading(): Locator {
+    return this.activePanel().getByRole('heading', { name: 'Your local environments' });
+  }
+
+  putOnPlatformButtonFor(name: string): Locator {
+    return this.activePanel()
+      .locator('li')
+      .filter({ hasText: name })
+      .getByRole('button', { name: 'Put on platform' });
   }
 
   registrationRestrictedNote(): Locator {

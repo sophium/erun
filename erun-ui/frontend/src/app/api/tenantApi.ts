@@ -8,7 +8,6 @@ import type {
   UIPlatformContextOutcome,
   UIPlatformEnvironmentActionInput,
   UIPlatformEnvironmentOutcome,
-  UIPlatformProvisionInput,
   UIPlatformProvisionResult,
   UIPlatformUser,
   UIPlatformUserEnrollInput,
@@ -30,13 +29,24 @@ import {
   LoadTenantConfig,
   LoadTenantDashboard,
   OverrideAdvanceMergeQueue,
-  PreviewPlatformProvision,
+  PreviewPlatformEnvironment,
   RegisterPlatformEnvironment,
   SaveTenantConfig,
   StopPlatformEnvironment,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
+
+// previewPlatformEnvironmentEndpoint is defined outside the endpoints
+// factory (rather than inlined like its neighbours) purely to keep that
+// factory under eslint's max-lines-per-function cap — its own generics are
+// too long to fit Prettier's line width in the inline shape every other
+// endpoint here uses.
+const previewPlatformEnvironmentEndpoint = {
+  queryFn: wailsQueryFn<UIRegisterPlatformEnvironmentInput, UIPlatformProvisionResult>((input) =>
+    PreviewPlatformEnvironment(input),
+  ),
+};
 
 export const tenantApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
@@ -101,13 +111,10 @@ export const tenantApi = wailsApi.injectEndpoints({
         ),
       },
     ),
-    previewPlatformProvision: builder.mutation<UIPlatformProvisionResult, UIPlatformProvisionInput>(
-      {
-        queryFn: wailsQueryFn<UIPlatformProvisionInput, UIPlatformProvisionResult>((input) =>
-          PreviewPlatformProvision(input),
-        ),
-      },
-    ),
+    previewPlatformEnvironment: builder.mutation<
+      UIPlatformProvisionResult,
+      UIRegisterPlatformEnvironmentInput
+    >(previewPlatformEnvironmentEndpoint),
     registerPlatformEnvironment: builder.mutation<
       UIPlatformEnvironmentOutcome,
       UIRegisterPlatformEnvironmentInput
@@ -155,7 +162,7 @@ export const {
   useConnectERunPlatformMutation,
   useEnrollERunPlatformUserMutation,
   useCreatePlatformContextMutation,
-  usePreviewPlatformProvisionMutation,
+  usePreviewPlatformEnvironmentMutation,
   useRegisterPlatformEnvironmentMutation,
   useDeployPlatformEnvironmentMutation,
   useStopPlatformEnvironmentMutation,

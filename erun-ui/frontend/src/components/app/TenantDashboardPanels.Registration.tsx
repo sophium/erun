@@ -172,10 +172,9 @@ function CreateContextForm({ data }: { data: TenantDashboardData }): React.React
           }}
         />
       </div>
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <Button
           type="button"
-          variant="outline"
           disabled={busy || !canSubmit}
           onClick={() => {
             void dispatch(createPlatformContext(true));
@@ -183,12 +182,16 @@ function CreateContextForm({ data }: { data: TenantDashboardData }): React.React
         >
           Preview context plan
         </Button>
-        <Button type="submit" disabled={busy || !canSubmit}>
+        <Button type="submit" variant="outline" disabled={busy || !canSubmit}>
           {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
           <Plus aria-hidden="true" />
           {busy ? 'Registering…' : 'Register context'}
         </Button>
       </div>
+      <p className="text-[13px] text-muted-foreground">
+        Registering launches a real cloud VM and bills your cloud account until it is stopped.
+        Preview the plan first — it creates nothing.
+      </p>
       <CreateContextFeedback
         plan={draft.contextPreviewPlan}
         conflict={draft.createContextConflict}

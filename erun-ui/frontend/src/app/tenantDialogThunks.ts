@@ -29,7 +29,7 @@ import {
   type TenantDialogState,
 } from './state';
 import type { AppDispatch, AppThunk, RootState } from './store';
-import { defaultRegistrationState, type RegistrationState } from './tenantRegistrationState';
+import { defaultRegistrationState } from './tenantRegistrationState';
 import { updateRegistrationDraft } from './tenantRegistrationThunks';
 import { requireController } from './thunkExtra';
 
@@ -332,12 +332,11 @@ export const setTenantDashboardTab =
   };
 
 // prefillRegistrationFromInviteRequest arrives at the Registration tab
-// already knowing the tenant/environment names the operator is about to
-// register — the same ones the invite request already carried, whether it
-// is still pending, was declined and retried, or is long since approved.
-// Never overwrites a name the operator has already typed (only fills a
-// still-blank draft), and applies to both forms since either could be the
-// one the operator reaches for first.
+// already knowing the environment name the operator is about to register —
+// the same one the invite request already carried, whether it is still
+// pending, was declined and retried, or is long since approved. Never
+// overwrites a name the operator has already typed (only fills a
+// still-blank draft).
 function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: RootState): void {
   const request = state.tenantDashboard.data?.myInviteRequest;
   const environmentName = request?.environmentName?.trim();
@@ -345,15 +344,8 @@ function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: Root
     return;
   }
   const registration = state.tenantDashboard.registration;
-  const patch: Partial<RegistrationState> = {};
-  if (!registration.registerName.trim()) {
-    patch.registerName = environmentName;
-  }
-  if (!registration.previewEnvName.trim()) {
-    patch.previewEnvName = environmentName;
-  }
-  if (Object.keys(patch).length > 0) {
-    dispatch(updateRegistrationDraft(patch));
+  if (!registration.envName.trim()) {
+    dispatch(updateRegistrationDraft({ envName: environmentName }));
   }
 }
 

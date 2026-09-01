@@ -334,16 +334,42 @@ type PlatformCreateEnvironmentParams struct {
 	ContextID         string `json:"contextId,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	// Adopt records a row for an environment that already exists — its name,
+	// type and kubernetes context, taken from wherever the caller already
+	// runs it — instead of asking the platform to provision one. The
+	// platform requires KubernetesContext and refuses RuntimeVersion/
+	// ContextID when Adopt is set, and never starts a deploy for it.
+	Adopt bool `json:"adopt,omitempty"`
 }
 
-// CreateEnvironment registers an environment. When it is a runtime env with a
-// pinned RuntimeVersion and the platform has a deploy executor configured,
-// this also starts the server-side deploy (the response's Status moves
-// registered -> provisioning -> running/failed; poll GetEnvironment).
+// CreateEnvironment registers an environment, or — with Adopt set — records
+// one that already exists without provisioning or deploying anything. When
+// it is a runtime env with a pinned RuntimeVersion and the platform has a
+// deploy executor configured, this also starts the server-side deploy (the
+// response's Status moves registered -> provisioning -> running/failed; poll
+// GetEnvironment).
 func (c *PlatformClient) CreateEnvironment(ctx context.Context, params PlatformCreateEnvironmentParams) (PlatformEnvironment, error) {
 	var environment PlatformEnvironment
 	err := c.do(ctx, http.MethodPost, "/v1/environments", params, true, &environment)
 	return environment, err
+}
+
+// PreviewCreateEnvironment resolves and returns the ordered plan the exact
+// same params would run through CreateEnvironment, without creating
+// anything — the register-preview entry point, distinct from Provision's own
+// preview (/v1/provision), which cannot express a contextId, a
+// runtimeVersion, or an adopt request. Always a successful preview
+// (PlatformProvisionResult.QuotaOk names whether it can actually register)
+// so a caller previewing a plan is never surprised by a refusal register
+// itself would then hit differently.
+func (c *PlatformClient) PreviewCreateEnvironment(ctx context.Context, params PlatformCreateEnvironmentParams) (PlatformProvisionResult, error) {
+	body := struct {
+		PlatformCreateEnvironmentParams
+		Preview bool `json:"preview"`
+	}{PlatformCreateEnvironmentParams: params, Preview: true}
+	var result PlatformProvisionResult
+	err := c.do(ctx, http.MethodPost, "/v1/environments", body, true, &result)
+	return result, err
 }
 
 // PlatformDeployEnvironmentParams re-deploys at an explicit version; empty

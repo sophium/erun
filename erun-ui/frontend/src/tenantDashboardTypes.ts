@@ -83,13 +83,14 @@ export interface UITenantDashboard {
   environments?: UIPlatformEnvironment[];
   environmentsRestricted?: string;
   environmentsError?: string;
-  // canCreateContext/canRegisterEnvironment/canPreviewProvision/
-  // canDeployEnvironment/canStopEnvironment/canDeleteEnvironment mirror
-  // canCreateReview/canAdvanceMergeQueue above for the Registration tab's
-  // own writes.
+  // canCreateContext/canRegisterEnvironment/canDeployEnvironment/
+  // canStopEnvironment/canDeleteEnvironment mirror canCreateReview/
+  // canAdvanceMergeQueue above for the Registration tab's own writes.
+  // Previewing an environment (register with preview:true) shares
+  // canRegisterEnvironment's own gate — it is the same POST /v1/environments
+  // route — rather than a separate capability.
   canCreateContext: boolean;
   canRegisterEnvironment: boolean;
-  canPreviewProvision: boolean;
   canDeployEnvironment: boolean;
   canStopEnvironment: boolean;
   canDeleteEnvironment: boolean;
@@ -268,23 +269,6 @@ export interface UIPlatformContextOutcome {
   message?: string;
 }
 
-// UIPlatformProvisionInput previews the ordered plan for provisioning a
-// hosted environment without creating anything, mirroring `erun platform
-// provision`. Pass either kubernetesContext to reuse an existing cluster, or
-// the context* trio to preview bootstrapping a new one.
-export interface UIPlatformProvisionInput {
-  tenant: string;
-  envName: string;
-  envType: string;
-  kubernetesContext?: string;
-  contextName?: string;
-  contextCloudProviderAlias?: string;
-  contextRegion?: string;
-  contextInstanceType?: string;
-  contextDiskType?: string;
-  contextDiskSizeGb?: number;
-}
-
 // UIPlatformProvisionResult is always a successful preview; quotaOk names
 // whether the plan can actually register without hitting the tenant's cap.
 export interface UIPlatformProvisionResult {
@@ -293,7 +277,14 @@ export interface UIPlatformProvisionResult {
 }
 
 // UIRegisterPlatformEnvironmentInput registers a hosted environment,
-// mirroring `erun platform env register`.
+// mirroring `erun platform env register` — or, passed to
+// PreviewPlatformEnvironment instead of RegisterPlatformEnvironment, resolves
+// the plan the exact same fields would submit without creating anything: the
+// preview and the register it precedes share one field set, so the plan an
+// operator sees can never diverge from what submit does. adopt records an
+// environment that already exists — its kubernetesContext is required, and
+// contextId/runtimeVersion must be left unset — instead of asking the
+// platform to provision one; it never starts a deploy.
 export interface UIRegisterPlatformEnvironmentInput {
   tenant: string;
   name: string;
@@ -301,6 +292,7 @@ export interface UIRegisterPlatformEnvironmentInput {
   contextId?: string;
   kubernetesContext?: string;
   runtimeVersion?: string;
+  adopt?: boolean;
 }
 
 // UIPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input.

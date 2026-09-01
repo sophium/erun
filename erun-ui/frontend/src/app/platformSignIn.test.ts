@@ -38,7 +38,6 @@ const dashboard: UITenantDashboard = {
   canOverrideMergeQueue: false,
   canCreateContext: false,
   canRegisterEnvironment: false,
-  canPreviewProvision: false,
   canDeployEnvironment: false,
   canStopEnvironment: false,
   canDeleteEnvironment: false,

@@ -204,25 +204,95 @@ func TestCreatePlatformContextRequiresNameAliasAndRegion(t *testing.T) {
 	}
 }
 
-// TestPreviewPlatformProvisionAlwaysReportsAPlan pins that provision preview
-// never surfaces a quota conflict as an error — /v1/provision always
-// resolves 200, with QuotaOk naming the blocking decision instead.
-func TestPreviewPlatformProvisionAlwaysReportsAPlan(t *testing.T) {
+// TestPreviewPlatformEnvironmentAlwaysReportsAPlan pins that the register
+// preview never surfaces a quota conflict as an error — POST /v1/environments
+// with preview:true always resolves 200, with QuotaOk naming the blocking
+// decision instead.
+func TestPreviewPlatformEnvironmentAlwaysReportsAPlan(t *testing.T) {
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
-		"POST /v1/provision": func(w http.ResponseWriter, _ *http.Request) {
+		"POST /v1/environments": func(w http.ResponseWriter, req *http.Request) {
+			if !strings.Contains(readBody(t, req), `"preview":true`) {
+				t.Fatalf("expected the preview flag to travel with the request")
+			}
 			_, _ = w.Write([]byte(`{"plan":["resolve tenant frs","quota: 3 of 3 environments"],"quotaOk":false}`))
 		},
 	}, nil)
 	defer server.Close()
 
-	result, err := tenantDashboardApp(t, server.URL).PreviewPlatformProvision(uiPlatformProvisionInput{
-		Tenant: "frs", EnvName: "prod", EnvType: "runtime",
+	result, err := tenantDashboardApp(t, server.URL).PreviewPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+		Tenant: "frs", Name: "prod", Type: "runtime",
 	})
 	if err != nil {
-		t.Fatalf("PreviewPlatformProvision failed: %v", err)
+		t.Fatalf("PreviewPlatformEnvironment failed: %v", err)
 	}
 	if result.QuotaOk || len(result.Plan) != 2 {
 		t.Fatalf("expected the resolved plan with quotaOk false, got %+v", result)
+	}
+}
+
+// TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister pins the
+// property the preview/register split exists for: the same input, sent to
+// PreviewPlatformEnvironment, carries the exact same fields onto the wire as
+// RegisterPlatformEnvironment would — a plan an operator previews can never
+// diverge from what register then submits.
+func TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister(t *testing.T) {
+	input := uiRegisterPlatformEnvironmentInput{
+		Tenant: "frs", Name: "prod", Type: "runtime", ContextID: "ctx-1", RuntimeVersion: "1.2.3",
+	}
+	var registerBody, previewBody string
+	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
+		"POST /v1/environments": func(w http.ResponseWriter, req *http.Request) {
+			body := readBody(t, req)
+			if strings.Contains(body, `"preview":true`) {
+				previewBody = body
+				_, _ = w.Write([]byte(`{"plan":["resolve tenant frs"],"quotaOk":true}`))
+				return
+			}
+			registerBody = body
+			_, _ = w.Write([]byte(`{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"registered"}`))
+		},
+	}, nil)
+	defer server.Close()
+	app := tenantDashboardApp(t, server.URL)
+
+	if _, err := app.PreviewPlatformEnvironment(input); err != nil {
+		t.Fatalf("PreviewPlatformEnvironment failed: %v", err)
+	}
+	if _, err := app.RegisterPlatformEnvironment(input); err != nil {
+		t.Fatalf("RegisterPlatformEnvironment failed: %v", err)
+	}
+
+	for _, field := range []string{`"name":"prod"`, `"type":"runtime"`, `"contextId":"ctx-1"`, `"runtimeVersion":"1.2.3"`} {
+		if !strings.Contains(previewBody, field) {
+			t.Fatalf("preview body missing %s: %s", field, previewBody)
+		}
+		if !strings.Contains(registerBody, field) {
+			t.Fatalf("register body missing %s: %s", field, registerBody)
+		}
+	}
+}
+
+// TestRegisterPlatformEnvironmentSendsAdopt pins that Adopt travels onto
+// the wire, so the platform's own adopt validation (kubernetesContext
+// required, runtimeVersion/contextId forbidden) is what a caller actually hits.
+func TestRegisterPlatformEnvironmentSendsAdopt(t *testing.T) {
+	var body string
+	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
+		"POST /v1/environments": func(w http.ResponseWriter, req *http.Request) {
+			body = readBody(t, req)
+			_, _ = w.Write([]byte(`{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"registered"}`))
+		},
+	}, nil)
+	defer server.Close()
+
+	_, err := tenantDashboardApp(t, server.URL).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
+		Tenant: "frs", Name: "prod", Type: "runtime", KubernetesContext: "primary", Adopt: true,
+	})
+	if err != nil {
+		t.Fatalf("RegisterPlatformEnvironment failed: %v", err)
+	}
+	if !strings.Contains(body, `"adopt":true`) {
+		t.Fatalf("expected the adopt flag to travel with the request, got %s", body)
 	}
 }
 

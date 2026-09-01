@@ -10,6 +10,7 @@ import {
   confirmDeletePlatformEnvironment,
   deletePlatformEnvironment,
   deployPlatformEnvironment,
+  prefillEnvironmentFromLocal,
   stopPlatformEnvironment,
   updateRegistrationDraft,
 } from '@/app/tenantRegistrationThunks';
@@ -17,10 +18,7 @@ import type { UIPlatformEnvironment } from '@/types';
 
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { DataCell, DataTable, type TenantDashboardData } from './TenantDashboardMessage';
-import {
-  ProvisionPreviewSection,
-  RegisterEnvironmentSection,
-} from './TenantDashboardPanels.RegistrationForms';
+import { EnvironmentSection } from './TenantDashboardPanels.RegistrationForms';
 
 function EnvironmentActionFeedback({
   environmentId,
@@ -275,6 +273,61 @@ function EnvironmentsList({
   return <EnvironmentsTable data={data} environments={environments} draft={draft} />;
 }
 
+// LocalEnvironmentsSection is the register-on-the-row affordance: the
+// desktop already knows this tenant's local environments (name, type,
+// kubernetes context — from this machine's config, TwoRegistriesNotice's
+// "local" registry), so putting one on the platform starts from those
+// values instead of a blank form. It never asserts a name match against the
+// platform's own environments list as "already registered" — no linkage
+// between the two registries exists yet, so a coincidental name match would
+// be a guess, not a fact.
+function LocalEnvironmentsSection({
+  data,
+}: {
+  data: TenantDashboardData;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  const localEnvironments = useAppSelector(
+    (state) =>
+      state.tenants.tenants.find((tenant) => tenant.name === data?.tenant)?.environments ?? [],
+  );
+  if (data?.canRegisterEnvironment !== true || localEnvironments.length === 0) {
+    return null;
+  }
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-sm font-medium text-foreground">Your local environments</h3>
+      <p className="text-[13px] text-muted-foreground">
+        Put an environment you already run onto the platform without provisioning or deploying
+        anything.
+      </p>
+      <ul className="grid gap-1.5">
+        {localEnvironments.map((environment) => (
+          <li
+            key={environment.name}
+            className="flex items-center justify-between gap-2 rounded-[var(--radius)] border border-border px-3 py-2 text-[13px]"
+          >
+            <span>
+              <span className="font-medium text-foreground">{environment.name}</span>{' '}
+              <span className="text-muted-foreground">({environment.type ?? 'local-agent'})</span>
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                dispatch(prefillEnvironmentFromLocal(environment));
+              }}
+            >
+              Put on platform
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function RegistrationEnvironmentsSection({
   data,
 }: {
@@ -287,8 +340,8 @@ export function RegistrationEnvironmentsSection({
         <Server className="size-4 text-muted-foreground" aria-hidden="true" />
         Hosted environments
       </h2>
-      <ProvisionPreviewSection data={data} draft={draft} />
-      <RegisterEnvironmentSection data={data} draft={draft} />
+      <LocalEnvironmentsSection data={data} />
+      <EnvironmentSection data={data} draft={draft} />
       <EnvironmentsList data={data} draft={draft} />
     </section>
   );

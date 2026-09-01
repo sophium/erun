@@ -31,8 +31,11 @@ import (
 // The write routes the Registration tab gates on, in the same canonical
 // "METHOD /path" form tenant_dashboard.go's read routes use.
 const (
-	tenantDashboardWriteCreateContext       = "POST /v1/contexts"
-	tenantDashboardWriteProvisionPreview    = "POST /v1/provision"
+	tenantDashboardWriteCreateContext = "POST /v1/contexts"
+	// tenantDashboardWriteRegisterEnvironment also gates PreviewPlatformEnvironment
+	// (register with preview:true): both hit this same POST /v1/environments
+	// route, so a preview needs no separate capability from the register it
+	// precedes.
 	tenantDashboardWriteRegisterEnvironment = "POST /v1/environments"
 	tenantDashboardWriteDeployEnvironment   = "POST /v1/environments/{environment_id}/deploy"
 	tenantDashboardWriteStopEnvironment     = "POST /v1/environments/{environment_id}/stop"
@@ -40,12 +43,12 @@ const (
 )
 
 const (
-	actionCreateContext    platformAction = "create a cloud context"
-	actionPreviewProvision platformAction = "preview provisioning a hosted environment"
-	actionRegisterEnv      platformAction = "register a hosted environment"
-	actionDeployEnv        platformAction = "deploy this environment"
-	actionStopEnv          platformAction = "stop this environment"
-	actionDeleteEnv        platformAction = "delete this environment"
+	actionCreateContext platformAction = "create a cloud context"
+	actionPreviewEnv    platformAction = "preview registering a hosted environment"
+	actionRegisterEnv   platformAction = "register a hosted environment"
+	actionDeployEnv     platformAction = "deploy this environment"
+	actionStopEnv       platformAction = "stop this environment"
+	actionDeleteEnv     platformAction = "delete this environment"
 )
 
 // loadTenantDashboardRegistration resolves the Registration tab's two lists
@@ -71,7 +74,6 @@ func loadTenantDashboardRegistration(ctx context.Context, client *eruncommon.Pla
 func loadTenantDashboardRegistrationCapabilities(capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	dashboard.CanCreateContext = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteCreateContext) == ""
 	dashboard.CanRegisterEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteRegisterEnvironment) == ""
-	dashboard.CanPreviewProvision = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteProvisionPreview) == ""
 	dashboard.CanDeployEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeployEnvironment) == ""
 	dashboard.CanStopEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteStopEnvironment) == ""
 	dashboard.CanDeleteEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeleteEnvironment) == ""
@@ -233,87 +235,84 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 	return outcome, nil
 }
 
-// PreviewPlatformProvision previews the ordered plan for provisioning a
-// hosted environment — quota, placement, namespace, register, deploy —
-// without executing any of it, mirroring `erun platform provision`. Always
-// returns a plan (QuotaOk names whether it can actually register), never a
-// conflict: this call creates nothing.
-func (a *App) PreviewPlatformProvision(input uiPlatformProvisionInput) (uiPlatformProvisionResult, error) {
-	tenant, err := requireTenant("previewing hosted environment provisioning", input.Tenant)
-	if err != nil {
-		return uiPlatformProvisionResult{}, err
-	}
-	envName := strings.TrimSpace(input.EnvName)
-	envType := strings.TrimSpace(input.EnvType)
-	if envName == "" || envType == "" {
-		return uiPlatformProvisionResult{}, fmt.Errorf("environment name and type are required")
-	}
-
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
-	if err != nil {
-		return uiPlatformProvisionResult{}, err
-	}
-	defer cancel()
-
-	params := eruncommon.PlatformProvisionParams{
-		Environment:       eruncommon.PlatformProvisionEnvironment{Name: envName, Type: envType},
-		KubernetesContext: strings.TrimSpace(input.KubernetesContext),
-	}
-	if contextName := strings.TrimSpace(input.ContextName); contextName != "" {
-		params.Context = &eruncommon.PlatformProvisionContext{
-			Name:               contextName,
-			CloudProviderAlias: strings.TrimSpace(input.ContextCloudProviderAlias),
-			Region:             strings.TrimSpace(input.ContextRegion),
-			InstanceType:       strings.TrimSpace(input.ContextInstanceType),
-			DiskType:           strings.TrimSpace(input.ContextDiskType),
-			DiskSizeGB:         input.ContextDiskSizeGB,
-		}
-	}
-
-	result, err := client.Provision(requestCtx, params)
-	if err != nil {
-		return uiPlatformProvisionResult{}, operatorPlatformError(actionPreviewProvision, err)
-	}
-	return uiPlatformProvisionResult{Plan: result.Plan, QuotaOk: result.QuotaOk}, nil
-}
-
-// RegisterPlatformEnvironment registers a hosted environment, mirroring
-// `erun platform env register`. A quota cap (the tenant's environment count
-// limit) reports as Kind "conflict" naming the cap, not a raw error — the
-// recoverable state the operator resolves by deleting or stopping another
-// environment first.
-func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformEnvironmentOutcome, error) {
-	tenant, err := requireTenant("registering a hosted environment", input.Tenant)
-	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
-	}
+// createEnvironmentParams validates and converts input, shared by
+// PreviewPlatformEnvironment and RegisterPlatformEnvironment so the two can
+// never diverge on what fields they send for the same operator input — the
+// defect class of a preview that cannot model what submit does.
+func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (eruncommon.PlatformCreateEnvironmentParams, error) {
 	name := strings.TrimSpace(input.Name)
 	envType := strings.TrimSpace(input.Type)
 	if name == "" || envType == "" {
-		return uiPlatformEnvironmentOutcome{}, fmt.Errorf("environment name and type are required")
+		return eruncommon.PlatformCreateEnvironmentParams{}, fmt.Errorf("environment name and type are required")
 	}
-
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
-	if err != nil {
-		return uiPlatformEnvironmentOutcome{}, err
-	}
-	defer cancel()
-
-	environment, err := client.CreateEnvironment(requestCtx, eruncommon.PlatformCreateEnvironmentParams{
+	return eruncommon.PlatformCreateEnvironmentParams{
 		Name:              name,
 		Type:              envType,
 		ContextID:         strings.TrimSpace(input.ContextID),
 		KubernetesContext: strings.TrimSpace(input.KubernetesContext),
 		RuntimeVersion:    strings.TrimSpace(input.RuntimeVersion),
-	})
+		Adopt:             input.Adopt,
+	}, nil
+}
+
+// PreviewPlatformEnvironment resolves and returns the ordered plan the exact
+// same input would submit through RegisterPlatformEnvironment, without
+// creating anything. Always returns a plan (QuotaOk names whether it can
+// actually register), never a conflict: this call creates nothing.
+func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformProvisionResult, error) {
+	tenant, err := requireTenant("previewing a hosted environment", input.Tenant)
+	if err != nil {
+		return uiPlatformProvisionResult{}, err
+	}
+	params, err := createEnvironmentParams(input)
+	if err != nil {
+		return uiPlatformProvisionResult{}, err
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	if err != nil {
+		return uiPlatformProvisionResult{}, err
+	}
+	defer cancel()
+
+	result, err := client.PreviewCreateEnvironment(requestCtx, params)
+	if err != nil {
+		return uiPlatformProvisionResult{}, operatorPlatformError(actionPreviewEnv, err)
+	}
+	return uiPlatformProvisionResult{Plan: result.Plan, QuotaOk: result.QuotaOk}, nil
+}
+
+// RegisterPlatformEnvironment registers a hosted environment, mirroring
+// `erun platform env register`, or — with input.Adopt set — records one that
+// already exists without provisioning or deploying anything. A quota
+// cap (the tenant's environment count limit) reports as Kind "conflict"
+// naming the cap, not a raw error — the recoverable state the operator
+// resolves by deleting or stopping another environment first.
+func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformEnvironmentOutcome, error) {
+	tenant, err := requireTenant("registering a hosted environment", input.Tenant)
+	if err != nil {
+		return uiPlatformEnvironmentOutcome{}, err
+	}
+	params, err := createEnvironmentParams(input)
+	if err != nil {
+		return uiPlatformEnvironmentOutcome{}, err
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
+	if err != nil {
+		return uiPlatformEnvironmentOutcome{}, err
+	}
+	defer cancel()
+
+	environment, err := client.CreateEnvironment(requestCtx, params)
 	if err != nil {
 		if kind := platformOutcomeKind(err); kind != "" {
 			return uiPlatformEnvironmentOutcome{Kind: kind, Message: platformActionMessage(err)}, nil

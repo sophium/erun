@@ -1,4 +1,4 @@
-import { Button, FieldLabel, Input, SelectField } from 'erun-kit';
+import { Button, Checkbox, FieldLabel, Input, SelectField } from 'erun-kit';
 import { LoaderCircle, Plus } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,7 +6,7 @@ import { useAppDispatch } from '@/app/hooks';
 import { contextOptions, ENV_TYPE_OPTIONS, NO_CONTEXT } from '@/app/tenantRegistrationFormOptions';
 import type { RegistrationState } from '@/app/tenantRegistrationState';
 import {
-  previewProvision,
+  previewPlatformEnvironment,
   registerPlatformEnvironment,
   updateRegistrationDraft,
 } from '@/app/tenantRegistrationThunks';
@@ -16,120 +16,48 @@ import { type TenantDashboardData } from './TenantDashboardMessage';
 import { PlanList } from './TenantDashboardPanels.Registration';
 
 // TenantDashboardPanels.RegistrationForms.tsx holds the Registration tab's
-// two "before you create anything" forms — split out of
+// hosted-environment form — split out of
 // TenantDashboardPanels.RegistrationEnvironments.tsx to keep that file under
-// eslint's 500-line cap. ProvisionPreviewSection always previews (rule #3:
-// shown before any register action); RegisterEnvironmentSection is the
-// distinct, deliberate register action that follows it.
+// eslint's 500-line cap. One field set backs both actions: Preview resolves
+// the ordered plan for exactly the fields Register would submit, and
+// Register follows it — never a separate, drifted field set, so the plan an
+// operator sees can never diverge from what submit does. envAdopt switches
+// the form to record an environment that already exists: it hides the
+// cloud-context and runtime-version fields (the platform forbids both for
+// an adopt request) and requires a kubernetes context instead.
 
-function ProvisionPreviewFields({ draft }: { draft: RegistrationState }): React.ReactElement {
+function EnvironmentAdoptToggle({
+  draft,
+  disabled,
+}: {
+  draft: RegistrationState;
+  disabled: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
-  const busy = draft.previewing;
   return (
-    <>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="preview-env-name" required>
-          Environment name
-        </FieldLabel>
-        <Input
-          id="preview-env-name"
-          value={draft.previewEnvName}
-          disabled={busy}
-          onChange={(event) => {
-            dispatch(updateRegistrationDraft({ previewEnvName: event.target.value }));
-          }}
-        />
-      </div>
-      <SelectField
-        id="preview-env-type"
-        label="Type"
-        value={draft.previewEnvType}
-        options={ENV_TYPE_OPTIONS}
-        disabled={busy}
-        onChange={(value) => {
-          dispatch(updateRegistrationDraft({ previewEnvType: value }));
+    <label htmlFor="env-adopt" className="flex items-center gap-2 text-[13px] text-foreground">
+      <Checkbox
+        id="env-adopt"
+        checked={draft.envAdopt}
+        disabled={disabled}
+        onCheckedChange={(checked) => {
+          dispatch(
+            updateRegistrationDraft({
+              envAdopt: checked === true,
+              envContextId: '',
+              envRuntimeVersion: '',
+              envPreviewPlan: null,
+              envPreviewQuotaOk: null,
+            }),
+          );
         }}
       />
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="preview-kube-context">Kubernetes context (optional)</FieldLabel>
-        <Input
-          id="preview-kube-context"
-          value={draft.previewKubernetesContext}
-          disabled={busy}
-          onChange={(event) => {
-            dispatch(updateRegistrationDraft({ previewKubernetesContext: event.target.value }));
-          }}
-        />
-      </div>
-    </>
+      This environment already exists — record it without provisioning or deploying anything
+    </label>
   );
 }
 
-function ProvisionPreviewFeedback({ draft }: { draft: RegistrationState }): React.ReactElement {
-  return (
-    <>
-      {draft.previewPlan && (
-        <div className="grid gap-2">
-          <PlanList plan={draft.previewPlan} />
-          <p role="status" className="text-[13px] text-muted-foreground">
-            {draft.previewQuotaOk
-              ? 'Quota ok: this plan can register without hitting the tenant cap.'
-              : 'Quota exceeded: registering this plan would hit the tenant cap. Delete or stop another environment first.'}
-          </p>
-        </div>
-      )}
-      {draft.previewError && <InlineAlert>{draft.previewError}</InlineAlert>}
-    </>
-  );
-}
-
-// ProvisionPreviewSection resolves the ordered plan — quota, placement,
-// namespace, register, deploy — for a drafted environment without creating
-// anything (rule #3). RegisterEnvironmentSection is deliberately a distinct
-// form/action below, so registering is never one click past a preview the
-// operator has not seen.
-export function ProvisionPreviewSection({
-  data,
-  draft,
-}: {
-  data: TenantDashboardData;
-  draft: RegistrationState;
-}): React.ReactElement | null {
-  const dispatch = useAppDispatch();
-  if (data?.canPreviewProvision !== true) {
-    return null;
-  }
-  const busy = draft.previewing;
-  const canSubmit = draft.previewEnvName.trim() !== '';
-  return (
-    <section className="grid gap-3">
-      <h3 className="text-sm font-medium text-foreground">
-        Preview provisioning a hosted environment
-      </h3>
-      <form
-        className="grid max-w-md gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void dispatch(previewProvision());
-        }}
-      >
-        <ProvisionPreviewFields draft={draft} />
-        <Button
-          type="submit"
-          variant="outline"
-          disabled={busy || !canSubmit}
-          className="justify-self-start"
-        >
-          {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-          {busy ? 'Previewing…' : 'Preview provisioning plan'}
-        </Button>
-      </form>
-      <ProvisionPreviewFeedback draft={draft} />
-    </section>
-  );
-}
-
-function RegisterEnvironmentFields({
+function EnvironmentFormFields({
   data,
   draft,
 }: {
@@ -137,92 +65,151 @@ function RegisterEnvironmentFields({
   draft: RegistrationState;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const busy = draft.registering;
+  const busy = draft.envPreviewing || draft.envRegistering;
   return (
     <>
       <div className="grid gap-2">
-        <FieldLabel htmlFor="register-env-name" required>
+        <FieldLabel htmlFor="env-name" required>
           Name
         </FieldLabel>
         <Input
-          id="register-env-name"
-          value={draft.registerName}
+          id="env-name"
+          value={draft.envName}
           disabled={busy}
           onChange={(event) => {
-            dispatch(updateRegistrationDraft({ registerName: event.target.value }));
+            dispatch(updateRegistrationDraft({ envName: event.target.value }));
           }}
         />
       </div>
       <SelectField
-        id="register-env-type"
+        id="env-type"
         label="Type"
-        value={draft.registerType}
+        value={draft.envType}
         options={ENV_TYPE_OPTIONS}
         disabled={busy}
         onChange={(value) => {
-          dispatch(updateRegistrationDraft({ registerType: value }));
+          dispatch(updateRegistrationDraft({ envType: value }));
         }}
       />
-      <SelectField
-        id="register-env-context"
-        label="Cloud context"
-        value={draft.registerContextId || NO_CONTEXT}
-        options={contextOptions(data)}
-        disabled={busy}
-        onChange={(value) => {
-          dispatch(
-            updateRegistrationDraft({ registerContextId: value === NO_CONTEXT ? '' : value }),
-          );
-        }}
-      />
+      <EnvironmentAdoptToggle draft={draft} disabled={busy} />
+      {!draft.envAdopt && (
+        <SelectField
+          id="env-context"
+          label="Cloud context"
+          value={draft.envContextId || NO_CONTEXT}
+          options={contextOptions(data)}
+          disabled={busy}
+          onChange={(value) => {
+            dispatch(updateRegistrationDraft({ envContextId: value === NO_CONTEXT ? '' : value }));
+          }}
+        />
+      )}
       <div className="grid gap-2">
-        <FieldLabel htmlFor="register-env-kube-context">
-          Kubernetes context (if not using a cloud context above)
+        <FieldLabel htmlFor="env-kube-context" required={draft.envAdopt}>
+          {draft.envAdopt
+            ? 'Kubernetes context'
+            : 'Kubernetes context (if not using a cloud context above)'}
         </FieldLabel>
         <Input
-          id="register-env-kube-context"
-          value={draft.registerKubernetesContext}
+          id="env-kube-context"
+          value={draft.envKubernetesContext}
           disabled={busy}
           onChange={(event) => {
-            dispatch(updateRegistrationDraft({ registerKubernetesContext: event.target.value }));
+            dispatch(updateRegistrationDraft({ envKubernetesContext: event.target.value }));
           }}
         />
       </div>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="register-env-runtime-version">
-          Runtime version (runtime environments only)
-        </FieldLabel>
-        <Input
-          id="register-env-runtime-version"
-          placeholder="1.2.3"
-          value={draft.registerRuntimeVersion}
-          disabled={busy}
-          onChange={(event) => {
-            dispatch(updateRegistrationDraft({ registerRuntimeVersion: event.target.value }));
-          }}
-        />
-      </div>
+      {!draft.envAdopt && (
+        <div className="grid gap-2">
+          <FieldLabel htmlFor="env-runtime-version">
+            Runtime version (runtime environments only)
+          </FieldLabel>
+          <Input
+            id="env-runtime-version"
+            placeholder="1.2.3"
+            value={draft.envRuntimeVersion}
+            disabled={busy}
+            onChange={(event) => {
+              dispatch(updateRegistrationDraft({ envRuntimeVersion: event.target.value }));
+            }}
+          />
+        </div>
+      )}
     </>
   );
 }
 
-function RegisterEnvironmentFeedback({ draft }: { draft: RegistrationState }): React.ReactElement {
+function EnvironmentPreviewFeedback({ draft }: { draft: RegistrationState }): React.ReactElement {
   return (
     <>
-      {draft.registerConflict && (
-        <p role="status" className="text-[13px] text-muted-foreground">
-          {draft.registerConflict}
-        </p>
+      {draft.envPreviewPlan && (
+        <div className="grid gap-2">
+          <PlanList plan={draft.envPreviewPlan} />
+          <p role="status" className="text-[13px] text-muted-foreground">
+            {draft.envPreviewQuotaOk
+              ? 'Quota ok: this plan can register without hitting the tenant cap.'
+              : 'Quota exceeded: registering this plan would hit the tenant cap. Delete or stop another environment first.'}
+          </p>
+        </div>
       )}
-      {draft.registerError && <InlineAlert>{draft.registerError}</InlineAlert>}
+      {draft.envPreviewError && <InlineAlert>{draft.envPreviewError}</InlineAlert>}
     </>
   );
 }
 
-// registerPlatformEnvironment is a quota-cap refusal renders as
-// registerConflict, the recoverable state (5): the operator's next action is
-// deleting or stopping another environment, not retrying blindly.
-export function RegisterEnvironmentSection({
+function EnvironmentRegisterFeedback({ draft }: { draft: RegistrationState }): React.ReactElement {
+  return (
+    <>
+      {draft.envRegisterConflict && (
+        <p role="status" className="text-[13px] text-muted-foreground">
+          {draft.envRegisterConflict}
+        </p>
+      )}
+      {draft.envRegisterError && <InlineAlert>{draft.envRegisterError}</InlineAlert>}
+    </>
+  );
+}
+
+function registerButtonLabel(draft: RegistrationState): string {
+  if (draft.envRegistering) {
+    return 'Registering…';
+  }
+  return draft.envAdopt ? 'Record environment' : 'Register environment';
+}
+
+function EnvironmentFormActions({ draft }: { draft: RegistrationState }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const previewBusy = draft.envPreviewing;
+  const registerBusy = draft.envRegistering;
+  const canSubmit =
+    draft.envName.trim() !== '' && (!draft.envAdopt || draft.envKubernetesContext.trim() !== '');
+  return (
+    <div className="flex gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={previewBusy || registerBusy || !canSubmit}
+        onClick={() => {
+          void dispatch(previewPlatformEnvironment());
+        }}
+      >
+        {previewBusy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+        {previewBusy ? 'Previewing…' : 'Preview plan'}
+      </Button>
+      <Button type="submit" disabled={previewBusy || registerBusy || !canSubmit}>
+        {registerBusy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+        <Plus aria-hidden="true" />
+        {registerButtonLabel(draft)}
+      </Button>
+    </div>
+  );
+}
+
+// EnvironmentSection is the Registration tab's one hosted-environment form:
+// Preview (outline, never a write) always precedes Register (rule #3), and
+// both submit the same fields, so registering is never one click past a
+// preview that described something else.
+export function EnvironmentSection({
   data,
   draft,
 }: {
@@ -233,11 +220,9 @@ export function RegisterEnvironmentSection({
   if (data?.canRegisterEnvironment !== true) {
     return null;
   }
-  const busy = draft.registering;
-  const canSubmit = draft.registerName.trim() !== '';
   return (
     <section className="grid gap-3">
-      <h3 className="text-sm font-medium text-foreground">Register a hosted environment</h3>
+      <h3 className="text-sm font-medium text-foreground">Hosted environment</h3>
       <form
         className="grid max-w-md gap-3"
         onSubmit={(event) => {
@@ -245,14 +230,11 @@ export function RegisterEnvironmentSection({
           void dispatch(registerPlatformEnvironment());
         }}
       >
-        <RegisterEnvironmentFields data={data} draft={draft} />
-        <Button type="submit" disabled={busy || !canSubmit} className="justify-self-start">
-          {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-          <Plus aria-hidden="true" />
-          {busy ? 'Registering…' : 'Register environment'}
-        </Button>
+        <EnvironmentFormFields data={data} draft={draft} />
+        <EnvironmentFormActions draft={draft} />
       </form>
-      <RegisterEnvironmentFeedback draft={draft} />
+      <EnvironmentPreviewFeedback draft={draft} />
+      <EnvironmentRegisterFeedback draft={draft} />
     </section>
   );
 }

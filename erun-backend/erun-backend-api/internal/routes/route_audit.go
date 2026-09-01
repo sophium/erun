@@ -43,6 +43,18 @@ var InternalAPIRoutes = map[string]bool{
 	// what earns those a console surface. There is no ongoing UI affordance to
 	// design here, only a break-glass call.
 	"PATCH /v1/tenants/reconcile-bootstrap-name": true,
+	// erun platform provision's own preview: it renders a plan for a
+	// standalone new-cluster bootstrap (Context block) that the desktop's
+	// environment form has never exposed a control for. The desktop's own
+	// register-preview action used to call this route too (with only the
+	// name/type/kubernetesContext fields, never the Context block), but that
+	// meant the plan it rendered couldn't express a contextId or
+	// runtimeVersion the way a real register call could -- a preview that
+	// cannot model what submit does. It now previews through
+	// POST /v1/environments with preview:true instead (the exact route and
+	// body Register submits), so this route stays a real, exercised CLI-only
+	// preview with no separate desktop surface to keep in sync.
+	"POST /v1/provision": true,
 }
 
 // KnownUnsurfacedRoutes is a record of known gaps, not a design decision: it

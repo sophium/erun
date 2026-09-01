@@ -283,6 +283,28 @@ func provisionPlan(in provisionPlanInput) []string {
 	return append(plan, "tls: would provision a per-env wildcard certificate through the DNS-01 broker (skipped when the platform has no ACME email or DNS-01 broker configured)")
 }
 
+// adoptPlan renders the ordered preview for an adopt request: a distinct
+// renderer from provisionPlan, not a branch inside it, because
+// provisionPlan always emits an unconditional "deploy:" line for a runtime
+// environment — exactly wrong for adopt, which never places or deploys
+// anything. Deliberately named "skipped" rather than omitted, so the plan
+// this preview shows and the create it precedes can never disagree about
+// whether a deploy happens.
+func adoptPlan(tenantName, envName string, envType model.EnvironmentType, kubernetesContext string, count int, quota model.TenantQuota) []string {
+	plan := []string{fmt.Sprintf("adopt: tenant %s (resolved from token)", tenantName)}
+
+	quotaLine := fmt.Sprintf("quota: tenant has %d of %d environments", count, quota.MaxEnvironments)
+	if count < quota.MaxEnvironments {
+		quotaLine += " — within quota"
+	} else {
+		quotaLine += " — WOULD EXCEED, registering blocked"
+	}
+	plan = append(plan, quotaLine)
+
+	plan = append(plan, fmt.Sprintf("register: would persist environment %s (%s) in tenant %s referencing kubernetes context %s — describes an environment that already exists", envName, envType, tenantName, kubernetesContext))
+	return append(plan, "deploy: skipped — adopting an existing environment never starts a deploy")
+}
+
 // contextPlanLine describes where the environment lands and the reference
 // the register line carries. An explicit context or kubernetes context is
 // only reachable here for a non-runtime environment: resolveDeployPlacement
