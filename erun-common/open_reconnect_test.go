@@ -107,8 +107,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
 		RemoteAppSessionSocketDir,
-		remoteAppSessionSocketPath("erun", "local", "open-0"),
-		remoteAppSessionSocketPath("erun", "local", "ai"),
+		RemoteAppSessionSocketPath("erun", "local", "open-0"),
+		RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}
 	for _, path := range paths {
 		if strings.Contains(path, DesktopAppName) {
