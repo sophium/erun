@@ -56,7 +56,7 @@ func holderCarriesTraffic(localPort int, carriesTraffic func(int) bool) bool {
 // kubectl port-forward: a port some other process legitimately holds is a
 // conflict to report, never something to kill.
 func replaceStalePortForwardHolder(ctx common.Context, kind string, pid, localPort int) bool {
-	if err := stopPortForwardProcess(pid); err != nil {
+	if _, err := stopPortForwardProcess(pid); err != nil {
 		return false
 	}
 	waitForLocalPortToClose(localPort)
@@ -182,6 +182,77 @@ func formatHolderForError(pid int, argv []string) string {
 		return ""
 	}
 	return "PID " + strconv.Itoa(pid) + ": " + command
+}
+
+// reapRecordedPortForwardProcess stops the process an environment's own
+// state file last recorded, whether that forward is bound-but-dead or was
+// never reached far enough to bind at all: bound state alone cannot tell a
+// corpse that exited cleanly from one still running with nobody left to
+// reap it, so the caller no longer gates this on the port being held.
+// stopPortForwardProcess re-verifies the PID is still a kubectl port-forward
+// before touching it, so a PID the OS has since reused is left alone.
+// Returns whether a live process was actually found (and thus killed), so
+// the caller can trace only when there was something to reap.
+func reapRecordedPortForwardProcess(matches bool, processID, localPort int) bool {
+	if !matches || processID <= 0 {
+		return false
+	}
+	found, _ := stopPortForwardProcess(processID)
+	waitForLocalPortToClose(localPort)
+	return found
+}
+
+// previewClearRecordedPortForward traces the --dry-run equivalent of
+// reapRecordedPortForward: naming a recorded PID that would be cleared
+// because it never bound its port, without touching it. A bound port is a
+// different decision the caller's own holder probe already owns (adopt or
+// refuse), and is silent when there is nothing to report — the ordinary case
+// of a state file whose process already exited cleanly.
+func previewClearRecordedPortForward(ctx common.Context, kind string, matches bool, processID, localPort int) {
+	if !matches || processID <= 0 || canConnectLocalPort(localPort) || !isPortForwardProcess(processID) {
+		return
+	}
+	ctx.Trace(fmt.Sprintf("%s: would clear the recorded port-forward for 127.0.0.1:%d (PID %d) — it never bound its port", kind, localPort, processID))
+}
+
+// sweepDeadPortForwardsMatching kills every kubectl port-forward process on
+// the host whose argv names this exact target/port pair but whose port is
+// not currently bound. The state-file reap above only clears the PID the
+// file itself remembers; two overlapping opens for the same environment can
+// each read the file before either overwrites it, so the invocation that
+// loses that race leaves a kubectl process with no state entry left pointing
+// at it. Argv identity — the same shape adoption already matches on — is
+// what still finds that one. Best-effort and unix-only
+// (kubectlPortForwardProcessIDs is empty on Windows): a caller that cannot
+// enumerate processes just skips the sweep, it does not fail the open.
+func sweepDeadPortForwardsMatching(ctx common.Context, kind string, expectedArgs []string, localPort int) {
+	if localPort <= 0 || canConnectLocalPort(localPort) {
+		return
+	}
+	for _, pid := range kubectlPortForwardProcessIDs() {
+		argv, ok := readProcessArgv(pid)
+		if !ok || !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+			continue
+		}
+		if found, _ := stopPortForwardProcess(pid); found {
+			ctx.Trace(fmt.Sprintf("%s: cleared an orphaned kubectl port-forward for 127.0.0.1:%d (PID %d) — it never bound its port", kind, localPort, pid))
+		}
+	}
+}
+
+// previewSweepDeadPortForwardsMatching mirrors sweepDeadPortForwardsMatching
+// for --dry-run: it names any zombie it would clear without touching it.
+func previewSweepDeadPortForwardsMatching(ctx common.Context, kind string, expectedArgs []string, localPort int) {
+	if localPort <= 0 || canConnectLocalPort(localPort) {
+		return
+	}
+	for _, pid := range kubectlPortForwardProcessIDs() {
+		argv, ok := readProcessArgv(pid)
+		if !ok || !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+			continue
+		}
+		ctx.Trace(fmt.Sprintf("%s: would clear an orphaned kubectl port-forward for 127.0.0.1:%d (PID %d) — it never bound its port", kind, localPort, pid))
+	}
 }
 
 // findLocalPortHolder identifies which process holds a port the caller has

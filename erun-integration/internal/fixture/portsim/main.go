@@ -21,7 +21,21 @@ func main() {
 	// bound and accepts every connection, and nothing ever comes back. It is
 	// the state a reachability check that stops at the listener calls healthy.
 	silent := flag.Bool("silent", false, "Accept connections and never answer them")
+	// noListen reproduces a `kubectl port-forward` that is still retrying
+	// against a pod that never answers: the process is alive, but it never
+	// gets far enough to bind the local port at all. Bound state alone
+	// cannot tell this apart from a process that already exited.
+	noListen := flag.Bool("no-listen", false, "Stay alive without binding any port")
 	flag.Parse()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
+	if *noListen {
+		<-signals
+		os.Exit(0)
+	}
+
 	if *port <= 0 {
 		log.Fatalf("portsim: --port is required")
 	}
@@ -32,8 +46,6 @@ func main() {
 	}
 	defer func() { _ = listener.Close() }()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-signals
 		_ = listener.Close()

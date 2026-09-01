@@ -40,7 +40,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	ctx.TraceCommand("", "kubectl", checkArgs...)
 
 	if ctx.DryRun {
-		return ensureAPIPortForwardDryRun(ctx, result, localPort)
+		return ensureAPIPortForwardDryRun(ctx, result, state, expectedState, localPort)
 	}
 
 	exists, err := checkAPIDeploymentPresent(checkArgs)
@@ -49,7 +49,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	}
 	if !exists {
 		ctx.Trace(fmt.Sprintf("open: %s deployment not present in %s; skipping API port-forward", apiDeployment, expectedState.Namespace))
-		stopStaleMCPPortForward(state, expectedState, localPort)
+		reapRecordedPortForwardProcess(stateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
 		return 0, nil
 	}
 
@@ -57,6 +57,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 	args := kubectlAPIPortForwardArgs(result, localPort)
+	sweepDeadPortForwardsMatching(ctx, "api", args, localPort)
 	if canConnectLocalPort(localPort) {
 		adopted, err := adoptForeignAPIPortForward(ctx, statePath, expectedState, args, localPort)
 		if err != nil {
@@ -81,11 +82,13 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 // the caller, rather than asserted outright — the same split
 // TraceEnsureKubernetesNamespace uses for the analogous namespace-create
 // decision.
-func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, localPort int) (int, error) {
+func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, state, expectedState mcpPortForwardState, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
 		return port, nil
 	}
+	previewClearRecordedPortForward(ctx, "api", stateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
+	previewSweepDeadPortForwardsMatching(ctx, "api", args, localPort)
 	apiDeployment := common.APIDeploymentName(result.Tenant)
 	ctx.Trace(fmt.Sprintf("open: port-forwarding service/%s if the check above finds the deployment present", apiDeployment))
 	return localPort, nil

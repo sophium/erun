@@ -1631,6 +1631,137 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
+	t.Run("previews_reaping_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
+		// Regression for erun#1847: a `kubectl port-forward` that is still
+		// retrying against a pod that never answers holds no port at all —
+		// unlike the bound-but-dead shape above, nothing binds, but the
+		// process itself is alive. Bound state alone can't tell that corpse
+		// apart from one that already exited, so the plan must still name
+		// it. Dry-run only plans: the process must still be alive when the
+		// run ends.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		deadPID := fixture.StartUnboundPortForwardProcess(t)
+		// port: 0 keeps the fabricated holder out of the lsof answer for
+		// 26100 (nothing is really bound), while the ps stub still answers
+		// for this exact PID — the shape production's isPortForwardProcess
+		// check needs to recognise the recorded PID as its own.
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/previews_reaping_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
+		// Side effect outside the captured streams: dry-run plans the reap,
+		// it does not perform it.
+		if fixture.ProcessStopped(deadPID, 500*time.Millisecond) {
+			t.Error("dry-run must leave the never-bound forward running; it only plans clearing it")
+		}
+	})
+
+	t.Run("real_run_reaps_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
+		// The real-run sibling, and the reported failure itself: a forward
+		// that never bound its port is never reaped, so every repeat attempt
+		// starts a fresh kubectl beside the last one — 101 of them for one
+		// environment in the reported case. open must kill the recorded PID
+		// before starting a replacement, not leave it running as one more
+		// corpse nothing will ever clear.
+		//
+		// The holder is a real process and the ps/lsof stubs name its real
+		// PID: production kills what the probe names, so a fabricated PID
+		// would aim the kill at whatever else owns that number.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		deadPID := fixture.StartUnboundPortForwardProcess(t)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
+
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_reaps_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
+		if !fixture.ProcessStopped(deadPID, 2*time.Second) {
+			t.Errorf("expected the never-bound forward (PID %d) to be killed before starting a fresh one", deadPID)
+		}
+		stateBody, err := os.ReadFile(portForwardStateFile(setup, "mcp", "team", "dev"))
+		if err != nil {
+			t.Fatalf("read rewritten mcp state: %v", err)
+		}
+		if strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, deadPID)) {
+			t.Errorf("expected the state file to record a fresh forward, still claims the dead PID %d:\n%s", deadPID, stateBody)
+		}
+	})
+
+	t.Run("real_run_sweeps_an_orphaned_forward_with_no_matching_state", func(t *testing.T) {
+		// The race the recorded-PID reap alone cannot close: two overlapping
+		// opens for the same environment can each read the old state file
+		// before either overwrites it, so the invocation that loses that
+		// race leaves a kubectl process with no state entry left pointing at
+		// it. This scenario reproduces the same end state without needing
+		// real concurrency — no state file names this env's forward at
+		// all — so only the argv-identity sweep (not the state-based reap)
+		// can find and clear the orphan.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		orphanPID := fixture.StartUnboundPortForwardProcess(t)
+		orphanArgv := "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"
+		stubLsofNoHolder(t, stubsDir)
+		fixture.StubBinaryWithScript(t, stubsDir, "ps", fmt.Sprintf(`for arg in "$@"; do
+    if [ "$arg" = "-e" ]; then
+        printf '%%s %%s\n' %d %s
+        exit 0
+    fi
+    if [ "$arg" = "%d" ]; then
+        printf '%%s\n' %s
+        exit 0
+    fi
+done
+exit 1
+`, orphanPID, shellQuote(orphanArgv), orphanPID, shellQuote(orphanArgv)))
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		// No writePortForwardState call: the sweep must find this PID by
+		// argv identity alone, with no state file naming it at all.
+
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_sweeps_an_orphaned_forward_with_no_matching_state", normalize.Apply(result.Combined))
+		if !fixture.ProcessStopped(orphanPID, 2*time.Second) {
+			t.Errorf("expected the unrecorded orphan (PID %d) to be swept before starting a fresh forward", orphanPID)
+		}
+	})
+
 	t.Run("refuses_to_bind_when_foreign_process_holds_port", func(t *testing.T) {
 		// When the port is held by a process whose argv does not look like
 		// the kubectl port-forward erun would start, adoption is unsafe.

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
@@ -1812,6 +1813,52 @@ func StalePortHolderStopped(port int, timeout time.Duration) bool {
 			return true
 		}
 		_ = conn.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// StartUnboundPortForwardProcess starts a live process that never binds any
+// port — the shape of a `kubectl port-forward` that is still retrying
+// against a pod that never answers, so its state-file PID is alive with
+// nothing to show for it. It exists to test the reap of a recorded forward
+// that never got as far as binding, as opposed to StartStalePortHolder's
+// bound-but-dead shape.
+func StartUnboundPortForwardProcess(t testing.TB) int {
+	t.Helper()
+	cmd := osexec.Command(PortSimBinary(t), "--no-listen")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start unbound port-forward process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	// A killed process stays a zombie — still "alive" to signal(0) — until
+	// something calls Wait on it. Reaping it here, the moment it exits,
+	// rather than only in t.Cleanup (which does not run until the whole test
+	// body has returned) is what lets ProcessStopped's liveness probe below
+	// observe production's kill promptly instead of only at test teardown.
+	reaped := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(reaped)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-reaped
+	})
+	return pid
+}
+
+// ProcessStopped reports whether erun killed the process at pid, waiting for
+// the OS to actually reap it rather than for a fixed delay. Unlike a bound
+// port's holder, a never-bound forward leaves no listener to dial, so
+// liveness here goes through the real process table (see
+// eruncommon.DesktopProcessAlive) instead of a network probe.
+func ProcessStopped(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !eruncommon.DesktopProcessAlive(pid) {
+			return true
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return false

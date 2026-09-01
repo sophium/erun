@@ -39,3 +39,33 @@ func isSSHDActivityProxyProcess(pid int) bool {
 	command := string(output)
 	return strings.Contains(command, "activity") && strings.Contains(command, "ssh-proxy")
 }
+
+// kubectlPortForwardProcessIDs enumerates every live kubectl port-forward
+// process on the host, for the argv-identity sweep that catches a forward
+// whose state-file entry was overwritten by a losing race between two
+// overlapping opens (see sweepDeadPortForwardsMatching). A single ps call,
+// filtered here rather than by a shell pattern, so nothing but an exact PID
+// ever reaches a kill call.
+func kubectlPortForwardProcessIDs() []int {
+	output, err := eruncommon.Command("ps", "-e", "-ww", "-o", "pid=", "-o", "command=").Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, "kubectl") || !strings.Contains(line, "port-forward") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
