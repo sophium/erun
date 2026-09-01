@@ -99,6 +99,7 @@ func run(args []string) error {
 			DocsURL:         cfg.PlatformDocsURL,
 			Tagline:         cfg.PlatformTagline,
 			LogoURL:         cfg.PlatformLogoURL,
+			Version:         currentBuildVersion(),
 		},
 		BootstrapTenantName: cfg.BootstrapTenantName,
 		IdentityAdmin:       optional.identityAdmin,

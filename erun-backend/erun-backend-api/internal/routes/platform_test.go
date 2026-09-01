@@ -21,6 +21,7 @@ var configuredPlatformInfo = PlatformInfo{
 	DocsURL:         "https://docs.example.test",
 	Tagline:         "Example's own one-line pitch.",
 	LogoURL:         "https://cdn.example.test/logo.svg",
+	Version:         "1.0.221",
 }
 
 func TestPlatformRouteServesConfiguredValues(t *testing.T) {
@@ -61,7 +62,7 @@ func TestPlatformRouteBodyCarriesEveryDiscoveryKey(t *testing.T) {
 	}
 	wantKeys := []string{
 		"issuer", "apiUrl", "consoleUrl", "consoleClientId", "cliClientId", "mobileClientId",
-		"brand", "docsUrl", "tagline", "logoUrl",
+		"brand", "docsUrl", "tagline", "logoUrl", "version",
 	}
 	for _, key := range wantKeys {
 		value, ok := body[key]

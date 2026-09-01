@@ -19,6 +19,7 @@ WORKDIR /src/erun-backend/erun-backend-api
 
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG ERUN_VERSION
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -27,10 +28,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY erun-common /src/erun-common
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
+# Bakes the serving build's version into the binary (GET /v1/platform reports
+# it) the same way erun/emcp do, so a client can tell whether a released fix
+# is actually deployed without a write.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-s -w" -o /out/eapi ./cmd/eapi
+    go build -trimpath -ldflags "-s -w -X github.com/sophium/erun/erun-backend/erun-backend-api/cmd/eapi.buildVersion=${ERUN_VERSION}" -o /out/eapi ./cmd/eapi
 
 FROM alpine:3.20
 
