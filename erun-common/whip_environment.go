@@ -44,7 +44,7 @@ var whipNudgeSleep = time.Sleep
 // RemoteAppSessionHeartbeatScript uses, run locally rather than over kubectl
 // exec.
 func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment string) (bool, error) {
-	socket := remoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
+	socket := RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
 	script := strings.Join(append(remoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
 	out, err := runner("sh", "-c", script)
 	if err != nil {
@@ -62,7 +62,7 @@ func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment s
 // it. `-r none` skips dtach's own redraw trigger, since this is a push, not an
 // operator reattaching.
 func pushEnvironmentWhipNudge(runner WhipCommandRunner, tenant, environment, text string, settle time.Duration) error {
-	socket := shellSingleQuote(remoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
+	socket := shellSingleQuote(RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
 
 	textScript := fmt.Sprintf("printf %%s %s | timeout 5 dtach -a %s -r none", shellSingleQuote(text), socket)
 	if _, err := runner("sh", "-c", textScript); err != nil {

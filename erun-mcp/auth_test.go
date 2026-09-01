@@ -27,6 +27,15 @@ func tenantEchoHandler() http.Handler {
 
 func identityWithToken(t *testing.T) (issuer, token string) {
 	t.Helper()
+	return identityWithScopedToken(t, "")
+}
+
+// identityWithScopedToken mints a token from a fresh desktop identity carrying
+// scope (a space-delimited MCPCapability list, e.g. "erun:attach"). An empty
+// scope is the desktop's own single-admin case (MCPCapabilitiesFromClaims
+// resolves no claims to admin).
+func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) {
+	t.Helper()
 	priv, pub, err := eruncommon.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
@@ -40,6 +49,7 @@ func identityWithToken(t *testing.T) (issuer, token string) {
 		Issuer:    issuer,
 		Audience:  "erun-mcp",
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		Scope:     scope,
 	})
 	if err != nil {
 		t.Fatalf("sign token: %v", err)

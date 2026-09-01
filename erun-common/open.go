@@ -908,7 +908,7 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
 	}
 	id := sanitizeForFilename(req.AppSession)
-	socket := remoteAppSessionSocketPath(req.Tenant, req.Environment, id)
+	socket := RemoteAppSessionSocketPath(req.Tenant, req.Environment, id)
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
 	redraw := "ctrl_l"
@@ -959,7 +959,12 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 	)
 }
 
-func remoteAppSessionSocketPath(tenant, environment, id string) string {
+// RemoteAppSessionSocketPath returns the dtach socket path for a given
+// tenant/environment/session id -- exported so a caller running inside the
+// pod (the erun-mcp WSS attach edge) can address the same socket
+// RemoteAppSessionAttachLines' own script builds, without reimplementing the
+// naming.
+func RemoteAppSessionSocketPath(tenant, environment, id string) string {
 	return fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(tenant), sanitizeForFilename(environment), sanitizeForFilename(id))
 }
 
@@ -984,7 +989,7 @@ func remoteAppSessionMasterScanLines(socket string) []string {
 // explicitly closes a terminal tab; closing the env or quitting the app merely
 // detach and leave the session running for the next attach.
 func RemoteAppSessionEndScript(tenant, environment, id string) string {
-	socket := remoteAppSessionSocketPath(tenant, environment, id)
+	socket := RemoteAppSessionSocketPath(tenant, environment, id)
 	lines := remoteAppSessionMasterScanLines(socket)
 	lines = append(lines,
 		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",

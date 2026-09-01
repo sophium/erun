@@ -97,12 +97,19 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 		SessionTimeout: 5 * time.Minute,
 	})
 
+	authCfg := mcpAuthConfigFromEnv()
 	mux := http.NewServeMux()
 	// Auth is the outermost layer, so even idle probes must carry a valid token
 	// before any tool runs. Traffic metering sits just inside it so a rejected
 	// call's tiny response still counts, but wraps the real MCP traffic that
 	// erun_traffic_window_bytes exists to measure.
-	mux.Handle(cfg.Path, authHTTPMiddleware(mcpAuthConfigFromEnv(), trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler))))
+	mux.Handle(cfg.Path, authHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler))))
+	// The WebSocket attach edge is not wrapped in trafficMeteringMiddleware:
+	// that wrapper's byteCountingResponseWriter does not implement
+	// http.Hijacker, and the WebSocket upgrade needs to hijack the
+	// connection. It shares the same auth middleware, so a caller still needs
+	// a valid token before the handler ever inspects capabilities or upgrades.
+	registerAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
 	return mux
 }
 
