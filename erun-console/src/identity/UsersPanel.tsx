@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
   EmptyState,
-  FieldLabel,
   Input,
   Table,
   TableBody,
@@ -24,11 +23,13 @@ import { LoaderCircle, Users } from 'lucide-react';
 import * as React from 'react';
 
 import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityApi';
+import { TenantTargetSelect } from '../shell/TenantTargetSelect';
+import { useTenantTargetSelection } from '../shell/useTenantTargetSelection';
 import type { EnrollState, UsersState } from './controller';
 import { useUsersController } from './controller';
 import { useEnrollOrgTarget } from './enrollOrgTargetController';
 import { EnrollUserForm } from './EnrollUserForm';
-import { OrgTargetStatus, TenantTargetSelect } from './PlatformEnrollFields';
+import { EnrollBasicFields, OrgTargetStatus } from './PlatformEnrollFields';
 import { UserRolesDialog } from './UserRolesDialog';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
@@ -152,9 +153,9 @@ function EnrollForm({
   const [email, setEmail] = React.useState('');
   const [firstName, setFirstName] = React.useState('');
   const [lastName, setLastName] = React.useState('');
-  const [targetTenantId, setTargetTenantId] = React.useState(ownTenantId);
   const busy = enroll.status === 'enrolling';
 
+  const { targetTenantId, setTargetTenantId } = useTenantTargetSelection(ownTenantId);
   const { tenants, orgTarget } = useEnrollOrgTarget(token, ownTenantId, targetTenantId);
   const canSubmit = orgTarget.status === 'default' || orgTarget.status === 'resolved';
 
@@ -177,54 +178,18 @@ function EnrollForm({
       <h3 id="enroll-form-heading" className="text-sm font-semibold text-foreground">
         Enroll a user
       </h3>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="enroll-username" required>
-          Username
-        </FieldLabel>
-        <Input
-          id="enroll-username"
-          value={username}
-          onChange={(e) => {
-            setUsername(e.target.value);
-          }}
-          required
-        />
-      </div>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="enroll-email" required>
-          Email
-        </FieldLabel>
-        <Input
-          id="enroll-email"
-          type="email"
-          value={email}
-          onChange={(e) => {
-            setEmail(e.target.value);
-          }}
-          required
-        />
-      </div>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="enroll-first-name">First name</FieldLabel>
-        <Input
-          id="enroll-first-name"
-          value={firstName}
-          onChange={(e) => {
-            setFirstName(e.target.value);
-          }}
-        />
-      </div>
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="enroll-last-name">Last name</FieldLabel>
-        <Input
-          id="enroll-last-name"
-          value={lastName}
-          onChange={(e) => {
-            setLastName(e.target.value);
-          }}
-        />
-      </div>
+      <EnrollBasicFields
+        username={username}
+        setUsername={setUsername}
+        email={email}
+        setEmail={setEmail}
+        firstName={firstName}
+        setFirstName={setFirstName}
+        lastName={lastName}
+        setLastName={setLastName}
+      />
       <TenantTargetSelect
+        id="enroll-target-tenant"
         tenantType={tenantType}
         tenants={tenants}
         value={targetTenantId}

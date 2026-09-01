@@ -10,9 +10,12 @@ import {
   Input,
   isTearingDown,
   SelectField,
+  StatusBadge,
 } from 'erun-kit';
 import * as React from 'react';
 
+import { useListEnvironmentsQuery } from '../app/api/environmentsApi';
+import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { DeployState, RegisterState } from './controller';
 import { useDeployController, useRegisterEnvironmentController } from './controller';
 
@@ -219,6 +222,36 @@ function DeployStatus({
   );
 }
 
+// tenantLabel looks up a row's owning tenant name. Undefined whenever there
+// is nothing to disambiguate (a caller with no cross-tenant scope, or a
+// tenant id the caller's own tenant list doesn't (yet) carry).
+function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): string | undefined {
+  if (tenantId === undefined) {
+    return undefined;
+  }
+  return tenants.find((tenant) => tenant.tenantId === tenantId)?.name;
+}
+
+// RowHeading names the environment and, once the caller administers more than
+// its own tenant (shell/ScopeSelector.tsx), the tenant it belongs to --
+// otherwise a row from a scope-widened list reads as the caller's own
+// (erun#1816).
+function RowHeading({
+  environment,
+  tenants,
+}: {
+  environment: Environment;
+  tenants: PlatformTenant[];
+}): React.ReactElement {
+  const label = tenantLabel(tenants, environment.tenantId);
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-medium text-foreground">{environment.name}</span>
+      {label !== undefined && <StatusBadge tone="muted" label={label} showIcon={false} />}
+    </div>
+  );
+}
+
 // TeardownRow replaces the whole deploy control for an environment whose delete
 // is outstanding. The API refuses a deploy on these with 409, so offering the
 // button meant an operator clicked it and got a raw Kubernetes admission error
@@ -226,11 +259,17 @@ function DeployStatus({
 // overwrote the teardown state. Showing the recorded blocker instead is the
 // thing an operator can actually act on: it names the finalizer holding the
 // namespace.
-function TeardownRow({ environment }: { environment: Environment }): React.ReactElement {
+function TeardownRow({
+  environment,
+  tenants,
+}: {
+  environment: Environment;
+  tenants: PlatformTenant[];
+}): React.ReactElement {
   const deleting = environment.status === 'deleting';
   return (
     <li className="grid gap-1 border-b border-border py-3 last:border-b-0">
-      <span className="font-medium text-foreground">{environment.name}</span>
+      <RowHeading environment={environment} tenants={tenants} />
       <div className="text-sm text-muted-foreground" role="status" aria-live="polite">
         <p>
           {deleting
@@ -247,10 +286,12 @@ function TeardownRow({ environment }: { environment: Environment }): React.React
 
 function EnvironmentDeployRow({
   environment,
+  tenants,
   state,
   onDeploy,
 }: {
   environment: Environment;
+  tenants: PlatformTenant[];
   state: DeployState | undefined;
   onDeploy: (environmentId: string, version: string) => void;
 }): React.ReactElement {
@@ -258,11 +299,11 @@ function EnvironmentDeployRow({
   const busy = state?.status === 'starting' || state?.status === 'deploying';
   const versionInputId = `deploy-version-${environment.environmentId}`;
   if (isTearingDown(environment)) {
-    return <TeardownRow environment={environment} />;
+    return <TeardownRow environment={environment} tenants={tenants} />;
   }
   return (
     <li className="grid gap-2 border-b border-border py-3 last:border-b-0">
-      <span className="font-medium text-foreground">{environment.name}</span>
+      <RowHeading environment={environment} tenants={tenants} />
       <div className="flex items-end gap-2">
         <div className="grid gap-2">
           <FieldLabel htmlFor={versionInputId}>Version</FieldLabel>
@@ -292,10 +333,12 @@ function EnvironmentDeployRow({
 
 function DeployList({
   environments,
+  tenants,
   states,
   onDeploy,
 }: {
   environments: Environment[];
+  tenants: PlatformTenant[];
   states: Record<string, DeployState>;
   onDeploy: (environmentId: string, version: string) => void;
 }): React.ReactElement {
@@ -309,6 +352,7 @@ function DeployList({
         <EnvironmentDeployRow
           key={environment.environmentId}
           environment={environment}
+          tenants={tenants}
           state={states[environment.environmentId]}
           onDeploy={onDeploy}
         />
@@ -321,15 +365,33 @@ export function EnvironmentsPanel({
   token,
   contexts,
   environments,
+  tenants = [],
+  scopeTenantId,
   onChanged,
 }: {
   token: string;
   contexts: CloudContext[];
   environments: Environment[];
+  // The full tenant list, for naming a row's owning tenant -- populated only
+  // for an OPERATIONS caller (shell/AppShell.tsx). Absent, this console has
+  // nothing to disambiguate rows with, so no tenant badge renders.
+  tenants?: PlatformTenant[];
+  // Set once shell/ScopeSelector.tsx points this caller at another tenant;
+  // undefined means "my own tenant", the default and every caller's ordinary
+  // behavior before the scope selector existed -- in which case `environments`
+  // above (already resolved by the parent from GET /v1/config) is shown
+  // unchanged, with no extra request.
+  scopeTenantId?: string;
   onChanged: () => void;
 }): React.ReactElement {
   const { state, register } = useRegisterEnvironmentController(token, onChanged);
   const { states, deploy } = useDeployController(token, onChanged);
+  const scopedEnvironmentsQuery = useListEnvironmentsQuery(
+    { token, tenantId: scopeTenantId },
+    { skip: scopeTenantId === undefined },
+  );
+  const visibleEnvironments =
+    scopeTenantId !== undefined ? (scopedEnvironmentsQuery.data ?? []) : environments;
 
   return (
     <Card aria-labelledby="environments-panel-heading">
@@ -358,7 +420,12 @@ export function EnvironmentsPanel({
           <h3 className="mb-2 text-sm font-semibold text-foreground">
             Deploy a runtime environment
           </h3>
-          <DeployList environments={environments} states={states} onDeploy={deploy} />
+          <DeployList
+            environments={visibleEnvironments}
+            tenants={tenants}
+            states={states}
+            onDeploy={deploy}
+          />
         </div>
       </CardContent>
     </Card>

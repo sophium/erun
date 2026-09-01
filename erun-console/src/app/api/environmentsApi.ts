@@ -1,4 +1,4 @@
-import { type Environment, isRecord, parseEnvironment } from 'erun-kit';
+import { type Environment, isRecord, parseEnvironment, parseList } from 'erun-kit';
 
 import { httpBaseQuery } from './httpBaseQuery';
 import { platformApi } from './platformApi';
@@ -33,6 +33,25 @@ function parseEnvironmentResponse(raw: unknown): Environment {
 
 export const environmentsApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
+    // listEnvironments backs the scope selector (erun#1816): the caller's own
+    // tenant by default, or -- operations-only, honored server-side -- a
+    // named target tenant's environments via `?tenantId=`. A non-OPERATIONS
+    // caller naming another tenant gets the same 403 the API always returns;
+    // this console never offers that param to a caller who cannot use it
+    // (see shell/ScopeSelector.tsx).
+    listEnvironments: builder.query<Environment[], { token: string; tenantId?: string }>({
+      query: ({ token, tenantId }) => ({
+        url:
+          tenantId === undefined
+            ? '/v1/environments'
+            : `/v1/environments?tenantId=${encodeURIComponent(tenantId)}`,
+        token,
+        label: 'list environments',
+      }),
+      transformResponse: (raw: unknown) => parseList(raw, parseEnvironment),
+      providesTags: ['Environments'],
+    }),
+
     createEnvironment: builder.mutation<
       Environment,
       { token: string; input: CreateEnvironmentInput }
@@ -45,7 +64,7 @@ export const environmentsApi = platformApi.injectEndpoints({
         label: 'register environment request',
       }),
       transformResponse: parseEnvironmentResponse,
-      invalidatesTags: ['Config'],
+      invalidatesTags: ['Config', 'Environments'],
     }),
 
     // getEnvironment polls one environment by id; the deploy controller drives
@@ -93,13 +112,14 @@ export const environmentsApi = platformApi.injectEndpoints({
       },
       invalidatesTags: (result, _error, arg) =>
         result?.kind === 'accepted'
-          ? [{ type: 'Environment', id: arg.environmentId }, 'Config']
+          ? [{ type: 'Environment', id: arg.environmentId }, 'Config', 'Environments']
           : [],
     }),
   }),
 });
 
 export const {
+  useListEnvironmentsQuery,
   useCreateEnvironmentMutation,
   useGetEnvironmentQuery,
   useDeployEnvironmentMutation,

@@ -6,6 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAppStore } from '../app/store';
 import { AppShell } from './AppShell';
 
+// Mocked so the scope-selector tests below can assert the negative: unlike
+// the tenant switcher, changing scope must never reach the OIDC redirect
+// path. Type-only elsewhere in this module, so mocking the runtime export
+// changes nothing for the tests that don't touch it.
+vi.mock('../auth/auth', () => ({
+  beginLogin: vi.fn(),
+}));
+
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -315,5 +323,71 @@ describe('AppShell identity chrome', () => {
     });
     expect(screen.queryByText(subject)).not.toBeInTheDocument();
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+  });
+});
+
+// erun#1816: the scope selector is a second, distinct tenant control next to
+// the (label-only, since oidc is undefined here too) tenant switcher above
+// the nav -- picking a target must swap which tenant's environments render
+// without ever reaching the switcher's re-auth path.
+describe('AppShell scope selector', () => {
+  const SCOPE_CONFIG: TenantConfigView = {
+    tenant: { tenantId: 'tn-1', name: 'Acme', type: 'OPERATIONS' },
+    environments: [
+      { environmentId: 'env-1', name: 'acme-env', type: 'runtime', status: 'running' },
+    ],
+    contexts: [],
+    inviteRequestRateLimitWindowSeconds: 60,
+  };
+
+  function stubScopeFetch(): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL) => {
+        const url = input instanceof URL ? input.href : input;
+        if (url === '/v1/tenants') {
+          return Promise.resolve(
+            jsonResponse([
+              { tenantId: 'tn-1', name: 'Acme', type: 'OPERATIONS', createdAt: '', updatedAt: '' },
+              { tenantId: 'tn-2', name: 'Beta', type: 'COMPANY', createdAt: '', updatedAt: '' },
+            ]),
+          );
+        }
+        if (url === '/v1/environments?tenantId=tn-2') {
+          return Promise.resolve(
+            jsonResponse([
+              {
+                environmentId: 'env-2',
+                name: 'beta-env',
+                type: 'runtime',
+                status: 'running',
+                tenantId: 'tn-2',
+              },
+            ]),
+          );
+        }
+        return Promise.resolve(jsonResponse([]));
+      }),
+    );
+  }
+
+  it("swaps the Environments panel's rows on a scope change, and never re-authenticates", async () => {
+    stubScopeFetch();
+    const { beginLogin } = await import('../auth/auth');
+    renderShell(SCOPE_CONFIG);
+
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
+    expect(screen.getByText('acme-env')).toBeInTheDocument();
+
+    const scopeSelect = await screen.findByRole('combobox', { name: 'Administering' });
+    fireEvent.click(scopeSelect);
+    fireEvent.click(await screen.findByRole('option', { name: 'Beta' }));
+
+    const betaRow = (await screen.findByText('beta-env')).closest('li');
+    expect(betaRow).not.toBeNull();
+    expect(within(betaRow as HTMLElement).getByText('Beta')).toBeInTheDocument();
+    expect(screen.queryByText('acme-env')).not.toBeInTheDocument();
+    expect(beginLogin).not.toHaveBeenCalled();
   });
 });

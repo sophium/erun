@@ -288,3 +288,57 @@ describe('EnvironmentsPanel deploy flow', () => {
     }
   });
 });
+
+// erun#1816: while an OPERATIONS caller is scoped to another tenant, every
+// row must name it -- otherwise the row reads as the caller's own.
+describe('EnvironmentsPanel tenant scope', () => {
+  const OWN_TENANT_ENV: Environment = { ...RUNTIME_ENV, tenantId: 'tenant-own' };
+  const OTHER_TENANT = { tenantId: 'tenant-other', name: 'Beta', type: 'COMPANY' };
+
+  it('renders no tenant badge when no tenant list is available', () => {
+    renderWithStore(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[OWN_TENANT_ENV]}
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it("names a row's owning tenant once the tenant list is available", () => {
+    renderWithStore(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[{ ...RUNTIME_ENV, tenantId: 'tenant-other' }]}
+        tenants={[OTHER_TENANT]}
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+  });
+
+  it("fetches the scoped tenant's own environments instead of the passed-in list", async () => {
+    const calls = mockFetch((req) =>
+      req.url === '/v1/environments?tenantId=tenant-other'
+        ? jsonResponse([{ ...RUNTIME_ENV, environmentId: 'env-2', name: 'staging' }])
+        : jsonResponse([], 404),
+    );
+    renderWithStore(
+      <EnvironmentsPanel
+        token="dev-token"
+        contexts={[]}
+        environments={[OWN_TENANT_ENV]}
+        tenants={[OTHER_TENANT]}
+        scopeTenantId="tenant-other"
+        onChanged={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('staging')).toBeInTheDocument();
+    expect(screen.queryByText('prod')).not.toBeInTheDocument();
+    expect(calls.some((c) => c.url === '/v1/environments?tenantId=tenant-other')).toBe(true);
+  });
+});

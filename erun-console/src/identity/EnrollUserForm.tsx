@@ -2,12 +2,13 @@ import { Button } from 'erun-kit';
 import * as React from 'react';
 
 import { useListTenantsQuery } from '../app/api/tenantsApi';
+import { TenantTargetSelect } from '../shell/TenantTargetSelect';
+import { useTenantTargetSelection } from '../shell/useTenantTargetSelection';
 import { usePlatformEnrollController } from './platformEnrollController';
 import {
   FirstUserNotice,
   PlatformEnrollFeedback,
   PlatformEnrollUsernameFields,
-  TenantTargetSelect,
 } from './PlatformEnrollFields';
 
 // EnrollUserForm is the console's parity for `erun platform user enroll`
@@ -26,7 +27,7 @@ export function EnrollUserForm({
 }): React.ReactElement {
   const tenantsQuery = useListTenantsQuery(token);
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
-  const [targetTenantId, setTargetTenantId] = React.useState(ownTenantId);
+  const { targetTenantId, setTargetTenantId } = useTenantTargetSelection(ownTenantId);
   const [username, setUsername] = React.useState('');
   const [issuer, setIssuer] = React.useState('');
   const [subject, setSubject] = React.useState('');
@@ -62,6 +63,7 @@ export function EnrollUserForm({
         blank to enroll a username that cannot sign in until an identity is linked later.
       </p>
       <TenantTargetSelect
+        id="enroll-user-target-tenant"
         tenantType={tenantType}
         tenants={tenants}
         value={targetTenantId}
