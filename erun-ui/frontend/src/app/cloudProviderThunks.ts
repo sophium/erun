@@ -2,6 +2,7 @@ import type { UICloudProviderStatus } from '@/types';
 
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import { cloudApi } from './api/cloudApi';
+import { tenantInviteRequestApi } from './api/tenantInviteRequestApi';
 import { replaceCloudProvider } from './cloudContextState';
 import { readError } from './errors';
 import { showNotification, showTerminalError, showTerminalMessage } from './notificationThunks';
@@ -120,6 +121,13 @@ const updatePrimaryCloudProvider =
       );
       dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       dispatch(showTerminalMessage(`${provider.alias}: ${provider.status}`));
+      if (action === 'login') {
+        // A successful sign-in is exactly the local-only -> enrolled
+        // transition tenantEnrollmentPoll.ts's gate cannot observe on its own
+        // (it polls nothing for local-only, by design) -- invalidate rather
+        // than wait on a timer that never fires for that state.
+        dispatch(tenantInviteRequestApi.util.invalidateTags(['TenantEnrollment']));
+      }
       return { status: 'success', provider };
     } catch (error) {
       const message = readError(error);

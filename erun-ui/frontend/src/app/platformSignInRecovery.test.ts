@@ -1,7 +1,8 @@
-// Side-effect imports: cloudApi/tenantApi inject their endpoints into the
-// shared wailsApi instance on import.
+// Side-effect imports: cloudApi/tenantApi/tenantInviteRequestApi inject their
+// endpoints into the shared wailsApi instance on import.
 import './api/cloudApi';
 import './api/tenantApi';
+import './api/tenantInviteRequestApi';
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -10,6 +11,7 @@ import { configureStore } from '@reduxjs/toolkit';
 
 import { TENANT_PLATFORM_STATE_NOT_SIGNED_IN } from '@/types';
 
+import { tenantInviteRequestApi } from './api/tenantInviteRequestApi';
 import { wailsApi } from './api/wailsApi';
 import { loginPrimaryCloudProvider, signInAndRecover } from './cloudProviderThunks';
 import sidebarReducer, { setSidebarCloudAliasBusy } from './slices/sidebarSlice';
@@ -99,6 +101,26 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
       issuedInviteLink: null,
     }),
   );
+}
+
+// waitFor polls a plain predicate against the store rather than awaiting a
+// handle: invalidateTags' own background refetch is triggered internally by
+// wailsApi's middleware, with no promise returned to the caller that started
+// it, unlike a thunk this file can just `await`.
+async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error('timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function enrollmentStatus(store: ReturnType<typeof buildTestStore>): string | undefined {
+  return tenantInviteRequestApi.endpoints.listTenantPlatformEnrollmentStatuses.select({
+    tenants: [TENANT],
+  })(store.getState()).data?.[0]?.state;
 }
 
 // This is the headline case: the panel must actually recover, not just clear
@@ -230,4 +252,81 @@ test("the sidebar's own login thunk still logs in and updates cloud provider sta
     '',
     'busy flag must clear after login settles',
   );
+});
+
+// The sidebar dot for a local-only tenant never polls (nothing is pending),
+// so the only way it can ever notice a sign-in that made the tenant enrolled
+// is an explicit invalidation of the query behind it. This drives the
+// sidebar's own login button (loginPrimaryCloudProvider, the thunk every
+// cloud-alias "Log in" click and PlatformSignInAlert's SignInAction share)
+// through a real subscribed query, the way useTenantEnrollmentStatus keeps
+// one alive for as long as the row is mounted -- an unsubscribed query is
+// never refetched by invalidateTags, so a test that skips subscribing would
+// pass even if the invalidation were never wired up.
+test('a successful sign-in invalidates the sidebar tenant-enrollment status query, turning local-only into enrolled without a restart (#1824)', async () => {
+  const store = buildTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+
+  let enrolled = false;
+  stubWailsBridge({
+    LoginCloudProvider: () => Promise.resolve({ alias: ALIAS, provider: 'erun', status: 'active' }),
+    ListTenantPlatformEnrollmentStatuses: () =>
+      Promise.resolve([{ tenant: TENANT, state: enrolled ? 'enrolled' : 'local-only' }]),
+  });
+
+  const subscription = dispatch(
+    tenantInviteRequestApi.endpoints.listTenantPlatformEnrollmentStatuses.initiate({
+      tenants: [TENANT],
+    }),
+  );
+  const initial = await subscription;
+  assert.equal(initial.data?.[0]?.state, 'local-only');
+
+  enrolled = true;
+  const outcome = await dispatch(loginPrimaryCloudProvider(ALIAS));
+  assert.equal(outcome.status, 'success');
+
+  await waitFor(() => enrollmentStatus(store) === 'enrolled');
+
+  subscription.unsubscribe();
+});
+
+// The dashboard's own load makes the same GET /v1/whoami call the sidebar
+// query itself makes, so a tenant that became enrolled by some other route
+// (approved while the desktop was open, enrolled from the CLI) is caught the
+// next time the operator opens or refreshes that tenant's dashboard, not just
+// on an explicit sign-in click.
+test("loading the tenant dashboard and resolving a whoami also invalidates the sidebar's enrollment status query", async () => {
+  const store = buildTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+  seedNotSignedInDashboard(dispatch);
+
+  let enrolled = false;
+  stubWailsBridge({
+    LoadTenantDashboard: () =>
+      Promise.resolve({
+        tenant: TENANT,
+        platformState: '',
+        platformAlias: ALIAS,
+        canCreateReview: true,
+        canAdvanceMergeQueue: true,
+        reviews: [],
+      }),
+    ListTenantPlatformEnrollmentStatuses: () =>
+      Promise.resolve([{ tenant: TENANT, state: enrolled ? 'enrolled' : 'local-only' }]),
+  });
+
+  const subscription = dispatch(
+    tenantInviteRequestApi.endpoints.listTenantPlatformEnrollmentStatuses.initiate({
+      tenants: [TENANT],
+    }),
+  );
+  await subscription;
+
+  enrolled = true;
+  await dispatch(loadTenantDashboard());
+
+  await waitFor(() => enrollmentStatus(store) === 'enrolled');
+
+  subscription.unsubscribe();
 });

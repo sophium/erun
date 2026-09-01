@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -231,6 +232,59 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnWhoamiFault(t *testing.T) 
 	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
 		t.Fatalf("expected unknown when whoami fails for a reason other than unauthorized/forbidden, got %+v", statuses)
+	}
+}
+
+// TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden is the
+// regression for the sidebar dot conflating a 403 with "not enrolled": the
+// same whoami read tenantDashboardIdentityFailure classifies treats Forbidden
+// as an identity the platform already resolved to a tenant user, refused only
+// for lacking permissions on the read itself -- that is enrolled, and must
+// never fall through to the invite-request lookup (which this server would
+// fail, proving the code path is not reached).
+func TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v1/whoami" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
+		t.Fatalf("expected enrolled when whoami reports forbidden, got %+v", statuses)
+	}
+}
+
+// TestListTenantPlatformEnrollmentStatusesUnknownOnUnresolvedOrFailedAuth is
+// the inversion the fix must not introduce: TENANT_UNRESOLVED and
+// RESOLUTION_FAILED are not enrollment answers (tenantDashboardIdentityFailure
+// and enrollERunPlatformUserError already draw this line on their own reads),
+// so they must report unknown rather than falling through to the
+// invite-request lookup and rendering a confident local-only/pending answer
+// for a state that could not actually be determined.
+func TestListTenantPlatformEnrollmentStatusesUnknownOnUnresolvedOrFailedAuth(t *testing.T) {
+	for _, code := range []string{"TENANT_UNRESOLVED", "RESOLUTION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path != "/v1/whoami" {
+					t.Fatalf("unexpected request path: %s", req.URL.Path)
+				}
+				encoded, _ := json.Marshal(map[string]string{"code": code, "message": "detail"})
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write(encoded)
+			}))
+			defer server.Close()
+
+			app := testERunPlatformAliasApp(t, server.URL)
+			statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+			if len(statuses) != 1 || statuses[0].State != tenantEnrollmentUnknown {
+				t.Fatalf("expected unknown for %s, got %+v", code, statuses)
+			}
+		})
 	}
 }
 

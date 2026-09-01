@@ -13,13 +13,21 @@
 // see the state table below) never keeps a shared timer alive for siblings
 // that still do.
 //
-// Polling gate: 'local-only' is never polled (nothing is pending, so there is
-// nothing to observe changing on its own); 'pending'/'declined' ARE polled
-// (both can change via an operator action elsewhere); 'enrolled' stops
-// polling for that tenant permanently -- this state changes at most a few
-// times in a tenant's life and then never again. 'unknown' is also polled: it
-// means the platform round trip itself failed (not "nothing pending"), so the
-// only way to recover is to keep trying rather than going silent forever.
+// Polling gate: 'local-only' is never polled -- not because nothing can move
+// it (signing in with an existing account is exactly a local-only -> enrolled
+// transition, and the popover built on this state offers that sign-in), but
+// because the transition is caused by a discrete, observable desktop action
+// rather than something to notice by re-asking on a timer. cloudProviderThunks
+// invalidates the 'TenantEnrollment' tag on a successful platform sign-in, and
+// tenantDialogThunks does the same after the tenant dashboard's own load
+// resolves a whoami -- both cheaper and more immediate than a per-row timer
+// for a state most tenants in a large sidebar are legitimately local-only
+// forever. 'pending'/'declined' ARE polled (both can change via an operator
+// action elsewhere); 'enrolled' stops polling for that tenant permanently --
+// this state changes at most a few times in a tenant's life and then never
+// again. 'unknown' is also polled: it means the platform round trip itself
+// failed (not "nothing pending"), so the only way to recover is to keep
+// trying rather than going silent forever.
 //
 // There is no backend-supplied interval for this the way GET /v1/config
 // threads other values, and a hard-coded frontend interval has previously

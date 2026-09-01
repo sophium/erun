@@ -20,7 +20,11 @@ interface StubbedResponse {
 // enrolled across live poll cycles), and an optional gate so a test can
 // assert on the pre-response state before releasing it. Mirrors
 // tenant-dashboard-platform-state.spec.ts's stubRPC, scoped to this file per
-// this suite's own no-shared-harness convention.
+// this suite's own no-shared-harness convention. A non-matching call defers
+// via route.fallback(), not route.continue() -- continue() sends the request
+// straight to the real network and ends interception entirely, so a test
+// that calls stubRPC more than once (one method per call) would have its
+// earlier-registered stub bypassed by the later one instead of chained.
 function stubRPC(
   page: import('@playwright/test').Page,
   method: string,
@@ -38,7 +42,7 @@ function stubRPC(
   void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method !== method) {
-      await route.continue();
+      await route.fallback();
       return;
     }
     calls += 1;
@@ -286,6 +290,64 @@ test.describe('sidebar tenant enrollment status icon', () => {
       // the icon stays absent, the same as the pre-load state, rather than
       // falling back to a confident wrong answer.
       await expect(app.sidebar.tenantEnrollmentStatus(tenant)).toHaveCount(0);
+    } finally {
+      removeTenant(tenant);
+    }
+  });
+
+  // The bug this guards: local-only was excluded from polling on the premise
+  // that nothing is pending, but the popover built on that very state offers
+  // a sign-in -- exactly a local-only -> enrolled transition with nothing
+  // pending. The fix is an invalidation on sign-in success, not a timer, so
+  // this drives the popover's own sign-in action (not a direct dashboard
+  // open) and asserts the row itself updates with no restart and no manual
+  // refresh.
+  test('the local-only popover sign-in action turns the icon enrolled without a restart', async ({
+    app,
+    page,
+  }) => {
+    const tenant = uniqueEnvironmentName('enrollment-sign-in');
+    const environment = uniqueEnvironmentName('env');
+    seedTenant(tenant, environment);
+    seedEnvironment(tenant, environment);
+    try {
+      const enrollment = stubRPC(page, 'ListTenantPlatformEnrollmentStatuses', {
+        data: [{ tenant, state: 'local-only' }],
+      });
+      stubRPC(page, 'LoadTenantDashboard', {
+        data: { tenant, platformState: 'not-signed-in', platformAlias: 'erun+api.example@erun' },
+      });
+      stubRPC(page, 'LoginCloudProvider', {
+        data: { alias: 'erun+api.example@erun', provider: 'erun', status: 'active' },
+      });
+
+      await app.reloadEnvironments();
+      const icon = app.sidebar.tenantEnrollmentStatus(tenant);
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'local-only');
+      await expect(
+        app.page.getByRole('button', { name: `${tenant} is not on erunpaas.com yet` }),
+      ).toBeVisible();
+
+      await app.sidebar.openTenantEnrollmentStatusPopover(tenant);
+      await app.sidebar
+        .tenantEnrollmentStatusPopover()
+        .getByRole('button', { name: 'Sign in' })
+        .click();
+      await app.tenantDashboard.notSignedInHeading().waitFor({ state: 'visible' });
+
+      // The platform round trip behind the sign-in click is what actually
+      // moved the tenant to enrolled; only now does the stubbed status query
+      // report it.
+      enrollment.respondWith({ data: [{ tenant, state: 'enrolled' }] });
+      await app.tenantDashboard.signInButton().click();
+
+      // The regression is the sidebar dot sitting stale beside a dashboard
+      // that already recovered -- so the assertion that matters is back on
+      // the row, not on the dashboard the operator navigated away from.
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
+      await expect(
+        app.page.getByRole('button', { name: `${tenant} is enrolled in erunpaas.com` }),
+      ).toBeVisible();
     } finally {
       removeTenant(tenant);
     }
