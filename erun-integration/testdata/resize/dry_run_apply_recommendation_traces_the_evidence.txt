@@ -4,6 +4,6 @@ resize: team/dev sizing: cpu lower to 10 from 12 (busiest interval 4.567 of 12, 
 resize: team/dev sizing-evidence: 31h12m observed, 240 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
 resize: team/dev cpu 12 -> 10
 resize: team/dev memory 23552Mi -> 18432Mi
-resize: team/dev this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC
-resize team dev cpu=10 memory=18432Mi
+resize: team/dev this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC
+resize team dev cpu=10 memory=18432Mi dind-cpu=4 dind-memory=8916Mi
 resize: team/dev will roll the runtime pod once to apply the new limits

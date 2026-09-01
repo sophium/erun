@@ -324,8 +324,10 @@ Per container, the consumption charged to its node resolves by precedence:
 | Neither | `0` | **no** — the container is counted in `unmeasuredContainers` |
 
 Charging `0` for a limitless container without saying so is the failure mode this precedence
-exists to prevent: every `erun-dind` sidecar declares no limits, so a limits-only sum reports
-capacity the node does not have.
+exists to prevent: a tenant application container with no declared limit is common, and a
+limits-only sum would report capacity the node does not have. The runtime pod's own two
+containers (`erun-devops`, `erun-dind`) always declare limits — both size independently via
+[`erun resize`](/cli/resize) — so neither ever falls into this arm for a stock deploy.
 
 Free capacity per node and resource:
 

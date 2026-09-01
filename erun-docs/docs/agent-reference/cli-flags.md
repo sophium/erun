@@ -56,6 +56,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
 | `--runtime-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimepod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
 | `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `8916Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. |
+| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--dind-memory <value>` | Kubernetes quantity | A **new** env takes `8916Mi`; an **existing** env keeps `EnvConfig.runtimedindpod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimedindpod.memory`. Merges with `--dind-cpu` the same way. Raise this when a multi-arch `erun release`/`erun build --release` OOMs inside the sidecar — every image build runs there, not in the runtime container. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
 | `--platform-account` | bool | `false` | — | Makes the env a **cluster platform account**: `EnvConfig.platformaccount = true`, which threads `--set platformAccount=true` at deploy so the runtime chart binds the env's ServiceAccount to the built-in `cluster-admin` (a `<release>-platform` `ClusterRoleBinding`). Lets in-pod platform Terraform (the [cluster edge](/agent-reference/skills-spec#erun-enable-hosting-edge)) and component installs manage cluster-scoped resources. The first deploy that adds the binding must run from an admin-capable context (the API server's escalation check). |
@@ -75,6 +77,7 @@ A setting is applied because it was supplied, not because of the type the invoca
 | `--runtime-registry` | Sets `EnvConfig.runtimeregistry`. | Keeps it. |
 | `--image-pull-secret` | Replaces `EnvConfig.imagepullsecrets` with the trimmed, de-duplicated list. | Keeps the recorded list. |
 | `--runtime-cpu` / `--runtime-memory` | Merges onto `EnvConfig.runtimepod`: the limit named is set, the other is kept. Trace: `init: runtime pod resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: runtime pod resources not given; keeping cpu=<c> memory=<m>`. |
+| `--dind-cpu` / `--dind-memory` | Merges onto `EnvConfig.runtimedindpod`, independently of `--runtime-cpu`/`--runtime-memory`. Trace: `init: erun-dind sidecar resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: erun-dind sidecar resources not given; keeping cpu=<c> memory=<m>`. |
 | `--type` / `--remote` | Retypes the env — see below. | **Never** retypes. Trace: `init: --type not given; keeping env type "<t>"`. |
 | `--components` | Replaces `EnvConfig.deploy.components` outright, including with an empty list when the value is explicitly empty (`--components ''`) — that clears a saved selection and returns deploy to the repo plan. Trace: `init: deploy components set to <a,b,…>` (or `… (cleared — deploy now follows the repo k8s.deployments plan)`). | Keeps the recorded selection. Trace: `init: deploy components not given; keeping <a,b,…>` (silent when there was none). |
 
@@ -736,7 +739,7 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 
 ## `erun resize` {#erun-resize}
 
-Changes the runtime pod's CPU/memory limits and rolls it out through the same deploy composition `erun deploy` uses (`ResolveCurrentDeploySpecs`/`RunDeploySpecs`), so it reuses the existing rollout mechanism rather than inventing a second one. Same operation as the MCP `resize` tool (see [MCP overview § `resize`](/mcp/overview#resize)).
+Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and rolls them out through the same deploy composition `erun deploy` uses (`ResolveCurrentDeploySpecs`/`RunDeploySpecs`), so it reuses the existing rollout mechanism rather than inventing a second one. Same operation as the MCP `resize` tool (see [MCP overview § `resize`](/mcp/overview#resize)).
 
 ### Flags
 
@@ -744,9 +747,11 @@ Changes the runtime pod's CPU/memory limits and rolls it out through the same de
 |---|---|---|---|
 | `--tenant <t>` | string | current scope | Target tenant. |
 | `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
-| `--cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit. Merged onto the current value — naming only `--cpu` leaves memory unchanged. |
-| `--memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit. Merged onto the current value the same way. |
-| `--apply-recommendation` | bool | `false` | Size from `RecommendRuntimeSizing`'s per-resource verdicts (see [`erun list` § the sizing recommendation](/cli/list#the-sizing-recommendation)) instead of `--cpu`/`--memory`. Mutually exclusive with them. |
+| `--cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit for the runtime pod. Merged onto the current value — naming only `--cpu` leaves memory unchanged. |
+| `--memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit for the runtime pod. Merged onto the current value the same way. |
+| `--dind-cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit for the `erun-dind` sidecar. Merged onto the current value, independent of `--cpu`/`--memory` — may be combined with them in one call. |
+| `--dind-memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit for the `erun-dind` sidecar. Merged onto the current value the same way. |
+| `--apply-recommendation` | bool | `false` | Size the runtime pod from `RecommendRuntimeSizing`'s per-resource verdicts (see [`erun list` § the sizing recommendation](/cli/list#the-sizing-recommendation)) instead of `--cpu`/`--memory`. Mutually exclusive with them. Never sizes the `erun-dind` sidecar — see step 2 below for why. |
 | `--override-lease` | bool | `false` | Proceed even though `LoadEnvironmentActivityLeases` reports a held lease. |
 | `--orchestrator <id>` | string | `""` | Recorded as `EnvironmentActivityLeaseHolder.Orchestrator` on the resize's own exclusive lease. |
 | `--dry-run` | bool | `false` | Resolve and trace the plan; performs no write. |
@@ -754,23 +759,23 @@ Changes the runtime pod's CPU/memory limits and rolls it out through the same de
 ### Resolution algorithm
 
 1. Resolve tenant/environment/`EnvConfig` (`ResolveOpen`, the same resolver every other typed command uses).
-2. Resolve the target `RuntimePodResources`:
-   - `--apply-recommendation`: load the standing recommendation the same way `erun list` does (`LoadRuntimeUsageHistory` + `RecommendRuntimeSizing`, scoped to **this process's own** cache directory — see [Idle policy § activity leases](/agent-reference/idle-policy#activity-leases) for why that is in-pod-only for a remote/runtime environment). For each verdict whose `action` is `raise` or `lower`, adopt its `suggested` value; a verdict of `hold`/`insufficient-evidence` leaves that resource unchanged. No recommendation available → error.
+2. Resolve the target `RuntimePodResources` for the runtime pod:
+   - `--apply-recommendation`: load the standing recommendation the same way `erun list` does (`LoadRuntimeUsageHistory` + `RecommendRuntimeSizing`, scoped to **this process's own** cache directory — see [Idle policy § activity leases](/agent-reference/idle-policy#activity-leases) for why that is in-pod-only for a remote/runtime environment). For each verdict whose `action` is `raise` or `lower`, adopt its `suggested` value; a verdict of `hold`/`insufficient-evidence` leaves that resource unchanged. No recommendation available → error. `RecommendRuntimeSizing` derives its verdicts from cgroup counters read out of the container it runs inside — the `erun-devops` container, not the `erun-dind` sidecar next to it in the same pod — so there is no standing recommendation for the sidecar today; covering it would mean exec'ing into it specifically and retaining a second usage history.
    - Explicit `--cpu`/`--memory`: merge onto the current `EnvConfig.runtimepod`, matching `erun init`'s own merge semantics for the same field.
-3. Normalize and validate the resolved pair (`ValidateRuntimePodResources`), then validate it against `EnvConfig.namespacequota` if one is set: a `ResourceQuota` counts every container in the pod, so the target CPU/memory plus the `erun-dind` sidecar's own fixed limit (`DefaultRuntimeDindCPU`/`DefaultRuntimeDindMemory`) must not exceed the quota. A violation errors naming the resource, the sidecar's share, and how much is actually available to the runtime container.
-4. If the resolved target equals the current recorded value, stop: report a no-op, no lease check, no deploy.
+3. Resolve the target `RuntimePodResources` for the `erun-dind` sidecar, independently: explicit `--dind-cpu`/`--dind-memory` merge onto the current `EnvConfig.runtimedindpod` the same way. Both targets normalize and validate (`ValidateRuntimePodResources`/`ValidateRuntimeDindPodResources`), then validate together against `EnvConfig.namespacequota` if one is set: a `ResourceQuota` counts every container in the pod, so the runtime pod's target CPU/memory plus the sidecar's own *resolved* target (not a fixed constant — a `--dind-cpu`/`--dind-memory` in the same call moves it) must not exceed the quota. A violation errors naming the resource, the sidecar's share, and how much is actually available to the runtime container.
+4. If both resolved targets equal their current recorded values, stop: report a no-op, no lease check, no deploy.
 5. Load every currently held activity lease for the environment (`LoadEnvironmentActivityLeases` — plain and exclusive alike, the same predicate the desktop's own AI-session spawn uses to decide occupancy). Any result and `--override-lease` unset → refuse, naming every holder (`EnvironmentActivityLeaseHolder.String()` plus the lease's `name`). An override is traced explicitly when used.
-6. `--dry-run` stops here, after tracing the per-resource `current -> target` lines and the occupancy decision.
-7. Take an exclusive lease (scope `worktree`, name `resize`) for the duration of the write — this is what a *second, concurrent* resize call collides with, distinct from step 5's occupancy check against other workers. Persist `EnvConfig.runtimepod` to the resolved target, then run the same deploy composition `erun deploy` uses with no explicit version override (redeploys the environment's own recorded `runtimeversion`), so the runtime chart's `--set-string runtime.resources.limits.cpu/memory` rerenders with the new values and the `Recreate`-strategy Deployment rolls exactly once. Release the lease when the deploy finishes (or fails).
+6. `--dry-run` stops here, after tracing the per-resource `current -> target` lines (`cpu`/`memory` for the runtime pod, `dind-cpu`/`dind-memory` for the sidecar) and the occupancy decision.
+7. Take an exclusive lease (scope `worktree`, name `resize`) for the duration of the write — this is what a *second, concurrent* resize call collides with, distinct from step 5's occupancy check against other workers. Persist `EnvConfig.runtimepod`/`EnvConfig.runtimedindpod` to the resolved targets, then run the same deploy composition `erun deploy` uses with no explicit version override (redeploys the environment's own recorded `runtimeversion`), so the runtime chart's `--set-string runtime.resources.limits.cpu/memory` and `runtime.dind.resources.limits.cpu/memory` rerender with the new values and the `Recreate`-strategy Deployment rolls exactly once. Release the lease when the deploy finishes (or fails).
 
 ### What moves and what doesn't
 
 | Quantity | Affected by `resize`? |
 |---|---|
-| Runtime container's `resources.limits.cpu`/`.memory` (the throttle/OOM ceiling) | Yes — this is the whole point. |
-| The namespace `ResourceQuota`'s draw from this environment | Yes, indirectly: quota accounting is limits-based. |
-| Runtime container's `resources.requests` (what the scheduler reserves) | No — pinned to a small fixed default (`DefaultLimitRangeDefaultRequestCPU`/`Memory`) independent of `runtimepod`. |
-| `erun-dind` sidecar's own limits/requests | No — not addressable by this command. |
+| Runtime container's `resources.limits.cpu`/`.memory` (the throttle/OOM ceiling) | Yes, via `--cpu`/`--memory` or `--apply-recommendation`. |
+| `erun-dind` sidecar's `resources.limits.cpu`/`.memory` | Yes, via `--dind-cpu`/`--dind-memory` — independent of the runtime pod's own limits and combinable with them in one call. |
+| The namespace `ResourceQuota`'s draw from this environment | Yes, indirectly: quota accounting is limits-based and counts both containers. |
+| Runtime container's and sidecar's `resources.requests` (what the scheduler reserves) | No — pinned to small fixed defaults (`DefaultLimitRangeDefaultRequestCPU`/`Memory`, `DefaultRuntimeDindRequestCPU`/`Memory`) independent of this command. |
 | Any PVC (home, docker state, worktree) | No — PVC sizes are chart literals today, not values-driven. |
 
 ### Error behaviour
@@ -778,13 +783,14 @@ Changes the runtime pod's CPU/memory limits and rolls it out through the same de
 | Failure | Behaviour |
 |---|---|
 | Tenant/environment can't be resolved. | Errors before any read or write. |
-| Neither `--cpu`/`--memory` nor `--apply-recommendation`, or both. | Errors naming the conflict. |
+| None of `--cpu`/`--memory`/`--dind-cpu`/`--dind-memory`/`--apply-recommendation` given. | Errors naming what to pass instead. |
+| Both `--apply-recommendation` and explicit `--cpu`/`--memory` given. | Errors naming the conflict. `--dind-cpu`/`--dind-memory` may still be combined with `--apply-recommendation` in the same call — they size a different resource with no recommendation of its own. |
 | `--apply-recommendation` with no retained history for this environment. | Errors, and names the explicit-values fallback. |
-| Resolved target would exceed `EnvConfig.namespacequota` once the `erun-dind` sidecar's limit is counted. | Errors naming the resource, the sidecar's share, and the remainder actually available. |
+| Resolved runtime-pod target plus the sidecar's resolved target would exceed `EnvConfig.namespacequota`. | Errors naming the resource, the sidecar's share, and the remainder actually available. |
 | Another holder's lease is present (`LoadEnvironmentActivityLeases` non-empty) and `--override-lease` is unset. | Errors naming every holder (`orchestrator`, `user`, lease `name`). |
 | A second resize is already running (`TakeEnvironmentActivityLease` with `Exclusive: true` conflicts). | Errors naming that holder. |
-| The deploy step fails (chart resolution, helm rollout). | Errors as `erun deploy` would for the same failure; `EnvConfig.runtimepod` has already been persisted to the new value at this point, since deploy is what makes it live and a retry should redeploy the same target rather than resolve a stale one. |
-| Resolved target equals the current recorded value. | No-op: reports "already sized", takes no lease, and does not deploy. |
+| The deploy step fails (chart resolution, helm rollout). | Errors as `erun deploy` would for the same failure; `EnvConfig.runtimepod`/`runtimedindpod` have already been persisted to the new values at this point, since deploy is what makes them live and a retry should redeploy the same target rather than resolve a stale one. |
+| Both resolved targets equal their current recorded values. | No-op: reports "already sized" (naming all four current values), takes no lease, and does not deploy. |
 
 ---
 

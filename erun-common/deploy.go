@@ -202,6 +202,11 @@ type HelmDeploySpec struct {
 	Idle                         EnvironmentIdleConfig
 	Claude                       EnvironmentClaudeConfig
 	RuntimePod                   RuntimePodResources
+	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
+	// mirroring RuntimePod but for the sidecar container that runs the actual
+	// docker builds. Zero normalizes to DefaultRuntimeDindCPU/Memory, so an env
+	// that never sized it deploys byte-for-byte as before.
+	RuntimeDindPod RuntimePodResources
 	// NamespaceQuota is a hard per-namespace ceiling applied via a Kubernetes
 	// ResourceQuota + LimitRange (kubernetes_resource_quota.go), distinct from
 	// RuntimePod which only sizes the runtime container itself. Zero applies no
@@ -2312,6 +2317,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		RuntimeDindPod:      NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
@@ -2661,6 +2667,8 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
 		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
 		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
+		"--set-string", "runtime.dind.resources.limits.cpu="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
+		"--set-string", "runtime.dind.resources.limits.memory="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
 	)
 	args = append(args, helmClaudeSetArgs(d.Claude)...)
 	// When the chart is an umbrella wrapping a canonical erun-<base> chart, every

@@ -99,6 +99,108 @@ func TestResize(t *testing.T) {
 		golden.Equal(t, "resize/dry_run_exceeds_namespace_quota_refuses", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_dind_explicit_values", func(t *testing.T) {
+		// --dind-cpu/--dind-memory resize the erun-dind sidecar independent
+		// of --cpu/--memory: only a "dind-cpu"/"dind-memory" action is
+		// resolved, the runtime pod's own resource is left alone, and the
+		// resolved command carries the runtime pod's unchanged defaults
+		// alongside the new sidecar values.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--dind-cpu", "6", "--dind-memory", "16Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_dind_explicit_values", normalize.Apply(result.Combined))
+		assertEnvConfigUnchanged(t, setup, "team", "dev")
+	})
+
+	t.Run("dry_run_dind_combined_with_runtime_pod_values", func(t *testing.T) {
+		// The runtime-pod and sidecar flags are independent knobs that may be
+		// resized together in one call.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--dind-memory", "16Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_dind_combined_with_runtime_pod_values", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dind_combined_with_apply_recommendation", func(t *testing.T) {
+		// --apply-recommendation only ever sizes the runtime pod, but it is
+		// never in conflict with an explicit --dind-cpu/--dind-memory: the
+		// two combine in one call, unlike --apply-recommendation with an
+		// explicit --cpu/--memory (dry_run_conflicting_inputs_refuses).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
+			windowHours: 31, samples: 240,
+			peakMemoryBytes: 12742377472, limitBytes: 24696061952,
+			quotaMilli: 12000, periods: 376556, throttled: 0, peakCPUMilli: 4567,
+		})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--apply-recommendation", "--dind-memory", "16Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_dind_combined_with_apply_recommendation", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dind_exceeds_namespace_quota_refuses", func(t *testing.T) {
+		// The sidecar's own requested target, not just its default, counts
+		// against the namespace quota: raising --dind-cpu past what the
+		// runtime pod's default leaves available must refuse the same way
+		// raising --cpu does (dry_run_exceeds_namespace_quota_refuses).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfigForTest(t, setup, "team", "dev", "namespacequota:\n  cpu: \"10\"\n  memory: 32Gi\n  storage: 80Gi\n")
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--dind-cpu", "8", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit exceeding the namespace quota, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_dind_exceeds_namespace_quota_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_persists_dind_and_redeploys_via_stubs", func(t *testing.T) {
+		// Mirrors real_run_persists_and_redeploys_via_stubs for the sidecar:
+		// a real (non-dry-run) --dind-cpu/--dind-memory persists
+		// EnvConfig.runtimedindpod and rolls the pod through the same deploy
+		// composition. The runtime pod's own recorded size is written too
+		// (resize always normalizes and re-persists both), but at its
+		// unchanged default (cpu=4/8916Mi) rather than the sidecar's new
+		// values, proving the two knobs stayed independent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--dind-cpu", "6", "--dind-memory", "16384Mi"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "resize/real_run_persists_dind_and_redeploys_via_stubs", normalize.Apply(result.Combined))
+
+		data, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if !strings.Contains(string(data), "runtimedindpod") {
+			t.Fatalf("expected the persisted config to carry runtimedindpod, got:\n%s", data)
+		}
+		if !strings.Contains(string(data), "cpu: \"6\"") && !strings.Contains(string(data), "cpu: 6") {
+			t.Fatalf("expected the persisted runtimedindpod cpu to be 6, got:\n%s", data)
+		}
+		if !strings.Contains(string(data), "16384Mi") {
+			t.Fatalf("expected the persisted runtimedindpod memory to be 16384Mi, got:\n%s", data)
+		}
+		if !strings.Contains(string(data), "runtimepod:\n    cpu: \"4\"\n    memory: 8916Mi") {
+			t.Fatalf("expected the runtime pod's own resources to stay at their unchanged default, got:\n%s", data)
+		}
+	})
+
 	t.Run("dry_run_held_lease_refuses_and_names_holder", func(t *testing.T) {
 		// The lease-held refusal is the safety property the resize command
 		// exists to enforce: staging a held exclusive lease (an orchestrator
@@ -170,7 +272,9 @@ func TestResize(t *testing.T) {
 		// verdict says "cpu hold from 12" and "memory lower ... from
 		// 23552Mi", so the resolved plan must carry cpu=12 through unchanged
 		// and read memory's "from" as 23552Mi, never fall back to cpu=4 or
-		// memory 8916Mi.
+		// memory 8916Mi. The leading space on each needle keeps the check from
+		// tripping on the unrelated, default-valued "dind-cpu=4"/"dind-memory=8916Mi"
+		// fields the same trace line now also carries.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -191,7 +295,7 @@ func TestResize(t *testing.T) {
 		if !strings.Contains(result.Combined, "cpu=12") {
 			t.Fatalf("expected the resolved command to carry cpu=12 (the live value) through unchanged, got:\n%s", result.Combined)
 		}
-		if strings.Contains(result.Combined, "cpu=4") || strings.Contains(result.Combined, "8916Mi") {
+		if strings.Contains(result.Combined, " cpu=4") || strings.Contains(result.Combined, " memory=8916Mi") {
 			t.Fatalf("expected the plan to never fall back to the package defaults cpu=4/8916Mi, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "resize/dry_run_apply_recommendation_holds_cpu_at_live_limit", normalize.Apply(result.Combined))

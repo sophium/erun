@@ -9,6 +9,7 @@ init: runtime version not given; keeping <VERSION>
 init: runtime image set to registry.example/team-devops
 init: image pull secrets set to ecr-pull
 init: runtime pod resources not given; keeping cpu=8 memory=16Gi
+init: erun-dind sidecar resources not given; keeping cpu=4 memory=8916Mi
 init: --type not given; keeping env type "remote-agent"
 init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 mkdir -p <TMP>

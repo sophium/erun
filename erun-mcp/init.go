@@ -21,6 +21,8 @@ type InitInput struct {
 	ImagePullSecrets         []string  `json:"imagePullSecrets,omitempty" jsonschema:"names of Kubernetes dockerconfigjson secrets the runtime pod pulls its image with; required when the runtime image lives in a private registry, since the pod cannot start without one"`
 	RuntimeCPU               string    `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit; omitted, an existing environment keeps its recorded limit"`
 	RuntimeMemory            string    `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit; omitted, an existing environment keeps its recorded limit"`
+	RuntimeDindCPU           string    `json:"runtimeDindCpu,omitempty" jsonschema:"optional erun-dind sidecar CPU limit — the container that actually runs erun build/erun release; omitted, an existing environment keeps its recorded limit"`
+	RuntimeDindMemory        string    `json:"runtimeDindMemory,omitempty" jsonschema:"optional erun-dind sidecar memory limit; raise this when a multi-arch erun release/erun build --release OOMs inside the sidecar. Omitted, an existing environment keeps its recorded limit"`
 	KubernetesContext        string    `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string    `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
 	Type                     string    `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime, host); takes precedence over remote. host names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials. On an existing environment this changes the type; omitted, the environment keeps the type it has"`
@@ -83,6 +85,10 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool) (Comman
 			RuntimePod: eruncommon.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),
 				Memory: strings.TrimSpace(input.RuntimeMemory),
+			},
+			RuntimeDindPod: eruncommon.RuntimePodResources{
+				CPU:    strings.TrimSpace(input.RuntimeDindCPU),
+				Memory: strings.TrimSpace(input.RuntimeDindMemory),
 			},
 			NoGit:                   input.NoGit,
 			Bootstrap:               input.Bootstrap,

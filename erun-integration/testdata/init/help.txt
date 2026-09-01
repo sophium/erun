@@ -9,6 +9,8 @@ Flags:
       --components strings             Save this as the env's default deploy component selection — what a later erun deploy rolls out with no --components flag of its own. Pass an empty string to clear a saved selection and return the env to its repo k8s.deployments plan
       --confirm-environment            Confirm environment initialization without prompting
       --container-registry string      Container registry to associate with the environment
+      --dind-cpu string                erun-dind sidecar CPU limit — the container that actually runs erun build/erun release
+      --dind-memory string             erun-dind sidecar memory limit; raise this when a multi-arch erun release/erun build --release OOMs inside the sidecar
       --disable-build-script           Ignore any project build.sh for this env; erun build resolves docker/release contexts directly
       --dry-run                        Resolve and trace mutating actions without executing them.
       --environment string             Environment name

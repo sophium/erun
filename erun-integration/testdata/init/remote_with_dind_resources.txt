@@ -1,0 +1,51 @@
+audit: erun init --confirm-environment --container-registry registry.example/test --dind-cpu 6 --dind-memory 16Gi --dry-run --kubernetes-context test-context --no-git --remote --set-default-tenant --version <VERSION> team dev
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+kubectl --context test-context get namespace team-dev -o name
+deploy: namespace team-dev is created if the check above reports it missing
+Adding new environment
+mkdir -p <TMP>
+write-yaml <TMP>
+==> Initializing team/dev
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+kubectl --context test-context get namespace team-dev -o name
+deploy: namespace team-dev is created if the check above reports it missing
+kubectl --context test-context --namespace team-dev get pvc team-devops-worktree -o name
+deploy: worktree <HOME>/git/team is served by the team-devops-worktree volume; a deploy that creates that volume adopts an existing tree from the team-devops-home volume before the pod starts
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace team-dev --debug --kube-context test-context --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=pvc --set-string worktreeRepoName=team --set-string worktreeHostPath=<HOME>/git/team --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-string containerRegistry=registry.example/test --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=registry.example/test/team-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string runtime.dind.resources.limits.cpu=4 --set-string runtime.dind.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://registry.example/test/charts/erun-devops --version <VERSION>
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-dev get pods -o json
+dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-worktree:
+  set -eu
+  mkdir -p '<HOME>/git/team'
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-init-marker:
+  set -eu
+  mkdir -p '$HOME/.erun/team/dev'
+  cat > '$HOME/.erun/team/dev/bootstrap.yaml' <<'__ERUN_BOOTSTRAP_MARKER__'
+  tenant: team
+  environment: dev
+  project_root: <HOME>/git/team
+  no_git: true
+  bootstrap_complete: true
+  __ERUN_BOOTSTRAP_MARKER__
+  chmod 600 '$HOME/.erun/team/dev/bootstrap.yaml'
+==> Initialized team/dev
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings

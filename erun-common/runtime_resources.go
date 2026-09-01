@@ -21,8 +21,10 @@ const (
 // match the erun-devops container's own defaults: that is the shape the
 // sidecar was already implicitly assigned while the bug was live, and it is
 // dind that runs the actual docker builds, so it is not the smaller of the
-// two containers. Not operator-configurable today, unlike DefaultRuntimePodCPU/
-// Memory: no caller sizes the sidecar independently of the main container.
+// two containers. These are only the fallback: an environment that sizes the
+// sidecar independently (`erun init`/`erun resize --dind-cpu/--dind-memory`,
+// EnvConfig.RuntimeDindPod) overrides them the same way RuntimePod already
+// overrides DefaultRuntimePodCPU/Memory.
 const (
 	DefaultRuntimeDindCPU           = "4"
 	DefaultRuntimeDindMemory        = "8916Mi"
@@ -119,6 +121,34 @@ func ValidateRuntimePodResources(resources RuntimePodResources) error {
 	}
 	if _, err := ParseKubernetesMemoryToMi(resources.Memory); err != nil {
 		return fmt.Errorf("runtime pod memory: %w", err)
+	}
+	return nil
+}
+
+// NormalizeRuntimeDindPodResources and ValidateRuntimeDindPodResources are
+// NormalizeRuntimePodResources/ValidateRuntimePodResources's counterparts for
+// the erun-dind sidecar, now that it is operator-sizeable (`erun init`/`erun
+// resize --dind-cpu/--dind-memory`) rather than fixed at
+// DefaultRuntimeDindCPU/Memory for every environment.
+func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodResources {
+	cpu := strings.TrimSpace(resources.CPU)
+	if cpu == "" {
+		cpu = DefaultRuntimeDindCPU
+	}
+	memory := strings.TrimSpace(resources.Memory)
+	if memory == "" {
+		memory = DefaultRuntimeDindMemory
+	}
+	return RuntimePodResources{CPU: cpu, Memory: memory}
+}
+
+func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
+	resources = NormalizeRuntimeDindPodResources(resources)
+	if _, err := ParseKubernetesCPUToMilli(resources.CPU); err != nil {
+		return fmt.Errorf("dind sidecar CPU: %w", err)
+	}
+	if _, err := ParseKubernetesMemoryToMi(resources.Memory); err != nil {
+		return fmt.Errorf("dind sidecar memory: %w", err)
 	}
 	return nil
 }

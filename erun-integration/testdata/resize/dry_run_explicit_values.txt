@@ -1,6 +1,6 @@
 audit: erun resize --cpu 6 --dry-run --environment dev --memory 12288Mi --tenant team
 resize: team/dev cpu 4 -> 6
 resize: team/dev memory 8916Mi -> 12288Mi
-resize: team/dev this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC
-resize team dev cpu=6 memory=12288Mi
+resize: team/dev this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC
+resize team dev cpu=6 memory=12288Mi dind-cpu=4 dind-memory=8916Mi
 resize: team/dev will roll the runtime pod once to apply the new limits
