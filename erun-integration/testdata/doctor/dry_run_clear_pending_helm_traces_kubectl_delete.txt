@@ -5,6 +5,7 @@ aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
 
 Running: Clear pending helm release
 No cleanup actions selected.

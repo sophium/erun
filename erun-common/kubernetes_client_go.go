@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -109,4 +110,37 @@ func libraryPersistentVolumeClaimExists(contextName, namespace, claim string) (b
 		return false, nil
 	}
 	return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %s", claim, namespace, contextName, err)
+}
+
+// libraryImagePullSecretAuths is the library-backed alternative to
+// defaultExistingImagePullSecretAuths, reading the same dockerconfigjson
+// Secret via k8s.io/client-go instead of shelling out to kubectl. A typed
+// Secret's Data field is already base64-decoded by the API machinery (Go's
+// json package decodes a []byte field from a base64 string automatically),
+// so this needs no separate decode step the subprocess path's manual JSON
+// parse does.
+func libraryImagePullSecretAuths(contextName, namespace, name string) (map[string]dockerConfigJSONAuthEntry, error) {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	clientset, err := kubernetesClientsetForContext(contextName)
+	if err != nil {
+		return nil, fmt.Errorf("read existing image pull secret %s: %s", name, err)
+	}
+	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read existing image pull secret %s: %s", name, err)
+	}
+	encoded, ok := secret.Data[dockerConfigJSONSecretKey]
+	if !ok {
+		return nil, nil
+	}
+	var file dockerConfigJSONFile
+	if err := json.Unmarshal(encoded, &file); err != nil {
+		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, dockerConfigJSONSecretKey)
+	}
+	return file.Auths, nil
 }

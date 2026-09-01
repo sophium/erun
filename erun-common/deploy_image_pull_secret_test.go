@@ -170,7 +170,7 @@ func TestExistingImagePullSecretAuthsRefusesMalformedSecret(t *testing.T) {
 	imagePullSecretKubectlStub(t, map[string]string{"regcred": getBody}, "")
 
 	args := imagePullSecretGetArgs("team-dev", "", "regcred")
-	_, err := existingImagePullSecretAuths("regcred", args)
+	_, err := existingImagePullSecretAuths("", "team-dev", "regcred", args)
 	if err == nil {
 		t.Fatal("expected an error for a Secret whose .dockerconfigjson does not decode, got nil")
 	}

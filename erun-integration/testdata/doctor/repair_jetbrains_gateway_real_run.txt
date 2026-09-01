@@ -5,6 +5,7 @@ aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 Running: Clear cached JetBrains Gateway backend metadata
