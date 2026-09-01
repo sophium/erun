@@ -28,3 +28,10 @@ func isPortForwardProcess(int) bool {
 func isSSHDActivityProxyProcess(int) bool {
 	return false
 }
+
+// kubectlPortForwardProcessIDs has no Windows implementation: adopting and
+// sweeping foreign port-forwards by argv is a unix-only feature (see
+// findLocalPortHolder), so the argv sweep is a no-op here.
+func kubectlPortForwardProcessIDs() []int {
+	return nil
+}
