@@ -2,6 +2,7 @@ audit: erun deploy --components [team-devops,erun-backend-postgres,erun-backend-
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[team-devops erun-backend-postgres erun-backend-db erun-backend-api] force=false current=false
 deploy: component selection source --components flag; components team-devops, erun-backend-postgres, erun-backend-db, erun-backend-api
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)

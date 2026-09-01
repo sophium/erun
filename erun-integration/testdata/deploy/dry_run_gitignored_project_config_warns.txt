@@ -3,7 +3,7 @@ trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 cd <TMP> && git check-ignore -q -- .erun/config.yaml
-deploy: k8s chart root configured as deploy/k8s (.erun/config.yaml paths.k8s)
+config: .erun/config.yaml is excluded by .gitignore -- this resolves only on this machine; replace a bare ".erun/" ignore with ".erun/*" plus "!.erun/config.yaml"
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name

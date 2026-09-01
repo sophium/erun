@@ -2,6 +2,7 @@ audit: erun deploy --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
 deploy: component selection source k8s.deployments plan; components team-devops, erun-backend-postgres, erun-backend-db, erun-backend-api
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
 deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)

@@ -1346,6 +1346,38 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_consistent_runtime_image_line_reports_nothing", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_gitignored_project_config", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. doctor
+		// must report that under "== Project config ==" rather than staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_gitignored_project_config", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_tracked_project_config_reports_nothing", func(t *testing.T) {
+		// The other half: a config that is present but not gitignored (the
+		// common case) must never be flagged.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Project config") {
+			t.Fatalf("expected no project-config finding for a tracked config, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_tracked_project_config_reports_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as

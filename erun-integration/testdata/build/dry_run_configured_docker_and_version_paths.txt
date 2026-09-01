@@ -1,4 +1,5 @@
 audit: erun build --dry-run
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
 build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
 build: version file configured as build/VERSION (.erun/config.yaml paths.version)
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64

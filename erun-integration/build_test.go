@@ -57,6 +57,23 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_gitignored_project_config_warns", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. The
+		// build trace must surface that as a warning instead of staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "paths:\n    docker: build/docker\n    version: build/VERSION\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_gitignored_project_config_warns", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_cluster_registry_resolves_host_port_forward", func(t *testing.T) {
 		// A cluster: container registry resolves its concrete push host from the
 		// kube-context at build time. On the host (not in-pod) the push host is a

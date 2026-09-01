@@ -130,6 +130,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
+	if err := reportProjectConfigTracked(ctx, result); err != nil {
+		return err
+	}
 	if err := reportExecutionModes(ctx); err != nil {
 		return err
 	}
@@ -157,6 +160,22 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 		return nil
 	}
 	return runDoctorPostSyncActions(ctx, promptRunner, result, req, diagnosis, options)
+}
+
+// reportProjectConfigTracked reports when this environment's project config
+// (.erun/config.yaml) exists but is excluded by .gitignore -- a silent
+// onboarding failure: it resolves fine on this machine and nowhere else,
+// because git never sees it, so the same build/deploy elsewhere falls back to
+// unconfigured defaults with no clue why. A detection failure (no git
+// repository, no config file at all) is not reported; only a config that
+// resolves yet is untracked is worth flagging here.
+func reportProjectConfigTracked(ctx common.Context, result common.OpenResult) error {
+	present, ignored, err := common.ProjectConfigGitIgnored(ctx, result.RepoPath)
+	if err != nil || !present || !ignored {
+		return nil
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", common.ProjectConfigGitIgnoreFix)
+	return err
 }
 
 // runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
