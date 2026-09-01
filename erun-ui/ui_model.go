@@ -58,6 +58,37 @@ type uiEnvironment struct {
 	// Go process would otherwise have no reading to seed a hover card from until
 	// the next sweep tick.
 	Usage *uiEnvironmentUsageSnapshot `json:"usage,omitempty"`
+	// Node is the cloud node this env's cluster runs on, if it has one. nil is
+	// the definite answer "this environment is not backed by a node erun
+	// manages" — never "the node could not be read", which is Status instead.
+	Node *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
+}
+
+// uiEnvironmentNodeSnapshot is the machine an environment's cluster runs on,
+// as the cloud-context poller last observed it (cloud_context_cache.go). It is
+// a fact about the NODE, kept apart from every field above, which are facts
+// about the environment: a stopped node and a stopped environment are
+// different things with different remedies, and the row that renders them must
+// not be able to conflate the two.
+type uiEnvironmentNodeSnapshot struct {
+	Name string `json:"name"`
+	// Label is the operator-facing name for the same node, falling back to Name.
+	Label string `json:"label,omitempty"`
+	// Status is the poller's cached reading: "running", "pending", "stopped",
+	// "unknown" once a known-good reading has gone stale, or "" when the poller
+	// has not observed this node yet. The last two both mean "we do not know",
+	// and neither may be rendered as stopped.
+	Status string `json:"status"`
+}
+
+// envNodePayload publishes one environment's node reading, on the same
+// transition-only cadence envActivityPayload uses. Node is nil for an
+// environment with no node erun manages, which is a state the row renders
+// (nothing about a node) rather than a reason to withhold the event.
+type envNodePayload struct {
+	Tenant      string                     `json:"tenant"`
+	Environment string                     `json:"environment"`
+	Node        *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
 }
 
 // uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation

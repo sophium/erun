@@ -59,6 +59,7 @@ func (a *App) LoadState() (uiState, error) {
 	state := stateFromListResult(result, info)
 	a.seedEnvironmentActivitySnapshots(&state)
 	a.seedEnvironmentUsageSnapshots(&state)
+	a.seedEnvironmentNodeSnapshots(&state, result)
 	suggestionTenant := ""
 	suggestionEnv := ""
 	if state.Selected != nil {

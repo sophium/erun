@@ -4,9 +4,11 @@ export type { AppNotificationClearPayload, AppNotificationPayload } from './appN
 export type { AppStatusPayload } from './appStatusPayload';
 export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
 export type { CloudInitProvider } from './cloudInitProvider';
+export type { CloudNodeOperation } from './cloudNodeOperation';
 export type { DoctorCompletedPayload } from './doctorCompletedPayload';
 export type { EnvActivityPayload } from './envActivityPayload';
 export type { EnvironmentInitializedPayload } from './environmentInitializedPayload';
+export type { EnvNodePayload } from './envNodePayload';
 export type { EnvStatusPayload } from './envStatusPayload';
 export type { EnvUsagePayload } from './envUsagePayload';
 export type { HiddenSessionMode } from './hiddenSessionMode';

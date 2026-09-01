@@ -12,6 +12,7 @@ import {
   replaceCloudContext,
   replaceCloudProvider,
 } from './cloudContextState';
+import { cloudNodeOperationFor } from './cloudNodeOperations';
 import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
@@ -24,7 +25,11 @@ import {
 } from './notificationThunks';
 import { openSelection } from './sessionThunks';
 import { patchGlobalConfigDialog, setGlobalConfigDialog } from './slices/globalConfigDialogSlice';
-import { setIdleCloudContextBusy, setIdleStatus } from './slices/idleSlice';
+import {
+  finishCloudNodeOperation,
+  setIdleStatus,
+  startCloudNodeOperation,
+} from './slices/idleSlice';
 import { trackCloudInitSession } from './slices/sessionsSlice';
 import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
@@ -161,16 +166,21 @@ export const startGlobalCloudContext =
 
 export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const state = getState();
-  const action = idleCloudContextAction(state.idle.idleStatus, state.idle.idleCloudContextBusy);
+  const action = idleCloudContextAction(
+    state.idle.idleStatus,
+    cloudNodeOperationFor(state.idle.cloudNodeOperations, state.idle.idleStatus?.cloudContextName),
+  );
   if (!action) {
     return;
   }
   const selection = state.selection.selected ? { ...state.selection.selected } : null;
-  dispatch(setIdleCloudContextBusy(true));
+  // Recorded against the node, not as a bare "something is busy": the titlebar
+  // renders the progressive label only for the node its own name refers to.
+  dispatch(startCloudNodeOperation({ name: action.name, operation: action.operation }));
   try {
     const context = (await action.run(action.name)) as UICloudContextStatus;
     applyIdleCloudContextResult(dispatch, getState, action.idleStatus, context);
-    dispatch(setIdleCloudContextBusy(false));
+    dispatch(finishCloudNodeOperation({ name: action.name }));
     dispatch(
       showNotification(
         'success',
@@ -186,7 +196,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
     void dispatch(refreshIdleStatus());
   } catch (error) {
     const message = readError(error);
-    dispatch(setIdleCloudContextBusy(false));
+    dispatch(finishCloudNodeOperation({ name: action.name }));
     dispatch(showNotification('error', message));
     dispatch(showTerminalError(message));
   }

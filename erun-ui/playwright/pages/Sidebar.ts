@@ -136,6 +136,14 @@ export class Sidebar {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
   }
 
+  // The row's SECOND indicator: the cloud node behind the environment, not the
+  // environment itself. Scoped the same way envOpenDot is, and deliberately a
+  // separate locator — the two report different objects and must be assertable
+  // apart.
+  envNodeIndicator(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env).locator('..').getByTestId('env-node-indicator');
+  }
+
   // closeEnvironment activates the row's indicator until the env's tabs are
   // actually gone.
   //

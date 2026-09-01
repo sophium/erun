@@ -9,6 +9,7 @@ import type {
   DoctorCompletedPayload,
   EnvActivityPayload,
   EnvironmentInitializedPayload,
+  EnvNodePayload,
   EnvStatusPayload,
   EnvUsagePayload,
   OrchestratorShellActivityPayload,
@@ -24,6 +25,7 @@ import {
   handleEnvironmentDeployed,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
+  handleEnvNode,
   handleEnvStatus,
   handleEnvUsage,
   handleOrchestratorShellActivity,
@@ -70,6 +72,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('env-usage', (payload: EnvUsagePayload) => {
         store.dispatch(handleEnvUsage(payload));
+      }),
+      EventsOn('env-node', (payload: EnvNodePayload) => {
+        store.dispatch(handleEnvNode(payload));
       }),
       EventsOn('doctor-completed', (payload: DoctorCompletedPayload) => {
         store.dispatch(handleDoctorCompleted(payload));

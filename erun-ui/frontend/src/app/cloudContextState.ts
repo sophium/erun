@@ -7,21 +7,27 @@ import type {
 } from '@/types';
 
 import { StartCloudContext, StopCloudContext } from '../../wailsjs/go/main/App';
-import type { IdleCloudContextAction } from './model';
+import { cloudNodeIsRunning } from './cloudNodeStatus';
+import type { CloudNodeOperation, IdleCloudContextAction } from './model';
 import { defaultCloudContextInitInput } from './state';
 import { normalizeDialogValue } from './versionSuggestions';
 
+// idleCloudContextAction resolves what clicking the titlebar's power control
+// would do. It reads the same two inputs idleCloudAction renders — the node's
+// current state, and the operation already in flight against that node — so the
+// control's label and the action behind it cannot describe different things.
+// The two used to read one global `busy` flag with opposite meanings ("no
+// action available" here, "my action is in progress" there); the flag is now the
+// per-node operation record, and both ask it the same question.
 export function idleCloudContextAction(
   idleStatus: UIIdleStatus | null,
-  busy: boolean,
+  inFlight: CloudNodeOperation | null,
 ): IdleCloudContextAction | null {
   const name = normalizeDialogValue(idleStatus?.cloudContextName ?? '');
-  if (!idleStatus?.managedCloud || !name || busy) {
+  if (!idleStatus?.managedCloud || !name || inFlight) {
     return null;
   }
-  const running =
-    normalizeDialogValue(idleStatus.cloudContextStatus ?? '').toLowerCase() === 'running';
-  if (running) {
+  if (cloudNodeIsRunning(idleStatus.cloudContextStatus)) {
     return {
       idleStatus,
       operation: 'stop',

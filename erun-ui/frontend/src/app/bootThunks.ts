@@ -2,12 +2,13 @@ import type { UIState, UITenant } from '@/types';
 
 import { stateApi } from './api/stateApi';
 import { planEnvActivitySeed } from './envActivitySeed';
+import { planEnvNodeSeed } from './envNodeSeed';
 import { planEnvUsageSeed } from './envUsageSeed';
 import { readError } from './errors';
 import { showTerminalError, showTerminalMessage } from './notificationThunks';
 import { loadOrchestrators, restoreOpenOrchestrators } from './orchestratorThunks';
 import { openSelection } from './sessionThunks';
-import { setEnvActivityForEnv, setEnvUsageForEnv } from './slices/envStatusSlice';
+import { setEnvActivityForEnv, setEnvNodeForEnv, setEnvUsageForEnv } from './slices/envStatusSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
   setCloudProviders,
@@ -39,6 +40,14 @@ function seedEnvActivity(dispatch: AppDispatch, tenants: UITenant[]): void {
 function seedEnvUsage(dispatch: AppDispatch, tenants: UITenant[]): void {
   for (const seed of planEnvUsageSeed(tenants)) {
     dispatch(setEnvUsageForEnv(seed));
+  }
+}
+
+// seedEnvNodes is the same seeding shape for the cloud node behind each
+// environment (environment_node.go) — see planEnvNodeSeed.
+function seedEnvNodes(dispatch: AppDispatch, tenants: UITenant[]): void {
+  for (const seed of planEnvNodeSeed(tenants)) {
+    dispatch(setEnvNodeForEnv(seed));
   }
 }
 
@@ -94,6 +103,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     dispatch(setTenants(tenants));
     seedEnvActivity(dispatch, tenants);
     seedEnvUsage(dispatch, tenants);
+    seedEnvNodes(dispatch, tenants);
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
     dispatch(setSelected(loaded.selected ?? null));
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));

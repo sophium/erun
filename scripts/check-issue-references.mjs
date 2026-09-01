@@ -223,7 +223,6 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/components/app/ReviewPanel.ChangedFiles.tsx': 2,
   'erun-ui/frontend/src/components/app/ReviewPanel.EnvLabel.tsx': 1,
   'erun-ui/frontend/src/components/app/ReviewPanel.tsx': 2,
-  'erun-ui/frontend/src/components/app/Sidebar.EnvironmentRow.tsx': 1,
   'erun-ui/frontend/src/components/app/Sidebar.OrchestratorHoverCard.tsx': 1,
   'erun-ui/frontend/src/components/app/TenantDashboardMessage.tsx': 2,
   'erun-ui/frontend/src/components/app/TenantDashboardPanels.Reviews.tsx': 3,

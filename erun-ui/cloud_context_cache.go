@@ -83,10 +83,20 @@ func (a *App) applyCloudContextStatusesToCache(statuses []eruncommon.CloudContex
 // Lets Init/Start/Stop handlers reflect the state they just caused
 // without waiting for the next poll tick.
 func (a *App) setCloudContextStatusInCache(name, status string) {
+	if !a.storeCloudContextStatus(name, status) {
+		return
+	}
+	// Outside the write above: the per-env fan-out reads the same cache back,
+	// and the sidebar rows for this node are as stale as the widget that just
+	// caused the change until it runs.
+	a.refreshEnvironmentNodeStatuses()
+}
+
+func (a *App) storeCloudContextStatus(name, status string) bool {
 	name = strings.TrimSpace(name)
 	status = strings.TrimSpace(status)
 	if name == "" || status == "" {
-		return
+		return false
 	}
 	a.cloudContextStatusesMu.Lock()
 	defer a.cloudContextStatusesMu.Unlock()
@@ -94,6 +104,7 @@ func (a *App) setCloudContextStatusInCache(name, status string) {
 		a.cloudContextStatuses = make(map[string]cloudContextCacheEntry, 1)
 	}
 	a.cloudContextStatuses[name] = cloudContextCacheEntry{status: status, confirmedAt: time.Now()}
+	return true
 }
 
 func (a *App) startCloudContextStatusPoller() {
@@ -141,4 +152,8 @@ func (a *App) refreshCloudContextStatusesOnce() {
 		return
 	}
 	a.applyCloudContextStatusesToCache(statuses)
+	// A cached node status nothing publishes per environment is a status the
+	// sidebar cannot render, which is how an environment on a stopped node came
+	// to show no indicator at all.
+	a.refreshEnvironmentNodeStatuses()
 }

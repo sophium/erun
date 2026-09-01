@@ -203,4 +203,16 @@ export class Titlebar {
   idleStatusBadge(): Locator {
     return this.page.getByRole('button', { name: /Idle timeout/ });
   }
+
+  // The pill that replaces the idle countdown while a cloud-node start or stop
+  // is in flight against the node this widget names.
+  idleTransitionPill(): Locator {
+    return this.page.getByTestId('titlebar-idle-transition');
+  }
+
+  // The cloud-node power button. Its accessible name is the action it performs,
+  // so a spec matching on it is asserting the label contract, not a test id.
+  cloudNodePowerButton(label: string | RegExp): Locator {
+    return this.page.getByRole('button', { name: label });
+  }
 }

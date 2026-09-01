@@ -774,8 +774,15 @@ func idleConfigValue(value, fallback string) string {
 // longer carries Status, so a missing cache entry surfaces as Status="" that
 // callers must treat as "not yet observed," not "stopped."
 func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
-	cloudProviderAlias := strings.TrimSpace(config.CloudProviderAlias)
-	kubernetesContext := strings.TrimSpace(config.KubernetesContext)
+	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
+}
+
+// linkedCloudContextFor is the same resolution keyed on the two fields it
+// actually reads, for read-model callers that hold a list result rather than a
+// full EnvConfig.
+func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (eruncommon.CloudContextStatus, bool, error) {
+	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
+	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
 		return eruncommon.CloudContextStatus{}, false, nil
 	}
