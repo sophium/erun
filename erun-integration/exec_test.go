@@ -250,6 +250,105 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("diff_scope_current_committed_change_still_reports_review_commits", func(t *testing.T) {
+		// Regression: the panel's default "current" scope only ever diffs
+		// uncommitted local edits, so a clean worktree right after a commit
+		// correctly shows an empty diff -- but the caller must still be able
+		// to tell that apart from "nothing to review at all". ReviewCommits
+		// is computed from base..HEAD regardless of scope, so it must stay
+		// populated here even though scope=current's own diff is empty.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		result := erun.Run(t, []string{"exec", "diff", "--json", "--scope=current"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Scope != "current" {
+			t.Errorf("expected Scope=current, got %q", parsed.Scope)
+		}
+		if len(parsed.Files) != 0 {
+			t.Errorf("expected no files under scope=current on a clean worktree, got %+v", parsed.Files)
+		}
+		if len(parsed.ReviewCommits) == 0 {
+			t.Errorf("expected ReviewCommits to still report the unpushed feature commit even though scope=current's own diff is empty")
+		}
+	})
+
+	t.Run("diff_scope_current_default_includes_staged_changes", func(t *testing.T) {
+		// Bug: scope=current used to run a bare `git diff` (worktree vs
+		// index), which misses a staged-but-uncommitted change entirely --
+		// exactly the state right after `git add`. It must diff against HEAD
+		// instead so staged edits show up alongside unstaged ones.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "# test\nstaged edit\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		result := erun.Run(t, []string{"exec", "diff", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Files) != 1 || parsed.Files[0].Path != "README.md" {
+			t.Errorf("expected staged README.md to appear with no --scope flag, got %+v", parsed.Files)
+		}
+	})
+
+	t.Run("diff_scope_current_explicit_matches_default_for_staged_changes", func(t *testing.T) {
+		// The CLI's implicit default (no --scope flag at all, ResolveGitDiff)
+		// and an explicit --scope=current (ResolveGitDiffWithOptions) are two
+		// different code paths that must resolve staged changes the same way
+		// rather than silently diverging.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "# test\nstaged edit\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		result := erun.Run(t, []string{"exec", "diff", "--json", "--scope=current"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Files) != 1 || parsed.Files[0].Path != "README.md" {
+			t.Errorf("expected staged README.md under explicit --scope=current, got %+v", parsed.Files)
+		}
+	})
+
+	t.Run("diff_scope_current_no_commits_yet_still_diffs_staged_changes", func(t *testing.T) {
+		// A repo with no commits at all has no HEAD to diff against;
+		// scope=current must fall back to the index-only form rather than
+		// erroring out on a missing HEAD.
+		setup := env.New(t)
+		fixture.RunGit(t, setup.Cwd, "init", "-q", "-b", "main")
+		fixture.RunGit(t, setup.Cwd, "config", "user.email", "test@example")
+		fixture.RunGit(t, setup.Cwd, "config", "user.name", "Test")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "new.txt"), "new\n")
+		fixture.RunGit(t, setup.Cwd, "add", "new.txt")
+		result := erun.Run(t, []string{"exec", "diff", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Files) != 1 || parsed.Files[0].Path != "new.txt" {
+			t.Errorf("expected staged new.txt on a repo with no commits yet, got %+v", parsed.Files)
+		}
+	})
+
 	t.Run("diff_scope_commit_uses_selected_commit_parent", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)

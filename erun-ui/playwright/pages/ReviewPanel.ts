@@ -189,4 +189,17 @@ export class ReviewPanel {
   reviewBoundaryButton(label: string, index: number): Locator {
     return this.page.getByRole('button', { name: new RegExp(label) }).nth(index);
   }
+
+  // noLocalChangesNotice locates DiffEmptyState's "no local changes, but
+  // commits are pending" notice (DiffList.tsx) within a given container --
+  // the same component renders in both the diff panel body and the
+  // changed-files tree aside, so callers scope to diffContentRegion() or
+  // changedFilesTree() to assert each independently.
+  noLocalChangesNotice(container: Locator): Locator {
+    return container.getByRole('status').filter({ hasText: 'No local changes' });
+  }
+
+  viewAllBranchChangesButton(container: Locator): Locator {
+    return container.getByRole('button', { name: 'View all branch changes' });
+  }
 }
