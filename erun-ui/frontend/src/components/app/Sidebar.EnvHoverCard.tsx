@@ -2,6 +2,7 @@ import { Popover, PopoverAnchor, PopoverContent } from 'erun-kit';
 import { TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
+import { type EnvironmentNodeIndicator, environmentNodeLabel } from '@/app/environmentNodeState';
 import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
 import {
   type ErunVersionSummary,
@@ -19,6 +20,7 @@ import {
   HoverCardTitle,
 } from '@/components/app/Sidebar.HoverCardRow';
 import type { UISelection, UIWorkingIssue } from '@/types';
+import type { UIEnvironmentNodeSnapshot } from '@/uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 import type {
   UIErunVersion,
@@ -64,6 +66,8 @@ export function EnvHoverCard({
   runtimeImageLineMismatch,
   activityLabel,
   indicator,
+  nodeIndicator,
+  node,
   usage,
   children,
 }: {
@@ -79,6 +83,8 @@ export function EnvHoverCard({
   runtimeImageLineMismatch?: UIRuntimeImageLineMismatch;
   activityLabel: string;
   indicator: EnvironmentIndicator;
+  nodeIndicator: EnvironmentNodeIndicator;
+  node: UIEnvironmentNodeSnapshot | undefined;
   usage: UIEnvironmentUsageSnapshot | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
@@ -123,46 +129,50 @@ export function EnvHoverCard({
             <EnvTypeBadge isLocal={isLocal} isHost={isHost} />
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
-          <EnvVersionRows
-            runtimeVersion={runtimeVersion}
-            runtimeVersionLine={runtimeVersionLine}
-            erunVersionSummary={erunVersionSummary}
-            runtimeImageLineMismatch={runtimeImageLineMismatch}
-          />
-          <HoverCardRow label="Working on" wide>
-            <WorkingOn issue={issue} />
-          </HoverCardRow>
-          <HoverCardRow label="Activity">
-            <ActivityState activityLabel={activityLabel} indicator={indicator} />
-          </HoverCardRow>
-          <HoverCardRow label="Usage">
-            <UsageState usage={usage} />
-          </HoverCardRow>
-        </dl>
+        <EnvHoverCardFields
+          runtimeVersion={runtimeVersion}
+          runtimeVersionLine={runtimeVersionLine}
+          erunVersionSummary={erunVersionSummary}
+          runtimeImageLineMismatch={runtimeImageLineMismatch}
+          issue={issue}
+          activityLabel={activityLabel}
+          indicator={indicator}
+          usage={usage}
+          node={node}
+          nodeIndicator={nodeIndicator}
+        />
       </PopoverContent>
     </Popover>
   );
 }
 
-// EnvVersionRows renders the card's version-related rows: the runtime
-// version with its release line named, the erun version when it can be told
-// apart from the runtime version, and a recorded/observed line mismatch
-// warning when there is one. Split out of EnvHoverCard to keep that
-// component's own body within the line budget.
-function EnvVersionRows({
+// EnvHoverCardFields is the card's body, split out from EnvHoverCard so that
+// component stays the popover's open/close lifecycle and this one stays markup.
+function EnvHoverCardFields({
   runtimeVersion,
   runtimeVersionLine,
   erunVersionSummary,
   runtimeImageLineMismatch,
+  issue,
+  activityLabel,
+  indicator,
+  usage,
+  node,
+  nodeIndicator,
 }: {
   runtimeVersion: string;
   runtimeVersionLine: UIRuntimeVersionLine | undefined;
   erunVersionSummary: ErunVersionSummary | null;
   runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
+  issue: WorkingIssueState;
+  activityLabel: string;
+  indicator: EnvironmentIndicator;
+  usage: UIEnvironmentUsageSnapshot | undefined;
+  node: UIEnvironmentNodeSnapshot | undefined;
+  nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
   return (
-    <>
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
       {/* wide: a version is the card's longest literal identifier, and the
           narrow value column shared with the label breaks it mid-token. */}
       <HoverCardRow label="Version" wide>
@@ -178,7 +188,19 @@ function EnvVersionRows({
           <LineMismatchWarning mismatch={runtimeImageLineMismatch} />
         </HoverCardRow>
       )}
-    </>
+      <HoverCardRow label="Working on" wide>
+        <WorkingOn issue={issue} />
+      </HoverCardRow>
+      <HoverCardRow label="Activity">
+        <ActivityState activityLabel={activityLabel} indicator={indicator} />
+      </HoverCardRow>
+      <HoverCardRow label="Usage">
+        <UsageState usage={usage} />
+      </HoverCardRow>
+      <HoverCardRow label="Cloud node">
+        <NodeState node={node} nodeIndicator={nodeIndicator} />
+      </HoverCardRow>
+    </dl>
   );
 }
 
@@ -262,6 +284,56 @@ function ActivityState({
     return <span>{indicator.activity}</span>;
   }
   return <Muted>{indicator.activity}</Muted>;
+}
+
+// NodeState names the machine the environment's cluster runs on and the power
+// state it was last observed in. It renders on EVERY hover, including for a
+// running node the row itself stays silent about: "the node is fine, it is the
+// environment that could not be determined" is the answer a blank row cannot
+// give, and this is where it is available without new row vocabulary.
+function NodeState({
+  node,
+  nodeIndicator,
+}: {
+  node: UIEnvironmentNodeSnapshot | undefined;
+  nodeIndicator: EnvironmentNodeIndicator;
+}): React.ReactElement {
+  if (!node) {
+    // A definite answer, not an unread one: nothing erun power-manages backs
+    // this environment, so there is no node to be up or down.
+    return <Muted>No cloud node — this cluster is not power-managed by erun</Muted>;
+  }
+  const label = environmentNodeLabel(node);
+  if (nodeIndicator.state === 'stopped') {
+    return (
+      <span className="grid gap-0.5">
+        <span className="font-mono">{label}</span>
+        <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+          <TriangleAlert aria-hidden="true" className="size-3 shrink-0" />
+          Stopped — start it from the titlebar
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="grid gap-0.5">
+      <span className="font-mono">{label}</span>
+      <span className={HOVER_CARD_CAPTION_CLASS}>{nodeStateCaption(nodeIndicator.state)}</span>
+    </span>
+  );
+}
+
+function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
+  switch (state) {
+    case 'running':
+      return 'Running';
+    case 'pending':
+      return 'Starting';
+    case 'stopped':
+      return 'Stopped';
+    case 'unknown':
+      return 'State unknown — could not be checked';
+  }
 }
 
 // UsageState renders the environment-usage sweep's cached reading

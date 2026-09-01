@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
+import type { UIEnvironmentNodeSnapshot } from '@/uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 // Per-env real status behind the sidebar's open dot: a row with live tabs must
@@ -45,6 +46,13 @@ export interface EnvObservedActivity {
 export interface EnvStatusState {
   statusByEnv: Record<string, EnvRealStatus>;
   activityByEnv: Record<string, EnvObservedActivity>;
+  // nodeByEnv is the cloud node behind each environment, as the cloud-context
+  // poller last observed it (erun-ui/environment_node.go). Kept apart from both
+  // maps above because it is a fact about a different object: the machine the
+  // cluster runs on, not the environment. An absent key means "no node erun
+  // manages backs this environment" — an undetermined reading is present, with
+  // an empty or 'unknown' status.
+  nodeByEnv: Record<string, UIEnvironmentNodeSnapshot>;
   // usageByEnv is the environment-usage sweep's last cached reading per
   // environment (environment_usage.go), keyed the same way activityByEnv is.
   // Unlike activity, a quiet reading is not omitted: the figures themselves
@@ -58,6 +66,7 @@ const initialState: EnvStatusState = {
   statusByEnv: {},
   activityByEnv: {},
   usageByEnv: {},
+  nodeByEnv: {},
 };
 
 // A quiet environment carries no entry, so a repeated "still quiet"
@@ -116,9 +125,42 @@ export const envStatusSlice = createSlice({
       const { key, usage } = action.payload;
       state.usageByEnv[key] = usage;
     },
+    setEnvNodeForEnv(
+      state,
+      action: PayloadAction<{ key: string; node: UIEnvironmentNodeSnapshot | undefined }>,
+    ) {
+      const { key, node } = action.payload;
+      if (!node) {
+        // Guarded, not unconditional: the sweep reports "no node" for every
+        // environment that has none on every tick, and an unguarded delete
+        // makes immer mint a new map each time — churn that re-renders rows
+        // for no rendered difference, and a sidebar hover card is dropped by
+        // any re-render of the row that raised it.
+        if (key in state.nodeByEnv) {
+          Reflect.deleteProperty(state.nodeByEnv, key);
+        }
+        return;
+      }
+      if (environmentNodeUnchanged(state.nodeByEnv[key], node)) {
+        return;
+      }
+      state.nodeByEnv[key] = node;
+    },
   },
 });
 
-export const { setEnvActivityForEnv, setEnvStatusForEnv, setEnvUsageForEnv } =
+// The Go side already publishes only on change, so an unchanged reading here
+// means a boot seed replaying what an event had already recorded; leaving the
+// slice byte-identical keeps that from re-rendering every row.
+function environmentNodeUnchanged(
+  current: UIEnvironmentNodeSnapshot | undefined,
+  node: UIEnvironmentNodeSnapshot,
+): boolean {
+  return (
+    current?.name === node.name && current.label === node.label && current.status === node.status
+  );
+}
+
+export const { setEnvActivityForEnv, setEnvNodeForEnv, setEnvStatusForEnv, setEnvUsageForEnv } =
   envStatusSlice.actions;
 export default envStatusSlice.reducer;

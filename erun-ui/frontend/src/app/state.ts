@@ -432,7 +432,6 @@ export interface AppState {
   terminalCopyOutput: string;
   terminalCopyStatus: string;
   idleStatus: UIIdleStatus | null;
-  idleCloudContextBusy: boolean;
   sidebarCloudAliasBusyByAlias: Record<string, '' | 'login' | 'logout' | 'bearer'>;
   debugOpen: boolean;
   debugHeight: number;

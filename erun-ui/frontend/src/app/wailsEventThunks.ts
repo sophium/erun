@@ -10,6 +10,7 @@ import type {
   DoctorCompletedPayload,
   EnvActivityPayload,
   EnvironmentInitializedPayload,
+  EnvNodePayload,
   EnvStatusPayload,
   EnvUsagePayload,
   OrchestratorShellActivityPayload,
@@ -34,6 +35,7 @@ import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { recordDoctorOutcome } from './slices/doctorSlice';
 import {
   setEnvActivityForEnv,
+  setEnvNodeForEnv,
   setEnvStatusForEnv,
   setEnvUsageForEnv,
 } from './slices/envStatusSlice';
@@ -177,6 +179,22 @@ export const handleEnvUsage =
     const key = selectionKey({ tenant, environment });
     dispatch(setEnvUsageForEnv({ key, usage }));
     dispatch(setEnvUsageForOrchestratorEnvs({ tenant, environment, usage }));
+  };
+
+// handleEnvNode records which cloud node backs one environment and what power
+// state it was last observed in (environment_node.go). It is what lets a row
+// whose own state cannot be determined still name the node behind it, instead
+// of rendering the blank that reads as "nothing to say".
+export const handleEnvNode =
+  (payload: EnvNodePayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(setEnvNodeForEnv({ key, node: payload.node }));
   };
 
 // handleAppStatus surfaces a backend status line to the user.

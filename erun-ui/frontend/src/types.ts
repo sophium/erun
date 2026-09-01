@@ -3,6 +3,7 @@
 // name where needed. This file only needs the cluster block for the entry below.
 import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
+import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
 import type {
   UIErunVersion,
@@ -37,6 +38,10 @@ export interface UIEnvironment {
   autoStart?: boolean;
   activity?: UIEnvironmentActivity;
   usage?: UIEnvironmentUsageSnapshot;
+  // node is absent for an environment with no cloud node erun power-manages —
+  // a definite "there is nothing to say about a node here", never an
+  // undetermined reading (that arrives as a node with an empty status).
+  node?: UIEnvironmentNodeSnapshot;
 }
 
 // UIWorkingIssue is the env worktree's current branch and, when the branch

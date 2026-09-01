@@ -47,6 +47,9 @@ const EXPECTED: TenantConfigView = {
       name: 'prod',
       type: 'runtime',
       status: 'running',
+      // The row's own owning tenant, which can differ from the caller's when an
+      // OPERATIONS caller lists another tenant's environments. Absent from this
+      // fixture body, so the lenient parse leaves it undefined.
       tenantId: undefined,
       kubernetesContext: undefined,
       contextId: undefined,

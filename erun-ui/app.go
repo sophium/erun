@@ -30,6 +30,7 @@ const (
 	envStatusEvent              = "env-status"
 	envActivityEvent            = "env-activity"
 	envUsageEvent               = "env-usage"
+	envNodeEvent                = "env-node"
 	appCloseGateEvent           = "app-close-gate"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
@@ -197,6 +198,12 @@ type App struct {
 	cloudContextStatusesMu sync.RWMutex
 	cloudContextStatuses   map[string]cloudContextCacheEntry
 	cloudContextPollerStop chan struct{}
+
+	// envNodes is the last node reading published per environment, so the sweep
+	// announces transitions rather than restating an unchanged node every tick.
+	// See environment_node.go.
+	envNodesMu sync.Mutex
+	envNodes   map[string]uiEnvironmentNodeSnapshot
 
 	// closeConfirmed latches the operator's explicit "close anyway" choice from
 	// the running-work confirmation, so the second beforeClose pass that

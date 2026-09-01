@@ -20,6 +20,7 @@ import {
   useEnableCloudContextApiStopMutation,
   useGetCloudContextApiStopQuery,
 } from '@/app/api/cloudApi';
+import { cloudNodeOperationFor } from '@/app/cloudNodeOperations';
 import { readError } from '@/app/errors';
 import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -43,10 +44,16 @@ function useIdleWidgetState(): {
   cloudContextName: string;
 } | null {
   const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
-  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
   const idleStatus = displayableIdleStatus(rawIdleStatus);
-  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
   const cloudContextName = rawIdleStatus?.cloudContextName?.trim() ?? '';
+  // Scoped to the node this widget actually names. The name follows the
+  // selected environment, so a flag that did not would pair one environment's
+  // node with another's operation — the cross-environment bleed that let a
+  // progressive label survive onto a row with nothing running.
+  const inFlight = useAppSelector((state) =>
+    cloudNodeOperationFor(state.idle.cloudNodeOperations, cloudContextName),
+  );
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, inFlight) : null;
   if (!idleStatus && !idleAction) {
     return null;
   }

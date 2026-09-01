@@ -42,6 +42,9 @@ const EXPECTED = {
       name: 'prod',
       type: 'runtime',
       status: 'running',
+      // The row's own owning tenant, which an OPERATIONS caller listing another
+      // tenant's environments needs; absent from this fixture body, so the
+      // lenient parse leaves it undefined.
       tenantId: undefined,
       kubernetesContext: undefined,
       contextId: undefined,
