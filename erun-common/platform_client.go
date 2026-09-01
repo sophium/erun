@@ -83,6 +83,10 @@ type PlatformInfo struct {
 	ConsoleClientID string `json:"consoleClientId"`
 	CLIClientID     string `json:"cliClientId"`
 	Brand           string `json:"brand"`
+	// Version is the build actually serving this response -- see
+	// routes.PlatformInfo.Version. "dev" when the serving binary was never
+	// stamped with a real one.
+	Version string `json:"version"`
 }
 
 // PlatformWhoami mirrors GET /v1/whoami's response. Capabilities is what a

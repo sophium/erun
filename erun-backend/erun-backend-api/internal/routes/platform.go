@@ -39,6 +39,19 @@ type PlatformInfo struct {
 	// a path this API serves, because a brand asset does not live in the
 	// console image — one built image serves every instance.
 	LogoURL string `json:"logoUrl"`
+	// Version is the build actually serving this request, not the release a
+	// tag names or a client's own compiled-in version — a tag can exist
+	// before any deployment serves it, and a field a build predates is
+	// silently ignored rather than rejected, so this is the only
+	// non-destructive way to answer "is fix X actually deployed here". Stamped
+	// in via -ldflags at image build time, the same mechanism `erun version`
+	// uses. Unlike the other fields above, an unresolved value renders as
+	// "dev" rather than an empty string: an empty version reads as "no build
+	// happened", where the true state is "this binary was never stamped with
+	// one" (a plain `go build` outside the release pipeline) -- a distinction
+	// this field must preserve rather than collapse into a blank that looks
+	// like a missing feature.
+	Version string `json:"version"`
 }
 
 // RegisterPlatformRoute registers GET /v1/platform directly on the mux,
