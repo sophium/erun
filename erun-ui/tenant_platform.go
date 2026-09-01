@@ -182,8 +182,9 @@ type uiPlatformUser struct {
 // bootstrap) or when the caller already holds user-management capability on
 // the platform; a not-yet-enrolled caller's own identity is refused by the
 // platform's own auth middleware before this call is even authorized — the
-// expected outcome for the common case, where the caller renders the
-// administrator hand-off instead.
+// expected outcome for the common case, so the refusal is classified into
+// the administrator hand-off (enrollERunPlatformUserError,
+// tenant_platform_error.go) rather than surfaced as the raw platform error.
 func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatformUser, error) {
 	user, err := eruncommon.RunPlatformCreateUser(eruncommon.Context{}, a.deps.store, strings.TrimSpace(input.Alias), eruncommon.PlatformCreateUserParams{
 		Username: strings.TrimSpace(input.Username),
@@ -191,7 +192,7 @@ func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatfor
 		Subject:  strings.TrimSpace(input.Subject),
 	}, a.deps.cloudDeps)
 	if err != nil {
-		return uiPlatformUser{}, err
+		return uiPlatformUser{}, enrollERunPlatformUserError(err)
 	}
 	return uiPlatformUser{UserID: user.UserID, TenantID: user.TenantID, Username: user.Username}, nil
 }

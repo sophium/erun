@@ -66,3 +66,36 @@ func operatorPlatformError(action platformAction, err error) error {
 	log.Printf("erun-app: %s refused: %v", action, err)
 	return errors.New(sentence)
 }
+
+// enrollERunPlatformUserError classifies EnrollERunPlatformUser's refusal the
+// same way tenantDashboardIdentityFailure already classifies the read path's
+// identity failure (tenant_dashboard.go), not operatorPlatformError above:
+// every other write it classifies runs only after the dashboard's own
+// identity resolution already succeeded, so ErrPlatformUnauthorized there
+// means a session that aged out mid-write ("sign in again"). Enrollment runs
+// exactly when that resolution has NOT succeeded, so a 401 here means the
+// platform's own auth middleware refused the caller's identity outright, for
+// one of three reasons its {code, message} envelope distinguishes -- and
+// "sign in again" would be wrong advice for any of them.
+func enrollERunPlatformUserError(err error) error {
+	if err == nil {
+		return nil
+	}
+	const handoff = "You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation."
+	switch {
+	case errors.Is(err, eruncommon.ErrPlatformForbidden):
+		log.Printf("erun-app: enroll self refused: %v", err)
+		return errors.New(handoff)
+	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
+		switch eruncommon.PlatformAuthErrorCode(err) {
+		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
+			// Neither is an enrollment answer -- the wire form stays primary,
+			// same as tenantDashboardIdentityFailure's own fall-through.
+			return err
+		}
+		log.Printf("erun-app: enroll self refused: %v", err)
+		return errors.New(handoff)
+	default:
+		return err
+	}
+}
