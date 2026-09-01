@@ -78,6 +78,27 @@ func MCPToolCapability(tool string) MCPCapability {
 	return MCPCapabilityAdmin
 }
 
+// knownMCPCapabilities are the tiers a caller may request when a route mints a
+// token, as opposed to the tiers MCPCapabilitiesFromClaims resolves off a
+// token already issued. The two must not share a validation strategy: resolving
+// an already-trusted token's claims ignores anything it doesn't recognize (so
+// an unrelated IdP role can't lock a caller out), but minting must refuse an
+// unrecognized request outright -- the caller asking for a capability is not
+// the authority on whether it exists.
+var knownMCPCapabilities = map[MCPCapability]struct{}{
+	MCPCapabilityRead:   {},
+	MCPCapabilityAdmin:  {},
+	MCPCapabilityAttach: {},
+}
+
+// IsKnownMCPCapability reports whether name is one of the defined capability
+// tiers. A minting path uses this to reject a requested scope outright rather
+// than silently drop or widen it.
+func IsKnownMCPCapability(name string) bool {
+	_, ok := knownMCPCapabilities[MCPCapability(strings.TrimSpace(name))]
+	return ok
+}
+
 // MCPCapabilitySet is a caller's resolved capabilities.
 type MCPCapabilitySet struct {
 	read   bool
