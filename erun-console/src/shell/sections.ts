@@ -71,3 +71,10 @@ export function sectionsForTenant(tenant: TenantConfigView['tenant']): ConsoleSe
     ? [...BASE_SECTIONS, ...OPERATIONS_SECTIONS]
     : BASE_SECTIONS;
 }
+
+// The full id set regardless of tenant type, for validating a URL-derived
+// candidate before it is even checked against what the current tenant may
+// see (sectionUrl.ts).
+export const ALL_SECTION_IDS: ConsoleSectionId[] = [...BASE_SECTIONS, ...OPERATIONS_SECTIONS].map(
+  (section) => section.id,
+);

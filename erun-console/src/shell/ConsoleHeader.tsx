@@ -12,12 +12,14 @@ import { ThemeToggle } from './ThemeToggle';
 export function ConsoleHeader({
   title,
   identityLabel,
+  identityPending,
   theme,
   onToggleTheme,
   onSignOut,
 }: {
   title: string;
   identityLabel: string | undefined;
+  identityPending: boolean;
   theme: ThemePreference;
   onToggleTheme: () => void;
   onSignOut: () => void;
@@ -26,9 +28,9 @@ export function ConsoleHeader({
     <header className="flex h-14 flex-none items-center justify-between gap-3 border-b border-border bg-background px-6">
       <h1 className="truncate text-base font-semibold text-foreground">{title}</h1>
       <div className="flex items-center gap-3">
-        {identityLabel !== undefined && (
+        {(identityLabel !== undefined || identityPending) && (
           <span className="hidden truncate text-sm text-muted-foreground sm:inline">
-            {identityLabel}
+            {identityLabel ?? 'Loading…'}
           </span>
         )}
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
