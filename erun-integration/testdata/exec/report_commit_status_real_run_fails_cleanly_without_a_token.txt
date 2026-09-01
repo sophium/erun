@@ -1,0 +1,13 @@
+audit: erun exec report-commit-status --description gate build passed --remote-url https://github.com/sophium/erun.git --state success deadbeefcafe
+report-commit-status: resolving commit
+report-commit-status: commit = <SHORTSHA>
+report-commit-status: resolving state
+report-commit-status: state = success
+report-commit-status: resolving description
+report-commit-status: resolving owner/repo from remote-url
+report-commit-status: owner = sophium, repo = erun
+report-commit-status: context not given, defaulting to erun/merge-gate
+github: POST https://api.github.com/repos/sophium/erun/statuses/deadbeefcafe (state=success, context=erun/merge-gate, description="gate build passed")
+report-commit-status: resolving a github token
+report-commit-status: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set
+no GitHub token available to report a commit status; run 'gh auth login' or set GITHUB_TOKEN

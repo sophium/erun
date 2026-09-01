@@ -4,14 +4,15 @@ Usage:
   erun exec [command]
 
 Available Commands:
-  commit      Commit every change, or only the declared paths, in the project working tree
-  diff        Show the current git diff
-  gate-merge  Build the prospective squash merge a merge queue promotion gates
-  job         Start long work in the environment and observe it by handle
-  merge       Merge a branch into the project working tree's current branch
-  push        Push the project working tree's current branch to a remote
-  raw         Run a raw command from the project root
-  write       Write stdin to a file in the project working tree
+  commit               Commit every change, or only the declared paths, in the project working tree
+  diff                 Show the current git diff
+  gate-merge           Build the prospective squash merge a merge queue promotion gates
+  job                  Start long work in the environment and observe it by handle
+  merge                Merge a branch into the project working tree's current branch
+  push                 Push the project working tree's current branch to a remote
+  raw                  Run a raw command from the project root
+  report-commit-status Report a GitHub commit status for a merge queue gate result
+  write                Write stdin to a file in the project working tree
 
 Flags:
   -h, --help   help for exec

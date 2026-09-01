@@ -1395,4 +1395,158 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected the worktree to be left mid-conflict, got status: %q", status)
 		}
 	})
+
+	t.Run("report_commit_status_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "report-commit-status", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_default_context", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_default_context", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_explicit_context_and_target_url", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "failure",
+			"--description", "erun build failed against the prospective merge",
+			"--remote-url", "git@github.com:sophium/erun.git",
+			"--context", "erun/custom-gate",
+			"--target-url", "https://example.com/build/123",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_explicit_context_and_target_url", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_ssh_remote_url", func(t *testing.T) {
+		// Exercises the ssh:// remote form, a distinct branch of
+		// cutGitHubRemotePrefix from the https/git@ forms the other scenarios
+		// already cover.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "pending",
+			"--description", "gate build running",
+			"--remote-url", "ssh://git@github.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_ssh_remote_url", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_empty_commit_traces_then_refuses", func(t *testing.T) {
+		// COMMIT is a positional arg an empty string can still satisfy
+		// cobra.ExactArgs(1), so the shared validation (and its trace) is what
+		// actually catches this, not command-tree wiring.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty commit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_empty_commit_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_invalid_state_traces_then_refuses", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "groovy",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an invalid state, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_invalid_state_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_missing_description_traces_then_refuses", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing description, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_missing_description_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_malformed_remote_url_traces_then_refuses", func(t *testing.T) {
+		// A non-github.com remote reaches parseGitHubOwnerRepo's rejection
+		// branch, distinct from the missing-remote-url case below.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://gitlab.com/sophium/erun.git",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a non-github remote, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_malformed_remote_url_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_dry_run_missing_remote_url_traces_then_refuses", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing remote-url, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_dry_run_missing_remote_url_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("report_commit_status_real_run_fails_cleanly_without_a_token", func(t *testing.T) {
+		// No --dry-run, no gh on the scrubbed PATH, and no GITHUB_TOKEN/GH_TOKEN
+		// in the environment: the real-run token resolution must refuse before
+		// ever reaching the network, naming the fix rather than a raw HTTP error.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
 }

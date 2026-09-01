@@ -74,8 +74,11 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 // second acceptance criterion: a reader that hits a torn read recovers
 // rather than failing the request. It seeds the on-disk residue of an
 // interrupted write (a zero-length file, config.go's own documented torn-read
-// signature) and heals it mid-retry-budget, mirroring how quickly a real
-// concurrent writer's rename actually resolves the race.
+// signature) and heals it deterministically via configReadRetryObserved,
+// which runs synchronously on the first retry instead of racing a real
+// concurrent writer goroutine against loadConfigFile's wall-clock sleep
+// budget -- a race that flaked under CPU contention from unrelated tests
+// running alongside this one in the same `go test ./...` process.
 func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -83,14 +86,17 @@ func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 		t.Fatalf("seed torn (zero-length) file: %v", err)
 	}
 
-	healed := make(chan struct{})
-	go func() {
-		defer close(healed)
-		time.Sleep(configReadRetrySleep * 2)
+	healed := false
+	configReadRetryObserved = func(int) {
+		if healed {
+			return
+		}
+		healed = true
 		if err := WriteFileAtomic(path, []byte("name: healed\n"), 0o644); err != nil {
 			t.Errorf("heal write failed: %v", err)
 		}
-	}()
+	}
+	t.Cleanup(func() { configReadRetryObserved = nil })
 
 	var config EnvConfig
 	if err := loadConfigFile(path, &config); err != nil {
@@ -99,7 +105,9 @@ func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	if config.Name != "healed" {
 		t.Fatalf("unexpected config after a healed retry: %+v", config)
 	}
-	<-healed
+	if !healed {
+		t.Fatal("expected the retry hook to have run")
+	}
 }
 
 // TestLoadConfigFileGenuinelyCorruptFileStillFails proves the retry budget

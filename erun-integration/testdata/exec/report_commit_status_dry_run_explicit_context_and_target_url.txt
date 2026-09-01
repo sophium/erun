@@ -1,0 +1,10 @@
+audit: erun exec report-commit-status --context erun/custom-gate --description erun build failed against the prospective merge --dry-run --remote-url git@github.com:sophium/erun.git --state failure --target-url https://example.com/build/123 deadbeefcafe
+report-commit-status: resolving commit
+report-commit-status: commit = <SHORTSHA>
+report-commit-status: resolving state
+report-commit-status: state = failure
+report-commit-status: resolving description
+report-commit-status: resolving owner/repo from remote-url
+report-commit-status: owner = sophium, repo = erun
+report-commit-status: context = erun/custom-gate
+github: POST https://api.github.com/repos/sophium/erun/statuses/deadbeefcafe (state=failure, context=erun/custom-gate, description="erun build failed against the prospective merge")

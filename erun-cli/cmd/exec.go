@@ -28,6 +28,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecPushCmd(findProjectRoot),
 		newExecMergeCmd(findProjectRoot),
 		newExecGateMergeCmd(findProjectRoot),
+		newExecReportCommitStatusCmd(),
 		jobCmd,
 	)
 }
@@ -381,6 +382,66 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, result.SourceBranch, result.TargetBranch, result.Commit))
+	return ctx.WriteResult(result)
+}
+
+func newExecReportCommitStatusCmd() *cobra.Command {
+	var (
+		state       string
+		statusCtx   string
+		description string
+		targetURL   string
+		remoteURL   string
+	)
+	cmd := &cobra.Command{
+		Use:   "report-commit-status COMMIT",
+		Short: "Report a GitHub commit status for a merge queue gate result",
+		Long: "Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate " +
+			"(`erun exec gate-merge`, `erun build`, `erun review record-build --gate`): report success once the " +
+			"gate build is green, or failure the moment it is not, naming which gate step failed in " +
+			"--description. A required status check on the remote's branch protection has nothing to require " +
+			"until this reports it.\n\n" +
+			"COMMIT should be the review's source branch tip — the pull request's own head commit — never the " +
+			"local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check " +
+			"against a commit reachable from the open pull request, and the squash commit does not exist there " +
+			"until after the gate has already passed and pushed.\n\n" +
+			"--dry-run traces the request without sending it.",
+		Example: "  erun exec report-commit-status $(git rev-parse HEAD) --state failure \\\n" +
+			"    --description 'erun build failed against the prospective merge' \\\n" +
+			"    --remote-url https://github.com/org/repo.git\n" +
+			"  erun exec report-commit-status $(git rev-parse HEAD) --state success \\\n" +
+			"    --description 'gate build passed' --remote-url https://github.com/org/repo.git",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecReportCommitStatusCommand(commandContext(cmd), args[0], state, statusCtx, description, targetURL, remoteURL)
+		},
+	}
+	cmd.Flags().StringVar(&state, "state", "", "Commit status state: success, failure, error, or pending (required)")
+	cmd.Flags().StringVar(&statusCtx, "context", "", "Status check name a required-status-checks rule names (defaults to erun/merge-gate)")
+	cmd.Flags().StringVar(&description, "description", "", "Short human-readable status, naming which gate step failed on failure (required)")
+	cmd.Flags().StringVar(&targetURL, "target-url", "", "URL a reader clicks through to from the status (optional)")
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote to report the status against (required)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecReportCommitStatusCommand(ctx common.Context, commit, state, statusCtx, description, targetURL, remoteURL string) error {
+	result, err := common.ReportCommitStatus(ctx, common.ReportCommitStatusParams{
+		RemoteURL:   remoteURL,
+		Commit:      commit,
+		State:       common.ReportCommitStatusState(state),
+		Context:     statusCtx,
+		Description: description,
+		TargetURL:   targetURL,
+	}, common.ReportCommitStatusDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	ctx.Info(fmt.Sprintf("Reported %s status %q on %s/%s@%s.", result.State, result.Context, result.Owner, result.Repo, result.Commit))
 	return ctx.WriteResult(result)
 }
 
