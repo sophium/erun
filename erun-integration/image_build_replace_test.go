@@ -86,14 +86,18 @@ func mustReadRepoFile(t *testing.T, root, rel string) string {
 	return string(b)
 }
 
-// The sentinel Dockerfile is absent from the partial erun-devops in-build
-// context, so its presence marks a full checkout.
+// The sentinel Dockerfile is the erun-devops image's own Dockerfile, which
+// that image's test stage has no reason to COPY into its own build context
+// (unlike erun-backend-api/Dockerfile, which the test stage now copies in for
+// TestDockerfileLdflagsActuallyStampsTheBinary and so can no longer serve as
+// this signal). Its absence from the partial in-build context is what marks
+// that context as partial; its presence marks a full checkout.
 func findFullCheckoutRoot() (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", false
 	}
-	const sentinel = "erun-devops/docker/erun-backend-api/Dockerfile"
+	const sentinel = "erun-devops/docker/erun-devops/Dockerfile"
 	for {
 		if _, err := os.Stat(filepath.Join(dir, sentinel)); err == nil {
 			return dir, true
