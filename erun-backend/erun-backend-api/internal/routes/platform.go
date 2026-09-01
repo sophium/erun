@@ -19,6 +19,13 @@ type PlatformInfo struct {
 	// CLIClientID is the OIDC client id an erun CLI/agent authenticates with
 	// (Device Authorization Grant, with an Authorization Code + PKCE fallback).
 	CLIClientID string `json:"cliClientId"`
+	// MobileClientID is the OIDC client id a mobile companion client
+	// authenticates with (Authorization Code + PKCE, no device code — a
+	// mobile client always has a system browser to redirect through). Empty
+	// until an operator configures a mobile client's redirect URI
+	// (zitadel.oidc.mobileRedirectUris): no erun-mobile app is minted until
+	// then, since its custom URL scheme belongs to whatever client ships.
+	MobileClientID string `json:"mobileClientId"`
 	// Brand is this instance's display name, if the operator set one.
 	Brand string `json:"brand"`
 	// DocsURL is the documentation site this instance's own surfaces link to,

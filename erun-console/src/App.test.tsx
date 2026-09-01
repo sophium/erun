@@ -11,6 +11,7 @@ const PLATFORM = {
   consoleUrl: 'https://console.acme.example',
   consoleClientId: 'console-client',
   cliClientId: 'cli-client',
+  mobileClientId: 'mobile-client',
   brand: 'Acme',
   docsUrl: 'https://docs.acme.example',
   tagline: 'Acme, from idea to production.',

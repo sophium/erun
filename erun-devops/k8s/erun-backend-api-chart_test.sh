@@ -485,4 +485,19 @@ container "${rendered}" >"${core}"
 grep -A1 'name: ERUN_OIDC_ALLOWED_AUDIENCES' "${core}" | grep -q 'value: "console-client,cli-client"' ||
     fail "api.oidcAllowedAudiences must render as ERUN_OIDC_ALLOWED_AUDIENCES, or the boundary can never be turned on"
 
+# --- 20. The mobile OIDC client id (#1105) reads from the same
+#         erun-zitadel-published ConfigMap as consoleClientId/cliClientId,
+#         and is optional -- the erun-zitadel chart may never have minted an
+#         erun-mobile app (no mobile redirect URI configured there) ---
+rendered=$(render)
+container "${rendered}" >"${core}"
+grep -q 'name: ERUN_PLATFORM_MOBILE_CLIENT_ID' "${core}" ||
+    fail "ERUN_PLATFORM_MOBILE_CLIENT_ID must always render, mirroring ERUN_PLATFORM_CLI_CLIENT_ID beside it"
+grep -A3 'name: ERUN_PLATFORM_MOBILE_CLIENT_ID' "${core}" | grep -q 'name: team-zitadel-oidc-clients' ||
+    fail "ERUN_PLATFORM_MOBILE_CLIENT_ID must read from the same ConfigMap the erun-zitadel OIDC bootstrap publishes to"
+grep -A4 'name: ERUN_PLATFORM_MOBILE_CLIENT_ID' "${core}" | grep -q 'key: mobileClientId' ||
+    fail "ERUN_PLATFORM_MOBILE_CLIENT_ID must read the mobileClientId key"
+grep -A5 'name: ERUN_PLATFORM_MOBILE_CLIENT_ID' "${core}" | grep -q 'optional: true' ||
+    fail "ERUN_PLATFORM_MOBILE_CLIENT_ID must be optional -- an env whose erun-zitadel minted no erun-mobile app must still start"
+
 echo "PASS: erun-backend-api DBOS wiring + public API edge + retraction RBAC + identity admin wiring + platform white-label discovery + oidc audience allow-list"

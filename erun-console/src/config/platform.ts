@@ -14,6 +14,7 @@ export interface PlatformConfig {
   consoleUrl: string;
   consoleClientId: string;
   cliClientId: string;
+  mobileClientId: string;
   brand: string;
   docsUrl: string;
   tagline: string;
@@ -56,6 +57,7 @@ export async function fetchPlatformConfig(): Promise<PlatformConfig | undefined>
     consoleUrl: asString(body.consoleUrl),
     consoleClientId: asString(body.consoleClientId),
     cliClientId: asString(body.cliClientId),
+    mobileClientId: asString(body.mobileClientId),
     brand: asString(body.brand),
     docsUrl: asString(body.docsUrl),
     tagline: asString(body.tagline),

@@ -94,6 +94,7 @@ func run(args []string) error {
 			ConsoleURL:      cfg.PlatformConsoleURL,
 			ConsoleClientID: cfg.PlatformConsoleClientID,
 			CLIClientID:     cfg.PlatformCLIClientID,
+			MobileClientID:  cfg.PlatformMobileClientID,
 			Brand:           cfg.PlatformBrand,
 			DocsURL:         cfg.PlatformDocsURL,
 			Tagline:         cfg.PlatformTagline,
@@ -141,6 +142,7 @@ func resolveConfig(args []string) (apiConfig, error) {
 	flags.StringVar(&cfg.PlatformConsoleURL, "platform-console-url", cfg.PlatformConsoleURL, "This instance's hosted console URL, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformConsoleClientID, "platform-console-client-id", cfg.PlatformConsoleClientID, "The OIDC client id the hosted console authenticates with, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformCLIClientID, "platform-cli-client-id", cfg.PlatformCLIClientID, "The OIDC client id an erun CLI/agent authenticates with, served unauthenticated at GET /v1/platform")
+	flags.StringVar(&cfg.PlatformMobileClientID, "platform-mobile-client-id", cfg.PlatformMobileClientID, "The OIDC client id a mobile companion client authenticates with, served unauthenticated at GET /v1/platform; empty until a mobile client's redirect URI is registered (zitadel.oidc.mobileRedirectUris)")
 	flags.StringVar(&cfg.PlatformBrand, "platform-brand", cfg.PlatformBrand, "This instance's display name, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformDocsURL, "platform-docs-url", cfg.PlatformDocsURL, "The documentation site this instance's own surfaces link to, served unauthenticated at GET /v1/platform")
 	flags.StringVar(&cfg.PlatformTagline, "platform-tagline", cfg.PlatformTagline, "The one-line pitch this instance's landing page leads with, served unauthenticated at GET /v1/platform")
@@ -348,13 +350,17 @@ type apiConfig struct {
 	// URL/tagline/logo its front door renders) before it has a token. Every
 	// field is optional; an absent value renders as an empty string, never an
 	// error, and a client falls back to its own bundled default.
-	// ConsoleClientID/CLIClientID are typically sourced from the erun-zitadel
-	// bootstrap's published ConfigMap, threaded in by the chart.
+	// ConsoleClientID/CLIClientID/MobileClientID are typically sourced from the
+	// erun-zitadel bootstrap's published ConfigMap, threaded in by the chart.
+	// MobileClientID is empty until an operator configures a mobile client's
+	// redirect URI (zitadel.oidc.mobileRedirectUris) -- no erun-mobile app
+	// exists in the IdP until then.
 	PlatformIssuer          string
 	PlatformAPIURL          string
 	PlatformConsoleURL      string
 	PlatformConsoleClientID string
 	PlatformCLIClientID     string
+	PlatformMobileClientID  string
 	PlatformBrand           string
 	PlatformDocsURL         string
 	PlatformTagline         string
@@ -408,6 +414,7 @@ func configFromEnv() apiConfig {
 		PlatformConsoleURL:      strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_URL")),
 		PlatformConsoleClientID: strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CONSOLE_CLIENT_ID")),
 		PlatformCLIClientID:     strings.TrimSpace(os.Getenv("ERUN_PLATFORM_CLI_CLIENT_ID")),
+		PlatformMobileClientID:  strings.TrimSpace(os.Getenv("ERUN_PLATFORM_MOBILE_CLIENT_ID")),
 		PlatformBrand:           strings.TrimSpace(os.Getenv("ERUN_PLATFORM_BRAND")),
 		PlatformDocsURL:         strings.TrimSpace(os.Getenv("ERUN_PLATFORM_DOCS_URL")),
 		PlatformTagline:         strings.TrimSpace(os.Getenv("ERUN_PLATFORM_TAGLINE")),

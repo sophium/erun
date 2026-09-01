@@ -16,6 +16,7 @@ var configuredPlatformInfo = PlatformInfo{
 	ConsoleURL:      "https://console.example.test",
 	ConsoleClientID: "console-client",
 	CLIClientID:     "cli-client",
+	MobileClientID:  "mobile-client",
 	Brand:           "Example",
 	DocsURL:         "https://docs.example.test",
 	Tagline:         "Example's own one-line pitch.",
@@ -59,7 +60,7 @@ func TestPlatformRouteBodyCarriesEveryDiscoveryKey(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	wantKeys := []string{
-		"issuer", "apiUrl", "consoleUrl", "consoleClientId", "cliClientId",
+		"issuer", "apiUrl", "consoleUrl", "consoleClientId", "cliClientId", "mobileClientId",
 		"brand", "docsUrl", "tagline", "logoUrl",
 	}
 	for _, key := range wantKeys {
