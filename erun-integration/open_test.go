@@ -3,10 +3,13 @@ package integration
 import (
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1941,6 +1944,96 @@ exit 1
 			t.Fatalf("MCP port-forward must still be listening after open returns without a shell: %v", err)
 		}
 		_ = conn.Close()
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_deployment_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-deployment-get: the
+		// plan must stay byte-identical to the subprocess-mode golden
+		// (intellij_dry_run, which already exercises the API-deployment
+		// presence trace) even with
+		// execution.modes.kubectl-deployment-get=library, since
+		// ensureAPIPortForward only ever renders the trace line
+		// (common.KubectlGetDeploymentArgs) and never calls
+		// common.DeploymentPresent on a dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-get", "library")
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/intellij_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_deployment_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (the team-api deployment is present, so the API
+		// port-forward proceeds) via a real client-go call against a fake API
+		// server instead of shelling out to kubectl. The kubectl stub fails
+		// loudly and distinctively only for the "get deployment team-api -o
+		// name" argv shape (every other kubectl subcommand this open needs --
+		// the runtime deployment checks, the wake wait, the port-forward
+		// simulator -- still succeeds), so a fallback to the subprocess path
+		// for the API-deployment check surfaces as a recognizable failure
+		// instead of silently passing.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		seedExecutionMode(t, setup, "kubectl-deployment-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-api" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-api","namespace":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName:       "team-devops",
+			ContainerName:        "team-devops",
+			RepoPath:             "/home/erun/git/team",
+			MCPPort:              26100,
+			SSHPort:              26122,
+			ExecExitCodes:        []int{0},
+			FailingArgvSubstring: "get deployment team-api -o name",
+		})...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("API deployment check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
 	})
 
 	t.Run("shell_real_run_session_taken_over_exits_with_notice", func(t *testing.T) {

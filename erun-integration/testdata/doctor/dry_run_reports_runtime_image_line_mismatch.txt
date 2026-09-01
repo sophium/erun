@@ -7,6 +7,7 @@ kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
 kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
 
 == Runtime image release line ==
 runtimeimage names the erun release line, but this env's last confirmed deploy actually ran the team line (recorded as runtimerunningimage).

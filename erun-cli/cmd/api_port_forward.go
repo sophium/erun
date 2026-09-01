@@ -36,14 +36,13 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	}
 
 	apiDeployment := common.APIDeploymentName(result.Tenant)
-	checkArgs := kubectlAPIDeploymentCheckArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
-	ctx.TraceCommand("", "kubectl", checkArgs...)
+	ctx.TraceCommand("", "kubectl", common.KubectlGetDeploymentArgs(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)...)
 
 	if ctx.DryRun {
 		return ensureAPIPortForwardDryRun(ctx, result, state, expectedState, localPort)
 	}
 
-	exists, err := checkAPIDeploymentPresent(checkArgs)
+	exists, err := common.DeploymentPresent(expectedState.KubernetesContext, expectedState.Namespace, apiDeployment)
 	if err != nil {
 		return 0, err
 	}
@@ -74,7 +73,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 }
 
 // ensureAPIPortForwardDryRun previews the port-forward without a live cluster
-// read: the real path (checkAPIDeploymentPresent, above) skips the whole
+// read: the real path (common.DeploymentPresent, above) skips the whole
 // forward when the tenant's <tenant>-api deployment is not present, but
 // resolving that here would need every open dry-run scenario in the suite to
 // declare a kubectl stub for a check it otherwise has no reason to. So the
@@ -117,31 +116,6 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	}
 	ctx.Trace(fmt.Sprintf("api: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", localPort, pid))
 	return true, nil
-}
-
-func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace, apiDeployment string) []string {
-	args := make([]string, 0, 7)
-	if strings.TrimSpace(kubernetesContext) != "" {
-		args = append(args, "--context", kubernetesContext)
-	}
-	if strings.TrimSpace(namespace) != "" {
-		args = append(args, "--namespace", namespace)
-	}
-	return append(args, "get", "deployment", apiDeployment, "-o", "name")
-}
-
-func checkAPIDeploymentPresent(args []string) (bool, error) {
-	output, err := common.Command("kubectl", args...).CombinedOutput()
-	if err == nil {
-		return true, nil
-	}
-	message := strings.ToLower(string(output))
-	if strings.Contains(message, "notfound") ||
-		strings.Contains(message, "not found") ||
-		strings.Contains(message, "no resources found") {
-		return false, nil
-	}
-	return false, fmt.Errorf("failed to check API deployment: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
 func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {

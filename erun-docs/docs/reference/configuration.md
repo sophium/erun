@@ -462,6 +462,7 @@ execution:
   | `kubectl-pvc-get` | `kubectl get pvc <claim> -o name`, the existence check `erun deploy` runs ahead of a runtime-release install to decide whether its dedicated worktree volume already exists (and, if not, to announce the adoption from the home volume). | Every other `kubectl` call site (`apply`, `wait`, pod-status polling) — still subprocess-only. |
   | `kubectl-secret-get` | `kubectl get secret <name> -o json`, the read `erun deploy` runs ahead of refreshing an image-pull Secret so this run's resolved registry credentials merge into its existing coverage instead of replacing it outright. | The Secret's own `apply` (the actual write) — still subprocess-only. |
   | `kubectl-pod-get` | `kubectl get pod <name> -o json`, the self-check a job supervisor's reconciliation runs to attribute a vanished supervisor to a real container restart instead of guessing pod replacement, and the check a failed `erun build` runs to name the container and memory limit behind an OOM kill. | Every other `kubectl` call site (`apply`, `wait`, pod-status polling) — still subprocess-only. |
+  | `kubectl-deployment-get` | `kubectl get deployment <name> -o name`, the existence check `erun open` runs ahead of forwarding to a tenant's API deployment, so it only forwards when the deployment is actually present. | The richer `kubectl get deployment -o json` reads that also retry across kubeconfig contexts and diff live settings, plus every other `kubectl` call site (`apply`, `wait`, pod-status polling) — still subprocess-only. |
 
 ---
 
