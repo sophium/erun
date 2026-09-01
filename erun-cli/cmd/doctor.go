@@ -147,6 +147,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportHostCredentials(ctx, configStore, result); err != nil {
 		return err
 	}
+	if err := reportGitPushAccess(ctx, result); err != nil {
+		return err
+	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
 		return err
 	}
