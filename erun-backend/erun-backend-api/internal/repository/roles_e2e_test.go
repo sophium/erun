@@ -64,7 +64,7 @@ func TestRoleRepositoryCreateGrantAndListRoundTrip(t *testing.T) {
 		t.Fatalf("expected a created role with one permission, got %+v", role)
 	}
 
-	if _, err := roles.Grant(ctx, reviewer, role.RoleID); err != nil {
+	if _, err := roles.Grant(ctx, reviewer, role.RoleID, ""); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestRoleRepositoryCustomRoleIsPermittedItsOwnPathAndRefusedEveryOther(t *te
 		{APIMethod: "GET", APIPath: "/v1/reviews"},
 	})
 	mustNoErr(t, err, "create role")
-	if _, err := roles.Grant(ctx, narrow, role.RoleID); err != nil {
+	if _, err := roles.Grant(ctx, narrow, role.RoleID, ""); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -242,8 +242,60 @@ func TestRoleRepositoryGrantRejectsCrossTenantRole(t *testing.T) {
 	mustNoErr(t, err, "create role in tenant B")
 
 	ctxA := rolesContext(tenantA, userA)
-	if _, err := roles.Grant(ctxA, userA, roleB.RoleID); !errors.Is(err, ErrNotFound) {
+	if _, err := roles.Grant(ctxA, userA, roleB.RoleID, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound granting a cross-tenant role, got %v", err)
+	}
+}
+
+// TestRoleRepositoryGrantFromOperationsFilesUnderTargetTenant is the recovery
+// path an operations caller uses when a tenant's only grant-capable user cannot
+// authenticate. erun_operations bypasses RLS, so without the explicit tenant
+// the row's tenant_id default would file the grant under the operations tenant
+// and the target tenant would still see nothing.
+func TestRoleRepositoryGrantFromOperationsFilesUnderTargetTenant(t *testing.T) {
+	db, tenantTarget := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+	adminTarget := seedPermissionsUser(t, db, tenantTarget, "admin-target")
+	member := seedPermissionsUser(t, db, tenantTarget, "member")
+
+	role, err := roles.Create(rolesContext(tenantTarget, adminTarget), "ReviewsReader", []RolePermissionInput{
+		{APIMethod: "GET", APIPath: "/v1/reviews"},
+	})
+	mustNoErr(t, err, "create role in the target tenant")
+
+	var tenantOps string
+	err = db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'OPERATIONS') RETURNING tenant_id`,
+		"roles-e2e-ops-"+time.Now().Format("20060102150405.000000"),
+	).Scan(&tenantOps)
+	mustNoErr(t, err, "seed operations tenant")
+	t.Cleanup(func() { clearPermissionsTenant(t, db, tenantOps) })
+	adminOps := seedPermissionsUser(t, db, tenantOps, "admin-ops")
+	ctxOps := security.WithContext(context.Background(), security.Context{
+		TenantID:   tenantOps,
+		TenantType: string(model.TenantTypeOperations),
+		ErunUserID: adminOps,
+	})
+
+	grant, err := roles.Grant(ctxOps, member, role.RoleID, tenantTarget)
+	mustNoErr(t, err, "operations grant into the target tenant")
+	if grant.TenantID != tenantTarget {
+		t.Fatalf("grant filed under tenant %q, want the target tenant %q", grant.TenantID, tenantTarget)
+	}
+
+	// And the target tenant itself can now see it, which is the whole point:
+	// a grant filed under operations would be invisible here.
+	assigned, err := roles.ForUser(rolesContext(tenantTarget, adminTarget), member)
+	mustNoErr(t, err, "list the member's roles as the target tenant")
+	found := false
+	for _, r := range assigned {
+		if r.RoleID == role.RoleID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("target tenant sees roles %+v, want the granted role %q", assigned, role.RoleID)
 	}
 }
 
@@ -272,10 +324,10 @@ func TestRoleRepositoryGrantRejectsDuplicateAssignment(t *testing.T) {
 
 	role, err := roles.Create(ctx, "ReviewsReader", []RolePermissionInput{{APIMethod: "GET", APIPath: "/v1/reviews"}})
 	mustNoErr(t, err, "create role")
-	if _, err := roles.Grant(ctx, reviewer, role.RoleID); err != nil {
+	if _, err := roles.Grant(ctx, reviewer, role.RoleID, ""); err != nil {
 		t.Fatalf("first grant: %v", err)
 	}
-	if _, err := roles.Grant(ctx, reviewer, role.RoleID); !errors.Is(err, ErrConflict) {
+	if _, err := roles.Grant(ctx, reviewer, role.RoleID, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected ErrConflict granting the same role twice, got %v", err)
 	}
 }

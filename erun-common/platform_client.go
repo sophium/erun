@@ -287,6 +287,12 @@ type PlatformCreateUserParams struct {
 	Issuer   string `json:"issuer,omitempty"`
 	Subject  string `json:"subject,omitempty"`
 	TenantID string `json:"tenantId,omitempty"`
+	// RoleIDs are the roles the enrollment grants. Empty leaves the platform's
+	// own default (TenantUser, or TenantAdmin for a tenant's first user), so
+	// naming roles here is what enrolls a tenant's administrator directly
+	// instead of a member who then needs elevating from inside the tenant —
+	// the elevation an unusable admin makes impossible.
+	RoleIDs []string `json:"roleIds,omitempty"`
 }
 
 // CreateUser enrolls a user.

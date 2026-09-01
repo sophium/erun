@@ -52,6 +52,8 @@ Registers a new tenant, or lists tenants visible to the caller. `create` require
 
 Enrolls a user in a tenant, or lists a tenant's users. `--issuer`/`--subject` link the external identity the user signs in with; `--tenant-id` targets another tenant and is honored only for an operations-tenant caller.
 
+`--role-id` (repeatable) names the roles the enrollment grants, instead of the platform's own default (`TenantUser`, or `TenantAdmin` for a tenant's first user). Use it to enroll a tenant's administrator directly: an enrollment that lands as an ordinary member has to be elevated from *inside* the tenant afterwards, and if no one there can grant roles yet, nothing can. List the target tenant's role ids with `GET /v1/roles` ([roles endpoints](/agent-reference/api-protocol#roles-endpoints)).
+
 ### `platform env list` / `platform env get`
 
 Lists the caller's tenant's hosted environments, or fetches one by id.

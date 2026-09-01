@@ -168,7 +168,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/roles` | List the caller's tenant's roles with their permissions. | Tenant member (read) |
 | `POST` | `/v1/roles` | Create a tenant-owned role with one or more permissions. Body below. | Tenant member (write) |
 | `GET` | `/v1/users/{user_id}/roles` | List a user's assigned roles. | Tenant member (read) |
-| `POST` | `/v1/users/{user_id}/roles` | Grant a role to a user. Body below. | Tenant member (write) |
+| `POST` | `/v1/users/{user_id}/roles` | Grant a role to a user. Body below; an `OPERATIONS` caller may name another `tenantId`. | Tenant member (write) |
 | `DELETE` | `/v1/users/{user_id}/roles/{role_id}` | Revoke a role from a user; refused if it would leave the tenant with no user able to grant roles. | Tenant member (write) |
 | `POST` | `/v1/invites` | Create a revocable, single-use invite for the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/invites` | List the caller's tenant's outstanding (unconsumed) invites, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
@@ -1185,6 +1185,9 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 // POST /v1/users/019a7fa5-…-f60/roles body
 { "roleId": "019a7fa5-c2c0-7c55-bc70-714873a71f70" }
 
+// …or, for an OPERATIONS caller, targeting another tenant
+{ "roleId": "019a7fa5-c2c0-7c55-bc70-714873a71f70", "tenantId": "019a7fa5-…-f10" }
+
 // 201 response
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
@@ -1195,6 +1198,8 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 }
 ```
 
+**Cross-tenant grants.** The grant lands in the caller's own resolved tenant by default. An explicit `tenantId` targets a **different** tenant and is honored only when the caller's resolved tenant is `OPERATIONS`, the same cross-tenant precedent [`POST`/`GET /v1/users`](#post-v1users-and-get-v1users) and [`POST /v1/invites`](#invites) use; any other caller naming another tenant gets `403`. It exists because the lockout guard above cannot cover every lockout: a tenant can reach a state where its only grant-capable user is an identity that can no longer authenticate — for instance a first-user bootstrap that ran against an identity from another IdP org, whose token can never resolve to this tenant again (issue #1830). The identity that *can* sign in holds no grant-capable role, and granting a role is itself a grant-capable call, so nothing inside the tenant can break the cycle. The target tenant must be named explicitly rather than left to the `tenant_id` default: the default fills in the *operations* tenant, and `user_roles`' composite foreign keys on `(tenant_id, user_id)` / `(tenant_id, role_id)` then match nothing, so an operations caller omitting `tenantId` gets `404` however valid the ids are.
+
 **The lockout guard.** `DELETE /v1/users/{user_id}/roles/{role_id}` refuses when the revoke would leave the tenant with **no user holding a role that can grant roles** (a permission matching `POST /v1/users/{user_id}/roles` itself) — the one failure this feature makes impossible rather than merely recoverable, since there would be no lever left inside the product to undo it. The check runs against every user in the tenant, not just the one being revoked, so revoking a role from one admin while another admin still holds a grant-capable role succeeds normally.
 
 **Error behaviour.** Same generic JSON `{code, message}` envelope as `/v1/users`:
@@ -1202,7 +1207,8 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 | Status | Condition | Recovery |
 |---|---|---|
 | `400` | `POST /v1/roles`: `name` is empty, no permissions given, or a permission fails the exact/pattern-exclusivity, method-enum, or regex-compile checks above. `POST /v1/users/{user_id}/roles`: `roleId` is empty. | Fix the request body per the rules above. |
-| `404` | The `role_id` or `user_id` does not exist in the caller's tenant (a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to your own tenant. |
+| `404` | The `role_id` or `user_id` does not exist in the target tenant (for a tenant-scoped caller a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to the target tenant. |
+| `403` | `POST /v1/users/{user_id}/roles`: `tenantId` names a tenant other than the caller's own and the caller's resolved tenant is not `OPERATIONS`. | Drop `tenantId` to grant within your own tenant, or have an operations-tenant caller make the request. |
 | `409` | `POST /v1/roles`: a role with this name, or one of its permissions, already exists in the tenant. `POST /v1/users/{user_id}/roles`: the user already holds this role. `DELETE .../roles/{role_id}`: the lockout guard above refused the revoke. | Use a different name, or accept the existing grant; for the lockout case, grant a recovery role to another user (or the same user) before revoking this one. |
 
 ### `POST /v1/invites`, `GET /v1/invites`, `DELETE /v1/invites/{invite_id}` {#invites}

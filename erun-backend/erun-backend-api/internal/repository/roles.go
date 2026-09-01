@@ -196,17 +196,37 @@ func insertRolePermission(ctx context.Context, tx bun.Tx, roleID string, permiss
 	return rolePermission, nil
 }
 
-// Grant assigns a role to a user. A role_id or user_id from another tenant is
-// invisible under RLS, so the insert's foreign keys report it as not found
-// rather than forbidden.
-func (r *RoleRepository) Grant(ctx context.Context, userID string, roleID string) (model.UserRole, error) {
+// Grant assigns a role to a user. For a tenant-scoped caller a role_id or
+// user_id from another tenant is invisible under RLS, so the insert's foreign
+// keys report it as not found rather than forbidden.
+//
+// tenantID is normally empty, letting the tenant_id column default to the
+// caller's own tenant, as every other tenant-owned insert here does. An
+// operations caller acting on another tenant passes it explicitly: the default
+// would fill in the operations tenant, and user_roles' composite foreign keys
+// on (tenant_id, user_id) and (tenant_id, role_id) then find nothing, so the
+// grant comes back as not found however valid the ids are. Same reason
+// grantPredefinedRoles takes the enrolling tenant's id explicitly rather than
+// trusting the transaction's scoping.
+//
+// That cross-tenant grant is what recovers a tenant whose only grant-capable
+// user cannot authenticate. Role management is itself role-gated, so without it
+// the one identity able to sign in can never be given the role that would let
+// it administer the tenant.
+func (r *RoleRepository) Grant(ctx context.Context, userID string, roleID string, tenantID string) (model.UserRole, error) {
 	userID = strings.TrimSpace(userID)
 	roleID = strings.TrimSpace(roleID)
+	tenantID = strings.TrimSpace(tenantID)
 	grant := model.UserRole{UserID: userID, RoleID: roleID}
+	columns := []string{"user_id", "role_id"}
+	if tenantID != "" {
+		grant.TenantID = tenantID
+		columns = append(columns, "tenant_id")
+	}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewInsert().
 			Model(&grant).
-			Column("user_id", "role_id").
+			Column(columns...).
 			Returning("*").
 			Scan(ctx)
 		if err != nil {

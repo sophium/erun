@@ -98,6 +98,55 @@ func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
 	}
 }
 
+// TestPlatformClientCreateUserSendsRoleIDs is the cross-tenant recovery path:
+// an operations caller enrolls a tenant's administrator directly, so the roles
+// have to reach the platform on the enrollment itself rather than needing a
+// later grant from inside a tenant that may have nobody able to make one.
+func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "admin"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{
+		Username: "admin", TenantID: "tenant-b", RoleIDs: []string{"role-admin"},
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	roles, ok := raw["roleIds"].([]any)
+	if !ok || len(roles) != 1 || roles[0] != "role-admin" {
+		t.Fatalf("body = %+v, want roleIds=[role-admin]", raw)
+	}
+}
+
+// An empty role list must stay off the wire entirely, so the platform applies
+// its own default rather than seeing an explicit "grant nothing".
+func TestPlatformClientCreateUserOmitsEmptyRoleIDs(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", Username: "alice"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{Username: "alice"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, present := raw["roleIds"]; present {
+		t.Fatalf("body = %+v, want no roleIds key", raw)
+	}
+}
+
 func TestPlatformClientListUsersEncodesTenantIDQueryParam(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("tenantId") != "tenant-b" {

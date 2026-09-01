@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 // RoleRepository is the persistence dependency for role management and
@@ -16,7 +17,7 @@ type RoleRepository interface {
 	List(ctx context.Context) ([]model.Role, error)
 	Create(ctx context.Context, name string, permissions []apirepository.RolePermissionInput) (model.Role, error)
 	ForUser(ctx context.Context, userID string) ([]model.Role, error)
-	Grant(ctx context.Context, userID string, roleID string) (model.UserRole, error)
+	Grant(ctx context.Context, userID string, roleID string, tenantID string) (model.UserRole, error)
 	Revoke(ctx context.Context, userID string, roleID string) error
 }
 
@@ -106,9 +107,20 @@ func (routes RoleRoutes) listUserRoles(w http.ResponseWriter, req *http.Request)
 
 type grantUserRoleRequest struct {
 	RoleID string `json:"roleId"`
+	// TenantID targets another tenant and is honored only for an
+	// operations-tenant caller, the same rule POST /v1/users applies. It is
+	// what recovers a tenant whose only grant-capable user cannot
+	// authenticate: role management is role-gated, so without this the
+	// identity that can sign in could never be given the role it needs.
+	TenantID string `json:"tenantId"`
 }
 
 func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request) {
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		return
+	}
 	var body grantUserRoleRequest
 	if err := decodeJSON(req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -119,8 +131,19 @@ func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request)
 		writeError(w, http.StatusBadRequest, "roleId is required")
 		return
 	}
+	targetTenantID, err := resolveTargetTenant(securityContext, body.TenantID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	// Passed through only when it differs from the caller's own session
+	// tenant; the common case relies on the tenant_id column default.
+	overrideTenantID := ""
+	if targetTenantID != securityContext.TenantID {
+		overrideTenantID = targetTenantID
+	}
 
-	grant, err := routes.roles.Grant(req.Context(), req.PathValue("user_id"), roleID)
+	grant, err := routes.roles.Grant(req.Context(), req.PathValue("user_id"), roleID, overrideTenantID)
 	if err != nil {
 		if errors.Is(err, apirepository.ErrConflict) {
 			writeError(w, http.StatusConflict, "the user already holds this role")

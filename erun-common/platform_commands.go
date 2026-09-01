@@ -135,7 +135,11 @@ func RunPlatformCreateUser(ctx Context, store CloudReadStore, alias string, para
 	if err != nil {
 		return PlatformUser{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/users", "username="+params.Username)
+	details := []string{"username=" + params.Username}
+	if len(params.RoleIDs) > 0 {
+		details = append(details, "roleIds="+strings.Join(params.RoleIDs, ","))
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/users", details...)
 	if ctx.DryRun {
 		return PlatformUser{}, nil
 	}

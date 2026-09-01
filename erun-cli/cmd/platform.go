@@ -179,7 +179,10 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 			"identity the user signs in with; without them the user cannot sign in until an identity " +
 			"is linked. If that identity is already enrolled in the target tenant, this is a no-op: " +
 			"it reports the existing user rather than failing on a username collision. --tenant-id " +
-			"targets another tenant and is honored only for an operations-tenant caller.",
+			"targets another tenant and is honored only for an operations-tenant caller. --role-id " +
+			"(repeatable) names the roles to grant instead of the platform's default, which is how a " +
+			"tenant's administrator is enrolled directly rather than a member nobody inside the " +
+			"tenant can elevate.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example:      "  erun platform user enroll --username jane --issuer https://acme.example.com --subject jane@acme.com",
@@ -209,6 +212,7 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 	cmd.Flags().StringVar(&params.Issuer, "issuer", "", "OIDC issuer of the external identity to link")
 	cmd.Flags().StringVar(&params.Subject, "subject", "", "OIDC subject of the external identity to link")
 	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Target tenant id (operations-tenant callers only; defaults to the caller's own tenant)")
+	cmd.Flags().StringArrayVar(&params.RoleIDs, "role-id", nil, "Role id to grant, repeatable (defaults to the platform's own default role for this enrollment)")
 	addDryRunFlag(cmd)
 	return cmd
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type stubRoleRepository struct {
@@ -23,9 +24,10 @@ type stubRoleRepository struct {
 	forUserErr error
 	gotUserID  string
 
-	grantErr error
-	granted  model.UserRole
-	gotGrant struct{ userID, roleID string }
+	grantErr   error
+	granted    model.UserRole
+	gotGrant   struct{ userID, roleID, tenantID string }
+	grantCalls int
 
 	revokeErr error
 	gotRevoke struct{ userID, roleID string }
@@ -55,8 +57,9 @@ func (r *stubRoleRepository) ForUser(_ context.Context, userID string) ([]model.
 	return r.forUser, nil
 }
 
-func (r *stubRoleRepository) Grant(_ context.Context, userID string, roleID string) (model.UserRole, error) {
-	r.gotGrant = struct{ userID, roleID string }{userID, roleID}
+func (r *stubRoleRepository) Grant(_ context.Context, userID string, roleID string, tenantID string) (model.UserRole, error) {
+	r.grantCalls++
+	r.gotGrant = struct{ userID, roleID, tenantID string }{userID, roleID, tenantID}
 	if r.grantErr != nil {
 		return model.UserRole{}, r.grantErr
 	}
@@ -148,12 +151,26 @@ func TestListUserRolesUsesPathUserID(t *testing.T) {
 	}
 }
 
-func TestGrantUserRoleRejectsMissingRoleID(t *testing.T) {
-	roles := &stubRoleRepository{}
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(`{}`))
+// postGrant drives the route with the security context the authentication
+// middleware always stamps, since the route now resolves the target tenant
+// from it.
+func postGrant(t *testing.T, roles *stubRoleRepository, tenantType, tenantID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(body))
 	req.SetPathValue("user_id", "user-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   tenantID,
+		TenantType: tenantType,
+		ErunUserID: "caller-user",
+	}))
 	rec := httptest.NewRecorder()
 	RoleRoutes{roles: roles}.grantUserRole(rec, req)
+	return rec
+}
+
+func TestGrantUserRoleRejectsMissingRoleID(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
@@ -161,24 +178,58 @@ func TestGrantUserRoleRejectsMissingRoleID(t *testing.T) {
 
 func TestGrantUserRoleSucceeds(t *testing.T) {
 	roles := &stubRoleRepository{granted: model.UserRole{UserID: "user-1", RoleID: "role-1"}}
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(`{"roleId":"role-1"}`))
-	req.SetPathValue("user_id", "user-1")
-	rec := httptest.NewRecorder()
-	RoleRoutes{roles: roles}.grantUserRole(rec, req)
+	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{"roleId":"role-1"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	if roles.gotGrant.userID != "user-1" || roles.gotGrant.roleID != "role-1" {
-		t.Fatalf("Grant called with %+v, want user-1/role-1", roles.gotGrant)
+	// No tenant override for the ordinary case: the column default keeps the
+	// grant in the caller's own tenant.
+	if roles.gotGrant.userID != "user-1" || roles.gotGrant.roleID != "role-1" || roles.gotGrant.tenantID != "" {
+		t.Fatalf("Grant called with %+v, want user-1/role-1 and no tenant override", roles.gotGrant)
+	}
+}
+
+// TestGrantUserRoleForbidsCrossTenantWithoutOperations is the guard: naming
+// another tenant must not be a way for an ordinary tenant to write into it.
+func TestGrantUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{"roleId":"role-1","tenantId":"tenant-b"}`)
+	if rec.Code != http.StatusForbidden || roles.grantCalls != 0 {
+		t.Fatalf("status=%d grantCalls=%d, want 403 / 0 calls", rec.Code, roles.grantCalls)
+	}
+}
+
+// TestGrantUserRoleFromOperationsTargetsNamedTenant is the recovery path: an
+// operations caller elevates a user in another tenant, and the grant must be
+// filed under that tenant rather than under operations.
+func TestGrantUserRoleFromOperationsTargetsNamedTenant(t *testing.T) {
+	roles := &stubRoleRepository{granted: model.UserRole{UserID: "user-1", RoleID: "role-1", TenantID: "tenant-b"}}
+	rec := postGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", `{"roleId":"role-1","tenantId":"tenant-b"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if roles.gotGrant.tenantID != "tenant-b" {
+		t.Fatalf("Grant called with %+v, want tenantID=tenant-b", roles.gotGrant)
+	}
+}
+
+// TestGrantUserRoleFromOperationsOwnTenantPassesNoOverride keeps the override
+// strictly for the cross-tenant case: an operations caller naming its own
+// tenant still relies on the column default.
+func TestGrantUserRoleFromOperationsOwnTenantPassesNoOverride(t *testing.T) {
+	roles := &stubRoleRepository{granted: model.UserRole{UserID: "user-1", RoleID: "role-1"}}
+	rec := postGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", `{"roleId":"role-1","tenantId":"tenant-ops"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if roles.gotGrant.tenantID != "" {
+		t.Fatalf("Grant called with %+v, want no tenant override", roles.gotGrant)
 	}
 }
 
 func TestGrantUserRoleMapsConflictToStatusConflict(t *testing.T) {
 	roles := &stubRoleRepository{grantErr: apirepository.ErrConflict}
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(`{"roleId":"role-1"}`))
-	req.SetPathValue("user_id", "user-1")
-	rec := httptest.NewRecorder()
-	RoleRoutes{roles: roles}.grantUserRole(rec, req)
+	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{"roleId":"role-1"}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
 	}
@@ -186,10 +237,7 @@ func TestGrantUserRoleMapsConflictToStatusConflict(t *testing.T) {
 
 func TestGrantUserRoleMapsNotFoundToStatusNotFound(t *testing.T) {
 	roles := &stubRoleRepository{grantErr: apirepository.ErrNotFound}
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(`{"roleId":"role-1"}`))
-	req.SetPathValue("user_id", "user-1")
-	rec := httptest.NewRecorder()
-	RoleRoutes{roles: roles}.grantUserRole(rec, req)
+	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{"roleId":"role-1"}`)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
