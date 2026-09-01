@@ -338,7 +338,7 @@ func seedScopeTestUser(t *testing.T, db *sql.DB, tenantID, username string) stri
 }
 
 // TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller drives
-// GET /v1/environments?tenantId=<target> over HTTP (#1816): an operations
+// GET /v1/environments?tenantId=<target> over HTTP: an operations
 // caller naming another tenant sees exactly that tenant's environments, and
 // a company caller making the identical request is refused before any row
 // is read, proving the boundary is enforced server-side rather than by the
@@ -397,8 +397,8 @@ func auditParametersColumn(t *testing.T, db *sql.DB, tenantID, apiPath string) s
 // /v1/environments naming tenantId places the row in the target tenant (read
 // back directly, not trusted from the response), and a distinct audit event
 // records the operator's home tenant plus the target in api_parameters —
-// the attribution #1816 requires because the write itself, once persisted,
-// only ever names the target.
+// the attribution a cross-tenant write needs, since the environment row
+// itself, once persisted, only ever names the target.
 func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testing.T) {
 	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	opsSecurity, _ := security.FromContext(opsCtx)
@@ -435,7 +435,7 @@ func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testi
 }
 
 // TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller is the
-// unentitled-write refusal test (#1816): a company caller naming another
+// unentitled-write refusal test: a company caller naming another
 // tenant on create is refused server-side with 403, and — the property that
 // actually matters — no row is created anywhere, not even in the caller's
 // own tenant, proving the refusal happens before any write is attempted.

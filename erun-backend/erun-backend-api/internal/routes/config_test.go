@@ -63,8 +63,8 @@ type stubEnvironmentRepository struct {
 	markDeleteBlockedCalls  int
 	markDeleteBlockedReason string
 	// lastListTenantID captures the security context's TenantID List saw, so a
-	// test can prove which tenant a scoped call actually queried (#1816)
-	// without a real database's RLS to observe it.
+	// test can prove which tenant a scoped call actually queried without a
+	// real database's RLS to observe it.
 	lastListTenantID string
 }
 

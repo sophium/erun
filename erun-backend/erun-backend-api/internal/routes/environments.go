@@ -109,15 +109,15 @@ type EnvironmentRoutes struct {
 	// deleter is nil when live env provisioning is not wired; then delete is
 	// unavailable rather than acting on config no Job can realize.
 	deleter EnvironmentDeleter
-	// admin is nil unless the server wires cross-tenant administration
-	// (#1816); a create that targets another tenant then fails clearly
-	// (500) rather than silently falling back to the caller's own tenant.
-	// Only createEnvironment uses it — list needs no audit trail.
+	// admin is nil unless the server wires cross-tenant administration; a
+	// create that targets another tenant then fails clearly (500) rather
+	// than silently falling back to the caller's own tenant. Only
+	// createEnvironment uses it — list needs no audit trail.
 	admin EnvironmentAdminCreator
 }
 
 // EnvironmentAdminCreator creates an environment in a tenant other than the
-// caller's own and records who did it (#1816): every ordinary repository
+// caller's own and records who did it: every ordinary repository
 // Create is a single write, but a cross-tenant one is a workflow — the write
 // plus a durable record of which operator, from which home tenant, placed a
 // row somewhere they do not otherwise operate. scopedCtx is already resolved
@@ -130,9 +130,9 @@ type EnvironmentAdminCreator interface {
 
 // createEnvironmentRequest carries only operator-authored fields; the tenant is
 // resolved from the caller's token, never trusted from the body, with one
-// deliberate exception: TenantID, honoured only for an operations caller
-// (#1816) to place the row in a named tenant instead of their own — refused
-// with 403 for any other caller. Preview resolves and returns the same
+// deliberate exception: TenantID, honoured only for an operations caller, to
+// place the row in a named tenant instead of their own — refused with 403
+// for any other caller. Preview resolves and returns the same
 // ordered plan POST /v1/provision renders, without creating the row — the
 // executing path previewing itself, so the plan an operator audits here is
 // the plan a non-preview call then runs.
@@ -660,7 +660,7 @@ func resolveDeployVersion(req *http.Request, environment model.Environment) (str
 // repository method this package calls that derives its tenant scope from
 // the security context (EnvironmentRepository.List/Count,
 // TenantQuotaRepository.Get, ConfigTenantRepository.Current) operates on the
-// target tenant instead (#1816). No repository method needs a parallel "or
+// target tenant instead. No repository method needs a parallel "or
 // this other tenant" parameter to support it.
 func scopedContextForTenant(ctx context.Context, securityContext security.Context, targetTenantID string) context.Context {
 	if targetTenantID == securityContext.TenantID {
@@ -896,7 +896,7 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 // createEnvironmentRow persists the new row: the caller's own tenant by
 // default (unchanged) when crossTenant is false, or — already authorized by
 // resolveTargetTenant — targetTenantID instead, through EnvironmentAdminCreator
-// so the cross-tenant write is audited (#1816). scopedCtx is req.Context() at
+// so the cross-tenant write is audited. scopedCtx is req.Context() at
 // the point of the call (already resolved to the target tenant when
 // crossTenant is true); homeCtx is the original, unscoped context the
 // request arrived with.

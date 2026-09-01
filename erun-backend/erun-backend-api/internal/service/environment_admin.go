@@ -24,7 +24,7 @@ type EnvironmentAdminAuditLogger interface {
 }
 
 // EnvironmentAdminService owns the one piece of cross-tenant environment
-// administration (#1816) that is more than a single repository call: an
+// administration that is more than a single repository call: an
 // operations caller placing a row in a tenant other than its own must leave a
 // durable, attributable record — which operator, from which home tenant,
 // acted on which target — since the write itself, once persisted, only ever

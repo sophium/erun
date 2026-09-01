@@ -19,7 +19,7 @@ import (
 // postCreateEnvironment posts through the route with a default company
 // security context — every protected route assumes one exists (it does in
 // production, stamped by AuthMiddleware before route code ever runs), and
-// resolveTargetTenant/scopedContextForTenant (#1816) need it to decide
+// resolveTargetTenant/scopedContextForTenant need it to decide
 // whether a request is scoped to another tenant.
 func postCreateEnvironment(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -76,9 +76,8 @@ var underCapQuota = stubTenantQuotaRepository{maxEnvironments: 10}
 
 // stubEnvironmentAdmin fakes EnvironmentAdminCreator, capturing the tenant
 // each of scopedCtx/homeCtx carried so a test can prove a cross-tenant create
-// (#1816) ran against the target tenant while still attributing the audit
-// trail to the caller's real home tenant, without a database's RLS to
-// observe either.
+// ran against the target tenant while still attributing the audit trail to
+// the caller's real home tenant, without a database's RLS to observe either.
 type stubEnvironmentAdmin struct {
 	created        model.Environment
 	err            error
@@ -112,7 +111,7 @@ func (s *stubEnvironmentAdmin) CreateForTenant(scopedCtx, homeCtx context.Contex
 
 // postCreateEnvironmentAs posts through a fully-wired route with an explicit
 // tenant type/ID, the shape postCreateEnvironmentWired always fixed to
-// COMPANY — needed to exercise the operations-only cross-tenant path (#1816).
+// COMPANY — needed to exercise the operations-only cross-tenant path.
 func postCreateEnvironmentAs(t *testing.T, tenantType model.TenantType, tenantID string, environments *stubEnvironmentRepository, admin *stubEnvironmentAdmin, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
