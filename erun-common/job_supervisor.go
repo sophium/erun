@@ -64,6 +64,18 @@ type StartEnvironmentJobParams struct {
 	// EnvironmentJob.Handoff). Only meaningful when this start itself runs
 	// from inside another job's own work.
 	Handoff bool
+	// StartedByJobID is an explicit override for the job this new work should
+	// record as its own parent (see EnvironmentJob.StartedByJobID). Leave it
+	// empty for the common case: the supervisor this spawns inherits its own
+	// process's ERUN_JOB_ID for free when the start itself runs as a plain
+	// nested subprocess of another job's work (agent-gate.sh, an agent's own
+	// Bash tool). Set it explicitly only when forwarding this start through a
+	// channel that cannot carry that inheritance itself — the MCP edge, most
+	// notably, since a request reaching it crosses into that server's own
+	// long-lived process, which has no ERUN_JOB_ID of its own regardless of
+	// how deep the logical nesting is on the calling side. See
+	// CurrentEnvironmentJobID.
+	StartedByJobID string
 	// SupervisorPath is the erun executable that will supervise the job. Each
 	// transport resolves it — the CLI is already that executable, the MCP server
 	// finds it on the environment's PATH — so this package stays free of any
@@ -75,6 +87,7 @@ func (p StartEnvironmentJobParams) normalize() (StartEnvironmentJobParams, error
 	p.Tenant = strings.TrimSpace(p.Tenant)
 	p.Environment = strings.TrimSpace(p.Environment)
 	p.Name = strings.TrimSpace(p.Name)
+	p.StartedByJobID = strings.TrimSpace(p.StartedByJobID)
 	id, err := normalizeEnvironmentJobIdentity(p.Tenant, p.Environment, p.Name, p.ID)
 	if err != nil {
 		return p, err
@@ -459,6 +472,9 @@ func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	if params.Handoff {
 		args = append(args, "--handoff")
 	}
+	if params.StartedByJobID != "" {
+		args = append(args, "--started-by-job-id", params.StartedByJobID)
+	}
 	for _, pair := range sortedEnvironmentJobEnvPairs(params.Env) {
 		args = append(args, "--env", pair)
 	}
@@ -483,6 +499,10 @@ type EnvironmentJobSupervisorParams struct {
 	// Handoff carries StartEnvironmentJobParams.Handoff into the record the
 	// supervisor registers (see registerEnvironmentJob).
 	Handoff bool
+	// StartedByJobID carries StartEnvironmentJobParams.StartedByJobID's explicit
+	// override into the record the supervisor registers; empty defers to this
+	// process's own ERUN_JOB_ID (see registerEnvironmentJob).
+	StartedByJobID string
 }
 
 // jobRecorder is the supervisor's single writer of the job record. The progress
@@ -533,6 +553,16 @@ func resolveSupervisorJobIdentity(params EnvironmentJobSupervisorParams) (string
 	return id, name, agent, nil
 }
 
+// firstNonEmptyString returns the first non-empty value, or "" if all are.
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // registerEnvironmentJob writes the running record before any work starts, so
 // the handle exists from the moment the start call can observe it — including
 // for work that then fails to exec.
@@ -566,11 +596,14 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
 		Hostname:         currentJobHostname(),
-		// This supervisor's own process inherited ERUN_JOB_ID from whatever job
-		// started it (see the env this job's own child process is given below),
-		// so a value here means this job was started from inside another job's
-		// work rather than from outside any job.
-		StartedByJobID: strings.TrimSpace(os.Getenv(environmentJobIDEnvVar)),
+		// An explicit override (see StartEnvironmentJobParams.StartedByJobID)
+		// wins when the start call could not rely on this process inheriting
+		// ERUN_JOB_ID for free; otherwise this supervisor's own process
+		// inherited it from whatever job started it (see the env this job's
+		// own child process is given below), so a value here means this job
+		// was started from inside another job's work rather than from
+		// outside any job.
+		StartedByJobID: firstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(environmentJobIDEnvVar))),
 		Handoff:        params.Handoff,
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {

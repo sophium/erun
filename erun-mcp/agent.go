@@ -26,6 +26,7 @@ type AgentInput struct {
 	MaxOutputBytes  int64             `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes; past it output is dropped and the job reports outputTruncated. Does not affect progress, which is folded from the tool's stream directly and keeps updating past the cap. Defaults to 16777216"`
 	LeaseTTLSeconds int64             `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL the job renews inside while it runs; defaults to 900"`
 	Handoff         bool              `json:"handoff,omitempty" jsonschema:"mark this job as deliberately meant to outlive whatever starts it. When this call itself runs from inside another job's own work, that job otherwise waits for this one to reach a verdict before reporting its own outcome; set true for work meant to keep running past the caller's own turn on purpose (a release, a long render)"`
+	StartedByJobID  string            `json:"startedByJobId,omitempty" jsonschema:"internal: the job this call is being made on behalf of, so that job's own finish check can find this one as work it started. Only needed when this call itself runs from inside another job's own work AND reaches this tool through this environment's MCP edge rather than as a plain nested subprocess -- a nested subprocess (an agent's own Bash tool calling the erun CLI directly) already gets this for free from its own ERUN_JOB_ID and never needs to set it"`
 	Preview         bool              `json:"preview,omitempty" jsonschema:"when true, resolve and trace the job without starting it"`
 }
 
@@ -62,6 +63,7 @@ func agentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			MaxOutputBytes: input.MaxOutputBytes,
 			LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
 			Handoff:        input.Handoff,
+			StartedByJobID: input.StartedByJobID,
 			SupervisorPath: supervisor,
 		})
 		if err != nil {

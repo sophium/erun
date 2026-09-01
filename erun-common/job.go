@@ -206,6 +206,20 @@ func resolveEnvironmentJobDurationOverride(envVar string, fallback time.Duration
 	return fallback
 }
 
+// CurrentEnvironmentJobID returns this process's own job id -- the job whose
+// supervisor set ERUN_JOB_ID on it -- or "" outside any job. registerEnvironmentJob
+// reads this same env var directly for a job started as a plain nested
+// subprocess (agent-gate.sh, an agent's own Bash tool), where the inheritance
+// happens for free. It is exported for a caller that cannot rely on that
+// inheritance: forwarding a job-start request through the MCP edge crosses
+// into that server's own long-lived process, which was never itself started as
+// anyone's job and so has no ERUN_JOB_ID to inherit from, however deep the
+// logical nesting on the calling side. Such a caller reads its own id here and
+// threads it explicitly as StartEnvironmentJobParams.StartedByJobID.
+func CurrentEnvironmentJobID() string {
+	return strings.TrimSpace(os.Getenv(environmentJobIDEnvVar))
+}
+
 // EnvironmentJob is one unit of long work and its outcome.
 type EnvironmentJob struct {
 	ID   string `json:"id"`
@@ -597,15 +611,38 @@ func environmentJobRunningChildren(dir, parentID string, now time.Time) []Enviro
 }
 
 // environmentJobFailedChildren returns parentID's children that have finished
-// without succeeding, excluding any marked Handoff. It is what lets a parent
+// without succeeding, excluding any marked Handoff, and excluding a failure a
+// later same-named attempt has since superseded. It is what lets a parent
 // whose own process exited cleanly still report the truth once it has waited
 // out a job it started (see EnvironmentJobStateGateIncomplete) and that job
 // turns out not to have succeeded — a clean exit code from the parent's own
 // process is not the same claim as a clean outcome from work it waited for.
+//
+// The supersede rule matters because a name is not a one-shot id: agent-gate.sh
+// folds the tree and command into --id, so an agent that fixes what a gate
+// found and reruns it gets a fresh id under the same --name, and the earlier
+// failing attempt's record is never replaced (reserveEnvironmentJobID only
+// replaces an id that is reused outright). Without this, a parent would name
+// that stale failure forever — including once a later attempt under the same
+// name went green, reporting exited/succeeded next to a startedJobFailed
+// naming a different job than the one that had actually passed.
 func environmentJobFailedChildren(dir, parentID string, now time.Time) []EnvironmentJob {
+	children := environmentJobChildren(dir, parentID, now)
+	latestStartByName := make(map[string]time.Time, len(children))
+	for _, child := range children {
+		if child.Name == "" {
+			continue
+		}
+		if child.StartedAt.After(latestStartByName[child.Name]) {
+			latestStartByName[child.Name] = child.StartedAt
+		}
+	}
 	var failed []EnvironmentJob
-	for _, child := range environmentJobChildren(dir, parentID, now) {
+	for _, child := range children {
 		if child.Handoff || !child.Finished() || child.Succeeded {
+			continue
+		}
+		if child.Name != "" && child.StartedAt.Before(latestStartByName[child.Name]) {
 			continue
 		}
 		failed = append(failed, child)

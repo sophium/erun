@@ -149,6 +149,18 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/await_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("status_help", func(t *testing.T) {
+		// The job states -- including abandoned/gate-incomplete, and that an
+		// agent job's own process exiting is not the verdict -- are the
+		// contract an orchestrator reads this help for, so it is locked here.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"job", "status", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/status_help", normalize.Apply(result.Combined))
+	})
+
 	t.Run("start_dry_run_plans_the_detach", func(t *testing.T) {
 		// The plan must show the supervisor argv, where output will land, and that
 		// a lease is taken, without starting anything.
@@ -1016,8 +1028,17 @@ func TestJob(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		bin := erun.BinaryPath(t)
-		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sh -c 'sleep 0.2; exit 1' >/dev/null 2>&1\nexit 0\n", bin)
-		envVars := jobStubEnv(t, setup, script)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		// The scrubbed PATH (see AGENTS.md "The PATH is scrubbed") has no `sh`
+		// forwarder, so a nested job whose own command was `sh -c '...'` failed
+		// to start rather than genuinely running its command -- the loose
+		// assertion below (matching "gate" in startedJobFailed regardless of
+		// why it failed) never caught it. A declared stub is the real gate
+		// command instead, so this locks the actual "started job finished with
+		// a failing exit code" path, not an accidental "sh is unresolvable" one.
+		fixture.StubBinaryWithScript(t, stubs, "gatefail", "sleep 0.2\nexit 1\n")
+		script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- gatefail >/dev/null 2>&1\nexit 0\n", bin)
+		envVars := append(jobStubEnv(t, setup, script), fixture.StubEnv(stubs, "gatefail")...)
 
 		start := startJob(t, setup, envVars, "outer", "--", "work")
 		if start.ExitCode != 0 {
@@ -1041,6 +1062,58 @@ func TestJob(t *testing.T) {
 		}
 		if !strings.Contains(payload.StartedJobFailed, "gate") {
 			t.Fatalf("expected startedJobFailed to name the failed gate job, got %+v", payload)
+		}
+	})
+
+	t.Run("startedJobFailed_ignores_a_superseded_earlier_attempt_under_the_same_name", func(t *testing.T) {
+		// agent-gate.sh folds the tree and command into the nested job's --id,
+		// so an agent that fixes what a gate found and reruns it gets a fresh
+		// id under the same --name -- the earlier failing attempt's record is
+		// never replaced (only reusing an id outright does that). Without
+		// accounting for that, a parent would keep naming the stale failure
+		// even after the same-named gate went green: exited/succeeded sitting
+		// next to a startedJobFailed naming a job that was not the one that
+		// actually ran last.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "gate1cmd", "exit 1\n")
+		fixture.StubBinaryWithScript(t, stubs, "gate2cmd", "exit 0\n")
+		script := fmt.Sprintf(
+			"%q job start --tenant team --environment dev --name gate --id gate-1 -- gate1cmd >/dev/null 2>&1\n"+
+				"%q job await --tenant team --environment dev --id gate-1 --timeout 10s >/dev/null 2>&1\n"+
+				"%q job start --tenant team --environment dev --name gate --id gate-2 -- gate2cmd >/dev/null 2>&1\n"+
+				"%q job await --tenant team --environment dev --id gate-2 --timeout 10s >/dev/null 2>&1\n"+
+				"exit 0\n",
+			bin, bin, bin, bin)
+		envVars := append(jobStubEnv(t, setup, script), fixture.StubEnv(stubs, "gate1cmd", "gate2cmd")...)
+
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			for _, id := range []string{"gate-1", "gate-2"} {
+				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
+					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			}
+		})
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected outer to report success once the latest same-named attempt passed, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State            string `json:"state"`
+			Succeeded        bool   `json:"succeeded"`
+			StartedJobFailed string `json:"startedJobFailed"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "exited" || !payload.Succeeded || payload.StartedJobFailed != "" {
+			t.Fatalf("expected outer to report exited/succeeded with no startedJobFailed once the latest attempt passed, got %+v", payload)
 		}
 	})
 
