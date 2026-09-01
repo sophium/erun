@@ -72,9 +72,14 @@ func parseEd25519PublicKey(publicPEM []byte) (ed25519.PublicKey, error) {
 
 // Sign mints a token whose sub is the ERun user, aud is the per-env audience,
 // and iss is the fixed in-pod file:// path the deploy injects the backend's
-// public key at — so the edge verifies it against that key. Returns the token
-// and the audience it was minted for.
-func (s *Signer) Sign(tenant, environment, subject string, now time.Time) (string, string, error) {
+// public key at — so the edge verifies it against that key. scope carries the
+// requested capability tier (see erun-common/mcp_capabilities.go) into the
+// token's claims; the caller (mcp_token.go's route) is responsible for
+// validating and defaulting it before it reaches here, since an absent scope
+// resolving to admin is exactly the desktop's own compatibility default
+// (MCPCapabilitiesFromClaims), not something this hosted signer should ever
+// produce unasked. Returns the token and the audience it was minted for.
+func (s *Signer) Sign(tenant, environment, subject, scope string, now time.Time) (string, string, error) {
 	audience := eruncommon.MCPTokenAudience(tenant, environment)
 	token, err := eruncommon.SignMCPToken(s.privatePEM, eruncommon.MCPTokenClaims{
 		Issuer:    eruncommon.DesktopMCPIssuer(),
@@ -82,6 +87,7 @@ func (s *Signer) Sign(tenant, environment, subject string, now time.Time) (strin
 		Audience:  audience,
 		IssuedAt:  now.Unix(),
 		ExpiresAt: now.Add(tokenTTL).Unix(),
+		Scope:     scope,
 	})
 	if err != nil {
 		return "", "", err

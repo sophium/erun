@@ -11,6 +11,7 @@ import { MCPAccessPanel } from './MCPAccessPanel';
 interface MockReq {
   method: string;
   url: string;
+  body: string | undefined;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -30,8 +31,13 @@ function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL, init?: RequestInit) => {
-      calls.push({ method: init?.method ?? 'GET', url: requestUrl(input) });
-      return Promise.resolve(handler({ method: init?.method ?? 'GET', url: requestUrl(input) }));
+      const req = {
+        method: init?.method ?? 'GET',
+        url: requestUrl(input),
+        body: init?.body as string | undefined,
+      };
+      calls.push(req);
+      return Promise.resolve(handler(req));
     }),
   );
   return calls;
@@ -45,9 +51,13 @@ afterEach(() => {
 });
 
 describe('MCPAccessPanel', () => {
-  it('POSTs to the env mcp-token endpoint and surfaces the token and audience', async () => {
+  it('POSTs to the env mcp-token endpoint requesting admin scope and surfaces the token and audience', async () => {
     const calls = mockFetch(() =>
-      jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }),
+      jsonResponse({
+        token: 'signed.jwt.value',
+        audience: 'erun-mcp:acme/prod',
+        scope: 'erun:admin',
+      }),
     );
     renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
 
@@ -59,6 +69,7 @@ describe('MCPAccessPanel', () => {
 
     const post = calls.find((c) => c.method === 'POST');
     expect(post?.url).toBe('/v1/environments/env-1/mcp-token');
+    expect(post?.body).toBe(JSON.stringify({ scope: 'erun:admin' }));
   });
 
   it('surfaces a 501 when the backend has no signing key configured', async () => {
