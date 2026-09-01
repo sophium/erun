@@ -1156,6 +1156,43 @@ func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, dockerContext
 	SeedProjectK8sConfig(t, setup, b.String())
 }
 
+// ComponentPathsConfig is one .erun/config.yaml components:<Name> entry —
+// the per-component twin of the fields SeedProjectPathsConfig writes under
+// the project-global paths: block. Empty fields are omitted.
+type ComponentPathsConfig struct {
+	Name          string
+	Docker        string
+	DockerContext string
+	K8s           string
+	Terraform     string
+	Version       string
+}
+
+// SeedProjectComponentsConfig writes the project .erun/config.yaml components:
+// map so build/deploy resolve a per-component docker/k8s/version root for a
+// monorepo of independent deployables that do not share one paths: root.
+// Entries are written in the given order for deterministic golden output.
+func SeedProjectComponentsConfig(t testing.TB, setup env.Setup, entries ...ComponentPathsConfig) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("components:\n")
+	for _, entry := range entries {
+		b.WriteString("    " + entry.Name + ":\n")
+		for _, kv := range []struct{ key, value string }{
+			{"docker", entry.Docker},
+			{"dockercontext", entry.DockerContext},
+			{"k8s", entry.K8s},
+			{"terraform", entry.Terraform},
+			{"version", entry.Version},
+		} {
+			if strings.TrimSpace(kv.value) != "" {
+				b.WriteString("        " + kv.key + ": " + kv.value + "\n")
+			}
+		}
+	}
+	SeedProjectK8sConfig(t, setup, b.String())
+}
+
 // SeedDockerComponentAt writes <dockerDir>/<component>/Dockerfile so a build
 // resolves a component build context at a caller-chosen docker root. dockerDir
 // must be named "docker" — the standard-layout checks key off the folder name.

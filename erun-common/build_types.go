@@ -160,6 +160,12 @@ type DockerCommandTarget struct {
 	// Release is set: a release build always publishes every platform erun
 	// supports, regardless of any override.
 	Platforms []string
+	// Component selects one components: entry (project_components_config.go) for
+	// a monorepo that declares more than one docker/k8s/version root. Empty
+	// auto-selects the lone entry when exactly one is declared, or resolves
+	// through the project-global paths: block when no components: map exists;
+	// more than one entry with Component empty fails naming the choices.
+	Component string
 }
 
 type DockerRegistryAuthError struct {

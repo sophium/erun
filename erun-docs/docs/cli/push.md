@@ -31,6 +31,7 @@ Because push publishes the charts for every version — snapshot or release — 
 | `--build` | **Operator shortcut** (build → push). Build the current source first, then push the version that build mints — so you don't have to copy the snapshot version out of `erun build` by hand. Mutually exclusive with `--version`. Programmatic callers (the desktop app, scripts, Agents over MCP) compose `build` and `push` themselves and thread the version; see [Command primitives](/concepts/command-primitives). |
 | `--force` | Rebuild and re-push every image, bypassing the fingerprint cache. Also forces the `--build` step. |
 | `--dry-run` | Resolve and print every `docker build` / `docker push` / `docker manifest` and `helm package` / `helm push` command without executing. |
+| `--component` | Select one [`components:`](/reference/configuration#components-block) entry for a monorepo of independent deployables, the same selector [`erun build`](/cli/build) takes. Auto-selects when the project declares exactly one; unused when it declares none. |
 
 ## Registry resolution
 

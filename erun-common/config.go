@@ -624,6 +624,11 @@ type ProjectConfig struct {
 	// Paths overrides where erun discovers the project's devops assets (docker/,
 	// k8s/, terraform-<tenant>/, VERSION); empty keeps the conventional layout.
 	Paths ProjectPathsConfig `yaml:"paths,omitempty"`
+	// Components declares more than one paths:-shaped root, keyed by component
+	// name, for a monorepo of independent deployables that do not share one
+	// docker/k8s root (e.g. harnesses/<name>/{docker,k8s}). Empty keeps paths: as
+	// the project's only root. See project_components_config.go for selection.
+	Components map[string]ProjectPathsConfig `yaml:"components,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
