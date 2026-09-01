@@ -51,10 +51,17 @@ function deployedVersionCell(env: Environment): string {
     : env.deployedVersion;
 }
 
-function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
+function EnvironmentRow({
+  env,
+  showTenant,
+}: {
+  env: Environment;
+  showTenant: boolean;
+}): React.ReactElement {
   return (
     <TableRow>
       <TableCell className="font-medium text-foreground">{env.name}</TableCell>
+      {showTenant && <TableCell>{env.tenantId}</TableCell>}
       <TableCell>{env.type}</TableCell>
       <TableCell>{placeholder(env.kubernetesContext)}</TableCell>
       <TableCell>{placeholder(env.runtimeVersion)}</TableCell>
@@ -71,10 +78,17 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
   );
 }
 
+// showTenant is true only for an OPERATIONS caller: a COMPANY tenant's own
+// environments are always its own, so the column would repeat what the
+// tenant header already names. An OPERATIONS caller can be scoped to see
+// another tenant's rows (erun#1816), where this is the only thing that says
+// whose row is whose.
 function EnvironmentsSection({
   environments,
+  showTenant,
 }: {
   environments: Environment[];
+  showTenant: boolean;
 }): React.ReactElement {
   return (
     <Card role="region" aria-labelledby="environments-heading">
@@ -89,6 +103,7 @@ function EnvironmentsSection({
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                {showTenant && <TableHead>Tenant</TableHead>}
                 <TableHead>Type</TableHead>
                 <TableHead>Kubernetes context</TableHead>
                 <TableHead>Runtime version</TableHead>
@@ -98,7 +113,7 @@ function EnvironmentsSection({
             </TableHeader>
             <TableBody>
               {environments.map((env) => (
-                <EnvironmentRow key={env.environmentId} env={env} />
+                <EnvironmentRow key={env.environmentId} env={env} showTenant={showTenant} />
               ))}
             </TableBody>
           </Table>
@@ -197,7 +212,10 @@ export function ConfigView({ config }: { config: TenantConfigView }): React.Reac
   return (
     <div className="grid gap-6">
       <TenantHeader tenant={config.tenant} />
-      <EnvironmentsSection environments={config.environments} />
+      <EnvironmentsSection
+        environments={config.environments}
+        showTenant={config.tenant.type === 'OPERATIONS'}
+      />
       <ContextsSection contexts={config.contexts} />
     </div>
   );

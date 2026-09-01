@@ -248,10 +248,12 @@ function TeardownRow({ environment }: { environment: Environment }): React.React
 function EnvironmentDeployRow({
   environment,
   state,
+  showTenant,
   onDeploy,
 }: {
   environment: Environment;
   state: DeployState | undefined;
+  showTenant: boolean;
   onDeploy: (environmentId: string, version: string) => void;
 }): React.ReactElement {
   const [version, setVersion] = React.useState('');
@@ -262,7 +264,14 @@ function EnvironmentDeployRow({
   }
   return (
     <li className="grid gap-2 border-b border-border py-3 last:border-b-0">
-      <span className="font-medium text-foreground">{environment.name}</span>
+      <span className="font-medium text-foreground">
+        {environment.name}
+        {showTenant && (
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            Tenant: {environment.tenantId}
+          </span>
+        )}
+      </span>
       <div className="flex items-end gap-2">
         <div className="grid gap-2">
           <FieldLabel htmlFor={versionInputId}>Version</FieldLabel>
@@ -293,10 +302,12 @@ function EnvironmentDeployRow({
 function DeployList({
   environments,
   states,
+  showTenant,
   onDeploy,
 }: {
   environments: Environment[];
   states: Record<string, DeployState>;
+  showTenant: boolean;
   onDeploy: (environmentId: string, version: string) => void;
 }): React.ReactElement {
   const runtimeEnvironments = environments.filter((environment) => environment.type === 'runtime');
@@ -310,6 +321,7 @@ function DeployList({
           key={environment.environmentId}
           environment={environment}
           state={states[environment.environmentId]}
+          showTenant={showTenant}
           onDeploy={onDeploy}
         />
       ))}
@@ -319,11 +331,13 @@ function DeployList({
 
 export function EnvironmentsPanel({
   token,
+  tenantType,
   contexts,
   environments,
   onChanged,
 }: {
   token: string;
+  tenantType: string;
   contexts: CloudContext[];
   environments: Environment[];
   onChanged: () => void;
@@ -358,7 +372,12 @@ export function EnvironmentsPanel({
           <h3 className="mb-2 text-sm font-semibold text-foreground">
             Deploy a runtime environment
           </h3>
-          <DeployList environments={environments} states={states} onDeploy={deploy} />
+          <DeployList
+            environments={environments}
+            states={states}
+            showTenant={tenantType === 'OPERATIONS'}
+            onDeploy={deploy}
+          />
         </div>
       </CardContent>
     </Card>

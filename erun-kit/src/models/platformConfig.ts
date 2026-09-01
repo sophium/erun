@@ -42,6 +42,10 @@ export function isTearingDown(environment: { status?: EnvironmentStatus }): bool
 
 export interface Environment {
   environmentId: string;
+  // The tenant this environment belongs to. Always present on the wire —
+  // load-bearing once a caller can be scoped to see another tenant's rows
+  // (erun#1816), since that is the only thing that then says whose row this is.
+  tenantId: string;
   name: string;
   // "runtime" | "remote-agent" | "local-agent"; kept as a string for the
   // same forward-compatibility reason as Tenant.type.
@@ -141,6 +145,7 @@ export function parseTenant(raw: Record<string, unknown>): Tenant {
 export function parseEnvironment(raw: Record<string, unknown>): Environment {
   return {
     environmentId: asString(raw.environmentId),
+    tenantId: asString(raw.tenantId),
     name: asString(raw.name),
     type: asString(raw.type),
     kubernetesContext: asOptionalString(raw.kubernetesContext),

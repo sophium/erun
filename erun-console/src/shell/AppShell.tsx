@@ -82,6 +82,7 @@ function SectionContent({
       return (
         <EnvironmentsPanel
           token={token}
+          tenantType={config.tenant.type}
           contexts={config.contexts}
           environments={config.environments}
           onChanged={onChanged}

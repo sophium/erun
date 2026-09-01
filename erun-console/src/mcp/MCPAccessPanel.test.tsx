@@ -37,7 +37,9 @@ function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
   return calls;
 }
 
-const ENVIRONMENTS: Environment[] = [{ environmentId: 'env-1', name: 'prod', type: 'runtime' }];
+const ENVIRONMENTS: Environment[] = [
+  { environmentId: 'env-1', tenantId: 'tn-1', name: 'prod', type: 'runtime' },
+];
 
 afterEach(() => {
   cleanup();

@@ -51,6 +51,7 @@ afterEach(() => {
 
 const RUNTIME_ENV: Environment = {
   environmentId: 'env-1',
+  tenantId: 'tn-1',
   name: 'prod',
   type: 'runtime',
   runtimeVersion: '1.2.3',
@@ -66,7 +67,13 @@ describe('EnvironmentsPanel register form', () => {
       ),
     );
     renderWithStore(
-      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+      <EnvironmentsPanel
+        token="dev-token"
+        tenantType="COMPANY"
+        contexts={[]}
+        environments={[]}
+        onChanged={vi.fn()}
+      />,
     );
 
     fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
@@ -93,7 +100,13 @@ describe('EnvironmentsPanel register form', () => {
     );
     const onChanged = vi.fn();
     renderWithStore(
-      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={onChanged} />,
+      <EnvironmentsPanel
+        token="dev-token"
+        tenantType="COMPANY"
+        contexts={[]}
+        environments={[]}
+        onChanged={onChanged}
+      />,
     );
 
     fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
@@ -108,7 +121,13 @@ describe('EnvironmentsPanel register form', () => {
   it('surfaces a 400 register error', async () => {
     mockFetch(() => jsonResponse('name must be a DNS-1123 label', 400));
     renderWithStore(
-      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+      <EnvironmentsPanel
+        token="dev-token"
+        tenantType="COMPANY"
+        contexts={[]}
+        environments={[]}
+        onChanged={vi.fn()}
+      />,
     );
 
     fireEvent.change(screen.getByLabelText('Name', { exact: false }), {
@@ -140,6 +159,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[RUNTIME_ENV]}
         onChanged={vi.fn()}
@@ -176,6 +196,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[RUNTIME_ENV]}
         onChanged={vi.fn()}
@@ -193,6 +214,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[RUNTIME_ENV]}
         onChanged={vi.fn()}
@@ -210,6 +232,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[RUNTIME_ENV]}
         onChanged={vi.fn()}
@@ -225,7 +248,13 @@ describe('EnvironmentsPanel deploy flow', () => {
 
   it('shows an empty state when there are no runtime environments', () => {
     renderWithStore(
-      <EnvironmentsPanel token="dev-token" contexts={[]} environments={[]} onChanged={vi.fn()} />,
+      <EnvironmentsPanel
+        token="dev-token"
+        tenantType="COMPANY"
+        contexts={[]}
+        environments={[]}
+        onChanged={vi.fn()}
+      />,
     );
     expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
   });
@@ -238,6 +267,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[{ ...RUNTIME_ENV, status: 'deleting' }]}
         onChanged={vi.fn()}
@@ -256,6 +286,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     renderWithStore(
       <EnvironmentsPanel
         token="dev-token"
+        tenantType="COMPANY"
         contexts={[]}
         environments={[{ ...RUNTIME_ENV, status: 'deletion-blocked', deleteError: blocker }]}
         onChanged={vi.fn()}
@@ -279,6 +310,7 @@ describe('EnvironmentsPanel deploy flow', () => {
       renderWithStore(
         <EnvironmentsPanel
           token="dev-token"
+          tenantType="COMPANY"
           contexts={[]}
           environments={[{ ...RUNTIME_ENV, status }]}
           onChanged={vi.fn()}

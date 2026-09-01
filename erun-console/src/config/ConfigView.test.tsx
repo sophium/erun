@@ -13,6 +13,7 @@ const SAMPLE_CONFIG = {
   environments: [
     {
       environmentId: 'env-1',
+      tenantId: 'tn-1',
       name: 'prod',
       type: 'runtime',
       kubernetesContext: 'primary',
@@ -22,6 +23,7 @@ const SAMPLE_CONFIG = {
     },
     {
       environmentId: 'env-2',
+      tenantId: 'tn-1',
       name: 'dev',
       type: 'remote-agent',
       status: 'failed',
@@ -126,6 +128,28 @@ describe('ConfigView via App', () => {
     expect(envs.getByText('Failed')).toBeInTheDocument();
     // A failed env surfaces its provision error inline, like a failed context.
     expect(envs.getByText('deploy job did not succeed')).toBeInTheDocument();
+  });
+
+  it('shows no Tenant column for a COMPANY caller, whose rows are always its own', async () => {
+    mockFetch(jsonResponse(SAMPLE_CONFIG));
+    renderWithStore(<App />);
+
+    const envs = within(await screen.findByRole('region', { name: 'Environments' }));
+    expect(envs.queryByRole('columnheader', { name: 'Tenant' })).not.toBeInTheDocument();
+  });
+
+  it('names the owning tenant on each row for an OPERATIONS caller, who can be scoped to another tenant', async () => {
+    mockFetch(
+      jsonResponse({
+        ...SAMPLE_CONFIG,
+        tenant: { tenantId: 'tn-ops', name: 'Frs', type: 'OPERATIONS' },
+      }),
+    );
+    renderWithStore(<App />);
+
+    const envs = within(await screen.findByRole('region', { name: 'Environments' }));
+    expect(envs.getByRole('columnheader', { name: 'Tenant' })).toBeInTheDocument();
+    expect(envs.getAllByRole('cell', { name: 'tn-1' })).toHaveLength(2);
   });
 
   it('renders empty states for an empty payload', async () => {

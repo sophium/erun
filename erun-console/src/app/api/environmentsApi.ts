@@ -4,7 +4,10 @@ import { httpBaseQuery } from './httpBaseQuery';
 import { platformApi } from './platformApi';
 
 // The operator-authored fields to register an environment. The tenant is
-// resolved from the caller's token server-side and is never sent from here.
+// resolved from the caller's token server-side and is never sent from here —
+// the API separately accepts an operations-only target-tenant override
+// (POST /v1/environments' tenantId body field, erun#1816), but no console
+// control sets one yet, so this input type has no field for it.
 export interface CreateEnvironmentInput {
   name: string;
   type: string;

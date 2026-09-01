@@ -25,6 +25,7 @@ const FIXTURE_BODY = {
   environments: [
     {
       environmentId: 'env-1',
+      tenantId: 'tn-1',
       name: 'prod',
       type: 'runtime',
       status: 'running',
@@ -39,6 +40,7 @@ const EXPECTED = {
   environments: [
     {
       environmentId: 'env-1',
+      tenantId: 'tn-1',
       name: 'prod',
       type: 'runtime',
       status: 'running',
