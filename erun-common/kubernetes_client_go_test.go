@@ -577,6 +577,138 @@ func TestLibraryDeploymentPresentHonorsContextOverride(t *testing.T) {
 	}
 }
 
+// deploymentConditionHandler serves a Deployment Get whose Available
+// condition is False for the first failCount requests, then True -- so tests
+// can exercise libraryWaitForDeploymentAvailable's poll loop instead of only
+// its immediate-success path.
+func deploymentConditionHandler(namespace, name string, failCount int) http.HandlerFunc {
+	path := "/apis/apps/v1/namespaces/" + namespace + "/deployments/" + name
+	calls := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","status":"Failure","reason":"NotFound"}`))
+			return
+		}
+		calls++
+		status := "False"
+		if calls > failCount {
+			status = "True"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"` + name + `","namespace":"` + namespace + `"},` +
+			`"status":{"conditions":[{"type":"Available","status":"` + status + `"}]}}`))
+	}
+}
+
+// TestLibraryWaitForDeploymentAvailableReturnsImmediatelyWhenAlreadyAvailable
+// proves the common case -- the Deployment is already Available on the first
+// Get -- returns without polling again.
+func TestLibraryWaitForDeploymentAvailableReturnsImmediatelyWhenAlreadyAvailable(t *testing.T) {
+	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 0))
+
+	if err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "5s"); err != nil {
+		t.Fatalf("libraryWaitForDeploymentAvailable: %v", err)
+	}
+}
+
+// TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue proves
+// the poll loop keeps re-Getting -- the same observable behavior as `kubectl
+// wait` blocking until the condition flips -- rather than only checking once.
+func TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue(t *testing.T) {
+	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
+	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 2))
+
+	if err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "5s"); err != nil {
+		t.Fatalf("libraryWaitForDeploymentAvailable: %v", err)
+	}
+}
+
+// TestLibraryWaitForDeploymentAvailableToleratesNotFoundUntilCreated proves
+// the wait survives the Deployment not existing yet at the first poll --
+// matching `kubectl wait`'s tolerance for a resource that has not been
+// created yet -- rather than failing outright on the first NotFound.
+func TestLibraryWaitForDeploymentAvailableToleratesNotFoundUntilCreated(t *testing.T) {
+	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
+	calls := 0
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
+				`"message":"deployments.apps \"team-api\" not found","reason":"NotFound","code":404}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-api","namespace":"team-dev"},` +
+			`"status":{"conditions":[{"type":"Available","status":"True"}]}}`))
+	})
+
+	if err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "5s"); err != nil {
+		t.Fatalf("libraryWaitForDeploymentAvailable: %v", err)
+	}
+}
+
+// TestLibraryWaitForDeploymentAvailableTimesOutWhenConditionNeverTrue proves
+// the wait gives up at the deadline instead of polling forever, the same
+// contract `kubectl wait --timeout` makes.
+func TestLibraryWaitForDeploymentAvailableTimesOutWhenConditionNeverTrue(t *testing.T) {
+	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
+	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 1<<20))
+
+	err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "20ms")
+	if err == nil {
+		t.Fatalf("err = nil, want a timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, want it to mention a timeout", err)
+	}
+}
+
+// TestLibraryWaitForDeploymentAvailablePropagatesOtherErrors proves a
+// non-NotFound API error is not swallowed into a plain timeout the way a
+// bare "condition never became true" loop would.
+func TestLibraryWaitForDeploymentAvailablePropagatesOtherErrors(t *testing.T) {
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"kind":"Status","status":"Failure","reason":"InternalError"}`))
+	})
+
+	err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "5s")
+	if err == nil {
+		t.Fatalf("err = nil, want an error")
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, want the underlying API error, not a timeout", err)
+	}
+}
+
+func TestLibraryWaitForDeploymentAvailableRejectsInvalidTimeout(t *testing.T) {
+	if err := libraryWaitForDeploymentAvailable("", "team-dev", "team-api", "not-a-duration"); err == nil {
+		t.Fatalf("err = nil, want an error for an invalid timeout")
+	}
+}
+
+func TestExecutionModeForKubectlDeploymentWaitDefaultsToSubprocess(t *testing.T) {
+	if got := ExecutionModeFor(ERunConfig{}, kubectlDeploymentWaitExecutionOperation); got != ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	}
+}
+
+func TestExecutionModeReportListsKubectlDeploymentWaitOperation(t *testing.T) {
+	report := ExecutionModeReport(ERunConfig{})
+	for _, status := range report {
+		if status.Operation == kubectlDeploymentWaitExecutionOperation {
+			if status.Mode != ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			}
+			return
+		}
+	}
+	t.Fatalf("kubectl-deployment-wait not found in report: %+v", report)
+}
+
 // TestKubectlGetDeploymentArgsSharedByBothPaths locks the one argv builder
 // ensureAPIPortForward (erun-cli) traces and defaultDeploymentPresent
 // executes, so the dry-run trace can never drift from the subprocess

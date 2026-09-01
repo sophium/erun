@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,12 +25,14 @@ import (
 // single resource kind (Namespace), a single Get-by-name call, and it sits
 // outside the helm deploy pod-watch loop (runHelmDeployWithPodWatch) that
 // stays subprocess-only, per execution_mode.go's one-key-per-call-site
-// convention. Every other kubectl call site — pod-watch polling, `apply`,
-// `wait` — stays subprocess-only for now: this is the first use of
-// k8s.io/client-go in the module, and paying that dependency cost to prove
-// the approach on the narrowest, lowest-blast-radius read is preferable to
-// spending it on the higher-traffic but streaming/mutating call sites in the
-// same pass.
+// convention: this is the first use of k8s.io/client-go in the module, and
+// paying that dependency cost to prove the approach on the narrowest,
+// lowest-blast-radius read is preferable to spending it on the higher-traffic
+// but streaming/mutating call sites in the same pass. `kubectl wait` followed
+// once a poll-based condition check proved out (kubectlDeploymentWaitExecutionOperation
+// below); the helm deploy pod-watch poll and `apply` (mutating; a
+// server-side-apply library call is not obviously equivalent to kubectl's
+// client-side three-way merge) remain deferred.
 const kubectlNamespaceGetExecutionOperation = "kubectl-namespace-get"
 
 // kubectlGetNamespaceArgs is the single source of the `kubectl get namespace
@@ -293,4 +298,88 @@ func libraryGetPod(podName string) (*corev1.Pod, error) {
 		return nil, fmt.Errorf("read pod %q in namespace %q: %s", podName, namespace, err)
 	}
 	return pod, nil
+}
+
+// kubectlDeploymentWaitExecutionOperation is the ExecutionModeFor/
+// ExecutionModeReport key for the `kubectl wait --for=condition=Available
+// --timeout <t> deployment/<name>` rollout wait, run from three call sites
+// with identical argv shape: WaitForShellDeployment/PreviewShellLaunch
+// (open.go, ahead of `erun open`'s shell exec), traceAndWaitForRuntime
+// (doctor.go, ahead of every doctor action), and WaitRuntimeAvailable
+// (stop.go, on the wake path). Picked next after kubectl-deployment-get:
+// unlike every prior ported operation, this one polls for a condition
+// rather than resolving a single Get, but it is still exactly one resource
+// kind, one hardcoded condition (Available), no mutation. The library path
+// polls Get on an interval and checks
+// .status.conditions rather than opening a real k8s watch, matching this
+// module's existing precedent for "watch" in name only
+// (deploy_pod_watch.go's watchReleasePods is a poll loop on a ticker, not a
+// client-go Watch) rather than introducing a second, inconsistent mechanism.
+const kubectlDeploymentWaitExecutionOperation = "kubectl-deployment-wait"
+
+// defaultDeploymentWaitPollInterval is how often libraryWaitForDeploymentAvailable
+// re-Gets the Deployment while waiting for the Available condition.
+// ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL overrides it, the same
+// test-only-tunable convention as ERUN_DEPLOY_POD_WATCH_INTERVAL
+// (deploy_pod_watch.go), so tests do not have to wait out a real interval.
+const defaultDeploymentWaitPollInterval = 500 * time.Millisecond
+
+func resolveDeploymentWaitPollInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL"))
+	if raw == "" {
+		return defaultDeploymentWaitPollInterval
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return defaultDeploymentWaitPollInterval
+	}
+	return parsed
+}
+
+// libraryWaitForDeploymentAvailable is the library-backed alternative to
+// shelling out to `kubectl wait --for=condition=Available`, polling the same
+// Deployment via k8s.io/client-go instead. timeout is a Go duration string
+// (defaultShellLaunchWaitTimeout, e.g. "2m0s"), matching kubectl's own
+// --timeout flag format.
+func libraryWaitForDeploymentAvailable(contextName, namespace, name, timeout string) error {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	duration, err := time.ParseDuration(strings.TrimSpace(timeout))
+	if err != nil {
+		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: invalid timeout %q: %s", name, namespace, contextName, timeout, err)
+	}
+	clientset, err := kubernetesClientsetForContext(contextName)
+	if err != nil {
+		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+	}
+
+	deployments := clientset.AppsV1().Deployments(namespace)
+	interval := resolveDeploymentWaitPollInterval()
+	deadline := time.Now().Add(duration)
+	for {
+		deployment, err := deployments.Get(context.Background(), name, metav1.GetOptions{})
+		switch {
+		case err == nil && deploymentConditionAvailable(deployment):
+			return nil
+		case err != nil && !apierrors.IsNotFound(err):
+			return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for deployment %q in namespace %q context %q to report condition Available after %s", name, namespace, contextName, duration)
+		}
+		time.Sleep(interval)
+	}
+}
+
+// deploymentConditionAvailable reports whether deployment's status carries an
+// Available condition with status True, the same condition kubectl wait
+// --for=condition=Available checks.
+func deploymentConditionAvailable(deployment *appsv1.Deployment) bool {
+	for _, condition := range deployment.Status.Conditions {
+		if condition.Type == appsv1.DeploymentAvailable {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }

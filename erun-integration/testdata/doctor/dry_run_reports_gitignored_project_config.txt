@@ -11,6 +11,7 @@ kubectl-pvc-get: subprocess
 kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
 
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev

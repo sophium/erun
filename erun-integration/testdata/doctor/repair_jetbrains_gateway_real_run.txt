@@ -8,6 +8,7 @@ kubectl-pvc-get: subprocess
 kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 Running: Clear cached JetBrains Gateway backend metadata
