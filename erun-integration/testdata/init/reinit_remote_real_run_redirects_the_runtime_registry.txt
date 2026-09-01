@@ -8,6 +8,7 @@ Loading environment configuration
 init: runtime version already <VERSION>
 init: runtime registry set to ghcr.io/sophium
 init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
+init: erun-dind sidecar resources not given; keeping cpu=4 memory=8916Mi
 init: env type already "remote-agent"
 deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)

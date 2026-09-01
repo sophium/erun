@@ -10,7 +10,10 @@ import (
 // an action: it moves the runtime container's own resource *limits* — the
 // throttle/OOM ceiling and the namespace ResourceQuota draw those limits count
 // against — never the scheduler *request*, which erun pins to a small fixed
-// default (runtime_resources.go) independent of RuntimePod. It reuses the
+// default (runtime_resources.go) independent of RuntimePod. --dind-cpu/
+// --dind-memory move the same kind of limit on the erun-dind sidecar
+// container instead (RuntimeDindPod); the two are independent knobs that may
+// be resized together or separately in one call. It reuses the
 // existing deploy path (ResolveCurrentDeploySpecs/RunDeploySpecs) to roll the
 // pod exactly once, the same way `erun open`'s drift redeploy and `erun
 // upgrade` already do — a resize is not a new rollout mechanism, only a new
@@ -26,10 +29,14 @@ import (
 // RuntimeResizeInput is what a resize request resolves from: either an
 // explicit CPU/memory pair (merged onto the current value, so naming only one
 // leaves the other where it was) or a request to size from the environment's
-// own standing recommendation.
+// own standing recommendation. DindCPU/DindMemory size the erun-dind sidecar
+// instead, the same merge-onto-current shape as CPU/Memory; there is no
+// apply-recommendation equivalent for the sidecar (see resolveRuntimeDindResizeTarget).
 type RuntimeResizeInput struct {
 	CPU                 string
 	Memory              string
+	DindCPU             string
+	DindMemory          string
 	ApplyRecommendation bool
 }
 
@@ -49,6 +56,8 @@ type RuntimeResizePlan struct {
 	Environment string
 	Current     RuntimePodResources
 	Target      RuntimePodResources
+	DindCurrent RuntimePodResources
+	DindTarget  RuntimePodResources
 	Actions     []RuntimeResizeAction
 	NoOp        bool
 }
@@ -62,14 +71,17 @@ type RuntimeResizePlan struct {
 // boundRuntimeMemorySuggestion already applies to a recommendation's own
 // suggested value).
 // validateRuntimeResizeInput rejects the two input shapes a resize can never
-// act on: naming the standing recommendation and explicit values at once, and
-// naming neither.
-func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitMemory string) error {
+// act on: naming the standing recommendation and explicit runtime pod values
+// at once, and naming nothing at all. apply-recommendation only ever sizes
+// the runtime pod (see resolveRuntimeDindResizeTarget), so it is never in
+// conflict with an explicit dind-cpu/dind-memory — those may be combined with
+// it freely.
+func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitMemory, explicitDindCPU, explicitDindMemory string) error {
 	if input.ApplyRecommendation && (explicitCPU != "" || explicitMemory != "") {
 		return fmt.Errorf("resize: pass either apply-recommendation or explicit cpu/memory values, not both")
 	}
-	if !input.ApplyRecommendation && explicitCPU == "" && explicitMemory == "" {
-		return fmt.Errorf("resize: pass cpu and/or memory, or apply-recommendation to size from the environment's standing recommendation")
+	if !input.ApplyRecommendation && explicitCPU == "" && explicitMemory == "" && explicitDindCPU == "" && explicitDindMemory == "" {
+		return fmt.Errorf("resize: pass cpu/memory and/or dind-cpu/dind-memory, or apply-recommendation to size the runtime pod from the environment's standing recommendation")
 	}
 	return nil
 }
@@ -147,12 +159,52 @@ func runtimeResizeActions(current, target RuntimePodResources) []RuntimeResizeAc
 	return actions
 }
 
-func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodResources, ceiling NamespaceResourceQuota, input RuntimeResizeInput, recommendation *RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
+// resolveRuntimeDindResizeTarget merges the caller's explicit --dind-cpu/
+// --dind-memory onto the sidecar's current sizing, leaving whatever the input
+// does not name unchanged. Unlike the runtime pod there is no
+// apply-recommendation path here: RecommendRuntimeSizing derives its verdicts
+// from cgroup counters read out of the container it runs inside
+// (RecommendRuntimeSizing's own doc comment, ReadLocalRuntimeUsage in
+// runtime_usage.go), which is the erun-devops container, not the erun-dind
+// sidecar next to it in the same pod -- a different container's cgroup is not
+// reachable that way, so there is no retained usage history to recommend from
+// today. Covering the sidecar would mean exec'ing into it specifically and
+// retaining a second history, which is real design work left out rather than
+// half-wired.
+func resolveRuntimeDindResizeTarget(current RuntimePodResources, explicitDindCPU, explicitDindMemory string) RuntimePodResources {
+	target := current
+	if explicitDindCPU != "" {
+		target.CPU = explicitDindCPU
+	}
+	if explicitDindMemory != "" {
+		target.Memory = explicitDindMemory
+	}
+	return target
+}
+
+// runtimeDindResizeActions mirrors runtimeResizeActions for the sidecar, using
+// distinct resource names ("dind-cpu"/"dind-memory") so a rendered plan never
+// confuses a sidecar change with a runtime-container one.
+func runtimeDindResizeActions(current, target RuntimePodResources) []RuntimeResizeAction {
+	var actions []RuntimeResizeAction
+	if target.CPU != current.CPU {
+		actions = append(actions, RuntimeResizeAction{Resource: "dind-cpu", From: current.CPU, To: target.CPU})
+	}
+	if target.Memory != current.Memory {
+		actions = append(actions, RuntimeResizeAction{Resource: "dind-memory", From: current.Memory, To: target.Memory})
+	}
+	return actions
+}
+
+func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind RuntimePodResources, ceiling NamespaceResourceQuota, input RuntimeResizeInput, recommendation *RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
 	current = NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
+	currentDind = NormalizeRuntimeDindPodResources(currentDind)
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
+	explicitDindCPU := strings.TrimSpace(input.DindCPU)
+	explicitDindMemory := strings.TrimSpace(input.DindMemory)
 
-	if err := validateRuntimeResizeInput(input, explicitCPU, explicitMemory); err != nil {
+	if err := validateRuntimeResizeInput(input, explicitCPU, explicitMemory, explicitDindCPU, explicitDindMemory); err != nil {
 		return RuntimeResizePlan{}, err
 	}
 
@@ -164,17 +216,25 @@ func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodReso
 	if err := ValidateRuntimePodResources(target); err != nil {
 		return RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
 	}
-	if err := validateRuntimeResizeAgainstQuota(target, ceiling); err != nil {
+
+	dindTarget := NormalizeRuntimeDindPodResources(resolveRuntimeDindResizeTarget(currentDind, explicitDindCPU, explicitDindMemory))
+	if err := ValidateRuntimeDindPodResources(dindTarget); err != nil {
+		return RuntimeResizePlan{}, fmt.Errorf("resize: %w", err)
+	}
+
+	if err := validateRuntimeResizeAgainstQuota(target, dindTarget, ceiling); err != nil {
 		return RuntimeResizePlan{}, err
 	}
 
-	actions := runtimeResizeActions(current, target)
+	actions := append(runtimeResizeActions(current, target), runtimeDindResizeActions(currentDind, dindTarget)...)
 
 	return RuntimeResizePlan{
 		Tenant:      tenant,
 		Environment: environment,
 		Current:     current,
 		Target:      target,
+		DindCurrent: currentDind,
+		DindTarget:  dindTarget,
 		Actions:     actions,
 		NoOp:        len(actions) == 0,
 	}, nil
@@ -184,29 +244,32 @@ func ResolveRuntimeResizePlan(tenant, environment string, current RuntimePodReso
 // ResourceQuota could never admit, naming the resource and the overage —
 // mirroring the shape of the hosted platform's own quota 409s (root
 // AGENTS.md's "same question, same shape" precedent) rather than letting the
-// operator discover it as a stuck helm rollout.
-func validateRuntimeResizeAgainstQuota(target RuntimePodResources, ceiling NamespaceResourceQuota) error {
+// operator discover it as a stuck helm rollout. dindTarget is the sidecar's
+// own resolved target rather than DefaultRuntimeDindCPU/Memory, since a
+// resize's own --dind-cpu/--dind-memory can move it away from that default in
+// the same call.
+func validateRuntimeResizeAgainstQuota(target, dindTarget RuntimePodResources, ceiling NamespaceResourceQuota) error {
 	if ceiling.IsZero() {
 		return nil
 	}
 	if quotaCPUMilli, err := ParseKubernetesCPUToMilli(ceiling.CPU); err == nil {
-		dindCPUMilli, _ := ParseKubernetesCPUToMilli(DefaultRuntimeDindCPU)
+		dindCPUMilli, _ := ParseKubernetesCPUToMilli(dindTarget.CPU)
 		if targetCPUMilli, tErr := ParseKubernetesCPUToMilli(target.CPU); tErr == nil && targetCPUMilli+dindCPUMilli > quotaCPUMilli {
 			available := quotaCPUMilli - dindCPUMilli
 			if available < 0 {
 				available = 0
 			}
-			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, DefaultRuntimeDindCPU, ceiling.CPU, FormatKubernetesCPUFromMilli(available))
+			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, dindTarget.CPU, ceiling.CPU, FormatKubernetesCPUFromMilli(available))
 		}
 	}
 	if quotaMemMi, err := ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
-		dindMemMi, _ := ParseKubernetesMemoryToMi(DefaultRuntimeDindMemory)
+		dindMemMi, _ := ParseKubernetesMemoryToMi(dindTarget.Memory)
 		if targetMemMi, tErr := ParseKubernetesMemoryToMi(target.Memory); tErr == nil && targetMemMi+dindMemMi > quotaMemMi {
 			available := quotaMemMi - dindMemMi
 			if available < 0 {
 				available = 0
 			}
-			return fmt.Errorf("resize: %s memory plus the erun-dind sidecar's %s would exceed the namespace quota of %s memory (%dMi available for the runtime container) — lower --memory or raise the namespace quota with `erun deploy --max-memory`", target.Memory, DefaultRuntimeDindMemory, ceiling.Memory, available)
+			return fmt.Errorf("resize: %s memory plus the erun-dind sidecar's %s would exceed the namespace quota of %s memory (%dMi available for the runtime container) — lower --memory/--dind-memory or raise the namespace quota with `erun deploy --max-memory`", target.Memory, dindTarget.Memory, ceiling.Memory, available)
 		}
 	}
 	return nil
@@ -276,18 +339,18 @@ type RuntimeResizeResult struct {
 }
 
 // RunRuntimeResize resolves the target size, checks occupancy, and — outside
-// dry-run — persists EnvConfig.RuntimePod and rolls the runtime pod through
-// the same deploy composition `erun deploy` uses. Dry-run traces every
+// dry-run — persists EnvConfig.RuntimePod/RuntimeDindPod and rolls the runtime
+// pod through the same deploy composition `erun deploy` uses. Dry-run traces every
 // decision (current/target per resource, held leases, whether an override was
 // needed) and performs no write, per the repository's dry-run contract.
 // traceRuntimeResizePlanActions narrates each limit that moves, then states
 // plainly what a resize does and does not touch, so a ceiling change is never
-// mistaken for a scheduler reservation or for resizing the sidecar or a PVC.
+// mistaken for a scheduler reservation or for resizing a PVC.
 func traceRuntimeResizePlanActions(ctx Context, tenant, environment string, plan RuntimeResizePlan) {
 	for _, action := range plan.Actions {
 		ctx.Trace(fmt.Sprintf("resize: %s/%s %s %s -> %s", tenant, environment, action.Resource, action.From, action.To))
 	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling and its namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod) and it does not resize the erun-dind sidecar or any PVC", tenant, environment))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC", tenant, environment))
 }
 
 // traceRuntimeSizingRecommendation surfaces the standing recommendation resize
@@ -324,6 +387,7 @@ func traceRuntimeResizeOverriddenLeases(ctx Context, tenant, environment string,
 func applyRuntimeResize(ctx Context, deps RuntimeResizeDependencies, tenant, environment string, target OpenResult, plan RuntimeResizePlan) error {
 	updatedConfig := target.EnvConfig
 	updatedConfig.RuntimePod = plan.Target
+	updatedConfig.RuntimeDindPod = plan.DindTarget
 	if err := deps.SaveEnvConfig(tenant, updatedConfig); err != nil {
 		return fmt.Errorf("resize: saving the new runtime pod size: %w", err)
 	}
@@ -356,12 +420,12 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 
 	recommendation := EnvironmentRuntimeSizing(tenant, target.EnvConfig)
 	traceRuntimeSizingRecommendation(ctx, tenant, environment, recommendation)
-	plan, err := ResolveRuntimeResizePlan(tenant, environment, target.EnvConfig.RuntimePod, target.EnvConfig.NamespaceQuota, params.Input, recommendation)
+	plan, err := ResolveRuntimeResizePlan(tenant, environment, target.EnvConfig.RuntimePod, target.EnvConfig.RuntimeDindPod, target.EnvConfig.NamespaceQuota, params.Input, recommendation)
 	if err != nil {
 		return RuntimeResizeResult{}, err
 	}
 	if plan.NoOp {
-		ctx.Trace(fmt.Sprintf("resize: %s/%s is already sized at cpu=%s memory=%s; no change", tenant, environment, plan.Current.CPU, plan.Current.Memory))
+		ctx.Trace(fmt.Sprintf("resize: %s/%s is already sized at cpu=%s memory=%s dind-cpu=%s dind-memory=%s; no change", tenant, environment, plan.Current.CPU, plan.Current.Memory, plan.DindCurrent.CPU, plan.DindCurrent.Memory))
 		return RuntimeResizeResult{Plan: plan}, nil
 	}
 	traceRuntimeResizePlanActions(ctx, tenant, environment, plan)
@@ -376,7 +440,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 	}
 	traceRuntimeResizeOverriddenLeases(ctx, tenant, environment, leases)
 
-	ctx.TraceCommand("", "resize", tenant, environment, "cpu="+plan.Target.CPU, "memory="+plan.Target.Memory)
+	ctx.TraceCommand("", "resize", tenant, environment, "cpu="+plan.Target.CPU, "memory="+plan.Target.Memory, "dind-cpu="+plan.DindTarget.CPU, "dind-memory="+plan.DindTarget.Memory)
 	ctx.Trace(fmt.Sprintf("resize: %s/%s will roll the runtime pod once to apply the new limits", tenant, environment))
 	if ctx.DryRun {
 		return RuntimeResizeResult{Plan: plan, OverriddenLeases: leases}, nil

@@ -1,0 +1,2 @@
+audit: erun resize --dind-cpu 8 --dry-run --environment dev --tenant team
+resize: 4 CPU plus the erun-dind sidecar's 8 would exceed the namespace quota of 10 CPU (2 available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`

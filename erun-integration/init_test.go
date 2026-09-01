@@ -242,6 +242,28 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_with_runtime_resources", normalize.Apply(result.Combined))
 	})
 
+	t.Run("remote_with_dind_resources", func(t *testing.T) {
+		// --dind-cpu/--dind-memory size the erun-dind sidecar independent of
+		// --runtime-cpu/--runtime-memory; the deployed helm command must carry
+		// both containers' resolved limits on separate --set-string flags.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/remote_with_dind_resources", normalize.Apply(result.Combined))
+	})
+
 	t.Run("remote_without_bootstrap", func(t *testing.T) {
 		setup := env.New(t)
 		args := []string{
@@ -1304,6 +1326,38 @@ func TestInit(t *testing.T) {
 		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi")
 	})
 
+	t.Run("reinit_remote_real_run_updates_dind_resources_independent_of_runtime_pod", func(t *testing.T) {
+		// --dind-cpu/--dind-memory on a re-init update the sidecar's own
+		// recorded resources without touching the runtime pod's separately
+		// recorded --runtime-cpu/--runtime-memory from an earlier init.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "2.0.0",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_remote_real_run_updates_dind_resources_independent_of_runtime_pod", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 2.0.0", "runtimedindpod:\n    cpu: \"6\"\n    memory: 16Gi", "runtimepod:\n    cpu: \"8\"\n    memory: 16Gi")
+	})
+
 	t.Run("reinit_remote_real_run_redirects_the_runtime_registry", func(t *testing.T) {
 		// The way out of the bootstrap deadlock: runtimeregistry is the only field
 		// that redirects chart resolution, and every other writer of it is a side
@@ -1539,5 +1593,29 @@ func TestInit(t *testing.T) {
 		// would keep are untouched, and what it said it would set never landed.
 		assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
 		assertEnvConfigLacks(t, setup, "team", "dev", "imagepullsecrets", "runtimeimage")
+	})
+
+	t.Run("reinit_dry_run_sets_dind_resources_independent_of_runtime_pod", func(t *testing.T) {
+		// --dind-cpu/--dind-memory on a re-init trace as set while an
+		// untouched runtimepod (from an earlier init) traces as kept —
+		// applyEnvRuntimeDindPod and applyEnvRuntimePod act independently.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		args := []string{
+			"init", "team", "dev",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_dry_run_sets_dind_resources_independent_of_runtime_pod", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
+		assertEnvConfigLacks(t, setup, "team", "dev", "runtimedindpod")
 	})
 }

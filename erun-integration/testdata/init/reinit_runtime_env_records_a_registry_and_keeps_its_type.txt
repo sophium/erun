@@ -8,6 +8,7 @@ Loading environment configuration
 init: runtime version not given; keeping <VERSION>
 init: runtime registry set to ghcr.io/sophium
 init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
+init: erun-dind sidecar resources not given; keeping cpu=4 memory=8916Mi
 init: --type not given; keeping env type "runtime"
 init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized team/dev

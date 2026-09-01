@@ -1,2 +1,2 @@
 audit: erun resize --cpu 4 --dry-run --environment dev --memory 8916Mi --tenant team
-resize: team/dev is already sized at cpu=4 memory=8916Mi; no change
+resize: team/dev is already sized at cpu=4 memory=8916Mi dind-cpu=4 dind-memory=8916Mi; no change

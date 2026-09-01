@@ -88,8 +88,11 @@ type BootstrapInitParams struct {
 	RuntimeRegistry string
 	// ImagePullSecrets names the dockerconfigjson secrets the runtime pod pulls
 	// its image with, which a private runtime image cannot start without.
-	ImagePullSecrets  []string
-	RuntimePod        RuntimePodResources
+	ImagePullSecrets []string
+	RuntimePod       RuntimePodResources
+	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
+	// independent of RuntimePod which only sizes the runtime container itself.
+	RuntimeDindPod    RuntimePodResources
 	NoGit             bool
 	KubernetesContext string
 	ContainerRegistry string
@@ -416,6 +419,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 
 func (s *bootstrapRunState) run() error {
 	if err := ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
 		return err
 	}
 	if err := s.validateRemoteParams(); err != nil {
@@ -861,6 +867,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		// env records them from the start rather than on a second init.
 		ImagePullSecrets:   normalizeImagePullSecrets(s.params.ImagePullSecrets),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
+		RuntimeDindPod:     NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
 		Deploy:             initDeployConfig(s.params),
@@ -1035,6 +1042,7 @@ func (s *bootstrapRunState) updateExistingEnvSettings() error {
 	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
 	s.applyEnvImagePullSecrets()
 	s.applyEnvRuntimePod()
+	s.applyEnvRuntimeDindPod()
 	s.applyEnvDeployComponents()
 	return s.applyEnvType()
 }
@@ -1120,6 +1128,27 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 	s.envConfig.RuntimePod = NormalizeRuntimePodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
+}
+
+// applyEnvRuntimeDindPod mirrors applyEnvRuntimePod for the erun-dind sidecar:
+// merge the supplied limits onto the recorded ones, using the raw
+// (unnormalized) flag values so a re-init that only touches an unrelated
+// setting cannot reset the sidecar's resources to their defaults.
+func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
+	desired := s.envConfig.RuntimeDindPod
+	if cpu := strings.TrimSpace(s.params.RuntimeDindPod.CPU); cpu != "" {
+		desired.CPU = cpu
+	}
+	if memory := strings.TrimSpace(s.params.RuntimeDindPod.Memory); memory != "" {
+		desired.Memory = memory
+	}
+	if desired == s.envConfig.RuntimeDindPod {
+		s.traceEnvSettingKept("erun-dind sidecar resources", formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
+		return
+	}
+	s.envConfig.RuntimeDindPod = NormalizeRuntimeDindPodResources(desired)
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: erun-dind sidecar resources set to " + formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 }
 
 // applyEnvDeployComponents honours --components on an existing env: given, it
@@ -1213,6 +1242,11 @@ func describeEnvType(envType EnvironmentType) string {
 
 func formatRuntimePodResources(resources RuntimePodResources) string {
 	resources = NormalizeRuntimePodResources(resources)
+	return "cpu=" + resources.CPU + " memory=" + resources.Memory
+}
+
+func formatRuntimeDindPodResources(resources RuntimePodResources) string {
+	resources = NormalizeRuntimeDindPodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
@@ -1443,6 +1477,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	// from an operator asking for that limit, and the reconcile needs to tell an
 	// omitted flag from a supplied one.
 	params.RuntimePod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
+	params.RuntimeDindPod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)

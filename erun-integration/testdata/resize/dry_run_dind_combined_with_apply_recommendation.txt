@@ -1,0 +1,10 @@
+audit: erun resize --apply-recommendation --dind-memory 16Gi --dry-run --environment dev --tenant team
+resize: team/dev sizing: memory lower to 18432Mi from 23552Mi (peak 12153Mi of 23552Mi (52%), no oom kills, keeping 1.5x headroom, low confidence)
+resize: team/dev sizing: cpu lower to 10 from 12 (busiest interval 4.567 of 12, 0.00% of scheduling periods throttled (0 of 376556), keeping 2x headroom, low confidence)
+resize: team/dev sizing-evidence: 31h12m observed, 240 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+resize: team/dev cpu 12 -> 10
+resize: team/dev memory 23552Mi -> 18432Mi
+resize: team/dev dind-memory 8916Mi -> 16Gi
+resize: team/dev this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC
+resize team dev cpu=10 memory=18432Mi dind-cpu=4 dind-memory=16Gi
+resize: team/dev will roll the runtime pod once to apply the new limits

@@ -61,10 +61,11 @@ The developer containers live in one pod, not two:
 ## Stopping and starting an environment
 
 An environment is not always running. Most environments are idle most of the time, and an idle one
-still reserves everything it was given — the runtime container's CPU and memory limits, plus
-whatever `erun-dind` is really consuming, which has no limit at all. [`erun stop`](/cli/stop) scales
-the runtime to zero so all of it goes back to the node; **opening the environment starts it again**,
-and [`erun open`](/cli/open) waits for the pod before it forwards anything.
+still reserves everything it was given — the runtime container's CPU and memory limits, plus the
+`erun-dind` sidecar's own limits (sized independently — see [`erun resize`](/cli/resize)).
+[`erun stop`](/cli/stop) scales the runtime to zero so all of it goes back to the node; **opening the
+environment starts it again**, and [`erun open`](/cli/open) waits for the pod before it forwards
+anything.
 
 Both PVCs survive a stop, so starting is a pod start rather than a cold rebuild: the workspace,
 the agent config, the outputs directory, the image store and the build cache are all still there.
@@ -93,9 +94,11 @@ Two cases the number alone cannot explain, so the tab spells them out:
   which the figure rises.
 - **Some usage is not counted.** The reading prefers a container's declared limits, falls back to
   its measured usage when the cluster reports metrics, and says how many containers it could not
-  account for at all when neither is available. The `erun-dind` sidecar declares no limits, so on a
-  cluster without metrics its real consumption — Testcontainers, the build cache — is invisible to
-  the reading and the tab warns that the true usage is higher than shown.
+  account for at all when neither is available. The runtime pod's own two containers (`erun-devops`,
+  `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves them — so this gap
+  is about the application services deployed alongside them: any of those that declares no limit of
+  its own is invisible to the reading on a cluster without metrics, and the tab warns that the true
+  usage is higher than shown.
 
 That is the node's answer to "how full is the machine". The environment's own answer to "how close
 am I to my own limits" is a different reading — CPU against its own quota, memory current and peak

@@ -621,24 +621,29 @@ When retained usage history has accumulated a [standing sizing recommendation](/
 
 ### `resize`
 
-Changes the runtime pod's CPU/memory limits and rolls it out, without re-running `init` to change two numbers. Takes either explicit `cpu`/`memory` (each optional; naming only one leaves the other unchanged) or `applyRecommendation: true` to size from this environment's own standing sizing recommendation — resolved from usage history retained inside this pod, so the value is never retyped by the caller. See [Agent reference · `erun resize`](/agent-reference/cli-flags#erun-resize) for exactly what the recommendation reasons about and the resolution algorithm.
+Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and rolls them out, without re-running `init` to change these numbers. Takes either explicit `cpu`/`memory` for the runtime pod (each optional; naming only one leaves the other unchanged) or `applyRecommendation: true` to size the runtime pod from this environment's own standing sizing recommendation — resolved from usage history retained inside this pod, so the value is never retyped by the caller. `dindCpu`/`dindMemory` size the sidecar instead — the container that actually runs `erun build`/`erun release` — independent of the runtime-pod inputs and combinable with them (or with `applyRecommendation`) in the same call, since the sidecar has no standing recommendation of its own. See [Agent reference · `erun resize`](/agent-reference/cli-flags#erun-resize) for exactly what the recommendation reasons about and the resolution algorithm.
 
 ```jsonc
-// resize { "applyRecommendation": true }
+// resize { "applyRecommendation": true, "dindMemory": "16Gi" }
 {
   "plan": {
     "tenant": "myapp", "environment": "prod",
     "current": { "cpu": "4", "memory": "8916Mi" },
     "target":  { "cpu": "6", "memory": "8916Mi" },
-    "actions": [ { "resource": "cpu", "from": "4", "to": "6" } ],
+    "dindCurrent": { "cpu": "4", "memory": "8916Mi" },
+    "dindTarget":  { "cpu": "4", "memory": "16Gi" },
+    "actions": [
+      { "resource": "cpu", "from": "4", "to": "6" },
+      { "resource": "dind-memory", "from": "8916Mi", "to": "16Gi" }
+    ],
     "noOp": false
   }
 }
 ```
 
-Before resolving the target, the standing recommendation's own reasoning is traced — one `sizing:` line per resource verdict plus a `sizing-evidence:` line, both readable in the tool's `trace` output — even when the resolved plan turns out to be a no-op, so "already sized" always comes with the window and counters it was decided from.
+Before resolving the runtime-pod target, the standing recommendation's own reasoning is traced — one `sizing:` line per resource verdict plus a `sizing-evidence:` line, both readable in the tool's `trace` output — even when the resolved plan turns out to be a no-op, so "already sized" always comes with the window and counters it was decided from.
 
-A resize whose resolved target equals the current recorded size is a no-op (`plan.noOp: true`) and does not deploy. It moves only the runtime container's own limits — the throttle/OOM ceiling and the namespace `ResourceQuota` draw those limits count against — never the scheduler's request (a small fixed value independent of this setting), the `erun-dind` sidecar's own limits, or any PVC; disk is out of scope until the chart's PVC sizes are values-driven.
+A resize whose resolved runtime-pod and sidecar targets both equal their current recorded sizes is a no-op (`plan.noOp: true`) and does not deploy. Both containers' own limits move — the throttle/OOM ceiling and the namespace `ResourceQuota` draw those limits count against — but never the scheduler's request for either container (a small fixed value independent of this setting) or any PVC; disk is out of scope until the chart's PVC sizes are values-driven.
 
 Because a resize rolls the pod (`Recreate` strategy) and would kill any live session inside it, it first loads the environment's activity leases (build, deploy, or an agent session — anything currently held) and refuses, naming every holder, unless `overrideLease: true` is passed. The refusal is a plain tool error (see [Tool-call error responses](#tool-call-error-responses)) whose message names each holder:
 

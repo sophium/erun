@@ -311,6 +311,10 @@ type EnvConfig struct {
 	// only carries the persisted name forward.
 	RegistryCredentialSecretName string              `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
 	RuntimePod                   RuntimePodResources `yaml:"runtimepod,omitempty"`
+	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
+	// independent of RuntimePod which only sizes the runtime container itself.
+	// Zero falls back to DefaultRuntimeDindCPU/Memory (NormalizeRuntimeDindPodResources).
+	RuntimeDindPod RuntimePodResources `yaml:"runtimedindpod,omitempty"`
 	// NamespaceQuota is a hard per-namespace ceiling (ResourceQuota + LimitRange)
 	// distinct from RuntimePod's own-container sizing; see NamespaceResourceQuota.
 	NamespaceQuota      NamespaceResourceQuota  `yaml:"namespacequota,omitempty" json:"namespaceQuota,omitempty"`
