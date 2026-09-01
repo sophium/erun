@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type stubConfigTenantRepository struct {
@@ -61,6 +62,10 @@ type stubEnvironmentRepository struct {
 	claimDeleteCalls        int
 	markDeleteBlockedCalls  int
 	markDeleteBlockedReason string
+	// lastListTenantID captures the security context's TenantID List saw, so a
+	// test can prove which tenant a scoped call actually queried without a
+	// real database's RLS to observe it.
+	lastListTenantID string
 }
 
 func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
@@ -91,7 +96,10 @@ func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ strin
 	return nil
 }
 
-func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
+func (r *stubEnvironmentRepository) List(ctx context.Context) ([]model.Environment, error) {
+	if securityContext, ok := security.FromContext(ctx); ok {
+		r.lastListTenantID = securityContext.TenantID
+	}
 	return r.environments, r.err
 }
 

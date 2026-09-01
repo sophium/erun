@@ -54,7 +54,11 @@ func RegisterUserRoutes(register ProtectedRouteRegistrar, users UserEnrollmentRe
 	register(http.MethodGet, "/v1/users", http.HandlerFunc(routes.listUsers))
 }
 
-var errCrossTenantUsersForbidden = errors.New("enrolling or listing users in another tenant requires an operations tenant")
+// errCrossTenantScopeForbidden is shared across every resolveTargetTenant
+// caller (users, invites, tenant-issuers, environments, ...) rather than
+// restated per resource, so a client sees the same 403 shape everywhere this
+// boundary applies.
+var errCrossTenantScopeForbidden = errors.New("targeting another tenant requires an operations tenant")
 
 // resolveTargetTenant is the operations-scoped cross-tenant precedent from
 // tenants.go/tenant_quotas.go: a caller acts on their own resolved tenant by
@@ -65,7 +69,7 @@ func resolveTargetTenant(securityContext security.Context, requested string) (st
 		return securityContext.TenantID, nil
 	}
 	if securityContext.TenantType != string(model.TenantTypeOperations) {
-		return "", errCrossTenantUsersForbidden
+		return "", errCrossTenantScopeForbidden
 	}
 	return requested, nil
 }
