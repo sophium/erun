@@ -87,8 +87,13 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 		if !requireBearer(w, r) {
 			return
 		}
+		// probeco stands in for a tenant whose issuer mapping no token can
+		// resolve through: it exists, it lists, and nobody can ever sign in to
+		// it. The listing has to say so, or the only way to find out is a
+		// sign-in that lands somewhere else.
 		_ = json.NewEncoder(w).Encode([]map[string]any{
-			{"tenantId": "tenant-1", "name": "acme", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z"},
+			{"tenantId": "tenant-1", "name": "acme", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": true},
+			{"tenantId": "tenant-3", "name": "probeco", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": false},
 		})
 	})
 	mux.HandleFunc("POST /v1/users", func(w http.ResponseWriter, r *http.Request) {
@@ -290,6 +295,24 @@ func TestPlatform(t *testing.T) {
 		}
 		if !strings.Contains(listResult.Combined, "acme") {
 			t.Fatalf("expected tenant list to include acme, got:\n%s", listResult.Combined)
+		}
+		// A tenant no token can resolve to must be flagged where it is
+		// listed, and a healthy one must not be.
+		unreachableLine := ""
+		acmeLine := ""
+		for _, line := range strings.Split(listResult.Combined, "\n") {
+			if strings.Contains(line, "probeco") {
+				unreachableLine = line
+			}
+			if strings.Contains(line, "acme") {
+				acmeLine = line
+			}
+		}
+		if !strings.Contains(unreachableLine, "UNREACHABLE") {
+			t.Fatalf("expected the unresolvable tenant to be flagged, got:\n%s", listResult.Combined)
+		}
+		if strings.Contains(acmeLine, "UNREACHABLE") {
+			t.Fatalf("a resolvable tenant must not be flagged unreachable, got:\n%s", acmeLine)
 		}
 	})
 

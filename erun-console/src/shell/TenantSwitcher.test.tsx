@@ -109,4 +109,61 @@ describe('TenantSwitcher', () => {
     expect(beginLogin).toHaveBeenCalledWith(OIDC, 'select_account');
     expect(consumeTenantSwitchIntent()).toEqual({ tenantId: 'tenant-b', name: 'Beta' });
   });
+  // The live production case: one identity holding a membership in a tenant
+  // whose org mapping it can never present. Offering it burned a full OIDC
+  // round trip and landed the caller back where they started, so it must not
+  // be an option — and it must not silently vanish either, since the operator
+  // reading this is the one who has to repair the mapping.
+  it('never offers a membership the platform reports as unreachable, and names why', async () => {
+    mockReachable([
+      { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },
+      { tenantId: 'tenant-b', name: 'Validation', type: 'COMPANY', reachability: 'ORG_MISMATCH' },
+    ]);
+    renderSwitcher();
+
+    expect(await screen.findByText('Not reachable with this account')).toBeInTheDocument();
+    expect(screen.getByText('Validation')).toBeInTheDocument();
+    expect(screen.getByText(/different organization/)).toBeInTheDocument();
+    // The only membership left is the caller's own tenant, so there is no
+    // choice to offer and therefore no control.
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('names a tenant with no org mapping as unconfigured rather than as a wrong-account problem', async () => {
+    mockReachable([
+      { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },
+      { tenantId: 'tenant-c', name: 'Probeco', type: 'COMPANY', reachability: 'NO_ORG_MAPPING' },
+    ]);
+    renderSwitcher();
+
+    expect(
+      await screen.findByText(/no organization on its identity-provider mapping/),
+    ).toBeInTheDocument();
+  });
+
+  it('still offers the resolvable memberships alongside an unreachable one', async () => {
+    mockReachable([
+      { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },
+      { tenantId: 'tenant-b', name: 'Beta', type: 'COMPANY', reachability: 'RESOLVABLE' },
+      { tenantId: 'tenant-c', name: 'Probeco', type: 'COMPANY', reachability: 'NO_ORG_MAPPING' },
+    ]);
+    renderSwitcher();
+
+    fireEvent.click(await screen.findByRole('combobox'));
+    expect(await screen.findByRole('option', { name: 'Beta' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Probeco' })).not.toBeInTheDocument();
+  });
+
+  // A verdict this console does not know must read as "unreachable, reason
+  // unknown" rather than be quietly treated as reachable.
+  it('refuses an unrecognized verdict instead of treating it as reachable', async () => {
+    mockReachable([
+      { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },
+      { tenantId: 'tenant-b', name: 'Beta', type: 'COMPANY', reachability: 'SOMETHING_NEW' },
+    ]);
+    renderSwitcher();
+
+    expect(await screen.findByText(/does not recognize the reason/)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
 });

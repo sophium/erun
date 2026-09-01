@@ -19,10 +19,39 @@ export interface PlatformTenant {
   createdAt: string;
   updatedAt: string;
   userCount?: number;
+  // reachability is populated only by getReachableTenants: whether a sign-in
+  // by this caller's own identity can actually resolve to this tenant.
+  // Membership and resolution use different keys, so a membership row is
+  // necessary but not sufficient — see TenantReachability.
+  reachability?: TenantReachability;
+  // resolvable is populated only by listTenants: whether any of this tenant's
+  // issuer mappings can resolve a token at all, for anyone. `undefined` means
+  // the read never computed it, never "assume it works".
+  resolvable?: boolean;
 }
+
+// TenantReachability mirrors erun-backend-api's model.TenantReachability. It
+// stays a plain string rather than a closed union: a value this console does
+// not know must read as "unreachable, reason unknown" rather than be coerced
+// into one of the reasons it does know, and only RESOLVABLE may ever be
+// treated as reachable.
+export type TenantReachability = string;
+
+export const TENANT_REACHABILITY_RESOLVABLE = 'RESOLVABLE';
+export const TENANT_REACHABILITY_ORG_MISMATCH = 'ORG_MISMATCH';
+export const TENANT_REACHABILITY_NO_ORG_MAPPING = 'NO_ORG_MAPPING';
+export const TENANT_REACHABILITY_ISSUER_NOT_MAPPED = 'ISSUER_NOT_MAPPED';
 
 function asOptionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function parsePlatformTenant(raw: Record<string, unknown>): PlatformTenant {
@@ -33,6 +62,8 @@ function parsePlatformTenant(raw: Record<string, unknown>): PlatformTenant {
     createdAt: asString(raw.createdAt),
     updatedAt: asString(raw.updatedAt),
     userCount: asOptionalNumber(raw.userCount),
+    reachability: asOptionalString(raw.reachability),
+    resolvable: asOptionalBoolean(raw.resolvable),
   };
 }
 

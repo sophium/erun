@@ -36,6 +36,8 @@ Every request signs in the same way — Operators and Agents alike. ERun uses st
 
 For Agents specifically, the usual pattern is a service-account credential. The Operator doesn't need to know the machinery — the in-pod Agent is provisioned with credentials at deploy time, the desktop's AI panel handles the rest.
 
+**One account, one tenant.** Because the tenant comes out of the token, and the claim it comes out of is the organization that owns your account, signing in again with the same account always lands you in the same tenant. Working in a second tenant means a second account, owned by that tenant's organization — not a second sign-in. That is why the console's tenant switcher offers only the tenants your current account can actually reach, and names the rest, with the reason, instead of sending you through a sign-in that cannot succeed. The full rules are in [Agent reference · erun API protocol](/agent-reference/api-protocol#get-v1tenantsreachable).
+
 For the full protocol spec — tenant-issuer schema, PATCH endpoint, service-account flow, error codes, rate limits, pagination — see **[Agent reference · erun API protocol](/agent-reference/api-protocol)**.
 
 ## Why a separate API?

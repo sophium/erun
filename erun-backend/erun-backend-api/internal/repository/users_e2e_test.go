@@ -337,3 +337,61 @@ func containsAll(haystack []string, wanted ...string) bool {
 	}
 	return true
 }
+
+// TestUserRepositoryCreateRefusesEnrollmentUnderADeadIssuerMapping is the
+// enrollment half of the reachability refusal: linking an identity to a
+// tenant whose mapping no token can resolve through produces a user who can
+// never sign in — a success today, discovered only as a failed sign-in later.
+// The refusal must abort the whole enrollment, leaving no orphan users row.
+func TestUserRepositoryCreateRefusesEnrollmentUnderADeadIssuerMapping(t *testing.T) {
+	db, tenantID := usersDatabase(t)
+	const issuer = "https://auth.enroll-refusal-e2e.example"
+	// An org-scoped issuer whose mapping for this tenant carries no org value:
+	// resolution matches the org by equality, so nothing ever matches here.
+	_, err := db.Exec(
+		`INSERT INTO issuers (issuer, org_field_key) VALUES ($1, $2) ON CONFLICT (issuer) DO NOTHING`,
+		issuer, "urn:zitadel:iam:user:resourceowner:id",
+	)
+	mustNoErr(t, err, "seed org-scoped issuer")
+	_, err = db.Exec(`INSERT INTO tenant_issuers (tenant_id, issuer, name) VALUES ($1, $2, $3)`, tenantID, issuer, issuer)
+	mustNoErr(t, err, "seed tenant_issuers with no org value")
+
+	users := &UserRepository{txs: NewTxManager(db, DialectPostgres)}
+	_, _, err = users.Create(rolesContext(tenantID, ""), CreateUserParams{
+		Username: "unreachable-enrollee",
+		Issuer:   issuer,
+		Subject:  "enroll-refusal-e2e-subject",
+	})
+	var unresolvable *UnresolvableIssuerMappingError
+	if !errors.As(err, &unresolvable) {
+		t.Fatalf("enrolling under a dead issuer mapping: err = %v, want *UnresolvableIssuerMappingError", err)
+	}
+
+	var count int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM users WHERE tenant_id = $1 AND username = $2`, tenantID, "unreachable-enrollee",
+	).Scan(&count), "count refused enrollment")
+	if count != 0 {
+		t.Fatalf("refused enrollment left %d users rows behind", count)
+	}
+}
+
+// TestUserRepositoryCreateAcceptsEnrollmentUnderAResolvableMapping is the
+// positive control: the refusal above must not have made ordinary enrollment
+// conditional on anything an operator has to supply.
+func TestUserRepositoryCreateAcceptsEnrollmentUnderAResolvableMapping(t *testing.T) {
+	db, tenantID := usersDatabase(t)
+	const issuer = "https://idp.enroll-accept-e2e.example"
+	seedTenantIssuer(t, db, tenantID, issuer)
+
+	users := &UserRepository{txs: NewTxManager(db, DialectPostgres)}
+	created, alreadyEnrolled, err := users.Create(rolesContext(tenantID, ""), CreateUserParams{
+		Username: "reachable-enrollee",
+		Issuer:   issuer,
+		Subject:  "enroll-accept-e2e-subject",
+	})
+	mustNoErr(t, err, "enroll under a single-tenant issuer mapping")
+	if alreadyEnrolled || created.UserID == "" {
+		t.Fatalf("expected a fresh enrollment, got alreadyEnrolled=%v user=%+v", alreadyEnrolled, created)
+	}
+}

@@ -111,6 +111,12 @@ type PlatformTenant struct {
 	Type      string    `json:"type"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Resolvable reports whether any of this tenant's registered issuer
+	// mappings can resolve a token at all — false means no sign-in can ever
+	// reach it, whatever account is used. Only the operations-scoped
+	// GET /v1/tenants listing computes it; nil everywhere else means "this
+	// read did not ask", never "it works".
+	Resolvable *bool `json:"resolvable,omitempty"`
 }
 
 // PlatformUser mirrors model.User's JSON shape (plus AlreadyEnrolled, which

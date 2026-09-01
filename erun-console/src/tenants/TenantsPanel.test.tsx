@@ -68,6 +68,7 @@ describe('TenantsPanel', () => {
             type: 'COMPANY',
             createdAt: '2026-06-24T10:00:00Z',
             updatedAt: '2026-06-24T10:00:00Z',
+            resolvable: true,
           },
         ]);
       }
@@ -96,6 +97,7 @@ describe('TenantsPanel', () => {
             createdAt: '2026-06-24T10:00:00Z',
             updatedAt: '2026-06-24T10:00:00Z',
             userCount: 0,
+            resolvable: true,
           },
           {
             tenantId: 'tn-populated',
@@ -104,6 +106,7 @@ describe('TenantsPanel', () => {
             createdAt: '2026-06-24T10:00:00Z',
             updatedAt: '2026-06-24T10:00:00Z',
             userCount: 3,
+            resolvable: true,
           },
         ]);
       }
@@ -114,6 +117,44 @@ describe('TenantsPanel', () => {
 
     expect(screen.getByText('No users')).toBeInTheDocument();
     expect(screen.getByText('3 users')).toBeInTheDocument();
+    expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
+  });
+
+  // The other half of "unreachable in silence": a tenant whose issuer mapping
+  // no token can resolve through is listed identically to a healthy one
+  // unless the row itself says otherwise. POST /v1/tenants refuses to create
+  // that shape now, so this is for the rows a platform already carries.
+  it('flags a tenant no token can resolve to, distinctly from one whose state was not computed', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants' && req.method === 'GET') {
+        return jsonResponse([
+          {
+            tenantId: 'tn-dead',
+            name: 'probeco',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+            userCount: 0,
+            resolvable: false,
+          },
+          {
+            tenantId: 'tn-live',
+            name: 'acme',
+            type: 'COMPANY',
+            createdAt: '2026-06-24T10:00:00Z',
+            updatedAt: '2026-06-24T10:00:00Z',
+            userCount: 2,
+            resolvable: true,
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(<TenantsPanel token="dev-token" docsUrl={undefined} />);
+    await screen.findByText('probeco');
+
+    expect(screen.getByText('No working issuer mapping')).toBeInTheDocument();
+    expect(screen.getByText('Reachable')).toBeInTheDocument();
     expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
 

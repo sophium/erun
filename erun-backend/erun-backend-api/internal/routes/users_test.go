@@ -218,3 +218,24 @@ func TestListUsersAllowsOperationsCrossTenantOverride(t *testing.T) {
 		t.Fatalf("List called %d times filter=%+v, want 1 call scoped to tenant-b", users.listCalls, users.gotFilter)
 	}
 }
+
+// TestEnrollUserRefusesAnUnresolvableIssuerMapping is the enrollment half of
+// the same refusal: a membership row under a mapping no token can resolve
+// through is a user who can never sign in, created successfully and failing
+// only later, somewhere else.
+func TestEnrollUserRefusesAnUnresolvableIssuerMapping(t *testing.T) {
+	users := &stubUserEnrollmentRepository{createErr: &repository.UnresolvableIssuerMappingError{
+		Issuer:      "https://auth.example",
+		Reason:      model.TenantReachabilityNoOrgMapping,
+		OrgFieldKey: "urn:zitadel:iam:user:resourceowner:id",
+	}}
+	rec := postUsers(t, users, string(model.TenantTypeOperations), "caller-tenant",
+		`{"username":"alice","issuer":"https://auth.example","subject":"sub-1","tenantId":"probeco-tenant"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "UNRESOLVABLE_ISSUER_MAPPING") {
+		t.Fatalf("body %q does not carry the refusal code", rec.Body.String())
+	}
+}

@@ -303,6 +303,27 @@ function TenantUserCountBadge({
   );
 }
 
+// TenantSignInBadge is where a tenant nobody can ever sign in to stops being
+// invisible: a tenant whose issuer mapping contradicts its issuer's
+// org-scoping mode exists, lists, and accepts enrollments while no token can
+// resolve to it. `POST /v1/tenants` refuses to create that shape now, so this
+// is for the rows a platform already carries. `undefined` (the read did not
+// compute it) renders as "Unknown" rather than as working, for the same
+// reason the user count does.
+function TenantSignInBadge({
+  resolvable,
+}: {
+  resolvable: boolean | undefined;
+}): React.ReactElement {
+  if (resolvable === undefined) {
+    return <StatusBadge tone="muted" label="Unknown" showIcon={false} />;
+  }
+  if (!resolvable) {
+    return <StatusBadge tone="destructive" label="No working issuer mapping" />;
+  }
+  return <StatusBadge tone="success" label="Reachable" showIcon={false} />;
+}
+
 function TenantRow({
   tenant,
   onManageQuota,
@@ -319,6 +340,9 @@ function TenantRow({
       <TableCell>{formatCreatedAt(tenant.createdAt)}</TableCell>
       <TableCell>
         <TenantUserCountBadge userCount={tenant.userCount} />
+      </TableCell>
+      <TableCell>
+        <TenantSignInBadge resolvable={tenant.resolvable} />
       </TableCell>
       <TableCell className="flex gap-2">
         <Button
@@ -366,6 +390,7 @@ function TenantsTable({
           <TableHead>Type</TableHead>
           <TableHead>Created</TableHead>
           <TableHead>Users</TableHead>
+          <TableHead>Sign-in</TableHead>
           <TableHead />
         </TableRow>
       </TableHeader>
