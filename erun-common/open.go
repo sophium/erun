@@ -53,6 +53,60 @@ const (
 // session back, so treat the wording as a public contract.
 const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
 
+// AISessionAttachOutcome is why an attach to a persistent session ended, from
+// the attaching client's point of view — not merely that the underlying
+// process exited, but which of the reattach contract's outcomes
+// (RemoteAppSessionAttachLines) it exited for, or that no exit signal could be
+// read at all. A WSS gateway bridging this contract to a remote client must
+// report one of these explicitly rather than letting every non-success case
+// read as a plain disconnect.
+type AISessionAttachOutcome string
+
+const (
+	// AISessionAttachOutcomeTakenOver: a different attach claimed session
+	// ownership while this one was connected (the owner-id check
+	// RemoteAppSessionAttachLines writes). The session itself is still
+	// running; only this viewer was evicted, and it must be told so plainly
+	// — see ShellSessionTakenOverNotice — rather than reading as a network
+	// drop.
+	AISessionAttachOutcomeTakenOver AISessionAttachOutcome = "taken-over"
+	// AISessionAttachOutcomeDeployReattach: the shell asked for a deploy
+	// handoff (ErrShellReattachDeploy's exit code); the caller should
+	// reattach once the new pod is ready.
+	AISessionAttachOutcomeDeployReattach AISessionAttachOutcome = "deploy-reattach"
+	// AISessionAttachOutcomeEnded: the session's own program exited on its
+	// own (any exit code other than the two above) — there is nothing left
+	// to reattach to.
+	AISessionAttachOutcomeEnded AISessionAttachOutcome = "ended"
+	// AISessionAttachOutcomeUnknown: the connection closed with no
+	// interpretable exit status — a network drop, a proxy timeout, a killed
+	// pod. Never collapse this into Ended or TakenOver: the caller genuinely
+	// does not know which happened, and reporting a guess as fact is the
+	// exact failure root AGENTS.md's "an unknown must not render as a
+	// definite value" forbids.
+	AISessionAttachOutcomeUnknown AISessionAttachOutcome = "unknown"
+)
+
+// ResolveAISessionAttachOutcome classifies an attach's own exit status — the
+// underlying dtach-wrapping shell script's exit code, however the caller ran
+// it (ssh, kubectl exec, or client-go's remotecommand) — into the outcome a
+// client must show. exitCodeKnown distinguishes "the process exited with code
+// 0" from "no exit status was observed at all"; a false exitCodeKnown always
+// resolves to Unknown, never Ended, regardless of exitCode's value.
+func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAttachOutcome {
+	if !exitCodeKnown {
+		return AISessionAttachOutcomeUnknown
+	}
+	switch exitCode {
+	case remoteShellTakenOverExitCode:
+		return AISessionAttachOutcomeTakenOver
+	case remoteShellReattachDeployExitCode:
+		return AISessionAttachOutcomeDeployReattach
+	default:
+		return AISessionAttachOutcomeEnded
+	}
+}
+
 // RemoteAppSessionSocketDir holds persistent desktop session sockets in the
 // runtime pod. Pod-ephemeral on purpose: a dtach server is a process in the
 // container, so a socket that outlived its pod could never be attached to —
@@ -855,12 +909,38 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 	}
 	id := sanitizeForFilename(req.AppSession)
 	socket := remoteAppSessionSocketPath(req.Tenant, req.Environment, id)
-	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
+	redraw := "ctrl_l"
+	if req.AI {
+		redraw = "winch"
+	}
 	lines := []string{
 		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
+	}
+	return append(lines, RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)
+}
+
+// RemoteAppSessionAttachLines returns the sh lines that attach-or-create
+// (dtach -A) a persistent session at socket and take ownership of it from any
+// other viewer, evicting them rather than sharing the pty. This is the
+// takeover half of the reattach contract erun-cli's own shell tabs already
+// run under (screen -d -r semantics: the session keeps running, an evicted
+// viewer only loses its own view) — exported so a caller outside
+// erun-cli/erun-common (the WSS session-attach gateway erun#1106 adds) can
+// reuse it instead of reimplementing the owner-id handoff. launchCommand runs
+// only the first time the session is created; a reattach connects to
+// whatever it is already running.
+//
+// redraw selects dtach's -r repaint trigger: "winch" forces a full repaint on
+// attach (needed for a main-screen TUI like Claude that ignores a bare ^L),
+// "ctrl_l" is quieter and right for an ordinary shell — see
+// remoteShellLaunchLines's own comment for why the two tab kinds need
+// different triggers.
+func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string {
+	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
+	lines := []string{
 		// Take over the session from any other ERun window (screen-style
 		// detach-elsewhere-and-reattach-here): claim ownership, then detach
 		// other viewers by killing their dtach clients. The master — which
@@ -872,26 +952,9 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
 	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
-	// Redraw method on reattach. dtach keeps no screen buffer, so a reattach
-	// shows nothing until the program itself repaints. The two tab kinds need
-	// different triggers:
-	//   - bash shell tabs (Local/ERun): readline repaints on the ^L byte dtach
-	//     injects, so -r ctrl_l works and is quieter than a resize.
-	//   - the AI tab's Claude: a main-screen TUI (no alternate screen) that does
-	//     NOT repaint on a bare ^L — it consumes the 0x0c as a keystroke (and can
-	//     nudge its exit/confirm footer). It only re-renders on a real SIGWINCH,
-	//     so the AI session uses -r winch: dtach raises WINCH on attach, forcing
-	//     a full repaint even when the reattached pane is the same size and the
-	//     pty would otherwise emit no WINCH of its own. Switching bash to ^L
-	//     silently regressed the AI tab once ultracode/opus became the default
-	//     and changed Claude's idle key handling.
-	redraw := "ctrl_l"
-	if req.AI {
-		redraw = "winch"
-	}
 	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
-		fmt.Sprintf("dtach -A \"%s\" -r %s /bin/bash \"%s\" || shell_status=$?", socket, redraw, launchScript),
+		fmt.Sprintf("dtach -A \"%s\" -r %s %s || shell_status=$?", socket, redraw, launchCommand),
 		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
 	)
 }
