@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { type TenantConfigView, TooltipProvider } from 'erun-kit';
 import { Provider } from 'react-redux';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,18 +17,31 @@ function jsonResponse(body: unknown, status = 200): Response {
 // The identity panels and Tenants fetch on mount (Users, Org settings,
 // Outbound mail, Tenants); every other section fetches only on submit. A
 // blanket 200-empty response is enough to let navigating into any of them
-// without erroring.
-function stubFetch(): void {
+// without erroring. whoamiBody defaults to an empty object (no username) so
+// tests that don't care about the header's identity label are unaffected.
+function stubFetch(whoamiBody: Record<string, unknown> = {}): void {
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL) => {
       const url = input instanceof URL ? input.href : input;
+      if (url.includes('/v1/whoami')) {
+        return Promise.resolve(jsonResponse(whoamiBody));
+      }
       if (url.includes('/v1/identity/users') || url.includes('/v1/tenants')) {
         return Promise.resolve(jsonResponse([]));
       }
       return Promise.resolve(jsonResponse({}));
     }),
   );
+}
+
+// fakeToken builds a decodable (unsigned) JWT-shaped string carrying the
+// given claims -- readTokenIdentity only decodes the payload, so a real
+// signature is unnecessary here.
+function fakeToken(payload: Record<string, unknown>): string {
+  const segment = (value: unknown): string =>
+    btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${segment({ alg: 'none' })}.${segment(payload)}.sig`;
 }
 
 const OPERATIONS_CONFIG: TenantConfigView = {
@@ -45,13 +58,13 @@ const COMPANY_CONFIG: TenantConfigView = {
   inviteRequestRateLimitWindowSeconds: 60,
 };
 
-function renderShell(config: TenantConfigView): void {
+function renderShell(config: TenantConfigView, token = 'dev-token'): void {
   render(
     <Provider store={createAppStore()}>
       <TooltipProvider>
         <AppShell
           brand="Acme"
-          token="dev-token"
+          token={token}
           config={config}
           oidc={undefined}
           switchMismatch={undefined}
@@ -67,6 +80,7 @@ function renderShell(config: TenantConfigView): void {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, '', '/');
 });
 
 describe('AppShell navigation', () => {
@@ -120,6 +134,65 @@ describe('AppShell navigation', () => {
 
     const current = nav.getAllByRole('button').filter((el) => el.getAttribute('aria-current'));
     expect(current).toHaveLength(1);
+  });
+});
+
+describe('AppShell section URL sync', () => {
+  it('pushes a history entry for the URL when navigating between sections', () => {
+    stubFetch();
+    renderShell(OPERATIONS_CONFIG);
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+
+    fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
+    expect(window.location.pathname).toBe('/environments');
+
+    fireEvent.click(nav.getByRole('button', { name: /Overview/ }));
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('renders the section named by the URL on mount', () => {
+    window.history.pushState(null, '', '/environments');
+    stubFetch();
+    renderShell(OPERATIONS_CONFIG);
+    expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument();
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+    expect(nav.getByRole('button', { name: /Environments/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('falls back to Overview, and corrects the URL, for an OPERATIONS-only section on a COMPANY tenant', () => {
+    window.history.pushState(null, '', '/users');
+    stubFetch();
+    renderShell(COMPANY_CONFIG);
+    expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('moves between sections when a popstate fires (Back/Forward)', () => {
+    stubFetch();
+    renderShell(OPERATIONS_CONFIG);
+    const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
+
+    fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
+    expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument();
+
+    // The URL moves without going through onSelect, so only a real popstate
+    // event -- not a click -- exercises the listener. jsdom's own
+    // history.back()/forward() resolve asynchronously, so the URL is moved
+    // directly and the event dispatched by hand to keep this deterministic.
+    act(() => {
+      window.history.pushState(null, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState(null, '', '/environments');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument();
   });
 });
 
@@ -208,5 +281,39 @@ describe('AppShell identity chrome', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to light theme' }));
     expect(document.documentElement.classList.contains('dark')).toBe(false);
+  });
+
+  it("prefers whoami's username over the token's email once whoami resolves", async () => {
+    stubFetch({ username: 'erun' });
+    renderShell(OPERATIONS_CONFIG, fakeToken({ sub: '123', email: 'someone@example.com' }));
+    await waitFor(() => {
+      expect(screen.getByText('erun')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('someone@example.com')).not.toBeInTheDocument();
+  });
+
+  it("falls back to the token's email while whoami has not resolved yet", () => {
+    stubFetch({ username: 'erun' });
+    renderShell(OPERATIONS_CONFIG, fakeToken({ sub: '123', email: 'someone@example.com' }));
+    // Asserted synchronously, before the mocked fetch's promise settles: this
+    // is the header's very first paint, with only the token claim available.
+    expect(screen.getByText('someone@example.com')).toBeInTheDocument();
+  });
+
+  it('never renders the raw subject id: a pending placeholder until whoami resolves, then the username', async () => {
+    stubFetch({ username: 'erun' });
+    const subject = '386994597031248060';
+    renderShell(OPERATIONS_CONFIG, fakeToken({ sub: subject }));
+
+    // No email claim and whoami not yet resolved -- must show that the label
+    // is unresolved, never the numeric subject id.
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByText(subject)).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('erun')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(subject)).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
   });
 });

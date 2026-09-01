@@ -10,6 +10,10 @@ For the full concept and spec, see [Agent reference · Hosted platform](/concept
 
 The examples below use the CLI, but every action — previewing, registering, deploying, stopping, deleting — has an equivalent in the desktop app's tenant dashboard, on its **Registration** tab. Open the tenant dashboard and switch to Registration to see what's already registered on the platform, alongside the local tenant and environments the sidebar already shows: those are two separate objects, and creating one does not create the other. Registering a new tenant, or enrolling its first user, still needs `erun platform tenant create`/`erun platform user enroll` from the CLI or console — the Registration tab points there rather than half-configuring it through a form.
 
+## Navigating the console
+
+Each section of the hosted web console — Overview, Environments, Cloud contexts, and the rest of the sidebar — has its own URL. Reloading the page, sharing a link, or using the browser's Back and Forward buttons all keep you on the section you were viewing rather than dropping you back to Overview. A link naming a section your tenant type doesn't have (for example a non-operations tenant following a Users link) lands on Overview instead of a panel the API would refuse.
+
 ## Sign in once
 
 ```bash

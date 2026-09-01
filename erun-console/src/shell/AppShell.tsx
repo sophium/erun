@@ -2,6 +2,7 @@ import type { TenantConfigView } from 'erun-kit';
 import * as React from 'react';
 
 import { PENDING_REQUESTS_POLL_MS, useListInviteRequestsQuery } from '../app/api/requestsApi';
+import { useGetWhoamiQuery } from '../app/api/whoamiApi';
 import type { OidcConfig } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
@@ -17,11 +18,12 @@ import { RequestsPanel } from '../requests/RequestsPanel';
 import { TenantsPanel } from '../tenants/TenantsPanel';
 import { ConsoleHeader } from './ConsoleHeader';
 import { ConsoleSidebar } from './ConsoleSidebar';
-import { type ConsoleSection, type ConsoleSectionId, sectionsForTenant } from './sections';
+import type { ConsoleSection, ConsoleSectionId } from './sections';
 import {
   type TenantSwitchMismatch,
   TenantSwitchMismatchBanner,
 } from './TenantSwitchMismatchBanner';
+import { useSectionNavigation } from './useSectionNavigation';
 import { useTheme } from './useTheme';
 
 // OperationsSectionContent renders the operations-only identity/tenant
@@ -142,10 +144,18 @@ export function AppShell({
   onChanged: () => void;
   onSignOut: () => void;
 }): React.ReactElement {
-  const sections = React.useMemo(() => sectionsForTenant(config.tenant), [config.tenant]);
-  const [active, setActive] = React.useState<ConsoleSectionId>('overview');
+  const { sections, active, onSelect } = useSectionNavigation(config.tenant);
   const { theme, toggleTheme } = useTheme();
+  // The header must never fall back to the raw `sub` claim -- whoami's own
+  // `username` is the platform's authoritative label for the enrolled user,
+  // and the token-claim email is a reasonable interim label while that query
+  // is still resolving. Neither present yet means "not resolved", shown as
+  // such rather than silently substituting the opaque subject id.
   const identity = React.useMemo(() => readTokenIdentity(token), [token]);
+  const whoamiQuery = useGetWhoamiQuery(token);
+  const identityLabel = whoamiQuery.data?.username ?? identity.email;
+  const identityPending =
+    identityLabel === undefined && (whoamiQuery.isLoading || whoamiQuery.isUninitialized);
 
   // The pending-request count has to be visible without opening the
   // Requests panel, so it's read here rather than only inside RequestsPanel
@@ -170,12 +180,13 @@ export function AppShell({
         sections={sections}
         active={active}
         counts={counts}
-        onSelect={setActive}
+        onSelect={onSelect}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <ConsoleHeader
           title={sectionLabel(sections, active)}
-          identityLabel={identity.email ?? identity.subject}
+          identityLabel={identityLabel}
+          identityPending={identityPending}
           theme={theme}
           onToggleTheme={toggleTheme}
           onSignOut={onSignOut}
