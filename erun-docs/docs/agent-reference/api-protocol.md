@@ -1195,6 +1195,8 @@ The half-landed-failure shape mirrors `POST /v1/identity/users` exactly: a failu
 
 Sets a tenant's full quota row — the environment-count cap the [`POST /v1/environments`](#post-v1environments) quota guardrail enforces, the per-environment CPU/memory/storage namespace ceiling, and the aggregate tenant-wide CPU/memory/storage budget (#1113). **Operations-only**, like tenant registration: the caller's resolved tenant must be `OPERATIONS`, because it writes another tenant's `tenant_quotas` row (the operations role's RLS policy permits cross-tenant writes; the row's `tenant_id` is set explicitly to the path's `{tenant_id}`, not the operations caller's own tenant). The write **fully replaces** the row — it is not a merge, so every field is required on every call.
 
+**Cross-tenant administration (#1816).** For the Operator view, see [Administering another tenant](/collaboration/cross-tenant-administration). This write is recorded in a second, explicit audit event (beyond the ordinary per-request one every API call gets) naming the target tenant, the operator, and the operator's own home tenant, so the write is attributable even though the row itself, once persisted, only ever names the target — the same shape [`POST /v1/environments`](#post-v1environments) uses for its own cross-tenant create. The set is refused before it runs if audit logging cannot be recorded, rather than silently changing another tenant's caps with no attributable record of who did it. [`GET /v1/quota`](#get-v1quota) below takes the same target tenant, as a `?tenantId=` query param, so a quota can be seen before it is set.
+
 ```jsonc
 // PUT /v1/tenants/019a7fa5-…/quota body
 {
@@ -1233,9 +1235,13 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 
 ### `GET /v1/quota` {#get-v1quota}
 
-Returns the caller's own tenant's full quota row — the identical shape and defaulting [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) writes and [`POST /v1/environments`](#post-v1environments) admission itself reads. **Tenant-self-service**: no operations role required, and the read is scoped explicitly to the caller's own tenant rather than left to row-level security alone. This is how an Operator inspects their own limits without an operations-scoped token (#605, #1113).
+Returns the caller's own tenant's full quota row by default — the identical shape and defaulting [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) writes and [`POST /v1/environments`](#post-v1environments) admission itself reads. **Tenant-self-service**: no operations role required, and the read is scoped explicitly to the caller's own tenant rather than left to row-level security alone. This is how an Operator inspects their own limits without an operations-scoped token (#605, #1113).
+
+**Cross-tenant read (#1816).** An operations-scoped caller may instead read another tenant's quota via `?tenantId=<tenant_id>`, the same `resolveTargetTenant` convention [`GET /v1/environments`](#post-v1environments), [`GET /v1/users`](#post-v1users-and-get-v1users), and [`GET /v1/invites`](#invites) use: omitted or equal to the caller's own tenant reads the caller's own row; a different value is refused with `403` for any caller whose tenant is not `OPERATIONS`. This is the read half of [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) above — until this existed, an operator could set another tenant's quota without ever being able to see its current value first.
 
 ```jsonc
+// GET /v1/quota?tenantId=019a… (operations-only cross-tenant; omit tenantId for the caller's own tenant)
+
 // 200 response — identical shape to the PUT response above
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
@@ -1252,6 +1258,10 @@ Returns the caller's own tenant's full quota row — the identical shape and def
 ```
 
 **Error behaviour.** Standard auth failures only (see [Errors](#errors)); `ReadAll` covers `GET /v1/quota`. There is no `404` — an absent `tenant_quotas` row resolves to the same defaulted values `PUT`/admission would use.
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `403` | `?tenantId=` names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to read your own tenant's quota, or call from an operations-tenant token. |
 
 ### `GET /v1/usage-events` {#get-v1usage-events}
 

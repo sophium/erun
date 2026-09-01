@@ -12,21 +12,25 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-type stubTenantQuotaWriter struct {
+type stubTenantQuotaAdmin struct {
 	setCalls  int
 	gotTenant string
 	gotQuota  model.TenantQuota
+	err       error
 }
 
-func (r *stubTenantQuotaWriter) Set(_ context.Context, tenantID string, quota model.TenantQuota) (model.TenantQuota, error) {
+func (r *stubTenantQuotaAdmin) SetForTenant(_ context.Context, tenantID string, quota model.TenantQuota) (model.TenantQuota, error) {
 	r.setCalls++
 	r.gotTenant = tenantID
 	r.gotQuota = quota
+	if r.err != nil {
+		return model.TenantQuota{}, r.err
+	}
 	quota.TenantID = tenantID
 	return quota, nil
 }
 
-func putQuota(t *testing.T, quotas *stubTenantQuotaWriter, tenantType, tenantID, body string) *httptest.ResponseRecorder {
+func putQuota(t *testing.T, quotas *stubTenantQuotaAdmin, tenantType, tenantID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPut, "/v1/tenants/"+tenantID+"/quota", bytes.NewBufferString(body))
 	req.SetPathValue("tenant_id", tenantID)
@@ -36,7 +40,7 @@ func putQuota(t *testing.T, quotas *stubTenantQuotaWriter, tenantType, tenantID,
 		ErunUserID: "user-1",
 	}))
 	rec := httptest.NewRecorder()
-	TenantQuotaRoutes{quotas: quotas}.setQuota(rec, req)
+	TenantQuotaRoutes{admin: quotas}.setQuota(rec, req)
 	return rec
 }
 
@@ -45,7 +49,7 @@ const fullQuotaBody = `{"maxEnvironments":50,"maxCpuMillicores":4000,"maxMemoryM
 
 func TestSetTenantQuotaForbidsNonOperations(t *testing.T) {
 	for _, tt := range []string{string(model.TenantTypeCompany), ""} {
-		quotas := &stubTenantQuotaWriter{}
+		quotas := &stubTenantQuotaAdmin{}
 		rec := putQuota(t, quotas, tt, "tenant-x", fullQuotaBody)
 		if rec.Code != http.StatusForbidden || quotas.setCalls != 0 {
 			t.Fatalf("type=%q: status=%d setCalls=%d, want 403 / 0 calls", tt, rec.Code, quotas.setCalls)
@@ -54,7 +58,7 @@ func TestSetTenantQuotaForbidsNonOperations(t *testing.T) {
 }
 
 func TestSetTenantQuotaOperationsPersists(t *testing.T) {
-	quotas := &stubTenantQuotaWriter{}
+	quotas := &stubTenantQuotaAdmin{}
 	rec := putQuota(t, quotas, string(model.TenantTypeOperations), "tenant-x", fullQuotaBody)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -83,7 +87,7 @@ func TestSetTenantQuotaRejectsInvalid(t *testing.T) {
 	}
 	for label, body := range cases {
 		t.Run(label, func(t *testing.T) {
-			quotas := &stubTenantQuotaWriter{}
+			quotas := &stubTenantQuotaAdmin{}
 			rec := putQuota(t, quotas, string(model.TenantTypeOperations), "tenant-x", body)
 			if rec.Code != http.StatusBadRequest || quotas.setCalls != 0 {
 				t.Fatalf("status=%d setCalls=%d, want 400 / 0 calls", rec.Code, quotas.setCalls)
@@ -92,13 +96,43 @@ func TestSetTenantQuotaRejectsInvalid(t *testing.T) {
 	}
 }
 
+// stubTenantQuotaReader is a pointer type so a test can inspect what Get saw
+// after the route runs: lastGetTenantID captures the security context's
+// TenantID Get saw (proving resolveTargetTenant/scopedContextForTenant
+// substituted the right tenant), and getCalls proves a refused cross-tenant
+// request never reached the reader at all.
 type stubTenantQuotaReader struct {
-	quota model.TenantQuota
-	err   error
+	quota           model.TenantQuota
+	err             error
+	getCalls        int
+	lastGetTenantID string
 }
 
-func (r stubTenantQuotaReader) Get(context.Context) (model.TenantQuota, error) {
+func (r *stubTenantQuotaReader) Get(ctx context.Context) (model.TenantQuota, error) {
+	r.getCalls++
+	if securityContext, ok := security.FromContext(ctx); ok {
+		r.lastGetTenantID = securityContext.TenantID
+	}
 	return r.quota, r.err
+}
+
+// getQuotaAs issues GET /v1/quota (with an optional ?tenantId) under an
+// explicit caller identity.
+func getQuotaAs(t *testing.T, tenantType model.TenantType, tenantID string, reader *stubTenantQuotaReader, requestedTenantID string) *httptest.ResponseRecorder {
+	t.Helper()
+	url := "/v1/quota"
+	if requestedTenantID != "" {
+		url += "?tenantId=" + requestedTenantID
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   tenantID,
+		TenantType: string(tenantType),
+		ErunUserID: "user-1",
+	}))
+	rec := httptest.NewRecorder()
+	TenantQuotaRoutes{reader: reader}.getQuota(rec, req)
+	return rec
 }
 
 // TestGetQuotaReturnsTheCallersOwnRow: an Operator can see their own tenant's
@@ -109,15 +143,8 @@ func TestGetQuotaReturnsTheCallersOwnRow(t *testing.T) {
 		MaxEnvironments: 10, MaxCPUMillicores: 8000, MaxMemoryMB: 17832, MaxStorageGB: 72,
 		MaxTotalCPUMillicores: 80000, MaxTotalMemoryMB: 178320, MaxTotalStorageGB: 720,
 	}
-	reader := stubTenantQuotaReader{quota: want}
-	req := httptest.NewRequest(http.MethodGet, "/v1/quota", nil)
-	req = req.WithContext(security.WithContext(req.Context(), security.Context{
-		TenantID:   "tenant-x",
-		TenantType: string(model.TenantTypeCompany),
-		ErunUserID: "user-1",
-	}))
-	rec := httptest.NewRecorder()
-	TenantQuotaRoutes{reader: reader}.getQuota(rec, req)
+	reader := &stubTenantQuotaReader{quota: want}
+	rec := getQuotaAs(t, model.TenantTypeCompany, "tenant-x", reader, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -127,5 +154,46 @@ func TestGetQuotaReturnsTheCallersOwnRow(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("quota = %+v, want %+v", got, want)
+	}
+	if reader.lastGetTenantID != "tenant-x" {
+		t.Fatalf("Get saw TenantID = %q, want tenant-x (unchanged default behavior)", reader.lastGetTenantID)
+	}
+}
+
+func TestGetQuotaRejectsTenantScopeForNonOperationsCaller(t *testing.T) {
+	reader := &stubTenantQuotaReader{}
+	rec := getQuotaAs(t, model.TenantTypeCompany, "tenant-x", reader, "other-tenant")
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unexpected status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if reader.getCalls != 0 {
+		t.Fatalf("Get should not have run for a refused cross-tenant request, saw %d calls", reader.getCalls)
+	}
+}
+
+// TestGetQuotaTreatsCallersOwnTenantIDAsANoOp mirrors the same case in the
+// environments listing tests: naming your own tenant explicitly is not a 403.
+func TestGetQuotaTreatsCallersOwnTenantIDAsANoOp(t *testing.T) {
+	reader := &stubTenantQuotaReader{}
+	rec := getQuotaAs(t, model.TenantTypeCompany, "tenant-x", reader, "tenant-x")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if reader.lastGetTenantID != "tenant-x" {
+		t.Fatalf("Get saw TenantID = %q, want tenant-x", reader.lastGetTenantID)
+	}
+}
+
+func TestGetQuotaScopesToRequestedTenantForOperationsCaller(t *testing.T) {
+	reader := &stubTenantQuotaReader{}
+	rec := getQuotaAs(t, model.TenantTypeOperations, "ops-tenant", reader, "other-tenant")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if reader.lastGetTenantID != "other-tenant" {
+		t.Fatalf("Get saw TenantID = %q, want other-tenant (the requested scope)", reader.lastGetTenantID)
 	}
 }

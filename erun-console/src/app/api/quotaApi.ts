@@ -47,8 +47,21 @@ export type SetTenantQuotaInput = Omit<TenantQuota, 'tenantId'>;
 
 export const quotaApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    getQuota: builder.query<TenantQuota, string>({
-      query: (token) => ({ url: '/v1/quota', token, label: 'get quota' }),
+    // getQuota reads the caller's own tenant's quota by default, or --
+    // operations-only, honored server-side -- a named target tenant's quota
+    // via `?tenantId=`, the read half of the operations-only write below, so
+    // a quota can be seen before it is set. Same shape as environmentsApi's
+    // listEnvironments: this console never offers the param to a caller who
+    // cannot use it.
+    getQuota: builder.query<TenantQuota, { token: string; tenantId?: string }>({
+      query: ({ token, tenantId }) => ({
+        url:
+          tenantId === undefined
+            ? '/v1/quota'
+            : `/v1/quota?tenantId=${encodeURIComponent(tenantId)}`,
+        token,
+        label: 'get quota',
+      }),
       transformResponse: parseTenantQuota,
       providesTags: ['Quota'],
     }),
@@ -65,6 +78,7 @@ export const quotaApi = platformApi.injectEndpoints({
         label: 'set tenant quota',
       }),
       transformResponse: parseTenantQuota,
+      invalidatesTags: ['Quota'],
     }),
   }),
 });

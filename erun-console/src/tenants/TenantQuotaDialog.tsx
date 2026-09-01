@@ -12,9 +12,10 @@ import {
 import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
-import type { SetTenantQuotaInput } from '../app/api/quotaApi';
+import type { SetTenantQuotaInput, TenantQuota } from '../app/api/quotaApi';
 import { useSetTenantQuotaMutation } from '../app/api/quotaApi';
 import { queryErrorMessage } from '../app/queryError';
+import { useQuotaController } from '../quota/controller';
 
 // QUOTA_FIELDS drives both the form's inputs and the request body, so a new
 // cap only needs one new entry here rather than a field repeated per form and
@@ -50,6 +51,23 @@ function parseQuotaInput(values: QuotaFieldValues): SetTenantQuotaInput {
     maxTotalCpuMillicores: Number(values.maxTotalCpuMillicores),
     maxTotalMemoryMb: Number(values.maxTotalMemoryMb),
     maxTotalStorageGb: Number(values.maxTotalStorageGb),
+  };
+}
+
+// quotaToFieldValues renders a loaded TenantQuota back into the same string
+// shape the form's inputs hold, so a PUT that fully replaces the row (see
+// setTenantQuotaRequest's own comment) starts from the target tenant's actual
+// current caps instead of a blank form the operator would otherwise have to
+// author blind.
+function quotaToFieldValues(quota: TenantQuota): QuotaFieldValues {
+  return {
+    maxEnvironments: String(quota.maxEnvironments),
+    maxCpuMillicores: String(quota.maxCpuMillicores),
+    maxMemoryMb: String(quota.maxMemoryMb),
+    maxStorageGb: String(quota.maxStorageGb),
+    maxTotalCpuMillicores: String(quota.maxTotalCpuMillicores),
+    maxTotalMemoryMb: String(quota.maxTotalMemoryMb),
+    maxTotalStorageGb: String(quota.maxTotalStorageGb),
   };
 }
 
@@ -103,6 +121,17 @@ export function TenantQuotaDialog({
   const [values, setValues] = React.useState<QuotaFieldValues>(EMPTY_VALUES);
   const [setTenantQuota, setTenantQuotaState] = useSetTenantQuotaMutation();
   const busy = setTenantQuotaState.isLoading;
+  const currentQuotaState = useQuotaController(token, tenantId);
+  const loadedQuota = currentQuotaState.status === 'ready' ? currentQuotaState.quota : undefined;
+
+  // Seeds the form from the target tenant's actual current caps once they
+  // load, the same "a fresh value always wins" resync RateLimitPanel uses for
+  // its own single field.
+  React.useEffect(() => {
+    if (loadedQuota !== undefined) {
+      setValues(quotaToFieldValues(loadedQuota));
+    }
+  }, [loadedQuota]);
 
   const submit = (event: React.SyntheticEvent): void => {
     event.preventDefault();
@@ -126,6 +155,16 @@ export function TenantQuotaDialog({
           </DialogDescription>
         </DialogHeader>
         <form className="grid gap-4" onSubmit={submit}>
+          {currentQuotaState.status === 'loading' && (
+            <p className="text-sm text-muted-foreground" role="status">
+              Loading current quota…
+            </p>
+          )}
+          {currentQuotaState.status === 'error' && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not load the current quota: {currentQuotaState.message}
+            </p>
+          )}
           <QuotaFields
             values={values}
             onChange={(key, value) => {
