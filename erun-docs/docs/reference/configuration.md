@@ -418,6 +418,7 @@ execution:
   | `aws-sts-web-identity-token` | `aws sts get-web-identity-token`, used by `cloud oidc` to mint the OIDC bearer token that federates an AWS-provider alias with erun. | The federation-enable recovery (`aws iam enable-outbound-web-identity-federation`) this operation retries through on failure — still subprocess-only. |
   | `aws-export-credentials` | `aws configure export-credentials --format process`, used by `erun cloud refresh` and the desktop's background credential refresher to mint the credentials it writes into a runtime pod's `~/.aws/credentials`. | Nothing else — this is the whole call site. |
   | `kubectl-namespace-get` | `kubectl get namespace <name> -o name`, the existence check `erun deploy` runs ahead of nearly every helm install so it only creates a namespace that is actually missing. | Every other `kubectl` call site (`apply`, `wait`, pod-status polling) — still subprocess-only. |
+  | `kubectl-pvc-get` | `kubectl get pvc <claim> -o name`, the existence check `erun deploy` runs ahead of a runtime-release install to decide whether its dedicated worktree volume already exists (and, if not, to announce the adoption from the home volume). | Every other `kubectl` call site (`apply`, `wait`, pod-status polling) — still subprocess-only. |
 
 ---
 

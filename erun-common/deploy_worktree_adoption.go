@@ -55,7 +55,7 @@ func announceWorktreeVolumeChange(ctx Context, spec HelmDeploySpec) {
 	}
 
 	headline := "==> Worktree volume " + claim + " is not in place yet for " + spec.Tenant + "/" + spec.Environment
-	exists, err := worktreeClaimExists(args)
+	exists, err := worktreeClaimExists(spec.KubernetesContext, spec.Namespace, claim)
 	if err != nil {
 		ctx.Trace("deploy: could not read worktree volume " + claim + ": " + err.Error())
 		headline = "==> Worktree volume " + claim + " could not be read for " + spec.Tenant + "/" + spec.Environment + "; this deploy may be the one that creates it"
@@ -70,21 +70,39 @@ func announceWorktreeVolumeChange(ctx Context, spec HelmDeploySpec) {
 	ctx.Info("    the worktree starts empty when there is nothing to adopt")
 }
 
-func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
+// kubectlGetPVCArgs is the single source of the `kubectl get pvc <claim> -o
+// name` argv, shared by kubectlWorktreeClaimArgs (which renders it for both
+// dry-run and audit purposes) and defaultWorktreeClaimExists (which also
+// executes it as a subprocess), so the dry-run trace can never drift from
+// either execution path.
+func kubectlGetPVCArgs(contextName, namespace, claim string) []string {
 	args := make([]string, 0, 8)
-	if contextName := strings.TrimSpace(spec.KubernetesContext); contextName != "" {
+	if contextName = strings.TrimSpace(contextName); contextName != "" {
 		args = append(args, "--context", contextName)
 	}
-	if namespace := strings.TrimSpace(spec.Namespace); namespace != "" {
+	if namespace = strings.TrimSpace(namespace); namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
 	return append(args, "get", "pvc", claim, "-o", "name")
 }
 
-// worktreeClaimExists distinguishes "the claim is not there" from "the answer is
-// unknown", so a cluster erun cannot read never passes for a settled worktree.
-func worktreeClaimExists(args []string) (bool, error) {
-	output, err := Command("kubectl", args...).CombinedOutput()
+func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
+	return kubectlGetPVCArgs(spec.KubernetesContext, spec.Namespace, claim)
+}
+
+// worktreeClaimExists dispatches to the subprocess or library path per the
+// kubectl-pvc-get execution mode (see execution_mode.go), distinguishing "the
+// claim is not there" from "the answer is unknown" either way, so a cluster
+// erun cannot read never passes for a settled worktree.
+func worktreeClaimExists(contextName, namespace, claim string) (bool, error) {
+	if currentExecutionMode(kubectlPVCGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryPersistentVolumeClaimExists(contextName, namespace, claim)
+	}
+	return defaultWorktreeClaimExists(contextName, namespace, claim)
+}
+
+func defaultWorktreeClaimExists(contextName, namespace, claim string) (bool, error) {
+	output, err := Command("kubectl", kubectlGetPVCArgs(contextName, namespace, claim)...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

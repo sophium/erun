@@ -4,6 +4,7 @@ aws-sts: library
 aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
 
 Running: Remove unused Docker images
 audit: erun doctor --dry-run --prune-images team dev

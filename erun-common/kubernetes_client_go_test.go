@@ -183,3 +183,145 @@ func TestExecutionModeReportListsKubectlNamespaceGetOperation(t *testing.T) {
 	}
 	t.Fatalf("kubectl-namespace-get not found in report: %+v", report)
 }
+
+func pvcFoundHandler(namespace, name string) http.HandlerFunc {
+	path := "/api/v1/namespaces/" + namespace + "/persistentvolumeclaims/" + name
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","status":"Failure","reason":"NotFound"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind":"PersistentVolumeClaim","apiVersion":"v1","metadata":{"name":"` + name + `","namespace":"` + namespace + `"}}`))
+	}
+}
+
+func pvcNotFoundHandler(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
+			`"message":"persistentvolumeclaims \"` + name + `\" not found","reason":"NotFound","code":404}`))
+	}
+}
+
+// TestLibraryPersistentVolumeClaimExistsMatchesSubprocessObservableResult pins
+// the same equivalence property
+// TestLibraryKubernetesNamespaceExistsMatchesSubprocessObservableResult does:
+// the library path's returned bool must agree with what
+// defaultWorktreeClaimExists derives from kubectl's exit code (found -> exit
+// 0, not found -> "NotFound" stderr).
+func TestLibraryPersistentVolumeClaimExistsMatchesSubprocessObservableResult(t *testing.T) {
+	fakeKubernetesAPIServer(t, pvcFoundHandler("team-dev", "team-devops-worktree"))
+
+	exists, err := libraryPersistentVolumeClaimExists("", "team-dev", "team-devops-worktree")
+	if err != nil {
+		t.Fatalf("libraryPersistentVolumeClaimExists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("exists = false, want true")
+	}
+}
+
+func TestLibraryPersistentVolumeClaimExistsReportsNotFoundAsAbsentNotError(t *testing.T) {
+	fakeKubernetesAPIServer(t, pvcNotFoundHandler("team-devops-worktree"))
+
+	exists, err := libraryPersistentVolumeClaimExists("", "team-dev", "team-devops-worktree")
+	if err != nil {
+		t.Fatalf("libraryPersistentVolumeClaimExists: %v", err)
+	}
+	if exists {
+		t.Fatalf("exists = true, want false")
+	}
+}
+
+// TestLibraryPersistentVolumeClaimExistsPropagatesOtherErrors proves a
+// refusal distinct from NotFound (Forbidden here) surfaces as an error rather
+// than being folded into "does not exist" — the same distinction
+// defaultWorktreeClaimExists's KubernetesResourceNotFound check draws against
+// kubectl's own stderr.
+func TestLibraryPersistentVolumeClaimExistsPropagatesOtherErrors(t *testing.T) {
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
+			`"message":"persistentvolumeclaims \"team-devops-worktree\" is forbidden","reason":"Forbidden","code":403}`))
+	})
+
+	exists, err := libraryPersistentVolumeClaimExists("", "team-dev", "team-devops-worktree")
+	if err == nil {
+		t.Fatalf("err = nil, want a forbidden error")
+	}
+	if exists {
+		t.Fatalf("exists = true, want false")
+	}
+}
+
+// TestLibraryPersistentVolumeClaimExistsHonorsContextOverride proves the
+// context-name argument actually selects the kubeconfig context, the same way
+// `kubectl --context X` does, rather than always following current-context.
+func TestLibraryPersistentVolumeClaimExistsHonorsContextOverride(t *testing.T) {
+	fakeKubernetesAPIServer(t, pvcFoundHandler("team-dev", "team-devops-worktree"))
+
+	exists, err := libraryPersistentVolumeClaimExists("test-context", "team-dev", "team-devops-worktree")
+	if err != nil {
+		t.Fatalf("libraryPersistentVolumeClaimExists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("exists = false, want true")
+	}
+
+	if _, err := libraryPersistentVolumeClaimExists("unknown-context", "team-dev", "team-devops-worktree"); err == nil {
+		t.Fatalf("err = nil, want an error for an unknown context")
+	}
+}
+
+// TestKubectlGetPVCArgsSharedByBothPaths locks the one argv builder
+// kubectlWorktreeClaimArgs and defaultWorktreeClaimExists both call (via
+// kubectlGetPVCArgs), so the dry-run trace can never drift from the
+// subprocess execution path regardless of which execution mode is active.
+func TestKubectlGetPVCArgsSharedByBothPaths(t *testing.T) {
+	got := kubectlGetPVCArgs("my-context", "team-dev", "team-devops-worktree")
+	want := []string{"--context", "my-context", "--namespace", "team-dev", "get", "pvc", "team-devops-worktree", "-o", "name"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestKubectlGetPVCArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testing.T) {
+	got := kubectlGetPVCArgs("", "", "team-devops-worktree")
+	want := []string{"get", "pvc", "team-devops-worktree", "-o", "name"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestExecutionModeForKubectlPVCGetDefaultsToSubprocess(t *testing.T) {
+	if got := ExecutionModeFor(ERunConfig{}, kubectlPVCGetExecutionOperation); got != ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	}
+}
+
+func TestExecutionModeReportListsKubectlPVCGetOperation(t *testing.T) {
+	report := ExecutionModeReport(ERunConfig{})
+	for _, status := range report {
+		if status.Operation == kubectlPVCGetExecutionOperation {
+			if status.Mode != ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			}
+			return
+		}
+	}
+	t.Fatalf("kubectl-pvc-get not found in report: %+v", report)
+}

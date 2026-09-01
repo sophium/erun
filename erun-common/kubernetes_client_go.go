@@ -79,3 +79,34 @@ func kubernetesClientsetForContext(contextName string) (*kubernetes.Clientset, e
 	}
 	return kubernetes.NewForConfig(config)
 }
+
+// kubectlPVCGetExecutionOperation is the ExecutionModeFor/ExecutionModeReport
+// key for the `kubectl get pvc <claim> -o name` existence check
+// (worktreeClaimExists in deploy_worktree_adoption.go), which
+// announceWorktreeVolumeChange runs ahead of a runtime-release deploy to
+// decide whether the dedicated worktree volume already exists. Picked next
+// after kubectl-namespace-get for the identical reason: a single resource
+// kind, a single Get-by-name call, no streaming, no mutation — reusing
+// kubernetesClientsetForContext rather than adding new dependency surface.
+const kubectlPVCGetExecutionOperation = "kubectl-pvc-get"
+
+// libraryPersistentVolumeClaimExists is the library-backed alternative to
+// defaultWorktreeClaimExists, resolving the same existence question via
+// k8s.io/client-go instead of shelling out to kubectl.
+func libraryPersistentVolumeClaimExists(contextName, namespace, claim string) (bool, error) {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	claim = strings.TrimSpace(claim)
+	clientset, err := kubernetesClientsetForContext(contextName)
+	if err != nil {
+		return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %s", claim, namespace, contextName, err)
+	}
+	_, err = clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), claim, metav1.GetOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %s", claim, namespace, contextName, err)
+}
