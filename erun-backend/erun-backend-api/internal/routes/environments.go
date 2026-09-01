@@ -110,9 +110,9 @@ type EnvironmentRoutes struct {
 	// unavailable rather than acting on config no Job can realize.
 	deleter EnvironmentDeleter
 	// admin is nil unless the server wires cross-tenant administration
-	// (#1816); then a tenantId naming another tenant is refused with a
-	// clear 500 rather than silently falling back to the caller's own
-	// tenant. Only createEnvironment uses it — list needs no audit trail.
+	// (#1816); a create that targets another tenant then fails clearly
+	// (500) rather than silently falling back to the caller's own tenant.
+	// Only createEnvironment uses it — list needs no audit trail.
 	admin EnvironmentAdminCreator
 }
 
