@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -327,5 +328,38 @@ func TestReachableTenantsSurfacesRepositoryError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// TestCreateTenantRefusesAnUnresolvableIssuerMapping is the server-side half
+// of the switcher fix: registering a tenant whose org mapping contradicts its
+// issuer's org-scoping mode produces a tenant no token can ever resolve to,
+// discoverable today only as a failed sign-in. The refusal must reach the
+// caller as a distinguishable code with a message naming the claim, not as a
+// bare 500.
+func TestCreateTenantRefusesAnUnresolvableIssuerMapping(t *testing.T) {
+	tenants := &stubTenantRepository{err: &repository.UnresolvableIssuerMappingError{
+		Issuer:      "https://auth.example",
+		Reason:      model.TenantReachabilityNoOrgMapping,
+		OrgFieldKey: "urn:zitadel:iam:user:resourceowner:id",
+	}}
+	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations),
+		`{"name":"probeco","issuer":"https://auth.example"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode error envelope: %v", err)
+	}
+	if envelope.Code != "UNRESOLVABLE_ISSUER_MAPPING" {
+		t.Fatalf("code = %q, want UNRESOLVABLE_ISSUER_MAPPING", envelope.Code)
+	}
+	if !strings.Contains(envelope.Message, "urn:zitadel:iam:user:resourceowner:id") {
+		t.Fatalf("message %q does not name the org claim the issuer resolves by", envelope.Message)
 	}
 }

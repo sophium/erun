@@ -817,7 +817,8 @@ Lists tenants. An **operations-tenant** caller sees **every** tenant this platfo
     "type": "COMPANY",
     "createdAt": "2026-06-24T10:00:00Z",
     "updatedAt": "2026-06-24T10:00:00Z",
-    "userCount": 3
+    "userCount": 3,
+    "resolvable": true
   },
   {
     "tenantId": "019a8012-...-000",
@@ -825,10 +826,24 @@ Lists tenants. An **operations-tenant** caller sees **every** tenant this platfo
     "type": "COMPANY",
     "createdAt": "2026-08-30T09:00:00Z",
     "updatedAt": "2026-08-30T09:00:00Z",
-    "userCount": 0
+    "userCount": 0,
+    "resolvable": true
+  },
+  {
+    "tenantId": "019a8b21-...-000",
+    "name": "probeco",
+    "type": "COMPANY",
+    "createdAt": "2026-08-30T09:00:00Z",
+    "updatedAt": "2026-08-30T09:00:00Z",
+    "userCount": 0,
+    "resolvable": false
   }
 ]
 ```
+
+`resolvable` answers "can *anybody* sign in to this tenant" — whether at least one of its `tenant_issuers` rows is a mapping the [resolution algorithm](#tenant-issuers) can ever match. A mapping is resolvable when the issuer's org-scoping mode and the mapping's org value agree: an org-scoped issuer needs an `org_field_value` (resolution matches it by equality, and an empty org claim is rejected before it gets that far), and a single-tenant issuer must not have one (resolution matches `NULL` there). `probeco` above is the mismatch: registered on an org-scoped issuer with no org value, so it exists, lists, accepts enrollments, and **no token can ever resolve to it**.
+
+Like `userCount`, `resolvable` is populated **only** by the operations-tenant branch; every other tenant-returning shape omits the field. Absent means "this read did not compute it", never "it works" — do not coalesce a missing `resolvable` to `true`. `POST /v1/tenants` refuses to create an unresolvable mapping (below), so a `false` here is a tenant registered before that refusal existed, or one whose issuer was converted after the fact; repair it by giving the mapping the org value its issuer resolves by ([`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers)).
 
 `userCount` is populated **only** for the operations-tenant branch above, in a single query (a `LEFT JOIN`/`GROUP BY` over `users`, not one query per tenant) — a tenant with genuinely zero users reports the explicit number `0`, never `null` and never an omitted field. Every other tenant-returning shape in this API (this endpoint's own single-tenant branch, `POST /v1/tenants`'s create response, `GET /v1/tenants/reachable`, `PATCH /v1/tenants/reconcile-bootstrap-name`) never computes it and omits the field entirely. A caller must treat "field absent" and "field present with value `0`" as different facts — the first means "not counted here", the second means "counted, and it is zero" — never coalesce a missing `userCount` to `0`.
 
@@ -852,6 +867,8 @@ Registers a **new tenant** plus the OIDC issuer mapping that resolves its tokens
 
 The three identity rows — the `tenants` row, the `issuers` registry row (the globally unique issuer key with its org-scoping mode), and the `tenant_issuers` mapping row binding the issuer (and org value, when org-scoped) to the new tenant — are inserted in **one transaction**. `orgFieldKey`/`orgFieldValue` are set only for an org-scoped (shared) issuer; a single-tenant issuer leaves both empty (NULL on the registry / mapping). No first user is created here: the tenant's first admin is enrolled by the per-tenant first-user bootstrap when the tenant's first valid token arrives (see [first-identity bootstrap](#tenant-issuers)).
 
+**`orgFieldKey` only ever registers a *new* issuer.** The org-scoping mode lives once on the shared `issuers` row, so an issuer already in the registry keeps the mode it has and the `orgFieldKey` in this body is ignored. That is why the endpoint validates `orgFieldValue` against the registry's **effective** mode rather than the requested one, and refuses a mapping the effective mode can never match (`UNRESOLVABLE_ISSUER_MAPPING`, below) instead of writing a tenant nobody can sign in to. Read the effective mode first with [`GET /v1/tenant-issuers`](#get-v1tenant-issuers) when in doubt.
+
 ```jsonc
 // 201 response
 {
@@ -870,6 +887,7 @@ The three identity rows — the `tenants` row, the `issuers` registry row (the g
 | `400` | `name` is empty or contains anything other than lowercase letters and digits (no hyphens — so the `<tenant>-<env>` namespace stays injective), `issuer` is empty/missing, `type` is not one of `COMPANY`/`OPERATIONS`, or the body is not valid JSON. | Send a hyphen-free lowercase-alphanumeric `name`, a non-empty `issuer`, and a valid `type`. |
 | `403` | The caller's resolved tenant is not an `OPERATIONS` tenant (the explicit operations gate, beyond the standard auth failures in [Errors](#errors)). | Call from an operations-tenant token whose roles permit the write. |
 | `409` | The `(issuer, org_field_value)` mapping already exists — either the issuer is already registered single-tenant (no org discriminator) and `orgFieldValue` was left empty, or this exact org value on that issuer is already taken; the body names which. | For the no-discriminator case, an operations caller converts the issuer to org-scoped via [`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers) (which backfills the existing tenant's mapping) before retrying this call with `orgFieldKey`/`orgFieldValue`; for the taken-org-value case, pick a different `orgFieldValue`. |
+| `409` `UNRESOLVABLE_ISSUER_MAPPING` | The requested mapping is one **no token can ever satisfy**: the issuer is already registered org-scoped and `orgFieldValue` is empty, or the issuer is single-tenant and `orgFieldValue` is set. The message names the issuer, its org-scoping mode, and which half is missing. Nothing is persisted — the `tenants` row rolls back with the mapping. | Send the `orgFieldValue` the issuer's org claim will actually carry (read the issuer's mode from [`GET /v1/tenant-issuers`](#get-v1tenant-issuers)), or drop `orgFieldValue` for a single-tenant issuer. |
 | `500` | Persistence failed — e.g. the tenant `name` already exists (a uniqueness violation), or the request-scoped security context is missing (an internal wiring error). | Use a unique tenant name; if it persists, it is a server bug. |
 
 ### `PATCH /v1/tenants/reconcile-bootstrap-name` {#patch-v1tenantsreconcile-bootstrap-name}
@@ -908,14 +926,29 @@ Answers a question no other endpoint does: **which tenants does the calling iden
 
 ```jsonc
 // 200 response — every tenant the caller's own (issuer, subject) maps to,
-// including the one this request already resolved to
+// including the one this request already resolved to, each annotated with
+// whether a sign-in by this same identity can actually produce it
 [
-  { "tenantId": "019a7fa5-…", "name": "acme", "type": "COMPANY", "createdAt": "…", "updatedAt": "…" },
-  { "tenantId": "019a8b21-…", "name": "beta", "type": "COMPANY", "createdAt": "…", "updatedAt": "…" }
+  { "tenantId": "019a7fa5-…", "name": "acme",     "type": "COMPANY", "createdAt": "…", "updatedAt": "…", "reachability": "RESOLVABLE" },
+  { "tenantId": "019a8b21-…", "name": "beta",     "type": "COMPANY", "createdAt": "…", "updatedAt": "…", "reachability": "ORG_MISMATCH" },
+  { "tenantId": "019a8c40-…", "name": "probeco",  "type": "COMPANY", "createdAt": "…", "updatedAt": "…", "reachability": "NO_ORG_MAPPING" }
 ]
 ```
 
-**Switching is a re-authentication, not a re-scope.** Because tenant resolution is a pure function of the token, the console cannot move the active tenant by changing client-side state — it holds a bearer token with no server-side session, and relabeling which tenant it claims to operate on would leave the API still resolving the original tenant from that token. The console's tenant switcher (visible in the app shell whenever this endpoint reports more than one reachable tenant) instead starts a fresh OIDC sign-in with `prompt=select_account`, so the identity provider offers an account/org picker instead of silently reusing the existing browser session, and remembers which tenant it asked for. If the credential that comes back resolves (via `GET /v1/config`) to a different tenant than requested, the console says so and offers to try again — it never claims a switch succeeded that the API disagrees with.
+**Membership is necessary but not sufficient.** Membership and resolution use **different keys**: a `user_external_ids` row is `(issuer, external_id)`, while sign-in resolves `(iss, org claim)`. Nothing binds the two, so a membership row can name a tenant no token from that identity will ever resolve to. `reachability` is the verdict, computed against the org this caller's own token actually presented:
+
+| `reachability` | Meaning | What resolves it |
+|---|---|---|
+| `RESOLVABLE` | This identity's `(iss, org)` resolves to this tenant. Signing in again lands here. | — |
+| `ORG_MISMATCH` | The tenant resolves for a different org value than this identity presents. The membership row is real and permanently unusable by this account. | An account owned by that tenant's org. Nothing this account can do reaches it. |
+| `NO_ORG_MAPPING` | The tenant's mapping for this issuer contradicts the issuer's org-scoping mode, so **no** token can resolve to it — not just this caller's. | An operator repairs the mapping ([`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers)); the tenant also reports `resolvable: false` on [`GET /v1/tenants`](#get-v1tenants). |
+| `ISSUER_NOT_MAPPED` | The tenant has no mapping for the issuer this identity signs in through. | An operator maps the issuer to that tenant. |
+
+**Unresolvable memberships are annotated, never dropped.** Filtering them out of the response would replace one silence (a switch target that always fails) with another — a genuinely misconfigured membership invisible to the operator who has to repair it. A client must offer only `RESOLVABLE` targets and surface the rest with their reason. A membership carrying no `reachability` at all is a platform too old to compute one, which is "cannot say", not "unreachable".
+
+**One account resolves to exactly one tenant.** Under an org-scoped issuer whose org claim is the immutable owner of the account — `urn:zitadel:iam:user:resourceowner:id`, which is what the [bootstrap registers](#tenant-issuers) for an erun-shipped IdP — the claim is not selectable at sign-in. A Zitadel user has exactly one resource owner, so every token that account can ever mint resolves to the same tenant. **Reaching a second tenant therefore needs a second account, owned by that tenant's org** — not a second sign-in with the same account. Enrolling one account into two tenants under such an issuer creates a membership row that can never authenticate; that is the `ORG_MISMATCH` row above, and it is why the switcher does not offer it.
+
+**Switching is a re-authentication, not a re-scope.** Because tenant resolution is a pure function of the token, the console cannot move the active tenant by changing client-side state — it holds a bearer token with no server-side session, and relabeling which tenant it claims to operate on would leave the API still resolving the original tenant from that token. The console's tenant switcher (visible in the app shell whenever this endpoint reports more than one **resolvable** tenant) instead starts a fresh OIDC sign-in with `prompt=select_account`, so the identity provider offers an account/org picker instead of silently reusing the existing browser session, and remembers which tenant it asked for. If the credential that comes back resolves (via `GET /v1/config`) to a different tenant than requested, the console says so and offers to try again — it never claims a switch succeeded that the API disagrees with. That banner is the safety net for a credential the caller picked differently than intended, not the mechanism for reporting an offer that could never have worked.
 
 **Error behaviour.**
 
@@ -969,9 +1002,11 @@ Omitting `issuer`/`subject` enrolls a username with **no external identity yet**
 }
 ```
 
-**Role assignment default.** An enrolled user gets exactly the roles named in `roleIds`. Omitting `roleIds` enrolls with **zero roles** — a user who can sign in but do nothing until someone with a grant-capable role grants one, the same "may do nothing" state [the capability set](#capability-set) already models. The one exception is the target tenant's **first** user: that enrollment still gets the predefined `ReadAll`/`WriteAll` roles regardless of `roleIds`, matching [empty-database bootstrap](#tenant-issuers) above — without it, a tenant whose first (and only) user held nothing could never grant anything, since granting a role is itself a permission-gated call. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator lists existing roles and grants/revokes them after enrollment.
+**Role assignment default.** An enrolled user gets exactly the roles named in `roleIds`. Omitting `roleIds` grants `TenantUser` — enough to read the tenant, drive reviews/comments/builds/the merge queue, and operate environments that already exist — rather than the zero-role default this endpoint shipped briefly, which left an invited colleague unable even to read [`GET /v1/whoami`](#get-v1whoami) until someone remembered to grant a role by hand. The one exception is the target tenant's **first** user: that enrollment gets `TenantAdmin` regardless of `roleIds`, because granting a role is itself a permission-gated call, so a first (and only) user holding nothing could never be granted anything. [`GET`/`POST /v1/roles`](#roles-endpoints) and [`/v1/users/{user_id}/roles`](#roles-endpoints) below are how an operator lists existing roles and grants/revokes them after enrollment.
 
 This endpoint requires the caller to already know the enrollee's `issuer`/`subject` from the identity provider. [`POST /v1/identity/users`](/agent-reference/identity-administration) is the higher-level alternative for a platform running its own IdP (Zitadel): it creates the IdP identity itself and calls this same mapping with the subject the IdP returns, in one action, restricted to an `OPERATIONS` tenant.
+
+**What the enrollment refusal does and does not check.** The endpoint refuses an enrollment whose *target tenant's mapping* no token can resolve through (`UNRESOLVABLE_ISSUER_MAPPING`, below) — a fact the platform owns entirely, since it holds both the issuer's org-scoping mode and the mapping's org value. It does **not** check whether the org that owns `subject` matches the target tenant's org, because `(issuer, subject)` alone does not tell the platform which org owns that account, and refusing on a guess would reject legitimate enrollments. That mismatch is therefore reported rather than refused: it surfaces as `ORG_MISMATCH` on [`GET /v1/tenants/reachable`](#get-v1tenantsreachable) for the enrolled identity, so a client never offers it as a switch target. Under an org-scoped issuer whose claim is the account's immutable owner, enrolling one account into a second tenant is exactly this case — see that endpoint's "One account resolves to exactly one tenant".
 
 ```jsonc
 // GET /v1/users?tenantId=019a… (operations-only cross-tenant; omit tenantId for the caller's own tenant)
@@ -997,6 +1032,7 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
 | `404` | `POST /v1/users`: a `roleIds` entry does not name a role in the target tenant. | Fix the role id, or create the role first via [`POST /v1/roles`](#roles-endpoints). |
 | `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. | Use a different username, or omit `tenantId` if you meant your own tenant. |
+| `409` `UNRESOLVABLE_ISSUER_MAPPING` | `POST /v1/users` with `issuer`/`subject`: the target tenant's mapping for that issuer is one **no token can resolve through** — its org value contradicts the issuer's org-scoping mode, or the tenant has no mapping for that issuer at all. The enrollment would produce a user who can never sign in. The whole transaction rolls back, so no `users` row is left behind. | Repair the tenant's mapping first ([`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers), or check it with [`GET /v1/tenant-issuers`](#get-v1tenant-issuers)); a tenant in this state also reports `resolvable: false` on [`GET /v1/tenants`](#get-v1tenants). |
 | `409` `CONFLICT` | `POST /v1/users`: a uniqueness violation this endpoint does not recognize as either of the above. | Retry is unlikely to help without changing the request; treat as a server-side gap and report it. |
 
 ### Roles and role assignment {#roles-endpoints}

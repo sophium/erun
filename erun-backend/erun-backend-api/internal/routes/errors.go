@@ -56,7 +56,15 @@ func writeErrorDetails(w http.ResponseWriter, status int, code, message string, 
 }
 
 func writeRepositoryError(w http.ResponseWriter, req *http.Request, err error) {
+	var unresolvableMapping *repository.UnresolvableIssuerMappingError
 	switch {
+	case errors.As(err, &unresolvableMapping):
+		// The caller asked for identity configuration no token could satisfy.
+		// It is a conflict with the issuer registry's own org-scoping mode
+		// rather than a malformed request, and the message names the mode and
+		// what it needs so the operator can fix the mapping instead of
+		// discovering it as a failed sign-in later.
+		writeErrorCode(w, http.StatusConflict, "UNRESOLVABLE_ISSUER_MAPPING", unresolvableMapping.Error())
 	case errors.Is(err, repository.ErrNotFound):
 		writeError(w, http.StatusNotFound, http.StatusText(http.StatusNotFound))
 	case errors.Is(err, repository.ErrForbidden):

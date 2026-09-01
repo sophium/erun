@@ -141,11 +141,23 @@ func writePlatformTenantList(ctx common.Context, tenants []common.PlatformTenant
 		return err
 	}
 	for _, tenant := range tenants {
-		if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) type=%s\n", tenant.Name, tenant.TenantID, tenant.Type); err != nil {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) type=%s%s\n", tenant.Name, tenant.TenantID, tenant.Type, tenantUnreachableSuffix(tenant)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// tenantUnreachableSuffix flags a tenant whose issuer mapping no token can
+// resolve through. Such a tenant lists exactly like a healthy one, so without
+// this the only way to discover it is a sign-in that lands somewhere else.
+// A nil Resolvable is "not computed", not "reachable", and stays silent rather
+// than accusing every tenant on a read path that never asked.
+func tenantUnreachableSuffix(tenant common.PlatformTenant) string {
+	if tenant.Resolvable == nil || *tenant.Resolvable {
+		return ""
+	}
+	return " UNREACHABLE (no issuer mapping any token can resolve through)"
 }
 
 func newPlatformUserCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {

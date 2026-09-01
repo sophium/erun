@@ -115,6 +115,13 @@ func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string
 			return err
 		}
 		if issuer != "" && subject != "" {
+			// The identity link is the whole point of the enrollment, so a
+			// mapping no token can resolve through makes this user unable to
+			// sign in the moment they are created. Refusing here aborts the
+			// transaction, leaving no half-usable row behind.
+			if err := assertTenantIssuerMappingResolvable(ctx, tx, user.TenantID, issuer); err != nil {
+				return err
+			}
 			if err := insertUserExternalID(ctx, tx, tenantID, user.UserID, issuer, subject); err != nil {
 				return err
 			}
