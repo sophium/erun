@@ -10,6 +10,7 @@ type NudgeSummaryFields = Pick<
   | 'whipCount'
   | 'lastWhipAtUnix'
   | 'lastCappedAtUnix'
+  | 'nudgeHistoryUnreadable'
 >;
 
 // orchestratorNudgeSummary names the pacing state orchestrator_pacing.go
@@ -21,6 +22,14 @@ type NudgeSummaryFields = Pick<
 // plus lastCappedAtUnix) never reset, so they are what this reports as
 // history; nudgeCapped alone is read live, since "currently at the cap" is
 // exactly the one fact that must still reflect a rearm.
+//
+// nudgeHistoryUnreadable is checked before any of that: it means the
+// persisted record behind the cumulative fields exists but could not be
+// read back, so a zero there is an unverified gap, not a confirmed "never
+// nudged" — asserting the latter for a record that was actually lost is the
+// exact defect this issue exists to close (erun#1834, following the same
+// shape as #1800/#1808/#1815: a known-unknown must not render as a
+// confident value).
 export function orchestratorNudgeSummary(orchestrator: NudgeSummaryFields, nowMs: number): string {
   if (orchestrator.nudgeCapped) {
     return `Stopped nudging after ${String(orchestrator.nudgeCount)} attempts — reply or restart`;
@@ -37,6 +46,9 @@ export function orchestratorNudgeSummary(orchestrator: NudgeSummaryFields, nowMs
   if (orchestrator.lastCappedAtUnix) {
     const elapsed = orchestratorBusyElapsed(orchestrator.lastCappedAtUnix, nowMs);
     facts.push(elapsed ? `previously capped ${elapsed} ago` : 'previously capped');
+  }
+  if (facts.length === 0 && orchestrator.nudgeHistoryUnreadable) {
+    return 'Nudge history unavailable';
   }
   return facts.length > 0 ? facts.join('; ') : 'Not nudged';
 }

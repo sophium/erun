@@ -90,9 +90,15 @@ type orchestratorSession struct {
 	// record of every automatic pacer nudge ever delivered to this session,
 	// and when the last one went out. Unlike pacingNudgeCount/pacingCapped
 	// (the cap's live budget, zeroed by rearmOrchestratorPacing on every
-	// answer), nothing ever resets these: they are what lets the hover card
-	// tell "never nudged" apart from "nudged repeatedly, answering every
-	// time" once the budget has rearmed back to zero.
+	// answer), no pacing decision ever resets these: they are what lets the
+	// hover card tell "never nudged" apart from "nudged repeatedly, answering
+	// every time" once the budget has rearmed back to zero. They are not
+	// immortal, though -- this struct itself does not survive a desktop
+	// restart, so spawnOrchestratorSession seeds them from
+	// orchestrator_nudge_history.go's persisted record on every (re)spawn of
+	// the same orchestrator id, and every update writes back through to that
+	// record. A genuinely new orchestrator (no persisted record for its id)
+	// starts at zero, same as it always did.
 	pacingAutoNudgeCount      int
 	pacingLastAutoNudgeAtUnix int64
 	// pacingWhipCount / pacingLastWhipAtUnix are the same cumulative record
@@ -107,6 +113,12 @@ type orchestratorSession struct {
 	// capped still reports having been capped rather than reading identically
 	// to one that never was.
 	pacingLastCappedAtUnix int64
+	// pacingHistoryUnreadable is set when the persisted nudge-history file
+	// exists but could not be parsed at spawn time. It is not itself
+	// cumulative history -- it says the cumulative fields above may be wrong
+	// (silently reset to zero) rather than genuinely zero, so the hover card
+	// can say "unknown" instead of asserting "never nudged".
+	pacingHistoryUnreadable bool
 }
 
 // orchestratorEnvInput is the frontend's env selection for create/update.
@@ -180,40 +192,51 @@ type orchestratorEnvInfo struct {
 // state (orchestrator_pacing.go) the same way: read directly rather than left
 // to the operator to infer from the pane, so a hover can tell a session erun
 // has given up nudging from one that has never needed a nudge. Zero/false for
-// a stopped orchestrator, whose pacing state does not survive past its session.
+// a stopped orchestrator: this live budget genuinely does not survive past
+// its session, and there is nothing mid-cycle to report while nothing runs.
 // NudgeCount/NudgeCapped are the cap's own live budget, reset on every answer —
 // they say only whether the session is *currently* at the cap.
 //
 // AutoNudgeCount/LastAutoNudgeAtUnix and WhipCount/LastWhipAtUnix are the
 // cumulative history behind that budget: how many automatic nudges, and how
 // many explicit operator whips, this session has ever received, and when the
-// last of each went out. Nothing resets these, so a session that answers
-// every nudge still reports having been nudged rather than collapsing back to
-// "never nudged". LastCappedAtUnix is the same treatment for the cap itself:
-// it survives the rearm that clears NudgeCapped, so a session that has since
-// resumed still reports having hit the cap before.
+// last of each went out. No pacing decision resets these, and — unlike the
+// live budget above — they are not lost when the session that reported them
+// goes away: orchestrator_nudge_history.go persists them per orchestrator id
+// and this is restored across a desktop restart or an explicit
+// Stop-then-Start, so a session that answers every nudge still reports
+// having been nudged rather than collapsing back to "never nudged". They do
+// reset to zero for a genuinely new orchestrator (no prior record for its
+// id), including one that reuses a deleted orchestrator's name-derived id.
+// LastCappedAtUnix is the same treatment for the cap itself: it survives the
+// rearm that clears NudgeCapped, so a session that has since resumed still
+// reports having hit the cap before. HistoryUnreadable is true when the
+// persisted record exists but could not be parsed, so the cumulative fields
+// above are an unverified zero rather than an asserted "never nudged" — the
+// frontend renders this case distinctly (orchestratorNudgeSummary.ts).
 type orchestratorInfo struct {
-	ID                  string                `json:"id"`
-	Name                string                `json:"name"`
-	Environments        []orchestratorEnvInfo `json:"environments"`
-	Tenants             []string              `json:"tenants"`
-	Directories         []string              `json:"directories"`
-	SessionID           int                   `json:"sessionId"`
-	Status              string                `json:"status"`
-	Busy                bool                  `json:"busy"`
-	BusyAtUnix          int64                 `json:"busyAtUnix,omitempty"`
-	Transient           bool                  `json:"transient"`
-	ShellRunning        bool                  `json:"shellRunning"`
-	ShellCommand        string                `json:"shellCommand,omitempty"`
-	ShellStartedAtUnix  int64                 `json:"shellStartedAtUnix,omitempty"`
-	NudgeCount          int                   `json:"nudgeCount"`
-	NudgeCapped         bool                  `json:"nudgeCapped"`
-	LastNudgeAtUnix     int64                 `json:"lastNudgeAtUnix,omitempty"`
-	AutoNudgeCount      int                   `json:"autoNudgeCount"`
-	LastAutoNudgeAtUnix int64                 `json:"lastAutoNudgeAtUnix,omitempty"`
-	WhipCount           int                   `json:"whipCount"`
-	LastWhipAtUnix      int64                 `json:"lastWhipAtUnix,omitempty"`
-	LastCappedAtUnix    int64                 `json:"lastCappedAtUnix,omitempty"`
+	ID                     string                `json:"id"`
+	Name                   string                `json:"name"`
+	Environments           []orchestratorEnvInfo `json:"environments"`
+	Tenants                []string              `json:"tenants"`
+	Directories            []string              `json:"directories"`
+	SessionID              int                   `json:"sessionId"`
+	Status                 string                `json:"status"`
+	Busy                   bool                  `json:"busy"`
+	BusyAtUnix             int64                 `json:"busyAtUnix,omitempty"`
+	Transient              bool                  `json:"transient"`
+	ShellRunning           bool                  `json:"shellRunning"`
+	ShellCommand           string                `json:"shellCommand,omitempty"`
+	ShellStartedAtUnix     int64                 `json:"shellStartedAtUnix,omitempty"`
+	NudgeCount             int                   `json:"nudgeCount"`
+	NudgeCapped            bool                  `json:"nudgeCapped"`
+	LastNudgeAtUnix        int64                 `json:"lastNudgeAtUnix,omitempty"`
+	AutoNudgeCount         int                   `json:"autoNudgeCount"`
+	LastAutoNudgeAtUnix    int64                 `json:"lastAutoNudgeAtUnix,omitempty"`
+	WhipCount              int                   `json:"whipCount"`
+	LastWhipAtUnix         int64                 `json:"lastWhipAtUnix,omitempty"`
+	LastCappedAtUnix       int64                 `json:"lastCappedAtUnix,omitempty"`
+	NudgeHistoryUnreadable bool                  `json:"nudgeHistoryUnreadable,omitempty"`
 	// RestartRequired is true when this orchestrator's live session was spawned
 	// with an environment scope that no longer matches its persisted one. A
 	// live Claude Code session resolves --mcp-config once at launch, so nothing
@@ -1125,6 +1148,11 @@ type orchestratorPacingSnapshot struct {
 	// survives a rearm that clears Capped, so a session that has since
 	// resumed still reports having hit the cap before.
 	LastCappedAtUnix int64
+	// HistoryUnreadable is the orchestratorSession field of the same name:
+	// the cumulative fields above are known to be a possibly-wrong zero
+	// rather than a genuine "never nudged", because the persisted record
+	// could not be read back.
+	HistoryUnreadable bool
 }
 
 // orchestratorPacingSnapshotFromSession reads a live session's pacing state,
@@ -1141,34 +1169,52 @@ func orchestratorPacingSnapshotFromSession(session *orchestratorSession) orchest
 		WhipCount:           session.pacingWhipCount,
 		LastWhipAtUnix:      session.pacingLastWhipAtUnix,
 		LastCappedAtUnix:    session.pacingLastCappedAtUnix,
+		HistoryUnreadable:   session.pacingHistoryUnreadable,
+	}
+}
+
+// orchestratorPacingSnapshotFromHistory builds the pacing snapshot for an
+// orchestrator with no live session (ListOrchestrators' "stopped" case) from
+// the persisted record alone. The live-cap fields (NudgeCount/Capped/
+// LastNudgeAtUnix) are correctly left zero: nothing is mid-nudge-cycle when
+// nothing is running.
+func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, unreadable bool) orchestratorPacingSnapshot {
+	return orchestratorPacingSnapshot{
+		AutoNudgeCount:      entry.AutoNudgeCount,
+		LastAutoNudgeAtUnix: entry.LastAutoNudgeAtUnix,
+		WhipCount:           entry.WhipCount,
+		LastWhipAtUnix:      entry.LastWhipAtUnix,
+		LastCappedAtUnix:    entry.LastCappedAtUnix,
+		HistoryUnreadable:   unreadable,
 	}
 }
 
 func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
-		ID:                  id,
-		Name:                name,
-		Environments:        envInfos(envs, envActivity, envUsage),
-		Tenants:             tenantsFromEnvs(envs),
-		Directories:         directoriesFromEnvs(envs),
-		SessionID:           sessionID,
-		Status:              status,
-		Busy:                busy.Busy,
-		BusyAtUnix:          busy.AtUnix,
-		ShellRunning:        shell.Running,
-		ShellCommand:        shell.Command,
-		ShellStartedAtUnix:  shell.StartedAtUnix,
-		Transient:           transient,
-		NudgeCount:          pacing.NudgeCount,
-		NudgeCapped:         pacing.Capped,
-		LastNudgeAtUnix:     pacing.LastNudgeAtUnix,
-		AutoNudgeCount:      pacing.AutoNudgeCount,
-		LastAutoNudgeAtUnix: pacing.LastAutoNudgeAtUnix,
-		WhipCount:           pacing.WhipCount,
-		LastWhipAtUnix:      pacing.LastWhipAtUnix,
-		LastCappedAtUnix:    pacing.LastCappedAtUnix,
-		RestartRequired:     restartRequired,
-		RoleChanged:         roleChanged,
+		ID:                     id,
+		Name:                   name,
+		Environments:           envInfos(envs, envActivity, envUsage),
+		Tenants:                tenantsFromEnvs(envs),
+		Directories:            directoriesFromEnvs(envs),
+		SessionID:              sessionID,
+		Status:                 status,
+		Busy:                   busy.Busy,
+		BusyAtUnix:             busy.AtUnix,
+		ShellRunning:           shell.Running,
+		ShellCommand:           shell.Command,
+		ShellStartedAtUnix:     shell.StartedAtUnix,
+		Transient:              transient,
+		NudgeCount:             pacing.NudgeCount,
+		NudgeCapped:            pacing.Capped,
+		LastNudgeAtUnix:        pacing.LastNudgeAtUnix,
+		AutoNudgeCount:         pacing.AutoNudgeCount,
+		LastAutoNudgeAtUnix:    pacing.LastAutoNudgeAtUnix,
+		WhipCount:              pacing.WhipCount,
+		LastWhipAtUnix:         pacing.LastWhipAtUnix,
+		LastCappedAtUnix:       pacing.LastCappedAtUnix,
+		NudgeHistoryUnreadable: pacing.HistoryUnreadable,
+		RestartRequired:        restartRequired,
+		RoleChanged:            roleChanged,
 	}
 }
 
@@ -1642,7 +1688,12 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eruncommon.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired, roleChanged bool) {
 	info, ok := a.runningOrchestratorInfo(id)
 	if !ok {
-		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, false, false
+		// Not running is not "never nudged": read the persisted cumulative
+		// history the same way ListOrchestrators' stopped branch does, so
+		// saving an edit to a stopped orchestrator does not flash its hover
+		// card back to "Not nudged".
+		entry, _, unreadable := orchestratorNudgeHistoryFor(a.deps.orchestratorNudgeHistoryPath, id)
+		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshotFromHistory(entry, unreadable), false, false
 	}
 	busy = orchestratorBusySnapshot{Busy: info.Busy, AtUnix: info.BusyAtUnix}
 	shell = orchestratorShellSnapshot{Running: info.ShellRunning, Command: info.ShellCommand, StartedAtUnix: info.ShellStartedAtUnix}
@@ -1655,6 +1706,7 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eru
 		WhipCount:           info.WhipCount,
 		LastWhipAtUnix:      info.LastWhipAtUnix,
 		LastCappedAtUnix:    info.LastCappedAtUnix,
+		HistoryUnreadable:   info.NudgeHistoryUnreadable,
 	}
 	// The session already running still holds whatever it was spawned with;
 	// saving a different scope here does not touch it (see
@@ -1990,8 +2042,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			rows:           rows,
 		})
 	}
-	a.sessions[key] = managed
-	a.orchestrators[id] = &orchestratorSession{
+	newSession := &orchestratorSession{
 		id:             id,
 		serial:         serial,
 		conversationID: conversationID,
@@ -2001,6 +2052,10 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		envs:           envs,
 		startedAt:      time.Now(),
 	}
+	a.restoreOrchestratorNudgeHistory(newSession)
+	a.sessions[key] = managed
+	a.orchestrators[id] = newSession
+	pacing := orchestratorPacingSnapshotFromSession(newSession)
 	a.mu.Unlock()
 
 	a.spawnStreamSession(managed)
@@ -2013,7 +2068,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -2080,6 +2135,11 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	if err != nil {
 		configs = nil
 	}
+	// Read once for the whole list rather than once per orchestrator: the
+	// "stopped" branch below has no live session to read cumulative pacing
+	// history from, so it falls back to this persisted record instead of the
+	// zero snapshot a stopped orchestrator otherwise reported unconditionally.
+	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
@@ -2089,7 +2149,8 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		sessionID := 0
 		busy := orchestratorBusySnapshot{}
 		shell := orchestratorShellSnapshot{}
-		pacing := orchestratorPacingSnapshot{}
+		historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
+		pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
 		restartRequired := false
 		roleChanged := false
 		if session := a.orchestrators[config.ID]; session != nil {
@@ -2165,9 +2226,18 @@ func (a *App) stopOrchestratorSession(id string) bool {
 
 // DeleteOrchestrator stops the session if running and removes the persisted
 // definition. The linked environments' sync config is left intact.
+//
+// It also clears this id's persisted nudge history: the id is a
+// name-derived slug (uniqueOrchestratorID), not a uuid, so creating a new
+// orchestrator with the same name after this delete reuses it. Leaving the
+// old record in place would hand that unrelated new orchestrator a nudge
+// history that was never its own.
 func (a *App) DeleteOrchestrator(id string) error {
 	id = strings.TrimSpace(id)
 	a.stopOrchestratorSession(id)
+	if err := clearOrchestratorNudgeHistoryEntry(a.deps.orchestratorNudgeHistoryPath, id); err != nil {
+		log.Printf("erun-app: clear orchestrator nudge history %s: %v", id, err)
+	}
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
 		return err

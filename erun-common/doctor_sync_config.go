@@ -476,5 +476,5 @@ func writeRuntimeYAML(ctx Context, path string, config any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ErrNoUserDataFolder
 	}
-	return writeFileAtomic(path, data, 0o644)
+	return WriteFileAtomic(path, data, 0o644)
 }

@@ -77,3 +77,22 @@ test('a session that resumed after hitting the cap still names that it was cappe
   assert.match(summary, /previously capped .+ ago/);
   assert.notEqual(summary, 'Not nudged');
 });
+
+test('an unreadable persisted history is reported as unavailable, never as "Not nudged"', () => {
+  const summary = orchestratorNudgeSummary(fields({ nudgeHistoryUnreadable: true }), Date.now());
+  assert.equal(summary, 'Nudge history unavailable');
+  assert.notEqual(summary, 'Not nudged');
+});
+
+test('a session with real nudges still reports them even if this restore happened to hit an unreadable file', () => {
+  const now = Date.now();
+  const summary = orchestratorNudgeSummary(
+    fields({
+      autoNudgeCount: 2,
+      lastAutoNudgeAtUnix: Math.floor(now / 1000) - 10,
+      nudgeHistoryUnreadable: true,
+    }),
+    now,
+  );
+  assert.match(summary, /^Nudged 2x, last .+ ago$/);
+});
