@@ -42,6 +42,7 @@ const EXPECTED = {
       name: 'prod',
       type: 'runtime',
       status: 'running',
+      tenantId: undefined,
       kubernetesContext: undefined,
       contextId: undefined,
       runtimeVersion: '1.2.3',

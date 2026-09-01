@@ -10,6 +10,7 @@ import {
   orchestratorNudgeSummary,
 } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
+import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
 import {
   HOVER_CARD_CAPTION_CLASS,
   HOVER_CARD_CAPTION_SIZE_CLASS,
@@ -45,25 +46,7 @@ export function OrchestratorHoverCard({
   orchestrator: OrchestratorInfo;
   children: React.ReactNode;
 }): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  const closeTimer = React.useRef(0);
-  const openNow = React.useCallback(() => {
-    window.clearTimeout(closeTimer.current);
-    setOpen(true);
-  }, []);
-  const closeSoon = React.useCallback(() => {
-    window.clearTimeout(closeTimer.current);
-    // Small grace so moving the pointer from the row onto the card doesn't close it.
-    closeTimer.current = window.setTimeout(() => {
-      setOpen(false);
-    }, 120);
-  }, []);
-  React.useEffect(
-    () => () => {
-      window.clearTimeout(closeTimer.current);
-    },
-    [],
-  );
+  const { open, setOpen, openNow, closeSoon } = useHoverCardOpenState();
 
   const running = orchestrator.status === 'running';
 

@@ -124,12 +124,36 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(card).toBeVisible();
+    // reboot() auto-opens this default-landing env, so Activity renders the
+    // inert muted single line "Idle" -- still a narrow, shared-row
+    // label/value like Version was when this spec was written. Version
+    // itself moved to the `wide` (stacked) variant in erun#1860 so its
+    // longest identifier never wraps mid-token; see the "keeps the wide
+    // Version row stacked" test below for that row's own invariant.
+    await expect(card).toContainText('Idle');
+
+    const geometry = await rowGeometry(card, 'Activity');
+    expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
+  });
+
+  test('the environment card keeps the wide Version row stacked, not baseline-shoved', async ({
+    app,
+  }) => {
+    await app.reboot();
+    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(card).toBeVisible();
     // seedEnvironment pins every seeded env's runtimeversion to 1.0.0, so the
     // Version row always renders the version, never the "Not set" empty case.
     await expect(card).toContainText('1.0.0');
 
+    // Version renders through the `wide` variant (erun#1860) so its longest
+    // identifier gets the card's full content width instead of breaking
+    // mid-token in the narrow shared-row column -- dt and dd col-span both
+    // grid columns and land in separate rows, the same invariant the
+    // orchestrator card's wide Environments row asserts below.
     const geometry = await rowGeometry(card, 'Version');
-    expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
+    expect(geometry.dtBottom).toBeLessThanOrEqual(geometry.ddTop + 1);
   });
 
   test('the orchestrator card aligns a single-line label and value to one baseline', async ({

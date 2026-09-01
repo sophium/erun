@@ -90,7 +90,15 @@ type ListEnvironmentResult struct {
 	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
 	// nothing to annotate for an environment that has never deployed.
 	RuntimeVersionLine *RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
-	RuntimePod         RuntimePodResources `json:"runtimePod,omitempty"`
+	// ErunVersion is the erun version this environment's runtime chart carries
+	// -- see ResolveErunVersion. Nil whenever it cannot be read from config
+	// alone, including whenever RuntimeVersion itself is empty.
+	ErunVersion *ErunVersion `json:"erunVersion,omitempty"`
+	// RuntimeImageLineMismatch is set only when the environment's recorded and
+	// last-observed runtime images name different release lines -- see
+	// EnvConfig.RuntimeImageLineMismatch.
+	RuntimeImageLineMismatch *RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	RuntimePod               RuntimePodResources             `json:"runtimePod,omitempty"`
 	// Sizing is the environment's standing recommendation, derived from the usage
 	// history the in-pod monitor retains. Nil where erun has never observed this
 	// environment — which is every environment seen from a host other than its
@@ -110,6 +118,15 @@ type ListEnvironmentResult struct {
 	IsEffective        bool                         `json:"isEffective,omitempty"`
 	SSH                ListSSHResult                `json:"ssh,omitempty"`
 	AutoStart          *bool                        `json:"autoStart,omitempty"`
+}
+
+// RuntimeImageLineMismatchResult is the list read-model view of
+// EnvConfig.RuntimeImageLineMismatch, present only when it reports a real
+// disagreement -- an environment with no recorded history, or one whose
+// recorded and observed images agree, has nothing to surface.
+type RuntimeImageLineMismatchResult struct {
+	RecordedLine string `json:"recordedLine"`
+	ObservedLine string `json:"observedLine"`
 }
 
 type ListSSHResult struct {
@@ -232,32 +249,35 @@ func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string
 
 func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, effective OpenResult, effectiveErr error, portAllocations map[string]EnvironmentLocalPorts) ListEnvironmentResult {
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
+	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
 	return ListEnvironmentResult{
-		Name:                env.Name,
-		Type:                env.ResolvedType(),
-		APIURL:              APIURLForListEnvironment(tenant, localPorts),
-		KubernetesContext:   strings.TrimSpace(env.KubernetesContext),
-		CloudProviderAlias:  strings.TrimSpace(env.CloudProviderAlias),
-		RepoPath:            env.EffectiveLocalRepoPath(),
-		LocalRepoPath:       strings.TrimSpace(env.LocalRepoPath),
-		ContainerRegistries: EffectiveEnvironmentContainerRegistries(env),
-		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
-		RuntimeVersionLine:  listRuntimeVersionLine(tenant.Name, env),
-		RuntimePod:          env.RuntimePod,
-		Sizing:              EnvironmentRuntimeSizing(tenant.Name, env),
-		ManagedCloud:        env.ManagedCloud,
-		DisableBuildScript:  env.DisableBuildScript,
-		PlatformAccount:     env.PlatformAccount,
-		AITool:              strings.TrimSpace(env.AITool),
-		Claude:              env.Claude,
-		Idle:                env.Idle,
-		Deploy:              env.Deploy,
-		IsActive:            listEnvironmentIsActive(store, env),
-		LocalPorts:          localPorts,
-		IsDefault:           env.Name == tenant.DefaultEnvironment,
-		IsEffective:         effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
-		SSH:                 listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
-		AutoStart:           copyAutoStartPtr(env.AutoStart),
+		Name:                     env.Name,
+		Type:                     env.ResolvedType(),
+		APIURL:                   APIURLForListEnvironment(tenant, localPorts),
+		KubernetesContext:        strings.TrimSpace(env.KubernetesContext),
+		CloudProviderAlias:       strings.TrimSpace(env.CloudProviderAlias),
+		RepoPath:                 env.EffectiveLocalRepoPath(),
+		LocalRepoPath:            strings.TrimSpace(env.LocalRepoPath),
+		ContainerRegistries:      EffectiveEnvironmentContainerRegistries(env),
+		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
+		RuntimeVersionLine:       runtimeVersionLine,
+		ErunVersion:              ResolveErunVersion(env, runtimeVersionLine),
+		RuntimeImageLineMismatch: listRuntimeImageLineMismatch(env),
+		RuntimePod:               env.RuntimePod,
+		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
+		ManagedCloud:             env.ManagedCloud,
+		DisableBuildScript:       env.DisableBuildScript,
+		PlatformAccount:          env.PlatformAccount,
+		AITool:                   strings.TrimSpace(env.AITool),
+		Claude:                   env.Claude,
+		Idle:                     env.Idle,
+		Deploy:                   env.Deploy,
+		IsActive:                 listEnvironmentIsActive(store, env),
+		LocalPorts:               localPorts,
+		IsDefault:                env.Name == tenant.DefaultEnvironment,
+		IsEffective:              effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
+		SSH:                      listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
+		AutoStart:                copyAutoStartPtr(env.AutoStart),
 	}
 }
 
@@ -271,6 +291,16 @@ func listRuntimeVersionLine(tenant string, env EnvConfig) *RuntimeVersionLine {
 	}
 	line := ResolveRuntimeVersionLine(tenant, env)
 	return &line
+}
+
+// listRuntimeImageLineMismatch wraps EnvConfig.RuntimeImageLineMismatch, only
+// surfacing a result when it reports a real disagreement.
+func listRuntimeImageLineMismatch(env EnvConfig) *RuntimeImageLineMismatchResult {
+	recordedLine, observedLine, mismatched := env.RuntimeImageLineMismatch()
+	if !mismatched {
+		return nil
+	}
+	return &RuntimeImageLineMismatchResult{RecordedLine: recordedLine, ObservedLine: observedLine}
 }
 
 // EnvironmentRuntimeSizing attaches the standing recommendation when there is

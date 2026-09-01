@@ -3,6 +3,12 @@ import { TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
+import {
+  type ErunVersionSummary,
+  summarizeErunVersion,
+  summarizeRuntimeVersionLine,
+} from '@/app/environmentVersionLines';
+import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import {
   HOVER_CARD_CAPTION_CLASS,
@@ -14,6 +20,11 @@ import {
 } from '@/components/app/Sidebar.HoverCardRow';
 import type { UISelection, UIWorkingIssue } from '@/types';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
+import type {
+  UIErunVersion,
+  UIRuntimeImageLineMismatch,
+  UIRuntimeVersionLine,
+} from '@/uiRuntimeVersionLineTypes';
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
@@ -48,6 +59,9 @@ export function EnvHoverCard({
   isLocal,
   isHost,
   runtimeVersion,
+  runtimeVersionLine,
+  erunVersion,
+  runtimeImageLineMismatch,
   activityLabel,
   indicator,
   usage,
@@ -60,32 +74,18 @@ export function EnvHoverCard({
   isLocal: boolean;
   isHost: boolean;
   runtimeVersion: string;
+  runtimeVersionLine?: UIRuntimeVersionLine;
+  erunVersion?: UIErunVersion;
+  runtimeImageLineMismatch?: UIRuntimeImageLineMismatch;
   activityLabel: string;
   indicator: EnvironmentIndicator;
   usage: UIEnvironmentUsageSnapshot | undefined;
   children: React.ReactNode;
 }): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  const closeTimer = React.useRef(0);
-  const openNow = React.useCallback(() => {
-    window.clearTimeout(closeTimer.current);
-    setOpen(true);
-  }, []);
-  const closeSoon = React.useCallback(() => {
-    window.clearTimeout(closeTimer.current);
-    // Small grace so moving the pointer from the row onto the card doesn't close it.
-    closeTimer.current = window.setTimeout(() => {
-      setOpen(false);
-    }, 120);
-  }, []);
-  React.useEffect(
-    () => () => {
-      window.clearTimeout(closeTimer.current);
-    },
-    [],
-  );
+  const { open, setOpen, openNow, closeSoon } = useHoverCardOpenState();
 
   const issue = useWorkingIssue(selection, open);
+  const erunVersionSummary = summarizeErunVersion(runtimeVersion.trim() !== '', erunVersion);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -124,14 +124,13 @@ export function EnvHoverCard({
           </div>
         </div>
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
-          <HoverCardRow label="Version">
-            {runtimeVersion ? (
-              <span className="font-mono tabular-nums">{runtimeVersion}</span>
-            ) : (
-              <Muted>Not set</Muted>
-            )}
-          </HoverCardRow>
-          <HoverCardRow label="Working on">
+          <EnvVersionRows
+            runtimeVersion={runtimeVersion}
+            runtimeVersionLine={runtimeVersionLine}
+            erunVersionSummary={erunVersionSummary}
+            runtimeImageLineMismatch={runtimeImageLineMismatch}
+          />
+          <HoverCardRow label="Working on" wide>
             <WorkingOn issue={issue} />
           </HoverCardRow>
           <HoverCardRow label="Activity">
@@ -146,8 +145,103 @@ export function EnvHoverCard({
   );
 }
 
+// EnvVersionRows renders the card's version-related rows: the runtime
+// version with its release line named, the erun version when it can be told
+// apart from the runtime version, and a recorded/observed line mismatch
+// warning when there is one. Split out of EnvHoverCard to keep that
+// component's own body within the line budget.
+function EnvVersionRows({
+  runtimeVersion,
+  runtimeVersionLine,
+  erunVersionSummary,
+  runtimeImageLineMismatch,
+}: {
+  runtimeVersion: string;
+  runtimeVersionLine: UIRuntimeVersionLine | undefined;
+  erunVersionSummary: ErunVersionSummary | null;
+  runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
+}): React.ReactElement {
+  return (
+    <>
+      {/* wide: a version is the card's longest literal identifier, and the
+          narrow value column shared with the label breaks it mid-token. */}
+      <HoverCardRow label="Version" wide>
+        <RuntimeVersionState runtimeVersion={runtimeVersion} line={runtimeVersionLine} />
+      </HoverCardRow>
+      {erunVersionSummary && (
+        <HoverCardRow label="Erun version" wide>
+          <ErunVersionState summary={erunVersionSummary} />
+        </HoverCardRow>
+      )}
+      {runtimeImageLineMismatch && (
+        <HoverCardRow label="Line mismatch" wide>
+          <LineMismatchWarning mismatch={runtimeImageLineMismatch} />
+        </HoverCardRow>
+      )}
+    </>
+  );
+}
+
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {
   return <HoverCardMuted>{children}</HoverCardMuted>;
+}
+
+// RuntimeVersionState names the release line beside the runtime-version
+// number, the same convention `erun list` already uses (erun-cli's
+// runtimeVersionLabel) -- a bare number reads as an erun version even when it
+// names a tenant's own <tenant>-devops line.
+function RuntimeVersionState({
+  runtimeVersion,
+  line,
+}: {
+  runtimeVersion: string;
+  line: UIRuntimeVersionLine | undefined;
+}): React.ReactElement {
+  const summary = summarizeRuntimeVersionLine(runtimeVersion, line);
+  if (!summary.hasVersion) {
+    return <Muted>Not set</Muted>;
+  }
+  return (
+    <div className="grid gap-0.5">
+      <span className="font-mono tabular-nums">{summary.version}</span>
+      {summary.caption && <span className={HOVER_CARD_CAPTION_CLASS}>{summary.caption}</span>}
+    </div>
+  );
+}
+
+// ErunVersionState is the erun version this environment's runtime chart
+// carries, distinct from the runtime-version row above whenever the running
+// image itself rides a tenant's own release line. Coincides with the runtime
+// version whenever both are confirmed on erun's own line, in which case this
+// says so rather than repeating an identical-looking number unexplained.
+function ErunVersionState({ summary }: { summary: ErunVersionSummary }): React.ReactElement {
+  if (!summary.known) {
+    return <Muted>Undetermined — no chart recorded to confirm it</Muted>;
+  }
+  if (summary.sameAsRuntime) {
+    return <Muted>Same as runtime version</Muted>;
+  }
+  return <span className="font-mono tabular-nums">{summary.version}</span>;
+}
+
+// LineMismatchWarning surfaces EnvConfig.RuntimeImageLineMismatch: the
+// environment's recorded and last-observed runtime images name different
+// release lines -- the case an operator most needs to see, since it means a
+// redeploy would pull a different line than what is actually running.
+function LineMismatchWarning({
+  mismatch,
+}: {
+  mismatch: UIRuntimeImageLineMismatch;
+}): React.ReactElement {
+  return (
+    <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+      <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
+      <span>
+        Recorded {mismatch.recordedLine} line, last observed running {mismatch.observedLine} line —
+        redeploy to realign.
+      </span>
+    </span>
+  );
 }
 
 // ActivityState reports the desktop's own in-flight command when there is one,

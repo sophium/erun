@@ -522,6 +522,46 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
   );
 }
 
+// seedEnvironmentWithRuntimeVersions writes an inert local-agent env like
+// seedEnvironment, but with the caller's own runtime-version fields instead
+// of the fixed 1.0.0 default -- for specs exercising the env hover card's
+// version rows (release-line attribution, the erun-version row, a
+// recorded/observed line mismatch), which need
+// runtimeversion/runtimerunningimage/runtimeimage/runtimechart values
+// seedEnvironment's fixed default cannot express.
+export function seedEnvironmentWithRuntimeVersions(
+  tenant: string,
+  environment: string,
+  versions: {
+    runtimeVersion?: string;
+    runtimeRunningImage?: string;
+    runtimeImage?: string;
+    runtimeChart?: string;
+  },
+): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  const lines = [
+    `name: ${environment}`,
+    `repopath: ${repoDir()}`,
+    'kubernetescontext: test-context',
+    'containerregistry: registry.example/test',
+    `runtimeversion: ${versions.runtimeVersion ?? '1.0.0'}`,
+    'type: local-agent',
+    'aitool: sh',
+  ];
+  if (versions.runtimeRunningImage) {
+    lines.push(`runtimerunningimage: ${versions.runtimeRunningImage}`);
+  }
+  if (versions.runtimeImage) {
+    lines.push(`runtimeimage: ${versions.runtimeImage}`);
+  }
+  if (versions.runtimeChart) {
+    lines.push(`runtimechart: ${versions.runtimeChart}`);
+  }
+  writeConfigFile(path.join(envDir, 'config.yaml'), lines.join('\n') + '\n');
+}
+
 // seedRuntimeEnvironment writes an inert runtime-type env config. A runtime env
 // is RemoteRepo (its worktree lives outside the local filesystem), so
 // ResolveDeployableComponents offers the publishable platform components by

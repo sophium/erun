@@ -72,3 +72,63 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveErunVersion pins the environment hover card's second version
+// row: the erun version stated by RuntimeChart, distinct from a
+// RuntimeVersion that may belong to a tenant's own release line -- and never
+// guessed when config alone cannot say.
+func TestResolveErunVersion(t *testing.T) {
+	cases := []struct {
+		name        string
+		env         EnvConfig
+		runtimeLine *RuntimeVersionLine
+		want        *ErunVersion
+	}{
+		{
+			name: "never deployed: no runtime version to annotate",
+			env:  EnvConfig{},
+			want: nil,
+		},
+		{
+			name:        "stock image confirmed on erun's own line, no chart override: coincides with runtime version",
+			env:         EnvConfig{RuntimeVersion: "1.0.239"},
+			runtimeLine: &RuntimeVersionLine{Line: "erun"},
+			want:        &ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
+		},
+		{
+			name:        "tenant's own line, chart explicitly states erun's version",
+			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops:1.0.239"},
+			runtimeLine: &RuntimeVersionLine{Line: "petios"},
+			want:        &ErunVersion{Version: "1.0.239"},
+		},
+		{
+			name:        "no resolved image recorded, chart empty: never guess the pairing",
+			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350"},
+			runtimeLine: &RuntimeVersionLine{Undetermined: true},
+			want:        nil,
+		},
+		{
+			name: "runtime version set but the line was never resolved at all: never guess",
+			env:  EnvConfig{RuntimeVersion: "1.0.239"},
+			want: nil,
+		},
+		{
+			name:        "chart stated with no version of its own: cannot read a number from config alone",
+			env:         EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops"},
+			runtimeLine: &RuntimeVersionLine{Line: "petios"},
+			want:        nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveErunVersion(tc.env, tc.runtimeLine)
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("ResolveErunVersion() = %+v, want %+v", got, tc.want)
+			}
+			if got != nil && *got != *tc.want {
+				t.Fatalf("ResolveErunVersion() = %+v, want %+v", *got, *tc.want)
+			}
+		})
+	}
+}
