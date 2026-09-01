@@ -1095,6 +1095,23 @@ When a job's process ends, the supervisor checks the job store for any non-[hand
 
 `job status`/`job await` render `gate-incomplete` as `gate-incomplete <exitCode>: <name> (<reason>)`, and append `, <startedJobFailed text>` to an otherwise-`exited`/`abandoned` line when `startedJobFailed` is set.
 
+### Bounded reinvocation for an agent job {#job-reinvocation}
+
+`gate-incomplete`/`startedJobFailed` tell an orchestrator polling from outside the truth, but a one-shot `--agent` run's own process has already exited by the time either is recorded — nothing wakes it to act on what it started. For an agent job specifically (never a plain command job, and never for a plain nonzero exit with no started work involved), erun closes that gap itself: before finalizing `gate-incomplete` or `startedJobFailed`, it resumes the same tool session with the concrete outcome, giving the agent a real turn to fix it, verify it, or explain why it cannot be resolved.
+
+This is a **resumption of the same conversation**, not a fresh, context-free retry: `claude -p --resume <session-id>` / `codex exec resume <thread-id>` carry the tool's own prior context forward, verified live for Claude (a fact told in one process was correctly recalled from a wholly separate resumed process). It only runs when a session id was actually captured from the tool's own event stream (`session_id` on every Claude stream-json event, `thread_id` on Codex's `thread.started` event) — an agent job with no captured session id gets the plain, unresumed outcome exactly as before this existed.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `reinvocationCount` | integer | How many bounded follow-up turns already ran for this job. `0` for a command job and for an agent job that never needed one. |
+
+Two independent caps bound the chain, both on the job's own record so neither can be extended by anything a reinvoked turn itself starts:
+
+- A fixed count, `EnvironmentJobMaxReinvocations` (default `2`), overridable per supervisor process via `ERUN_JOB_MAX_REINVOCATIONS`.
+- A wall-clock budget across the whole chain, `EnvironmentJobReinvocationBudget` (default `30m`), overridable via `ERUN_JOB_REINVOCATION_BUDGET` (a `time.ParseDuration` string), struck once before the first turn rather than reset per turn.
+
+Once either cap is reached, the job finalizes exactly as it would without this feature — `gate-incomplete` or `startedJobFailed`, `succeeded: false` — except `reason` now says so explicitly (`"... (already resumed N time(s) without a clean outcome; the reinvocation bound is exhausted)"`), distinct from a job that never got a reinvocation at all. `job status` also appends `, resumed N/M time(s)` to the rendered line for any job with `reinvocationCount > 0`, running or finished.
+
 ### Deliberate handoff: `--handoff` {#job-handoff}
 
 Not every job a job starts is meant to be waited for. `job start --handoff` marks the new job as deliberately outliving whatever starts it — a release, a long render, anything an agent kicks off on purpose before ending its own turn. A handoff job is excluded from its parent's finish check entirely: it is never counted toward `gate-incomplete`, and its own eventual outcome (success or failure) is never folded into `startedJobFailed`. Without `--handoff`, *every* nested `job start` defaults into the wait-then-report behavior above, which is correct for a gate but wrong for work genuinely meant to keep running past the caller's own turn.
