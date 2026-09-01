@@ -182,6 +182,90 @@ func kubectlGetPodArgs(podName string) []string {
 	return []string{"get", "pod", strings.TrimSpace(podName), "-o", "json"}
 }
 
+// kubectlDeploymentGetExecutionOperation is the ExecutionModeFor/
+// ExecutionModeReport key for the `kubectl get deployment <name> -o name`
+// existence check (DeploymentPresent below), which ensureAPIPortForward
+// (erun-cli/cmd/api_port_forward.go) runs ahead of every API port-forward to
+// decide whether the tenant's `<tenant>-api` deployment is present before
+// forwarding to it. Picked next after kubectl-pod-get for the identical
+// narrow shape -- a single resource kind (Deployment), a single Get-by-name
+// call, `-o name`, no streaming, no mutation -- and because it is a genuinely
+// new resource kind, distinct from the richer `-o json` deployment reads
+// CheckKubernetesDeployment (deploy.go) performs, which stay subprocess-only:
+// those also retry across kubeconfig contexts and diff live container specs
+// against expected settings, a materially different problem from this bare
+// existence check.
+//
+// This is also the first switchable call site whose caller lives outside
+// erun-common (erun-cli), so DeploymentPresent and KubectlGetDeploymentArgs
+// are exported: the CLI needs the exact same argv for its own dry-run trace,
+// and needs to invoke the dispatcher directly since currentExecutionMode is
+// package-private.
+const kubectlDeploymentGetExecutionOperation = "kubectl-deployment-get"
+
+// KubectlGetDeploymentArgs is the single source of the `kubectl get
+// deployment <name> -o name` argv, shared by ensureAPIPortForward (which
+// traces it for both dry-run and audit purposes) and
+// defaultDeploymentPresent (which also executes it as a subprocess), so the
+// dry-run trace can never drift from either execution path.
+func KubectlGetDeploymentArgs(contextName, namespace, name string) []string {
+	args := make([]string, 0, 7)
+	if contextName = strings.TrimSpace(contextName); contextName != "" {
+		args = append(args, "--context", contextName)
+	}
+	if namespace = strings.TrimSpace(namespace); namespace != "" {
+		args = append(args, "--namespace", namespace)
+	}
+	return append(args, "get", "deployment", strings.TrimSpace(name), "-o", "name")
+}
+
+// DeploymentPresent dispatches to the subprocess or library path per the
+// kubectl-deployment-get execution mode (see execution_mode.go), distinguishing
+// "the deployment is not there" from "the answer is unknown" either way, so a
+// cluster erun cannot read never passes for a deployment that is actually
+// present.
+func DeploymentPresent(contextName, namespace, name string) (bool, error) {
+	if currentExecutionMode(kubectlDeploymentGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryDeploymentPresent(contextName, namespace, name)
+	}
+	return defaultDeploymentPresent(contextName, namespace, name)
+}
+
+// defaultDeploymentPresent is the subprocess-backed path DeploymentPresent
+// dispatches to by default.
+func defaultDeploymentPresent(contextName, namespace, name string) (bool, error) {
+	output, err := Command("kubectl", KubectlGetDeploymentArgs(contextName, namespace, name)...).CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	message := strings.ToLower(strings.TrimSpace(string(output)))
+	if strings.Contains(message, "notfound") || strings.Contains(message, "not found") || strings.Contains(message, "no resources found") {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %w: %s", name, namespace, contextName, err, strings.TrimSpace(string(output)))
+}
+
+// libraryDeploymentPresent is the library-backed alternative to
+// defaultDeploymentPresent, resolving the same existence question via
+// k8s.io/client-go instead of shelling out to kubectl.
+func libraryDeploymentPresent(contextName, namespace, name string) (bool, error) {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	clientset, err := kubernetesClientsetForContext(contextName)
+	if err != nil {
+		return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+	}
+	_, err = clientset.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+}
+
 // libraryGetPod is the library-backed alternative to shelling out to
 // `kubectl get pod <name> -o json`, resolving the same pod via k8s.io/client-go
 // instead. It takes no context or namespace: both current call sites read

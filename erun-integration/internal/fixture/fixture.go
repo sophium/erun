@@ -1911,6 +1911,14 @@ type KubectlDeployedStubSpec struct {
 	// the forwards the open flow starts after its own deploy. Real-run
 	// open scenarios use it to drive the deploy-then-forward path.
 	DeploymentNotFound bool
+	// FailingArgvSubstring, when non-empty, fails loudly (exit 1, a
+	// distinctive stderr message naming the substring) for any kubectl
+	// invocation whose argv contains it, before falling through to the rest
+	// of this stub's arms. A library-execution-mode real-run scenario uses
+	// this to prove a specific kubectl call was never reached as a
+	// subprocess fallback -- e.g. "get deployment team-api -o name" for the
+	// kubectl-deployment-get switch.
+	FailingArgvSubstring string
 }
 
 // StubKubectlDeployed writes a kubectl stub that reports the named deployment as
@@ -2039,6 +2047,11 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 	// Forward-slash every path embedded into the sh stub body so Git Bash /
 	// Cygwin sh on Windows reads them as paths, not escape sequences (ToSlash is
 	// a no-op on Unix). See the rationale in StubKubectlDeployed.
+	if spec.FailingArgvSubstring != "" {
+		arms.WriteString(`  *"` + spec.FailingArgvSubstring + `"*)` + "\n")
+		arms.WriteString(`    printf '%s\n' "fell through to the kubectl subprocess for the ` + spec.FailingArgvSubstring + ` check" >&2` + "\n")
+		arms.WriteString(`    exit 1 ;;` + "\n")
+	}
 	if len(spec.ExecExitCodes) > 0 {
 		counterFile := filepath.ToSlash(filepath.Join(stubsDir, "exec-calls"))
 		arms.WriteString(`  *" exec -it "*)` + "\n")
