@@ -218,6 +218,38 @@ If you don't — the pairing just drifted — realign the persisted `runtimeimag
 erun doctor <tenant> <env>
 ```
 
+## An agent environment can fetch but can't push a branch or use `gh` {#git-push-access}
+
+**Symptoms:** a remote-agent (or runtime) environment clones, builds, and tests fine — `make check` or the equivalent gate goes green — but the very last step of the work fails:
+
+```
+$ gh auth status
+You are not logged into any GitHub hosts. To log in, run: gh auth login
+
+$ git push -u origin my-branch
+fatal: could not read Username for 'https://github.com': No such device or address
+```
+
+If an agent tries to fix this itself by running `gh auth login`, it can burn many minutes stuck in gh's interactive device-code flow (a code, a URL, a 900-second poll) with nobody able to open the browser to complete it, then exit having done no work.
+
+**Diagnose:**
+
+```bash
+erun doctor <tenant> <env>       # reports fetch and push as independent verdicts
+```
+
+**Cause:** a public GitHub repository fetches anonymously, so cloning and reading succeed with no credential at all — the environment looks completely healthy for the entire life of a piece of work. Pushing (and using `gh` for anything — reading an issue, opening a PR) needs a credential, and a newly created remote-agent environment has none: no `gh` session, no `GH_TOKEN`/`GITHUB_TOKEN`, no SSH key the remote host accepts. Provisioning this is deliberately manual, the same as an operator's AWS identity, but for a full git/gh identity rather than a narrowly-scoped token — nothing copies a live credential into the pod automatically.
+
+**Fix:** from an interactive shell opened with `erun open <tenant> <env>`, authenticate once:
+
+```bash
+gh auth login -h github.com
+# or, to skip gh's browser flow entirely:
+gh auth login -h github.com --with-token < token-file
+```
+
+Run this only from that interactive shell — never from an unattended agent run, which cannot complete gh's device-code/browser flow. The credential persists on the environment's home volume across restarts, so this is a one-time setup per environment. See [`erun doctor` · git push access](/cli/doctor#what-it-checks).
+
 ## AWS calls fail with `Invalid endpoint: https://sts..amazonaws.com` {#aws-region-empty}
 
 **Symptoms:** every AWS call in the environment fails with an endpoint that has an empty region in it, and passing `--region <region>` by hand makes the same call succeed.

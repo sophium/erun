@@ -1223,6 +1223,75 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_aws_alias_env_plans_host_credential_check", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_agent_env_plans_git_push_access_check", func(t *testing.T) {
+		// A remote-agent env's project checkout lives inside the pod, so an
+		// environment can look completely healthy (clone, build, test all work
+		// against a public repo) and only discover it cannot push at the very
+		// end of real work. doctor reads back fetch/push access so that
+		// asymmetry surfaces up front instead. The plan must show the exec and
+		// the read-only script -- it must never invoke `gh auth
+		// login`/`refresh`/`switch`, which would start gh's interactive
+		// device-code/browser flow and hang forever in a headless pod.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_remote_agent_env_plans_git_push_access_check", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_fetch_works_push_credential_missing", func(t *testing.T) {
+		// A public GitHub repository fetches anonymously for the whole life of
+		// a piece of work, so this is the exact asymmetry that hides until the
+		// moment something tries to push. doctor must name it plainly and point
+		// at a non-interactive fix (never suggesting `gh auth login` from an
+		// unattended run).
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "https://github.com/acme/example.git", "1", "0", "0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_fetch_works_push_credential_missing", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_git_push_credential_configured", func(t *testing.T) {
+		// The healthy verdict: a resolved gh session (or SSH key / token) reads
+		// as "credential configured" and offers no remedy.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "https://github.com/acme/example.git", "1", "1", "1")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_git_push_credential_configured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_fetch_also_fails", func(t *testing.T) {
+		// The other half: a private remote with no credential at all can't
+		// even fetch. Fetch and push are reported as independent verdicts.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "git@github.com:acme/private.git", "0", "0", "0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_fetch_also_fails", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_reports_runtime_image_registry_mismatch", func(t *testing.T) {
 		// #1328: a runtimeimage pinned to one registry (an ECR build host)
 		// while runtimeregistry names another (the deploy/chart registry)
@@ -1900,6 +1969,25 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
 		`  *"docker builder prune"*) printf '%s\n' 'Total: 3GB' ;;`,
 		`  *"docker container prune"*) printf '%s\n' 'Total reclaimed space: 1GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlWithGitPushAccess answers the git-push-access read script
+// with a fixed remote/fetch/gh-auth/push-credential verdict — the decision
+// input dry-run cannot supply — while keeping every other doctor arm intact.
+// Matched on the push_credential key, which only that script prints.
+func stubDoctorKubectlWithGitPushAccess(t *testing.T, stubsDir, remote, fetchOK, ghAuthenticated, pushCredential string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"push_credential="*) printf 'remote=` + remote + `\nfetch_ok=` + fetchOK + `\ngh_authenticated=` + ghAuthenticated + `\npush_credential=` + pushCredential + `\n' ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
 		`esac`,
 		`exit 0`,
 	}, "\n")

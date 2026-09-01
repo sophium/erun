@@ -565,6 +565,18 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 | `ssh.keypair` | `~/.ssh/id_ed25519` and `.pub` exist. | Offers `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''`. |
 | `ssh.codecommit_key` | When the marker recorded a CodeCommit host: `~/.ssh/id_rsa` (RSA, not ed25519) is registered with the IAM user. | Offers to generate and upload via `aws iam upload-ssh-public-key`. |
 
+### Git push access check
+
+Gating: runs only when `EnvConfig.RemoteWorktree()` is true (`remote-agent` or `runtime` env types) — the project checkout lives inside the pod for those types, so a credential gap there is invisible to anything running on the operator's own machine. A `local-agent` or `host` env is skipped entirely: its checkout lives on the operator's machine, which already carries their own git/gh credentials.
+
+The check execs a single read-only shell script into the runtime pod (`kubectl exec deployment/<release> -- /bin/sh -lc '<script>'`) that: resolves `origin` via `git remote get-url origin`; runs `git ls-remote --exit-code <remote> HEAD` to test an anonymous fetch; runs `gh auth status -h <host>` (never `gh auth login`, `gh auth refresh`, or `gh auth switch`) to test whether a `gh` session is configured for the remote's host; checks `GH_TOKEN`/`GITHUB_TOKEN`; and, for an SSH remote with none of the above, runs `ssh -o BatchMode=yes -T git@<host>` and greps its stderr for `successfully authenticated`. Every one of these is read-only and side-effect-free, so the check can never itself start gh's interactive device-code/browser flow, which cannot complete headlessly — there is no browser, and no human at a prompt, inside an agent pod.
+
+Report shape (printed under `== Git push access ==`): `Remote` (the resolved `origin` URL, or the section is omitted entirely when there is no checkout or no `origin`), `Fetch` (`ok` or `FAILED`), `Push` (`credential configured (...)` or `NO CREDENTIAL — <remedy>`). The remedy text always names the same non-interactive-safe fix: authenticate once from an interactive shell opened with `erun open <tenant> <environment>` (`gh auth login -h <host>`, or `gh auth login -h <host> --with-token < token-file` to skip gh's browser flow entirely), and never attempt it from an unattended agent run. Provisioning this credential is deliberately manual — the same model as `~/.aws/credentials`' `erun-host` profile, but for a full `gh`/git identity rather than a narrowly-scoped registry token, so erun does not copy a live operator credential into a shared, ephemeral pod on the environment's behalf.
+
+Reading this check requires the runtime pod, same as host AWS credentials: when the pod isn't reachable, `doctor` reports `could not read` for it instead of aborting and continues the rest of the run.
+
+Exposed identically on both transports: the CLI's plain-text report and the [MCP `doctor` tool](/mcp/overview#doctor)'s output carry the same `== Git push access ==` section, both driven by the same `eruncommon.InspectGitPushAccess`.
+
 ### Deploy recovery actions {#deploy-recovery-actions}
 
 After the read-only deploy diagnosis (helm release status + runtime pods), `doctor` can run two recovery actions that **mutate the live release**. They are **alternative** fixes for different failure modes, not additive steps — clearing a pending lock leaves the release at its last deployed revision, so a rollback run straight after would step back a further revision. `--clear-pending-helm` and `--rollback` are therefore mutually exclusive; passing both aborts with `--clear-pending-helm and --rollback are alternative recoveries; pass only one` (exit 1, nothing runs).

@@ -183,6 +183,9 @@ func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx 
 	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
 		return err
 	}
+	if err := writeDoctorGitPushAccess(runCtx, target, req); err != nil {
+		return err
+	}
 	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
 		return err
 	}
