@@ -25,7 +25,9 @@ The **Environments** panel is the first resource this covers. Pick a tenant in t
 
 ## Administering quota
 
-The **Tenants** panel's per-tenant **Set quota** action already let you write another tenant's environment-count cap, per-environment resource ceiling, and aggregate tenant-wide budget — but until now that dialog opened blank, so you had to already know (or guess) the target tenant's current caps before typing new ones, since a quota update always fully replaces the row. The dialog now reads the target tenant's current quota first and starts you from those values, the same as any edit form should. This is a separate control from the scope selector above — it targets whichever tenant's row you clicked, not whichever tenant the selector is pointed at — and the read-only **Quota** panel on your own overview page still shows only your own tenant's caps regardless of scope; widening that panel to the selected scope is a later increment.
+The **Tenants** panel's per-tenant **Set quota** action lets you write another tenant's environment-count cap, per-environment resource ceiling, and aggregate tenant-wide budget. That dialog reads the target tenant's current quota first and starts you from those values, since a quota update always fully replaces the row. This is a separate control from the scope selector above — it targets whichever tenant's row you clicked, not whichever tenant the selector is pointed at.
+
+The read-only **Quota** panel on your overview page, by contrast, *is* wired to the scope selector: point it at a `COMPANY` tenant and the panel's caps swap to that tenant's own, with a badge next to the **Quota** heading naming which tenant you're looking at — the same "never render another tenant's row unlabeled" rule the Environments panel's per-row badges follow. It defaults to your own tenant, shown with no badge, exactly as it always has.
 
 ## What's audited
 
@@ -36,7 +38,7 @@ Every request you make while scoped to another tenant still carries your own ide
 - It does not grant any permission you don't already have — a `COMPANY`-tenant Operator never sees the scope selector at all, the same OPERATIONS-only gate the [Users/Tenants/Org settings views](/collaboration/identity-administration) already use.
 - It does not let you act *as* the other tenant's own Operators — you're still your own identity, administering another tenant's resources with your own OPERATIONS-tenant reach.
 - Resources without a supported cross-tenant capability aren't affected: builds, comments, reviews, releases, and audit events stay scoped to your own tenant regardless of the scope selector's setting (a deliberate boundary, not an oversight — see [Agent reference · erun API protocol](/agent-reference/api-protocol#post-v1environments) for which resources do support it).
-- The quota read/write pair above is deliberately not wired to the scope selector — it always targets whichever tenant's row you opened the dialog from, never "whichever tenant the selector currently shows."
+- The **Set quota** write dialog above is deliberately not wired to the scope selector — it always targets whichever tenant's row you opened the dialog from, never "whichever tenant the selector currently shows." The read-only Quota panel is the opposite: it *is* wired to the selector, as described above.
 
 ## Where next
 
