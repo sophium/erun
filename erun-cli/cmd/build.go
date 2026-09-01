@@ -38,8 +38,14 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 			"can only ever run one architecture stops paying for an emulated build of the other; " +
 			"the project's .erun/config.yaml environments.<env>.docker.platforms pins the same " +
 			"choice permanently. A release build always publishes every platform and refuses " +
-			"--platform, since a released artifact must be deployable anywhere.",
-		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy\n  erun build --platform linux/amd64",
+			"--platform, since a released artifact must be deployable anywhere.\n\n" +
+			"--component selects one of a monorepo's declared .erun/config.yaml components " +
+			"entries — a project with more than one independent docker/k8s root (e.g. " +
+			"harnesses/<name>/{docker,k8s}) declares one entry per root, and this builds only " +
+			"the selected root's images. It auto-selects when exactly one entry is declared and " +
+			"is unused (falls through to paths.docker/convention) when the project declares no " +
+			"components at all.",
+		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy\n  erun build --platform linux/amd64\n  erun build --component ingest-worker",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -176,8 +182,10 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			"manifest and, for the runtime image, the runtime chart alongside it.\n\n" +
 			"--build is an operator shortcut that builds the current source first and then " +
 			"pushes the version that build mints, so you don't have to copy the snapshot " +
-			"version out of `erun build` by hand. It is mutually exclusive with --version.",
-		Example:       "  erun push --version 1.2.3-snapshot-20260101010101\n  erun push --build",
+			"version out of `erun build` by hand. It is mutually exclusive with --version.\n\n" +
+			"--component selects one of a monorepo's declared .erun/config.yaml components " +
+			"entries, the same selector `erun build` takes; see `erun build --help`.",
+		Example:       "  erun push --version 1.2.3-snapshot-20260101010101\n  erun push --build\n  erun push --version 1.2.3 --component ingest-worker",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -322,6 +330,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
+	cmd.Flags().StringVar(&target.Component, "component", "", "Select a monorepo component declared under .erun/config.yaml components.<name> (auto-selects the lone entry if only one is declared; unused when the project declares none)")
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	_ = cmd.Flags().MarkHidden("project-root")

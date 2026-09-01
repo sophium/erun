@@ -23,6 +23,13 @@ export function createAppStore() {
       [platformApi.reducerPath]: platformApi.reducer,
     },
     middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(platformApi.middleware),
+    // The default 'raf' autoBatch enhancer schedules a window.requestAnimationFrame
+    // callback plus a setTimeout fallback on every dispatch against the
+    // global window/cancelAnimationFrame. A store built for a jsdom test
+    // (renderWithStore.tsx makes a fresh one per render) can outlive that
+    // window, so a callback still pending at teardown throws. 'tick' batches
+    // via queueMicrotask, which always drains within the dispatching test.
+    enhancers: (getDefaultEnhancers) => getDefaultEnhancers({ autoBatch: { type: 'tick' } }),
   });
   setupListeners(appStore.dispatch);
   return appStore;

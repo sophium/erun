@@ -95,10 +95,33 @@ environments:
 `k8s` — erun's build and deploy machinery keys off the folder name, and the
 override relocates those folders rather than renaming them.
 
-**`paths` is project-global and single-valued.** A repo with several service
-roots is onboarded one root at a time, and the config is swapped between them.
-Say this out loud when the repo has more than one candidate — a half-configured
-tree that builds the wrong product is the failure this prevents.
+**More than one root in the roll-out set needs `components:`, not `paths:`.**
+`paths:` is project-global and single-valued — it can only ever point at one
+root. When the roll-out set (Step 1) has more than one candidate with its own
+`docker`/`k8s` root, wire each one as its own entry under `components:` instead
+of `paths:`:
+
+```yaml
+components:
+  <component-a>:
+    docker: <path-a>/docker
+    k8s: <path-a>/k8s
+    dockercontext: repo-root
+    version: <path-a>/VERSION
+  <component-b>:
+    docker: <path-b>/docker
+    k8s: <path-b>/k8s
+```
+
+`erun build`/`erun push` then take `--component <name>` to select one — it
+auto-selects when only one is declared, and fails naming the choices when more
+than one is declared and no `--component` is given. This is what lets two
+operators build different components from the same commit with no local edit:
+the whole set is committed once, and each operator's own `--component` flag
+picks their root. `erun deploy`'s existing `--components <name>` (Step 2's
+`environments.<env>.k8s.deployments`) resolves each name through its
+`components.<name>.k8s` root automatically once declared here — no separate
+deploy-side wiring needed.
 
 **Check whether the repo commits this file.** erun's own contract is that
 `.erun/config.yaml` is committed and applies to everyone who checks the repo out.

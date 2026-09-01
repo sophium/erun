@@ -1,0 +1,18 @@
+audit: erun build --dry-run
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
+build: component platform-validator selected (.erun/config.yaml components)
+build: docker build root configured as harnesses/platform-validator/docker (.erun/config.yaml components.platform-validator.docker)
+build: version file configured as harnesses/platform-validator/VERSION (.erun/config.yaml components.platform-validator.version)
+docker image inspect ghcr.io/sophium/platform-validator:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/platform-validator:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/platform-validator:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/platform-validator:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/platform-validator:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/platform-validator:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:fp-<HEX16>-amd64
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/platform-validator:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/platform-validator:<VERSION> ghcr.io/sophium/platform-validator:<VERSION>

@@ -4,19 +4,23 @@ A version is required (--version <v>, the same flag deploy uses) and is the one 
 
 --build is an operator shortcut that builds the current source first and then pushes the version that build mints, so you don't have to copy the snapshot version out of `erun build` by hand. It is mutually exclusive with --version.
 
+--component selects one of a monorepo's declared .erun/config.yaml components entries, the same selector `erun build` takes; see `erun build --help`.
+
 Usage:
   erun push [flags]
 
 Examples:
   erun push --version <VERSION>
   erun push --build
+  erun push --version <VERSION> --component ingest-worker
 
 Flags:
-      --build            Build the current source first, then push the version it mints (operator shortcut for build → push)
-      --dry-run          Resolve and trace mutating actions without executing them.
-      --force            Rebuild and re-push every image, bypassing the fingerprint cache (also forces the --build step)
-  -h, --help             help for push
-      --version string   Version to publish, produced by erun build
+      --build              Build the current source first, then push the version it mints (operator shortcut for build → push)
+      --component string   Select a monorepo component declared under .erun/config.yaml components.<name> (auto-selects the lone entry if only one is declared; unused when the project declares none)
+      --dry-run            Resolve and trace mutating actions without executing them.
+      --force              Rebuild and re-push every image, bypassing the fingerprint cache (also forces the --build step)
+  -h, --help               help for push
+      --version string     Version to publish, produced by erun build
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

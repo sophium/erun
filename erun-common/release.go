@@ -751,7 +751,7 @@ func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadPr
 	ctx.Trace(fmt.Sprintf("release: branch = %s, commit = %s", branch, commit))
 
 	ctx.Trace("release: resolving base version from VERSION file")
-	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot)
+	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot, "")
 	if err != nil {
 		ctx.Trace("release: base version resolution failed: " + err.Error())
 		return releaseInputs{}, err
@@ -1146,7 +1146,7 @@ func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionF
 // release publishes, or reports it as excluded when the context takes its
 // version from a different VERSION file than the one being released.
 func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (ReleaseDockerImageSpec, bool, error) {
-	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot)
+	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot, "")
 	if err != nil {
 		return ReleaseDockerImageSpec{}, false, err
 	}
@@ -1159,7 +1159,7 @@ func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, 
 	if strings.TrimSpace(registry) != "" {
 		tag = strings.TrimRight(registry, "/") + "/" + tag
 	}
-	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot)
+	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot, "")
 	if err != nil {
 		return ReleaseDockerImageSpec{}, false, err
 	}
@@ -1789,7 +1789,7 @@ func findReleaseChartPaths(projectRoot, searchRoot string) ([]string, error) {
 func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 
-	if _, _, _, err := ResolveDockerBuildVersion(projectRoot, projectRoot); err == nil {
+	if _, _, _, err := ResolveDockerBuildVersion(projectRoot, projectRoot, ""); err == nil {
 		return projectRoot, nil
 	} else if !errors.Is(err, ErrVersionFileNotFound) {
 		return "", err
