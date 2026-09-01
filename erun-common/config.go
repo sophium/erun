@@ -1232,6 +1232,15 @@ const (
 // directory, too many open files, ...) is neither of those things and is
 // returned as-is: reporting it as ErrNotInitialized would tell the operator
 // to run `erun init` for a problem `erun init` cannot fix.
+// configReadRetryObserved, when non-nil, runs synchronously after each failed
+// attempt instead of the real sleep. A test sets it to heal a torn read
+// deterministically (write the real content the moment a retry is about to
+// happen) rather than racing a concurrent writer goroutine against this
+// function's wall-clock sleep budget, which is exactly the kind of timing
+// race that flakes under CPU contention from unrelated tests running
+// alongside it in the same `go test ./...` process.
+var configReadRetryObserved func(attempt int)
+
 func loadConfigFile(path string, out any) error {
 	var lastErr error
 	for attempt := 0; attempt < configReadRetryAttempts; attempt++ {
@@ -1250,7 +1259,11 @@ func loadConfigFile(path string, out any) error {
 			return nil
 		}
 		if attempt < configReadRetryAttempts-1 {
-			time.Sleep(configReadRetrySleep)
+			if configReadRetryObserved != nil {
+				configReadRetryObserved(attempt)
+			} else {
+				time.Sleep(configReadRetrySleep)
+			}
 		}
 	}
 	return lastErr
