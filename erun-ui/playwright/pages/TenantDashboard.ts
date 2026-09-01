@@ -214,6 +214,10 @@ export class TenantDashboard {
     return this.page.locator('#enroll-admin-command');
   }
 
+  enrollErrorAlert(): Locator {
+    return this.page.getByRole('alert');
+  }
+
   noPermissionHeading(): Locator {
     return this.page.getByText("You do not have access to this tenant's dashboard", {
       exact: true,

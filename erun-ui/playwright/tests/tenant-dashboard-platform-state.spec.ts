@@ -232,6 +232,55 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
+  // Regression for erun#1820: a not-yet-enrolled caller's self-enroll
+  // attempt is refused by the platform's own auth middleware -- the
+  // expected outcome EnrollERunPlatformUser documents -- and must render as
+  // the administrator hand-off already sitting on this card, not the raw
+  // wire error.
+  test('the self-enroll refusal renders the administrator hand-off, not the raw error', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('platform-enroll-refused');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      const stub = stubRPC(page, {
+        LoadTenantDashboard: {
+          data: {
+            tenant: SEED_TENANT,
+            platformState: 'not-enrolled',
+            platformAlias: 'erun+api.frs-prod.services.erunpaas.com@erun',
+            platformIssuer: 'https://auth.erunpaas.com',
+            platformSubject: 'user-42',
+          },
+        },
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.enrollUsernameInput().fill('jane');
+
+      stub.respondWith('EnrollERunPlatformUser', {
+        error:
+          'You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation.',
+      });
+      await app.tenantDashboard.tryEnrollButton().click();
+
+      await expect(app.tenantDashboard.enrollErrorAlert()).toContainText(
+        'do not have permission to enroll yourself',
+      );
+      for (const leak of ['http 401', 'http 403', '/v1/users', 'NOT_ENROLLED']) {
+        await expect(app.tenantDashboard.enrollErrorAlert()).not.toContainText(leak);
+      }
+      // The message names an action, and the two actions it names are
+      // still on the card -- no dead end.
+      await expect(app.tenantDashboard.enrollAdminCommand()).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Request an invitation' })).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
   test('no-permission is a plain notice with no dead-end action', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('platform-no-permission');
     try {
