@@ -59,17 +59,20 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 		_ = current.Close()
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	// Wait on the marker, not on a clock: the guard runs on the session's own
+	// goroutine, so a fixed sleep made this test fail under load -- and worse,
+	// the count assertion below would pass vacuously for the same reason the
+	// marker had not arrived (nothing had run yet). The marker is the guard's
+	// observable decision, and it is emitted before the respawn it refuses, so
+	// once it lands the session count is final.
+	waitForTerminalMarker(t, emits, loopGuardMarkerNeedle, 10*time.Second)
+
 	sessionsMu.Lock()
 	got := len(sessions)
 	sessionsMu.Unlock()
 	if got != closes {
 		t.Fatalf("expected loop guard to cap session count at %d (original + %d respawns), got %d",
 			closes, reconnectLoopMaxExits, got)
-	}
-
-	if !sawLoopMarker(emits) {
-		t.Fatal("expected reconnect-loop marker on terminal-output channel after cap")
 	}
 }
 
@@ -149,8 +152,31 @@ func waitForSessionCount(t *testing.T, mu *sync.Mutex, sessions *[]*stubTerminal
 	t.Fatalf("timed out waiting for %d sessions, got %d", want, got)
 }
 
-func sawLoopMarker(emits *capturedEmits) bool {
-	const needle = "stopped reconnecting after repeated failures"
+// The user-visible text of the two markers these tests wait on. Matching on
+// the words rather than the full ANSI string keeps the assertion about what the
+// operator reads, not about the styling around it.
+const (
+	loopGuardMarkerNeedle = "stopped reconnecting after repeated failures"
+	takenOverMarkerNeedle = "re-attached in another ERun window"
+)
+
+// waitForTerminalMarker polls the captured emits for a terminal-output marker.
+// It replaces a fixed sleep-then-assert: the markers are emitted from the
+// session's own goroutine, so any fixed interval is a race against the machine
+// rather than against the code under test.
+func waitForTerminalMarker(t *testing.T, emits *capturedEmits, needle string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if sawTerminalMarker(emits, needle) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for the %q marker on the terminal-output channel", needle)
+}
+
+func sawTerminalMarker(emits *capturedEmits, needle string) bool {
 	for _, evt := range emits.events(terminalOutputEvent) {
 		payload, ok := evt.(terminalOutputPayload)
 		if !ok {
@@ -545,15 +571,13 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	sessionsMu.Unlock()
 	_ = current.Close()
 
-	time.Sleep(200 * time.Millisecond)
+	waitForTerminalMarker(t, emits, takenOverMarkerNeedle, 10*time.Second)
+
 	sessionsMu.Lock()
 	got := len(sessions)
 	sessionsMu.Unlock()
 	if got != 1 {
 		t.Fatalf("takeover must not respawn: expected 1 session, got %d", got)
-	}
-	if !sawTakenOverMarker(emits) {
-		t.Fatal("expected taken-over marker on terminal-output channel")
 	}
 }
 
@@ -575,22 +599,4 @@ func waitForTakenOverFlag(t *testing.T, app *App, timeout time.Duration) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for the taken-over notice to be scanned from session output")
-}
-
-func sawTakenOverMarker(emits *capturedEmits) bool {
-	const needle = "re-attached in another ERun window"
-	for _, evt := range emits.events(terminalOutputEvent) {
-		payload, ok := evt.(terminalOutputPayload)
-		if !ok {
-			continue
-		}
-		data, err := base64.StdEncoding.DecodeString(payload.Data)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(data), needle) {
-			return true
-		}
-	}
-	return false
 }
