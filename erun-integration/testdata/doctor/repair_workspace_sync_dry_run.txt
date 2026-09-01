@@ -6,6 +6,7 @@ aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
 kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
 
 == Workspace sync (host mirror) ==
   host alias: erun-team-dev

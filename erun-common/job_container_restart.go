@@ -11,8 +11,8 @@ import (
 // container status, so a job whose supervisor vanished from a still-running
 // pod (job.Hostname equals the pod reconciling it) can report a real
 // container restart -- reason and exit code -- instead of guessing pod
-// replacement. It reuses the same `kubectl get pod -o json` shape
-// open_runtime_diagnostics.go already parses.
+// replacement. Dispatches to the subprocess or library path per the
+// kubectl-pod-get execution mode (see execution_mode.go).
 //
 // ok is false whenever the answer cannot be trusted: kubectl is unavailable,
 // the API call failed, the named container is missing from the response, or
@@ -20,11 +20,24 @@ import (
 // as "did not restart" -- only as "could not check".
 func jobSupervisorContainerRestart(podName, containerName string, runner openKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	podName = strings.TrimSpace(podName)
-	if podName == "" || runner == nil {
+	if podName == "" {
+		return false, "", 0, time.Time{}, false
+	}
+	if currentExecutionMode(kubectlPodGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryJobSupervisorContainerRestart(podName, containerName)
+	}
+	return defaultJobSupervisorContainerRestart(podName, containerName, runner)
+}
+
+// defaultJobSupervisorContainerRestart is the subprocess-backed path
+// jobSupervisorContainerRestart dispatches to by default. It reuses the same
+// `kubectl get pod -o json` shape open_runtime_diagnostics.go already parses.
+func defaultJobSupervisorContainerRestart(podName, containerName string, runner openKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+	if runner == nil {
 		return false, "", 0, time.Time{}, false
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runner([]string{"get", "pod", podName, "-o", "json"}, &stdout, &stderr); err != nil {
+	if err := runner(kubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
 	var pod runtimePodDiagnostic
@@ -46,6 +59,27 @@ func jobSupervisorContainerRestart(podName, containerName string, runner openKub
 			return false, "", 0, time.Time{}, false
 		}
 		return true, strings.TrimSpace(terminated.Reason), terminated.ExitCode, parsed, true
+	}
+	return false, "", 0, time.Time{}, false
+}
+
+// libraryJobSupervisorContainerRestart is the library-backed alternative to
+// defaultJobSupervisorContainerRestart, resolving the same pod via
+// k8s.io/client-go instead of shelling out to kubectl.
+func libraryJobSupervisorContainerRestart(podName, containerName string) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+	pod, err := libraryGetPod(podName)
+	if err != nil {
+		return false, "", 0, time.Time{}, false
+	}
+	for _, container := range pod.Status.ContainerStatuses {
+		if container.Name != containerName {
+			continue
+		}
+		terminated := container.LastTerminationState.Terminated
+		if terminated == nil {
+			return false, "", 0, time.Time{}, true
+		}
+		return true, strings.TrimSpace(terminated.Reason), int(terminated.ExitCode), terminated.FinishedAt.Time, true
 	}
 	return false, "", 0, time.Time{}, false
 }
