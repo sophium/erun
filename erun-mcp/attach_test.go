@@ -16,9 +16,17 @@ import (
 
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
 // RemoteAppSessionSocketPath resolves to a socket path no other test (or real
-// environment) can collide with.
+// environment) can collide with. It also ensures the socket directory itself
+// exists: in a deployed pod, the session-start script's own "mkdir -p" (see
+// open.go) has always run before anything attaches, but these tests attach
+// straight away without ever running that step, so they must establish the
+// same precondition instead of depending on it already being present on the
+// host running the suite.
 func newAttachTestRuntime(t *testing.T) RuntimeConfig {
 	t.Helper()
+	if err := os.MkdirAll(eruncommon.RemoteAppSessionSocketDir, 0o700); err != nil {
+		t.Fatalf("create session socket dir: %v", err)
+	}
 	return RuntimeConfig{Context: RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
 }
 
