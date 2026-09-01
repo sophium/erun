@@ -130,10 +130,7 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
-	if err := reportProjectConfigTracked(ctx, result); err != nil {
-		return err
-	}
-	if err := reportExecutionModes(ctx); err != nil {
+	if err := reportProjectConfigAndExecutionModes(ctx, result); err != nil {
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
@@ -160,6 +157,15 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 		return nil
 	}
 	return runDoctorPostSyncActions(ctx, promptRunner, result, req, diagnosis, options)
+}
+
+// reportProjectConfigAndExecutionModes runs the two checks that need neither
+// req nor a deploy diagnosis, ahead of everything that does.
+func reportProjectConfigAndExecutionModes(ctx common.Context, result common.OpenResult) error {
+	if err := reportProjectConfigTracked(ctx, result); err != nil {
+		return err
+	}
+	return reportExecutionModes(ctx)
 }
 
 // reportProjectConfigTracked reports when this environment's project config
