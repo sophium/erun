@@ -74,6 +74,10 @@ COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 COPY erun-integration /src/erun-integration
+# erun-devops/dns01-webhook has no LINT_MODULES entry (no golangci-lint config
+# of its own) but does have a Makefile test target (test-erun-dns01-webhook),
+# so it needs the same COPY-or-`cd`-fails treatment as the modules below.
+COPY erun-devops/dns01-webhook /src/erun-devops/dns01-webhook
 # Every module in the Makefile's LINT_MODULES must land here or `make check`
 # cannot cd into it -- and so must every path those modules' tests read at run
 # time, which is not the same set. erun-ui's build-stamp guard deliberately
