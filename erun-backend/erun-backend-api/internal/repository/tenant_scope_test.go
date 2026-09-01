@@ -163,19 +163,28 @@ func contextOnlyRepositoryMethods(t *testing.T, dir string) []string {
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil {
-				continue
-			}
-			receiver := receiverTypeName(fn.Recv)
-			if receiver == "" || !isContextOnlySignature(fn.Type) {
-				continue
-			}
-			methods = append(methods, receiver+"."+fn.Name.Name)
-		}
+		methods = append(methods, contextOnlyMethodsInFile(file)...)
 	}
 	sort.Strings(methods)
+	return methods
+}
+
+// contextOnlyMethodsInFile returns "ReceiverType.MethodName" for every
+// top-level method declaration in file whose parameter list is exactly one
+// context.Context.
+func contextOnlyMethodsInFile(file *ast.File) []string {
+	var methods []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil {
+			continue
+		}
+		receiver := receiverTypeName(fn.Recv)
+		if receiver == "" || !isContextOnlySignature(fn.Type) {
+			continue
+		}
+		methods = append(methods, receiver+"."+fn.Name.Name)
+	}
 	return methods
 }
 
