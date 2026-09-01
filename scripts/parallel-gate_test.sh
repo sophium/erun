@@ -116,4 +116,19 @@ echo "1200000 100000" >"${case_dir}/cpu.max"
 echo "$((64 * 1024 * 1024 * 1024))" >"${case_dir}/memory.max"
 PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "job-count caps an abundant environment" 3 3 700
 
+# --- PARALLEL_GATE_MEMORY_LIMIT_MIB overrides the cgroup read outright, for
+# a BuildKit RUN step where memory.max reads "max" (unlimited) even though
+# the sidecar's chart-declared limit is real -- see the script's own header
+# comment for why the cgroup read cannot see that number in this context.
+# Reuse the "v2-unlimited" cgroup shape (memory.max="max") to prove the
+# override, not the cgroup file, is what wins.
+case_dir="${work_root}/v2-unlimited"
+got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_MEMORY_LIMIT_MIB=1400 "$gate" width 6 700)
+[ "$got" = 2 ] || fail "memory override binds despite unlimited memory.max: expected 2 (1400MiB/700MiB per job), got $got"
+
+# --- the override is ignored when it is not a positive integer, falling
+# back to the cgroup read (or further, per the existing fallback chain).
+got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_MEMORY_LIMIT_MIB=bogus "$gate" width 6 700)
+[ "$got" = 6 ] || fail "non-numeric memory override is ignored: expected job-count cap 6, got $got"
+
 echo "ok: parallel-gate.sh width"

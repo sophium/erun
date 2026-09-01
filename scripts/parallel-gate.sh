@@ -54,6 +54,20 @@
 # PARALLEL_GATE_CGROUP_ROOT overrides the cgroup root (default
 # /sys/fs/cgroup) so tests can point at a synthetic tree instead of faking
 # /sys/fs/cgroup itself.
+#
+# PARALLEL_GATE_MEMORY_LIMIT_MIB overrides the memory ceiling outright,
+# skipping the cgroup reads above. This exists because a BuildKit `RUN` step
+# (the erun-devops image's own test stage, which is where this script sizes
+# LINT_PARALLELISM/HELM_CHART_TEST_PARALLELISM for the in-build `make check`
+# gate) runs in a cgroup that is a SIBLING of the pod's own limited cgroup,
+# not a descendant of it -- cgroup v2's memory.max reads "max" (unlimited)
+# there regardless of what the erun-dind sidecar's chart-declared memory
+# limit actually is, so the cgroup-based reads above are structurally blind
+# in exactly the context this script exists to size. There is no cgroup file
+# in that context that reflects the intended ceiling; the erun-devops
+# Dockerfile threads the sidecar's own configured limit in through this
+# variable instead so the width calculation still has a real number to divide
+# by (see DIND_MEMORY_LIMIT_MIB in that Dockerfile).
 if [ "${1:-}" = "width" ]; then
 	set -eu
 	job_count=$2
@@ -101,6 +115,10 @@ if [ "${1:-}" = "width" ]; then
 	# unlimited/unreadable -- an empty result means "drop the memory term",
 	# not "zero memory available".
 	mem_limit_mib() {
+		if is_positive_int "${PARALLEL_GATE_MEMORY_LIMIT_MIB:-}"; then
+			echo "$PARALLEL_GATE_MEMORY_LIMIT_MIB"
+			return
+		fi
 		if [ -r "$cgroup_root/memory.max" ]; then
 			val=$(cat "$cgroup_root/memory.max" 2>/dev/null) || val=""
 			if [ "$val" != "max" ] && is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
