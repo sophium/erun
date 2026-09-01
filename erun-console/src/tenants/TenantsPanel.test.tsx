@@ -276,7 +276,7 @@ describe('TenantsPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('sets a tenant quota through the per-row dialog', async () => {
+  it('sets a tenant quota through the per-row dialog, prefilled from the target tenant’s current caps', async () => {
     let putBody: unknown;
     mockFetch((req) => {
       if (req.url === '/v1/tenants' && req.method === 'GET') {
@@ -290,6 +290,18 @@ describe('TenantsPanel', () => {
           },
         ]);
       }
+      if (req.url === '/v1/quota?tenantId=tn-1' && req.method === 'GET') {
+        return jsonResponse({
+          tenantId: 'tn-1',
+          maxEnvironments: 3,
+          maxCpuMillicores: 300,
+          maxMemoryMb: 256,
+          maxStorageGb: 5,
+          maxTotalCpuMillicores: 1200,
+          maxTotalMemoryMb: 2048,
+          maxTotalStorageGb: 50,
+        });
+      }
       if (req.url === '/v1/tenants/tn-1/quota' && req.method === 'PUT') {
         putBody = req.body;
         return jsonResponse({ tenantId: 'tn-1', ...(req.body as object) });
@@ -301,6 +313,7 @@ describe('TenantsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set quota' }));
     expect(screen.getByText('Set quota for acme')).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^Environments/)).toHaveValue(3);
 
     fireEvent.change(screen.getByLabelText(/^Environments/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/^Per-environment CPU/), { target: { value: '500' } });
