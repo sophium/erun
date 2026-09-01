@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -137,9 +138,9 @@ func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.Au
 }
 
 // List returns one page of the caller's tenant audit trail, newest first.
-// RLS scopes rows to the tenant (or, under erun_operations, every tenant); the
-// filters and cursor here are the same tenant-owned SQL every other repository
-// runs through TxManager.
+// Scoped explicitly by tenant_id from the security context rather than left
+// to RLS: erun_operations' policy is unconditional, so an OPERATIONS caller
+// would otherwise read every tenant's audit trail.
 func (r *AuditEventRepository) List(ctx context.Context, filter AuditEventFilter) (AuditEventPage, error) {
 	limit := filter.Limit
 	switch {
@@ -149,9 +150,13 @@ func (r *AuditEventRepository) List(ctx context.Context, filter AuditEventFilter
 		limit = maxAuditEventLimit
 	}
 
-	query, args := auditEventListQuery(filter, limit)
 	var events []model.AuditEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
+		query, args := auditEventListQuery(securityContext.TenantID, filter, limit)
 		return tx.NewRaw(query, args...).Scan(ctx, &events)
 	})
 	if err != nil {
@@ -170,9 +175,9 @@ func (r *AuditEventRepository) List(ctx context.Context, filter AuditEventFilter
 // auditEventListQuery builds the SELECT for List. It fetches one row beyond
 // limit so a next page can be reported without a second round trip; List
 // trims that extra row back off.
-func auditEventListQuery(filter AuditEventFilter, limit int) (string, []any) {
-	query := `SELECT ` + auditEventColumns + ` FROM audit_events WHERE TRUE`
-	var args []any
+func auditEventListQuery(tenantID string, filter AuditEventFilter, limit int) (string, []any) {
+	query := `SELECT ` + auditEventColumns + ` FROM audit_events WHERE tenant_id = ?`
+	args := []any{tenantID}
 	if !filter.Since.IsZero() {
 		query += ` AND created_at >= ?`
 		args = append(args, filter.Since)

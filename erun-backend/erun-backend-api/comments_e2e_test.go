@@ -194,3 +194,74 @@ func TestCommentCreateRequiresNonEmptyBody(t *testing.T) {
 		t.Fatalf("whitespace-only body: err = %v, want ErrInvalidInput", err)
 	}
 }
+
+// commentsTenantFixture seeds one tenant of tenantType with one user and one
+// review, for the cross-tenant scoping regression test below, which needs
+// two independent tenants rather than commentsDatabase's single shared one.
+func commentsTenantFixture(t *testing.T, db *sql.DB, label, tenantType string) (ctx context.Context, comments *repository.CommentRepository, reviewID string) {
+	t.Helper()
+	suffix := time.Now().Format("20060102150405.000000")
+	var tenantID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, $2) RETURNING tenant_id`,
+		label+"-"+suffix, tenantType,
+	).Scan(&tenantID), "seed tenant")
+	t.Cleanup(func() {
+		for _, table := range []string{"comments", "reviews", "users", "tenants"} {
+			if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
+				t.Logf("clearing test tenant rows from %s: %v", table, err)
+			}
+		}
+	})
+
+	var userID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		tenantID, "user-"+suffix,
+	).Scan(&userID), "seed user")
+	ctx = security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: tenantType, ErunUserID: userID})
+
+	txs := repository.NewTxManager(db, repository.DialectPostgres)
+	reviews := repository.NewReviewRepository(txs)
+	review, err := reviews.Create(ctx, model.Review{Name: "comments scope e2e", TargetBranch: "main", SourceBranch: "feature/scope-" + suffix, Status: model.ReviewStatusOpen})
+	mustNoErr(t, err, "seed review")
+
+	comments = repository.NewCommentRepository(txs)
+	return ctx, comments, review.ReviewID
+}
+
+// TestCommentListScopesToTheOperationsCallersOwnTenant pins the failure
+// scenario directly: an OPERATIONS caller's List must not include a stranger
+// tenant's comments even though erun_operations' RLS policy makes them
+// visible too.
+func TestCommentListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	databaseURL := os.Getenv("ERUN_E2E_COMMENTS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("opt-in: set ERUN_E2E_COMMENTS_DATABASE_URL to a migrated PostgreSQL")
+	}
+	db, err := sql.Open("pgx", databaseURL)
+	mustNoErr(t, err, "open db")
+	t.Cleanup(func() { _ = db.Close() })
+
+	strangerCtx, strangerComments, strangerReviewID := commentsTenantFixture(t, db, "comments-e2e-stranger", "COMPANY")
+	strangerPrepared, err := service.NewCommentService(strangerComments).PrepareCreate(strangerCtx, model.Comment{
+		ReviewID: strangerReviewID, CommitID: testCommitID, FilePath: "stranger.go", Line: 1, Body: "stranger comment",
+	})
+	mustNoErr(t, err, "prepare stranger comment")
+	_, err = strangerComments.Create(strangerCtx, strangerPrepared)
+	mustNoErr(t, err, "create stranger comment")
+
+	opsCtx, opsComments, opsReviewID := commentsTenantFixture(t, db, "comments-e2e-ops", "OPERATIONS")
+	opsPrepared, err := service.NewCommentService(opsComments).PrepareCreate(opsCtx, model.Comment{
+		ReviewID: opsReviewID, CommitID: testCommitID, FilePath: "ops.go", Line: 1, Body: "ops comment",
+	})
+	mustNoErr(t, err, "prepare ops comment")
+	own, err := opsComments.Create(opsCtx, opsPrepared)
+	mustNoErr(t, err, "create ops comment")
+
+	listed, err := opsComments.List(opsCtx, repository.CommentFilter{})
+	mustNoErr(t, err, "list as operations caller")
+	if len(listed) != 1 || listed[0].CommentID != own.CommentID {
+		t.Fatalf("List = %+v, want exactly the operations caller's own comment %s, not the stranger's as well", listed, own.CommentID)
+	}
+}

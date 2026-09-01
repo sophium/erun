@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgerrcode"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -72,19 +73,29 @@ func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build,
 	return build, err
 }
 
+// List returns the caller's tenant's builds, optionally narrowed to one
+// review. Scoped explicitly by tenant_id from the security context rather
+// than left to RLS: erun_operations' policy is unconditional, so an
+// OPERATIONS caller's empty filter would otherwise read every tenant's
+// builds.
 func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model.Build, error) {
 	var builds []model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		query := `
 			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name
 			  FROM builds b
 			  JOIN reviews r
 			    ON r.tenant_id = b.tenant_id
 			   AND r.review_id = b.review_id
+			 WHERE b.tenant_id = ?
 		`
-		var args []any
+		args := []any{securityContext.TenantID}
 		if filter.ReviewID != "" {
-			query += ` WHERE b.review_id = ?`
+			query += ` AND b.review_id = ?`
 			args = append(args, filter.ReviewID)
 		}
 		query += ` ORDER BY b.created_at DESC, b.build_id DESC`

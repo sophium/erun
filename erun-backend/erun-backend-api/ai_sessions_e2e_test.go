@@ -59,6 +59,69 @@ func seedAISessionTestTenant(t *testing.T, db *sql.DB) string {
 	return tenantID
 }
 
+// aiSessionsOperationsDatabase mirrors aiSessionsDatabase, but seeds an
+// OPERATIONS-typed tenant: erun_operations' RLS policy is unconditional
+// (USING (true)), so only an OPERATIONS caller can actually exercise the
+// bypass List must guard against.
+func aiSessionsOperationsDatabase(t *testing.T, db *sql.DB) (*repository.AISessionRepository, *repository.EnvironmentRepository, context.Context) {
+	t.Helper()
+	var tenantID string
+	err := db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'OPERATIONS') RETURNING tenant_id`,
+		"ai-sessions-e2e-ops-"+time.Now().Format("20060102150405.000000"),
+	).Scan(&tenantID)
+	mustNoErr(t, err, "seed operations tenant")
+	ctx := security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: "OPERATIONS"})
+	txManager := repository.NewTxManager(db, repository.DialectPostgres)
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM environments WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("clearing the operations tenant's environments (cascades ai_sessions): %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM tenants WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("clearing the operations tenant: %v", err)
+		}
+	})
+	return repository.NewAISessionRepository(txManager), repository.NewEnvironmentRepository(txManager), ctx
+}
+
+// TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant pins the
+// failure scenario directly: an OPERATIONS caller's List for its own
+// environment id must not surface a stranger tenant's session event for a
+// same-named session, even though erun_operations' RLS policy makes the
+// stranger's row visible too.
+func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	strangerSessions, strangerEnvironments, strangerCtx, _ := aiSessionsDatabase(t)
+	strangerEnv, err := strangerEnvironments.Create(strangerCtx, model.Environment{Name: "stranger-env", Type: model.EnvironmentTypeRuntime})
+	mustNoErr(t, err, "create stranger environment")
+	_, err = strangerSessions.Record(strangerCtx, model.AISessionEvent{EnvironmentID: strangerEnv.EnvironmentID, SessionID: "ai", Event: "turn-start"})
+	mustNoErr(t, err, "record stranger session event")
+
+	databaseURL := os.Getenv("ERUN_E2E_AI_SESSIONS_DATABASE_URL")
+	db, err := sql.Open("pgx", databaseURL)
+	mustNoErr(t, err, "open db")
+	t.Cleanup(func() { _ = db.Close() })
+	opsSessions, opsEnvironments, opsCtx := aiSessionsOperationsDatabase(t, db)
+	opsEnv, err := opsEnvironments.Create(opsCtx, model.Environment{Name: "ops-env", Type: model.EnvironmentTypeRuntime})
+	mustNoErr(t, err, "create ops environment")
+	_, err = opsSessions.Record(opsCtx, model.AISessionEvent{EnvironmentID: opsEnv.EnvironmentID, SessionID: "ai", Event: "turn-start"})
+	mustNoErr(t, err, "record ops session event")
+
+	// Guessing the stranger's own environment id must not surface the
+	// stranger's row: erun_operations bypasses RLS, so only the explicit
+	// tenant_id predicate stands between this call and the stranger's data.
+	crossTenant, err := opsSessions.List(opsCtx, strangerEnv.EnvironmentID)
+	mustNoErr(t, err, "list stranger's environment id as operations caller")
+	if len(crossTenant) != 0 {
+		t.Fatalf("List(strangerEnv) as operations caller = %+v, want empty", crossTenant)
+	}
+
+	own, err := opsSessions.List(opsCtx, opsEnv.EnvironmentID)
+	mustNoErr(t, err, "list own environment id as operations caller")
+	if len(own) != 1 || own[0].EnvironmentID != opsEnv.EnvironmentID {
+		t.Fatalf("List(opsEnv) as operations caller = %+v, want exactly its own session", own)
+	}
+}
+
 // TestAISessionRepositoryRecordCarriesForwardTheToolOnAnOmittedReport pins
 // the property eruncommon.RecordAISessionEvent enforces locally
 // (previouslyReportedAISessionTool): a later event that omits Tool must not

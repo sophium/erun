@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -65,12 +66,20 @@ func (r *ReviewRepository) Get(ctx context.Context, reviewID string) (model.Revi
 	return review, err
 }
 
+// List returns the caller's tenant's reviews matching filter. Scoped
+// explicitly by tenant_id from the security context rather than left to RLS:
+// erun_operations' policy is unconditional, so an OPERATIONS caller's empty
+// filter would otherwise read every tenant's reviews.
 func (r *ReviewRepository) List(ctx context.Context, filter ReviewFilter) ([]model.Review, error) {
 	var reviews []model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		query := `SELECT ` + qualifiedReviewColumns + ` FROM reviews r`
-		var conditions []string
-		var args []any
+		conditions := []string{"r.tenant_id = ?"}
+		args := []any{securityContext.TenantID}
 		if filter.ReviewerUserID != "" {
 			query += `
 				  JOIN review_reviewers rr
@@ -96,18 +105,25 @@ func (r *ReviewRepository) List(ctx context.Context, filter ReviewFilter) ([]mod
 			conditions = append(conditions, "r.author_user_id = ?")
 			args = append(args, filter.AuthorUserID)
 		}
-		if len(conditions) > 0 {
-			query += " WHERE " + strings.Join(conditions, " AND ")
-		}
+		query += " WHERE " + strings.Join(conditions, " AND ")
 		query += ` ORDER BY r.created_at DESC, r.review_id DESC`
 		return tx.NewRaw(query, args...).Scan(ctx, &reviews)
 	})
 	return reviews, err
 }
 
+// ListMergeQueue returns the caller's tenant's merge queue, optionally
+// narrowed to one target branch. Scoped explicitly by tenant_id from the
+// security context rather than left to RLS: erun_operations' policy is
+// unconditional, so an OPERATIONS caller's empty targetBranch would otherwise
+// read every tenant's merge queue.
 func (r *ReviewRepository) ListMergeQueue(ctx context.Context, targetBranch string) ([]model.Review, error) {
 	var reviews []model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		query := `
 			SELECT ` + qualifiedReviewColumns + `
 			  FROM review_merge_queue q
@@ -115,9 +131,10 @@ func (r *ReviewRepository) ListMergeQueue(ctx context.Context, targetBranch stri
 			    ON r.tenant_id = q.tenant_id
 			   AND r.target_branch = q.target_branch
 			   AND r.review_id = q.review_id
-			 WHERE r.status = 'READY'
+			 WHERE q.tenant_id = ?
+			   AND r.status = 'READY'
 		`
-		var args []any
+		args := []any{securityContext.TenantID}
 		if targetBranch != "" {
 			query += ` AND q.target_branch = ?`
 			args = append(args, targetBranch)

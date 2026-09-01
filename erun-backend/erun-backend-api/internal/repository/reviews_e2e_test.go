@@ -35,10 +35,19 @@ func reviewsDatabase(t *testing.T) (*sql.DB, string) {
 
 func seedReviewsTenant(t *testing.T, db *sql.DB, label string) string {
 	t.Helper()
+	return seedReviewsTenantOfType(t, db, label, "COMPANY")
+}
+
+// seedReviewsTenantOfType is seedReviewsTenant's general form, for the
+// OPERATIONS-caller scoping regression tests below: erun_operations' RLS
+// policy is unconditional (USING (true)), so only an OPERATIONS-typed tenant
+// can actually exercise the bypass List/ListMergeQueue must guard against.
+func seedReviewsTenantOfType(t *testing.T, db *sql.DB, label string, tenantType string) string {
+	t.Helper()
 	var tenantID string
 	err := db.QueryRow(
-		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
-		label+"-"+time.Now().Format("20060102150405.000000"),
+		`INSERT INTO tenants (name, type) VALUES ($1, $2) RETURNING tenant_id`,
+		label+"-"+time.Now().Format("20060102150405.000000"), tenantType,
 	).Scan(&tenantID)
 	mustNoErr(t, err, "seed tenant")
 	return tenantID
@@ -76,6 +85,14 @@ func seedReviewsUser(t *testing.T, db *sql.DB, tenantID, username string) string
 func reviewsContext(tenantID, userID string) context.Context {
 	return security.WithContext(context.Background(), security.Context{
 		TenantID: tenantID, TenantType: "COMPANY", ErunUserID: userID,
+	})
+}
+
+// reviewsContextOfType is reviewsContext's general form, for the
+// OPERATIONS-caller scoping regression tests below.
+func reviewsContextOfType(tenantID, userID, tenantType string) context.Context {
+	return security.WithContext(context.Background(), security.Context{
+		TenantID: tenantID, TenantType: tenantType, ErunUserID: userID,
 	})
 }
 
@@ -423,5 +440,141 @@ func TestBuildTenantIsolation(t *testing.T) {
 
 	if _, err := builds.Get(ctxB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("tenant B fetching tenant A's build by ID: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestReviewListScopesToTheOperationsCallersOwnTenant pins the failure
+// scenario directly: an OPERATIONS caller's List must not include a stranger
+// tenant's reviews even though erun_operations' RLS policy makes them visible
+// too.
+func TestReviewListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	db, strangerTenantID := reviewsDatabase(t)
+	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
+	strangerCtx := reviewsContext(strangerTenantID, strangerAuthor)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	_ = openReview(t, reviews, strangerCtx, "stranger review", "feature/stranger")
+
+	opsTenantID := seedReviewsTenantOfType(t, db, "reviews-e2e-ops", "OPERATIONS")
+	t.Cleanup(func() { clearReviewsTenant(t, db, opsTenantID) })
+	opsAuthor := seedReviewsUser(t, db, opsTenantID, "ops-author")
+	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
+	own := openReview(t, reviews, opsCtx, "ops review", "feature/ops")
+
+	listed, err := reviews.List(opsCtx, ReviewFilter{})
+	mustNoErr(t, err, "list as operations caller")
+	if len(listed) != 1 || listed[0].ReviewID != own.ReviewID {
+		t.Fatalf("List = %+v, want exactly the operations caller's own review %s, not the stranger's as well", listed, own.ReviewID)
+	}
+}
+
+// TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant pins the same
+// failure scenario for the merge queue: an OPERATIONS caller's
+// ListMergeQueue must not include a stranger tenant's queued review.
+func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	db, strangerTenantID := reviewsDatabase(t)
+	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
+	strangerCtx := reviewsContext(strangerTenantID, strangerAuthor)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+	strangerReview := openReview(t, reviews, strangerCtx, "stranger queued review", "feature/stranger-queue")
+	strangerBuild, err := builds.Create(strangerCtx, model.Build{
+		ReviewID: strangerReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "stranger-sha", Version: "1.0.0",
+	})
+	mustNoErr(t, err, "create stranger build")
+	strangerReview.Status = model.ReviewStatusReady
+	strangerReview.LastReadyBuildID = strangerBuild.BuildID
+	strangerReview, err = reviews.Update(strangerCtx, strangerReview)
+	mustNoErr(t, err, "mark stranger review READY")
+	_, err = reviews.CreateMergeQueueEntry(strangerCtx, model.ReviewMergeQueueEntry{
+		TargetBranch: strangerReview.TargetBranch, ReviewID: strangerReview.ReviewID,
+	})
+	mustNoErr(t, err, "queue stranger review")
+
+	opsTenantID := seedReviewsTenantOfType(t, db, "reviews-e2e-ops-queue", "OPERATIONS")
+	t.Cleanup(func() { clearReviewsTenant(t, db, opsTenantID) })
+	opsAuthor := seedReviewsUser(t, db, opsTenantID, "ops-author")
+	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
+	opsReview := openReview(t, reviews, opsCtx, "ops queued review", "feature/ops-queue")
+	opsBuild, err := builds.Create(opsCtx, model.Build{
+		ReviewID: opsReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "ops-sha", Version: "1.0.0",
+	})
+	mustNoErr(t, err, "create ops build")
+	opsReview.Status = model.ReviewStatusReady
+	opsReview.LastReadyBuildID = opsBuild.BuildID
+	opsReview, err = reviews.Update(opsCtx, opsReview)
+	mustNoErr(t, err, "mark ops review READY")
+	_, err = reviews.CreateMergeQueueEntry(opsCtx, model.ReviewMergeQueueEntry{
+		TargetBranch: opsReview.TargetBranch, ReviewID: opsReview.ReviewID,
+	})
+	mustNoErr(t, err, "queue ops review")
+
+	listed, err := reviews.ListMergeQueue(opsCtx, "")
+	mustNoErr(t, err, "list merge queue as operations caller")
+	if len(listed) != 1 || listed[0].ReviewID != opsReview.ReviewID {
+		t.Fatalf("ListMergeQueue = %+v, want exactly the operations caller's own queued review %s, not the stranger's as well", listed, opsReview.ReviewID)
+	}
+}
+
+// TestBuildListScopesToTheOperationsCallersOwnTenant pins the failure
+// scenario for builds: an OPERATIONS caller's List must not include a
+// stranger tenant's builds even though erun_operations' RLS policy makes
+// them visible too.
+func TestBuildListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	db, strangerTenantID := reviewsDatabase(t)
+	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
+	strangerCtx := reviewsContext(strangerTenantID, strangerAuthor)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+	strangerReview := openReview(t, reviews, strangerCtx, "stranger build review", "feature/stranger-build")
+	_, err := builds.Create(strangerCtx, model.Build{
+		ReviewID: strangerReview.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-stranger",
+	})
+	mustNoErr(t, err, "create stranger build")
+
+	opsTenantID := seedReviewsTenantOfType(t, db, "reviews-e2e-ops-build", "OPERATIONS")
+	t.Cleanup(func() { clearReviewsTenant(t, db, opsTenantID) })
+	opsAuthor := seedReviewsUser(t, db, opsTenantID, "ops-author")
+	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
+	opsReview := openReview(t, reviews, opsCtx, "ops build review", "feature/ops-build")
+	opsBuild, err := builds.Create(opsCtx, model.Build{
+		ReviewID: opsReview.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-ops",
+	})
+	mustNoErr(t, err, "create ops build")
+
+	listed, err := builds.List(opsCtx, BuildFilter{})
+	mustNoErr(t, err, "list builds as operations caller")
+	if len(listed) != 1 || listed[0].BuildID != opsBuild.BuildID {
+		t.Fatalf("List = %+v, want exactly the operations caller's own build %s, not the stranger's as well", listed, opsBuild.BuildID)
+	}
+}
+
+// TestReviewReviewerListScopesToTheOperationsCallersOwnTenant pins the
+// failure scenario for review reviewers: an OPERATIONS caller's List must
+// not include a stranger tenant's reviewer assignments even though
+// erun_operations' RLS policy makes them visible too.
+func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	db, strangerTenantID := reviewsDatabase(t)
+	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
+	strangerReviewer := seedReviewsUser(t, db, strangerTenantID, "stranger-reviewer")
+	strangerCtx := reviewsContext(strangerTenantID, strangerAuthor)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	reviewers := NewReviewReviewerRepository(NewTxManager(db, DialectPostgres))
+	strangerReview := openReview(t, reviews, strangerCtx, "stranger reviewed review", "feature/stranger-reviewers")
+	_, err := reviewers.Create(strangerCtx, model.ReviewReviewer{ReviewID: strangerReview.ReviewID, UserID: strangerReviewer})
+	mustNoErr(t, err, "add stranger reviewer")
+
+	opsTenantID := seedReviewsTenantOfType(t, db, "reviews-e2e-ops-reviewers", "OPERATIONS")
+	t.Cleanup(func() { clearReviewsTenant(t, db, opsTenantID) })
+	opsAuthor := seedReviewsUser(t, db, opsTenantID, "ops-author")
+	opsReviewer := seedReviewsUser(t, db, opsTenantID, "ops-reviewer")
+	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
+	opsReview := openReview(t, reviews, opsCtx, "ops reviewed review", "feature/ops-reviewers")
+	_, err = reviewers.Create(opsCtx, model.ReviewReviewer{ReviewID: opsReview.ReviewID, UserID: opsReviewer})
+	mustNoErr(t, err, "add ops reviewer")
+
+	listed, err := reviewers.List(opsCtx, ReviewReviewerFilter{})
+	mustNoErr(t, err, "list reviewers as operations caller")
+	if len(listed) != 1 || listed[0].UserID != opsReviewer {
+		t.Fatalf("List = %+v, want exactly the operations caller's own reviewer %s, not the stranger's as well", listed, opsReviewer)
 	}
 }
