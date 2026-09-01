@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Seven subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), and `gate-merge` (build the prospective squash merge a merge queue promotion gates).
+Repository helpers that run from the project root. Eight subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), and `report-commit-status` (report a GitHub commit status for a merge queue gate result).
 
 ## Synopsis
 
@@ -16,6 +16,7 @@ erun exec commit BRANCH [PATH...] [flags]
 erun exec push BRANCH [flags]
 erun exec merge TARGET_BRANCH [flags]
 erun exec gate-merge SOURCE_BRANCH --target TARGET_BRANCH [flags]
+erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --remote-url URL [flags]
 ```
 
 ## Subcommands
@@ -72,6 +73,16 @@ A conflicted squash is reported as a distinct, named outcome, the same as `merge
 
 `--dry-run` traces the fetch, checkout, squash merge, and commit without running them. Reports the target branch, source branch, remote, source commit, and squash merge commit id; add `--output json` for a structured result.
 
+### `exec report-commit-status` {#exec-report-commit-status}
+
+Reports a commit status on GitHub for COMMIT — the last step in the merge queue gate: report `--state success` once the gate build is green, or `--state failure` the moment it is not, naming which gate step failed in `--description`. A required status check on the remote's branch protection has nothing to require until this reports it.
+
+COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed.
+
+`--remote-url` names the github.com remote to report against, in any form git accepts. `--context` names the status check a required-status-checks rule points at (defaults to `erun/merge-gate`); `--target-url` is an optional link a reader clicks through to (e.g. a build log). Reporting needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+
+`--dry-run` traces the request without sending it.
+
 ## Examples
 
 ```bash
@@ -84,6 +95,8 @@ echo 'fix the values typo' | erun exec commit main values.yaml
 erun exec push feature/add-widget
 erun exec merge main
 echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
+erun exec report-commit-status $(git rev-parse HEAD) --state success \
+  --description 'gate build passed' --remote-url https://github.com/org/repo.git
 ```
 
 ## Error behaviour
@@ -107,3 +120,7 @@ echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
 | The working tree has uncommitted changes (`gate-merge`). | Refuses with `refusing to gate-merge: the working tree has uncommitted changes`; nothing is fetched or checked out. |
 | The squash merge conflicts (`gate-merge`). | Refuses naming every conflicted file and pointing at `git merge --abort`; the worktree is left mid-conflict for the caller to resolve. |
 | The fetch, checkout, squash merge, or commit fails for another reason (`gate-merge`), e.g. an unknown branch. | Git's own stderr surfaces verbatim; the worktree is left in whatever state that step produced. |
+| `--state`, `--description`, or `--remote-url` is missing, or `--state` is not one of `success`/`failure`/`error`/`pending` (`report-commit-status`). | Refuses with a message naming the missing or invalid field; nothing is reported, even under `--dry-run`. |
+| `--remote-url` is not a recognized github.com remote (`report-commit-status`). | Refuses with `remote-url "..." is not a recognized github.com remote`. |
+| No GitHub token is available (`report-commit-status`). | Refuses with `no GitHub token available to report a commit status; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
+| GitHub rejects the request (`report-commit-status`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
