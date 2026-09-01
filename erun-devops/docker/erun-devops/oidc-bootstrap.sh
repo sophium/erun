@@ -1,8 +1,8 @@
 #!/bin/sh
 
 # oidc-bootstrap idempotently reconciles the platform's OIDC applications
-# (erun-console, erun-cli) against Zitadel's Management API, and persists the
-# two bootstrap PATs it authenticates with into a durable Secret.
+# (erun-console, erun-cli, erun-mobile) against Zitadel's Management API, and
+# persists the two bootstrap PATs it authenticates with into a durable Secret.
 #
 # It runs as a sidecar, not a hook Job, because it needs the org-owner PAT
 # core writes to the shared bootstrap emptyDir, which a separate Job cannot
@@ -24,10 +24,19 @@
 # publish guard below.
 #
 # It never publishes a ConfigMap result unless the project and the erun-cli
-# app genuinely resolved — the console app id is empty on purpose when no
-# console redirect URI is configured, but any other empty id aborts the
-# reconcile before it touches the ConfigMap, so a resolution failure leaves
-# prior good data alone instead of overwriting it with empty strings.
+# app genuinely resolved — the console and mobile app ids are empty on
+# purpose when no redirect URI is configured for them, but any other empty id
+# aborts the reconcile before it touches the ConfigMap, so a resolution
+# failure leaves prior good data alone instead of overwriting it with empty
+# strings.
+#
+# erun-mobile is a native OIDC app (Authorization Code + PKCE, no device
+# code — a mobile client always has a system browser to redirect through)
+# reconciled the same way as erun-console: its redirect URI is a custom URL
+# scheme owned by whichever mobile client actually ships, so it is
+# chart-configurable (MOBILE_REDIRECT_URIS) rather than fixed like
+# erun-cli's loopback, and optional the same way erun-console is — a
+# platform with no mobile client yet can leave it unconfigured.
 #
 # Reconciles periodically rather than exiting, so a ConfigMap, an app, or the
 # PATs Secret deleted out of band is restored without a redeploy. Set
@@ -43,6 +52,7 @@ set -eu
 : "${PATS_SECRET_NAME:?PATS_SECRET_NAME is required}"
 : "${POD_NAMESPACE:?POD_NAMESPACE is required}"
 CONSOLE_REDIRECT_URIS="${CONSOLE_REDIRECT_URIS:-[]}"
+MOBILE_REDIRECT_URIS="${MOBILE_REDIRECT_URIS:-[]}"
 BOOTSTRAP_DIR="${BOOTSTRAP_DIR:-/zitadel/bootstrap}"
 
 # No configured value ever drifts today, but the app is reconciled the same
@@ -205,18 +215,51 @@ ensure_cli_app() {
     echo "${cid}"
 }
 
+ensure_mobile_app() {
+    app_id="$(find_app_id erun-mobile || true)"
+    if [ -z "${app_id:-}" ]; then
+        if [ "${MOBILE_REDIRECT_URIS}" = "[]" ]; then
+            echo "oidc-bootstrap: no mobile redirect URI configured; skipping the erun-mobile app" >&2
+            echo ""
+            return
+        fi
+        call -X POST "${base}/management/v1/projects/${project_id}/apps/oidc" -d "$(
+            jq -n --argjson redirects "${MOBILE_REDIRECT_URIS}" '{
+                name: "erun-mobile",
+                redirectUris: $redirects,
+                responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+                grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
+                appType: "OIDC_APP_TYPE_NATIVE",
+                authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+                accessTokenType: "OIDC_TOKEN_TYPE_JWT"
+            }'
+        )" | jq -r '.clientId'
+        return
+    fi
+
+    app_json="$(get_app "${app_id}")" || {
+        echo "oidc-bootstrap: FAILED to read the erun-mobile app; leaving it unchanged" >&2
+        echo ""
+        return
+    }
+    cid="$(printf '%s' "${app_json}" | jq -r '.app.oidcConfig.clientId')"
+    converge_oidc_redirects erun-mobile "${app_id}" "${app_json}" "${MOBILE_REDIRECT_URIS}" null || true
+    echo "${cid}"
+}
+
 reconcile() {
     persist_pats || echo "oidc-bootstrap: PATs Secret not persisted this tick" >&2
 
     project_id="$(ensure_project || true)"
     console_client_id="$(ensure_console_app || true)"
     cli_client_id="$(ensure_cli_app || true)"
+    mobile_client_id="$(ensure_mobile_app || true)"
 
-    # The console app id is legitimately empty when no console redirect URI is
-    # configured; the project and the CLI app are not optional. Publishing on
-    # a partial resolution would overwrite good client ids with empty strings
-    # on every subsequent tick, so a failed resolution leaves the ConfigMap
-    # untouched instead.
+    # The console and mobile app ids are legitimately empty when no redirect
+    # URI is configured for them; the project and the CLI app are not
+    # optional. Publishing on a partial resolution would overwrite good
+    # client ids with empty strings on every subsequent tick, so a failed
+    # resolution leaves the ConfigMap untouched instead.
     if [ -z "${project_id}" ] || [ -z "${cli_client_id}" ]; then
         echo "oidc-bootstrap: resolution incomplete (project=${project_id:-<empty>} cli=${cli_client_id:-<empty>}), leaving ${CONFIGMAP_NAME} untouched" >&2
         return 1
@@ -225,9 +268,10 @@ reconcile() {
     kubectl create configmap "${CONFIGMAP_NAME}" \
         --from-literal=consoleClientId="${console_client_id}" \
         --from-literal=cliClientId="${cli_client_id}" \
+        --from-literal=mobileClientId="${mobile_client_id}" \
         --namespace "${POD_NAMESPACE}" \
         --dry-run=client -o yaml | kubectl apply -f -
-    echo "oidc-bootstrap: ready project=${project_id} console=${console_client_id} cli=${cli_client_id}"
+    echo "oidc-bootstrap: ready project=${project_id} console=${console_client_id} cli=${cli_client_id} mobile=${mobile_client_id}"
 }
 
 echo "oidc-bootstrap: waiting for the org-owner PAT"

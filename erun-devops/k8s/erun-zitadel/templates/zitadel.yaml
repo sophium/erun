@@ -143,38 +143,43 @@
 {{- $zitadelImage := default (printf "%s/erun-zitadel:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
 {{- $loginImage := default (printf "%s/erun-zitadel-login:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
 {{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
-{{- /* OIDC application bootstrap: the console and an erun CLI/agent each need a
-       real OIDC client to authenticate against, and until now this chart
-       created only the two machine-user PATs, never an application. A sidecar
-       (not a hook Job) is what can reach the org-owner PAT: it lives on the
-       shared bootstrap emptyDir inside this pod, which a separate Job cannot
-       mount. It runs the erun-oidc-bootstrap script baked into the erun-devops
-       runtime image (erun-devops/docker/erun-devops/oidc-bootstrap.sh), rather
-       than a container command inlined here, so the reconcile logic is
-       directly unit-testable. It idempotently ensures a project and two apps
-       via the Management API over the core container's loopback, both issuing
-       JWT access tokens (erun's bearer verifier rejects Zitadel's default
-       opaque token), then publishes the client ids to a ConfigMap the
+{{- /* OIDC application bootstrap: the console, an erun CLI/agent, and a mobile
+       client each need a real OIDC client to authenticate against, and until
+       now this chart created only the two machine-user PATs, never an
+       application. A sidecar (not a hook Job) is what can reach the
+       org-owner PAT: it lives on the shared bootstrap emptyDir inside this
+       pod, which a separate Job cannot mount. It runs the erun-oidc-bootstrap
+       script baked into the erun-devops runtime image
+       (erun-devops/docker/erun-devops/oidc-bootstrap.sh), rather than a
+       container command inlined here, so the reconcile logic is directly
+       unit-testable. It idempotently ensures a project and three apps via the
+       Management API over the core container's loopback, all issuing JWT
+       access tokens (erun's bearer verifier rejects Zitadel's default opaque
+       token), then publishes the client ids to a ConfigMap the
        erun-backend-api chart reads optionally (absent -> empty
        platform.*ClientId, never a failed deploy). Every call carries an
        explicit Host header naming the external domain: Zitadel resolves the
        instance the Management API call targets from that header, not from the
        loopback address the call is actually addressed to, and a call with no
        Host header 404s against every path. It never publishes a result unless
-       the project and the erun-cli app genuinely resolved — the console app
-       id is empty on purpose when no console redirect URI is configured, but
-       any other empty id aborts the reconcile before it touches the
-       ConfigMap, so a resolution failure leaves prior good data alone instead
-       of overwriting it with empty strings. It reconciles on a timer rather
-       than exiting, so a ConfigMap, an app, or the PATs Secret deleted out of
-       band is restored without a redeploy — and on every tick it also
-       converges each app's registered redirectUris/postLogoutRedirectUris to
-       the configured list via the OIDC config update endpoint, not only at
-       first creation, so a changed or added console address actually reaches
-       the app instead of silently drifting from what the platform advertises.
+       the project and the erun-cli app genuinely resolved — the console and
+       mobile app ids are empty on purpose when no redirect URI is configured
+       for them, but any other empty id aborts the reconcile before it
+       touches the ConfigMap, so a resolution failure leaves prior good data
+       alone instead of overwriting it with empty strings. It reconciles on a
+       timer rather than exiting, so a ConfigMap, an app, or the PATs Secret
+       deleted out of band is restored without a redeploy — and on every tick
+       it also converges each app's registered redirectUris to the configured
+       list via the OIDC config update endpoint, not only at first creation,
+       so a changed or added address actually reaches the app instead of
+       silently drifting from what the platform advertises.
        zitadel.oidc.additionalConsoleRedirectUris registers more origins
        alongside zitadel.oidc.consoleRedirectUri/platform.consoleUrl, so
-       publishing a second console host is additive rather than a cutover. */ -}}
+       publishing a second console host is additive rather than a cutover.
+       zitadel.oidc.mobileRedirectUris is unset (no app) by default: the
+       custom URL scheme a mobile client redirects through belongs to whatever
+       app actually ships, so this platform mints no client for one until an
+       operator (or a future erun-ios release) names its real redirect. */ -}}
 {{- $oidc := default dict $zitadel.oidc -}}
 {{- $oidcProjectName := default (printf "%s-platform" $tenant) $oidc.projectName -}}
 {{- $oidcConfigMapName := default (printf "%s-zitadel-oidc-clients" $tenant) $oidc.configMapName -}}
@@ -188,6 +193,7 @@
 {{- $oidcConsoleRedirectURIs = append $oidcConsoleRedirectURIs . -}}
 {{- end -}}
 {{- $oidcConsoleRedirectURIs = uniq $oidcConsoleRedirectURIs -}}
+{{- $oidcMobileRedirectURIs := uniq (default (list) $oidc.mobileRedirectUris) -}}
 {{- $oidcBootstrapImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $oidcServiceAccount := printf "%s-zitadel" $tenant -}}
 apiVersion: v1
@@ -585,6 +591,8 @@ spec:
               value: {{ $oidcProjectName | quote }}
             - name: CONSOLE_REDIRECT_URIS
               value: {{ $oidcConsoleRedirectURIs | toJson | quote }}
+            - name: MOBILE_REDIRECT_URIS
+              value: {{ $oidcMobileRedirectURIs | toJson | quote }}
             - name: CONFIGMAP_NAME
               value: {{ $oidcConfigMapName | quote }}
             - name: PATS_SECRET_NAME

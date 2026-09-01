@@ -276,6 +276,20 @@ rendered=$(render \
 container "${rendered}" oidc-bootstrap | grep -q 'https://console.example.test\\",\\"https://console2.example.test' ||
     fail "additionalConsoleRedirectUris must register alongside consoleRedirectUri, not replace it"
 
+# --- 17b. The mobile app's redirect URI has no default (#1105): a mobile
+#          client's custom URL scheme belongs to whatever app actually ships,
+#          so this platform mints no erun-mobile client until an operator
+#          names one via zitadel.oidc.mobileRedirectUris ---
+rendered=$(render)
+container "${rendered}" oidc-bootstrap | grep -q 'name: MOBILE_REDIRECT_URIS' ||
+    fail "the OIDC bootstrap sidecar must know which mobile redirect URIs to reconcile"
+container "${rendered}" oidc-bootstrap | grep -A1 'name: MOBILE_REDIRECT_URIS' | grep -q 'value: "\[\]"' ||
+    fail "MOBILE_REDIRECT_URIS must default to an empty list, unlike the console's platform.consoleUrl default"
+
+rendered=$(render --set-string 'zitadel.oidc.mobileRedirectUris[0]=erun://callback')
+container "${rendered}" oidc-bootstrap | grep -A1 'name: MOBILE_REDIRECT_URIS' | grep -q 'value: "\[\\"erun://callback\\"\]"' ||
+    fail "zitadel.oidc.mobileRedirectUris must configure MOBILE_REDIRECT_URIS"
+
 # --- 18. The external domain, EXTERNAL_DOMAIN, is what the sidecar sends as
 #         the Management API's Host header (see oidc-bootstrap_test.sh for the
 #         header itself, which is the baked script's behavior) ---

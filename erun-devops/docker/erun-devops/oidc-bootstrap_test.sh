@@ -1,14 +1,16 @@
 #!/bin/sh
 
 # Tests for oidc-bootstrap.sh: the platform's OIDC applications (erun-console,
-# erun-cli) are reconciled against Zitadel's Management API on every tick, not
-# only created once. What is locked here is the reconcile itself — creation,
-# converging an existing app's redirect URIs to a changed configured list,
-# staying idempotent when nothing changed, refusing to converge to an empty
-# list, and being loud (not silent) when an update fails — using a fake
-# `curl` and `kubectl` on PATH so the real Management API and cluster are
-# never touched. Sibling to worktree-adopt_test.sh / session-prune_test.sh:
-# a real baked script exercised as a subprocess, not sourced and mocked.
+# erun-cli, erun-mobile) are reconciled against Zitadel's Management API on
+# every tick, not only created once. What is locked here is the reconcile
+# itself — creation, converging an existing app's redirect URIs to a changed
+# configured list, staying idempotent when nothing changed, refusing to
+# converge to an empty list, being loud (not silent) when an update fails,
+# and erun-mobile's own optionality (no configured redirect -> no app, ever
+# published as a client id) — using a fake `curl` and `kubectl` on PATH so
+# the real Management API and cluster are never touched. Sibling to
+# worktree-adopt_test.sh / session-prune_test.sh: a real baked script
+# exercised as a subprocess, not sourced and mocked.
 
 set -eu
 
@@ -177,12 +179,40 @@ console_post_logout() {
     jq -c '.[] | select(.name == "erun-console") | .oidcConfig.postLogoutRedirectUris' "${state_dir}/apps.json"
 }
 
+mobile_redirects() {
+    jq -c '.[] | select(.name == "erun-mobile") | .oidcConfig.redirectUris' "${state_dir}/apps.json"
+}
+
+# seed_mobile_app <redirects-json> — a pre-existing project with one
+# erun-mobile app already registered, mirroring seed_project_and_app's shape
+# for the native app type.
+seed_mobile_app() {
+    jq --arg name "test-platform" '. + [{id: "p1", name: $name}]' "${state_dir}/projects.json" >"${state_dir}/projects.json.tmp"
+    mv "${state_dir}/projects.json.tmp" "${state_dir}/projects.json"
+    jq -n --argjson redirects "$1" '[{
+        id: "a1",
+        name: "erun-mobile",
+        oidcConfig: {
+            clientId: "cid-existing",
+            redirectUris: $redirects,
+            responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+            grantTypes: ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
+            appType: "OIDC_APP_TYPE_NATIVE",
+            authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
+            accessTokenType: "OIDC_TOKEN_TYPE_JWT",
+            devMode: false,
+            clockSkew: "0s"
+        }
+    }]' >"${state_dir}/apps.json"
+}
+
 put_count() {
     wc -l <"${state_dir}/put_log" | tr -d ' '
 }
 
-# run_once <console-redirect-uris-json> — one reconcile tick against the fake
-# Management API. Stdout+stderr land in ${work_root}/run.log.
+# run_once <console-redirect-uris-json> [mobile-redirect-uris-json] — one
+# reconcile tick against the fake Management API. Stdout+stderr land in
+# ${work_root}/run.log.
 run_once() {
     env -i \
         PATH="${fakebin}:/usr/bin:/bin" \
@@ -195,6 +225,7 @@ run_once() {
         PATS_SECRET_NAME="test-zitadel-pats" \
         POD_NAMESPACE="test-ns" \
         CONSOLE_REDIRECT_URIS="$1" \
+        MOBILE_REDIRECT_URIS="${2:-[]}" \
         OIDC_BOOTSTRAP_RUN_ONCE=1 \
         FAKE_CURL_FAIL_PUT="${FAKE_CURL_FAIL_PUT:-0}" \
         "${bootstrap}" >"${work_root}/run.log" 2>&1
@@ -287,5 +318,41 @@ jq -e '.[] | select(.name == "erun-console") | .oidcConfig | .appType == "OIDC_A
     fail "appType must survive a redirect-only convergence"
 jq -e '.[] | select(.name == "erun-console") | .oidcConfig | .clockSkew == "0s"' "${state_dir}/apps.json" >/dev/null ||
     fail "fields the reconcile does not manage (e.g. clockSkew) must survive a redirect-only convergence"
+
+# --- 10. erun-mobile is optional (#1105): with no configured redirect URI,
+#         no app is created, the skip is logged rather than silent, and the
+#         ConfigMap still publishes since the project and erun-cli resolved ---
+reset_state
+run_once '["https://console.example.test/"]' || fail "a reconcile tick with no mobile redirect configured must still succeed"
+[ "$(mobile_redirects)" = "" ] || fail "no erun-mobile app should be created when MOBILE_REDIRECT_URIS is unset"
+grep -q 'no mobile redirect URI configured; skipping the erun-mobile app' "${work_root}/run.log" ||
+    fail "skipping the unconfigured mobile app must be logged, not silent"
+grep -q 'oidc-bootstrap: ready' "${work_root}/run.log" ||
+    fail "the ConfigMap must still publish when only the mobile app is unconfigured"
+
+# --- 11. erun-mobile is created as a native app with the configured redirect
+#         URI, and its client id is reported in the ready log line ---
+reset_state
+run_once '["https://console.example.test/"]' '["erun://callback"]' ||
+    fail "a reconcile tick that configures a mobile redirect must succeed"
+[ "$(mobile_redirects)" = '["erun://callback"]' ] ||
+    fail "a newly created erun-mobile app must carry the configured redirect URI"
+jq -e '.[] | select(.name == "erun-mobile") | .oidcConfig.appType == "OIDC_APP_TYPE_NATIVE"' "${state_dir}/apps.json" >/dev/null ||
+    fail "erun-mobile must be registered as a native OIDC app"
+jq -e '.[] | select(.name == "erun-mobile") | .oidcConfig.grantTypes == ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"]' "${state_dir}/apps.json" >/dev/null ||
+    fail "erun-mobile must use Authorization Code (+ PKCE) only, no device code grant"
+grep -q 'oidc-bootstrap: ready .*mobile=cid-' "${work_root}/run.log" ||
+    fail "a resolved mobile client id must be reported in the ready log line"
+
+# --- 12. erun-mobile converges an existing app's redirect URI to a changed
+#         configured value, the same reconcile path erun-console uses ---
+reset_state
+seed_mobile_app '["erun://old-callback"]'
+run_once '[]' '["erun://new-callback"]' ||
+    fail "a reconcile tick that converges the mobile redirect must succeed"
+[ "$(mobile_redirects)" = '["erun://new-callback"]' ] ||
+    fail "erun-mobile's redirectUris must converge to the newly configured value"
+grep -q 'converged erun-mobile redirect URIs from .*old-callback.* to .*new-callback' "${work_root}/run.log" ||
+    fail "a tick that changes the mobile redirect must say what it changed, from what to what"
 
 echo "PASS: oidc-bootstrap reconcile"

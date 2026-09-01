@@ -180,6 +180,7 @@ The only endpoint besides `/healthz` that requires **no credential of any kind**
   "consoleUrl": "https://console.acme.erunpaas.com",
   "consoleClientId": "console-app-id",
   "cliClientId": "cli-app-id",
+  "mobileClientId": "",
   "brand": "Acme",
   "docsUrl": "https://docs.acme.erunpaas.com",
   "tagline": "Ship it, prove it.",
@@ -187,7 +188,7 @@ The only endpoint besides `/healthz` that requires **no credential of any kind**
 }
 ```
 
-Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand`/`docsUrl`/`tagline`/`logoUrl` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response.
+Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl`/`brand`/`docsUrl`/`tagline`/`logoUrl` come from the env's [`platform:` block](/reference/configuration#platform-block) (threaded in at deploy via `--set-string platform.*`); an unset value renders as an empty string, **never** an error or a missing field. `consoleClientId`/`cliClientId`/`mobileClientId` come from the `erun-zitadel` chart's OIDC application bootstrap (see [below](#zitadel-oidc-bootstrap)) via an optional ConfigMap — absent when that chart hasn't run, or on a platform with no hosted IdP, again rendering as `""` rather than failing the response. `mobileClientId` is also `""` on a platform that runs `erun-zitadel` but has never configured `zitadel.oidc.mobileRedirectUris`: unlike the console and CLI apps, no `erun-mobile` OIDC application is minted until an operator names the redirect URI a real mobile client will use, since that custom URL scheme belongs to whichever client ships and this platform has no default to guess.
 
 `docsUrl` defaults to `https://docs.<basedomain>` when the platform block sets a base domain, so an instance links its own documentation with nothing configured. `tagline` and `logoUrl` have no default — empty is what keeps the client's bundled product text and generic mark in place. `logoUrl` is deliberately an **absolute URL**, not a path this API serves: one built console image serves every instance and carries no brand asset, so the logo lives wherever the operator hosts it.
 
@@ -199,12 +200,15 @@ Every field is optional and independently sourced. `issuer`/`apiUrl`/`consoleUrl
 
 #### Zitadel OIDC application bootstrap {#zitadel-oidc-bootstrap}
 
-The `erun-zitadel` chart provisions the two OIDC applications `consoleClientId`/`cliClientId` above resolve to, idempotently, via a sidecar in the same pod as Zitadel core (it needs the shared bootstrap volume to read the org-owner PAT core writes):
+The `erun-zitadel` chart provisions the OIDC applications `consoleClientId`/`cliClientId`/`mobileClientId` above resolve to, idempotently, via a sidecar in the same pod as Zitadel core (it needs the shared bootstrap volume to read the org-owner PAT core writes):
 
 - **`erun-console`** — a `OIDC_APP_TYPE_USER_AGENT` (SPA) app, Authorization Code + PKCE, redirect/post-logout URI derived from the env's `platform.consoleUrl`.
 - **`erun-cli`** — a `OIDC_APP_TYPE_NATIVE` (public) app supporting both the Device Authorization Grant (`OIDC_GRANT_TYPE_DEVICE_CODE`) and Authorization Code + PKCE with loopback redirect URIs (`http://127.0.0.1/callback`, `http://localhost/callback`).
+- **`erun-mobile`** — a `OIDC_APP_TYPE_NATIVE` (public) app supporting Authorization Code + PKCE only (a mobile client always has a system browser to redirect through, so it needs no device-code fallback), redirect URI(s) from `zitadel.oidc.mobileRedirectUris`. Unlike the other two apps this one has no default: the sidecar mints no `erun-mobile` application at all while `mobileRedirectUris` is unset, the same "skip, don't guess" behavior `erun-console` falls back to when `platform.consoleUrl` is unset.
 
-Both are configured with `accessTokenType: OIDC_TOKEN_TYPE_JWT` — load-bearing, since erun's bearer verifier validates a JWT via OIDC discovery + JWKS and rejects Zitadel's default opaque access token with `401 invalid bearer token`. The sidecar publishes the resulting client ids to a `<tenant>-zitadel-oidc-clients` ConfigMap in the release namespace, which the `erun-backend-api` chart reads via an optional `configMapKeyRef` (`optional: true` — absent ConfigMap, absent env var, empty string in the `/v1/platform` response above).
+All three are configured with `accessTokenType: OIDC_TOKEN_TYPE_JWT` — load-bearing, since erun's bearer verifier validates a JWT via OIDC discovery + JWKS and rejects Zitadel's default opaque access token with `401 invalid bearer token`. The sidecar publishes the resulting client ids to a `<tenant>-zitadel-oidc-clients` ConfigMap in the release namespace, which the `erun-backend-api` chart reads via an optional `configMapKeyRef` (`optional: true` — absent ConfigMap, absent env var, empty string in the `/v1/platform` response above).
+
+Every OIDC application shares one issuer, so `ERUN_OIDC_ALLOWED_AUDIENCES`/`api.oidcAllowedAudiences` (the [OIDC audience allow-list](#oidc-audience-allow-list) above) is what scopes which of `consoleClientId`/`cliClientId`/`mobileClientId` may actually call this API, if an operator chooses to turn audience enforcement on at all — minting a fourth client here does not by itself change that policy or its default (unset, accepting any audience an allowed issuer minted).
 
 #### erun cloud provider {#erun-cloud-provider}
 
