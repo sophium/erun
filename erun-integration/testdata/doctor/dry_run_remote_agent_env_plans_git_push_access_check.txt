@@ -28,15 +28,26 @@ git-push-access-script:
   if git ls-remote --exit-code "$remote" HEAD >/dev/null 2>&1; then fetch_ok=1; fi
   printf 'fetch_ok=%s\n' "$fetch_ok"
   gh_auth=0
-  if [ -n "$host" ] && command -v gh >/dev/null 2>&1 && gh auth status -h "$host" >/dev/null 2>&1; then gh_auth=1; fi
+  gh_status=""
+  if [ -n "$host" ] && command -v gh >/dev/null 2>&1; then
+    gh_status=$(gh auth status -h "$host" 2>&1) && gh_auth=1
+  fi
   printf 'gh_authenticated=%s\n' "$gh_auth"
   push_credential=0
-  if [ "$gh_auth" -eq 1 ]; then push_credential=1; fi
+  if [ "$gh_auth" -eq 1 ]; then
+    if printf '%s' "$gh_status" | grep -q "Token scopes:"; then
+      if printf '%s' "$gh_status" | grep -q "'repo'"; then push_credential=1; fi
+    else
+      push_credential=1
+    fi
+  fi
   if [ "$push_credential" -eq 0 ] && { [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; }; then push_credential=1; fi
-  if [ "$push_credential" -eq 0 ] && [ -n "$host" ]; then
+  if [ "$push_credential" -eq 0 ] && [ -n "$host" ] && command -v ssh >/dev/null 2>&1; then
     case "$remote" in
       git@*|ssh://*)
-        if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T "git@$host" 2>&1 | grep -qi "successfully authenticated"; then push_credential=1; fi
+        ssh_exit=0
+        ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T "git@$host" >/dev/null 2>&1 || ssh_exit=$?
+        if [ "$ssh_exit" -ne 255 ]; then push_credential=1; fi
         ;;
     esac
   fi

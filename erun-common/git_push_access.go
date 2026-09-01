@@ -27,9 +27,23 @@ type GitPushAccessStatus struct {
 	// build_docker_commands.go for the same reasoning applied to erun's own
 	// GHCR push-scope refresh).
 	GHAuthenticated bool
-	// PushCredential reports whether any credential that could push resolved:
-	// a gh session, GH_TOKEN/GITHUB_TOKEN, or (for an SSH remote) a key the
-	// remote host actually accepts.
+	// PushCredential reports whether any credential that could push resolved.
+	// A `gh` session only counts when it either carries the classic OAuth
+	// `repo` scope or reports no scope list at all (a fine-grained PAT or
+	// GitHub App token uses a different permission model that `gh auth
+	// status` can't enumerate, so an absent scope list is not evidence of
+	// absent permission -- same reasoning as verifyGHCRPushScopeFor in
+	// ghcr_push_preflight.go: `gh auth status` succeeding only proves the
+	// session authenticates, not that it can push, so a read:org/gist-only
+	// token must not read as a push credential). GH_TOKEN/GITHUB_TOKEN always
+	// count. For an SSH remote with none of the above, a key the remote host
+	// accepts is detected by the ssh client's own exit-code convention: ssh
+	// reserves exit 255 for its own connection/auth failure and passes through
+	// whatever the remote process returns otherwise, so a non-255 exit means
+	// the remote accepted the key even though most git hosts (GitHub, GitLab,
+	// Bitbucket, self-hosted) then refuse the shell command itself -- grepping
+	// stderr for GitHub's own wording ("successfully authenticated") read a
+	// valid key against any other host as no credential at all.
 	PushCredential bool
 }
 
@@ -73,15 +87,26 @@ func gitPushAccessScript(repoPath string) string {
 		`if git ls-remote --exit-code "$remote" HEAD >/dev/null 2>&1; then fetch_ok=1; fi`,
 		`printf 'fetch_ok=%s\n' "$fetch_ok"`,
 		`gh_auth=0`,
-		`if [ -n "$host" ] && command -v gh >/dev/null 2>&1 && gh auth status -h "$host" >/dev/null 2>&1; then gh_auth=1; fi`,
+		`gh_status=""`,
+		`if [ -n "$host" ] && command -v gh >/dev/null 2>&1; then`,
+		`  gh_status=$(gh auth status -h "$host" 2>&1) && gh_auth=1`,
+		`fi`,
 		`printf 'gh_authenticated=%s\n' "$gh_auth"`,
 		`push_credential=0`,
-		`if [ "$gh_auth" -eq 1 ]; then push_credential=1; fi`,
+		`if [ "$gh_auth" -eq 1 ]; then`,
+		`  if printf '%s' "$gh_status" | grep -q "Token scopes:"; then`,
+		`    if printf '%s' "$gh_status" | grep -q "'repo'"; then push_credential=1; fi`,
+		`  else`,
+		`    push_credential=1`,
+		`  fi`,
+		"fi",
 		`if [ "$push_credential" -eq 0 ] && { [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]; }; then push_credential=1; fi`,
-		`if [ "$push_credential" -eq 0 ] && [ -n "$host" ]; then`,
+		`if [ "$push_credential" -eq 0 ] && [ -n "$host" ] && command -v ssh >/dev/null 2>&1; then`,
 		`  case "$remote" in`,
 		`    git@*|ssh://*)`,
-		`      if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T "git@$host" 2>&1 | grep -qi "successfully authenticated"; then push_credential=1; fi`,
+		`      ssh_exit=0`,
+		`      ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T "git@$host" >/dev/null 2>&1 || ssh_exit=$?`,
+		`      if [ "$ssh_exit" -ne 255 ]; then push_credential=1; fi`,
 		`      ;;`,
 		"  esac",
 		"fi",
