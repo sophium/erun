@@ -177,7 +177,7 @@ func TestRoleRepositoryRevokeRefusesLastGrantCapableRole(t *testing.T) {
 	mustNoErr(t, err, "look up seeded WriteAll role id")
 
 	ctx := rolesContext(tenantID, admin)
-	err = roles.Revoke(ctx, admin, writeAllRoleID)
+	err = roles.Revoke(ctx, admin, writeAllRoleID, "")
 	if !errors.Is(err, ErrLastGrantCapableRole) {
 		t.Fatalf("expected ErrLastGrantCapableRole, got %v", err)
 	}
@@ -212,8 +212,119 @@ func TestRoleRepositoryRevokeSucceedsWhenAnotherGrantCapableUserRemains(t *testi
 	mustNoErr(t, err, "assign WriteAll to second admin")
 
 	ctx := rolesContext(tenantID, first)
-	if err := roles.Revoke(ctx, first, writeAllRoleID); err != nil {
+	if err := roles.Revoke(ctx, first, writeAllRoleID, ""); err != nil {
 		t.Fatalf("expected revoke to succeed while another grant-capable user remains, got %v", err)
+	}
+}
+
+// TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant is the guard's
+// cross-tenant half. erun_operations bypasses RLS, so before the tenant filter
+// went in, both of Revoke's statements saw the whole platform: the delete would
+// remove a matching (user_id, role_id) row in whatever tenant it lived in, and
+// the lockout guard would pass as long as *some other* tenant still had a
+// grant-capable user. An operations caller could therefore take the last admin
+// role off a tenant and brick it — the exact state this guard exists to make
+// impossible, silently not held for the only caller who can reach across
+// tenants.
+func TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant(t *testing.T) {
+	db, tenantTarget := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+
+	// The target tenant's sole grant-capable user.
+	soleAdmin := seedPermissionsUser(t, db, tenantTarget, "sole-admin")
+	grantRole(t, db, tenantTarget, soleAdmin, "WriteAll", []seededPermission{
+		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
+	})
+	var writeAllRoleID string
+	mustNoErr(t, db.QueryRow(
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = 'WriteAll'`, tenantTarget,
+	).Scan(&writeAllRoleID), "look up the target tenant's WriteAll role id")
+
+	// A second, unrelated tenant that also has one. This is the decoy the
+	// unfiltered guard counted.
+	var tenantOther string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
+		"roles-e2e-other-"+time.Now().Format("20060102150405.000000"),
+	).Scan(&tenantOther), "seed the decoy tenant")
+	t.Cleanup(func() { clearPermissionsTenant(t, db, tenantOther) })
+	otherAdmin := seedPermissionsUser(t, db, tenantOther, "other-admin")
+	grantRole(t, db, tenantOther, otherAdmin, "WriteAll", []seededPermission{
+		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
+	})
+
+	var tenantOps string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'OPERATIONS') RETURNING tenant_id`,
+		"roles-e2e-ops-revoke-"+time.Now().Format("20060102150405.000000"),
+	).Scan(&tenantOps), "seed the operations tenant")
+	t.Cleanup(func() { clearPermissionsTenant(t, db, tenantOps) })
+	adminOps := seedPermissionsUser(t, db, tenantOps, "admin-ops")
+	ctxOps := security.WithContext(context.Background(), security.Context{
+		TenantID:   tenantOps,
+		TenantType: string(model.TenantTypeOperations),
+		ErunUserID: adminOps,
+	})
+
+	err := roles.Revoke(ctxOps, soleAdmin, writeAllRoleID, tenantTarget)
+	if !errors.Is(err, ErrLastGrantCapableRole) {
+		t.Fatalf("expected ErrLastGrantCapableRole for the target tenant's last grant-capable role, got %v", err)
+	}
+
+	var stillAssigned int
+	mustNoErr(t, db.QueryRow(
+		`SELECT COUNT(*) FROM user_roles WHERE tenant_id = $1 AND user_id = $2 AND role_id = $3`,
+		tenantTarget, soleAdmin, writeAllRoleID,
+	).Scan(&stillAssigned), "count the assignment after the refused revoke")
+	if stillAssigned != 1 {
+		t.Fatalf("expected the refused revoke to roll back, found %d rows", stillAssigned)
+	}
+}
+
+// TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant closes the loop
+// on the grant: whatever an operations caller can do to another tenant's roles,
+// it must be able to undo, or the recovery path creates its own dead end.
+func TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant(t *testing.T) {
+	db, tenantTarget := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+	adminTarget := seedPermissionsUser(t, db, tenantTarget, "admin-target")
+	member := seedPermissionsUser(t, db, tenantTarget, "member")
+
+	// The target tenant keeps a grant-capable user of its own, so the lockout
+	// guard has no reason to refuse the revoke below.
+	grantRole(t, db, tenantTarget, adminTarget, "WriteAll", []seededPermission{
+		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
+	})
+	role, err := roles.Create(rolesContext(tenantTarget, adminTarget), "ReviewsReader", []RolePermissionInput{
+		{APIMethod: "GET", APIPath: "/v1/reviews"},
+	})
+	mustNoErr(t, err, "create a role in the target tenant")
+
+	var tenantOps string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'OPERATIONS') RETURNING tenant_id`,
+		"roles-e2e-ops-roundtrip-"+time.Now().Format("20060102150405.000000"),
+	).Scan(&tenantOps), "seed the operations tenant")
+	t.Cleanup(func() { clearPermissionsTenant(t, db, tenantOps) })
+	adminOps := seedPermissionsUser(t, db, tenantOps, "admin-ops")
+	ctxOps := security.WithContext(context.Background(), security.Context{
+		TenantID:   tenantOps,
+		TenantType: string(model.TenantTypeOperations),
+		ErunUserID: adminOps,
+	})
+
+	_, err = roles.Grant(ctxOps, member, role.RoleID, tenantTarget)
+	mustNoErr(t, err, "operations grant into the target tenant")
+	mustNoErr(t, roles.Revoke(ctxOps, member, role.RoleID, tenantTarget), "operations revoke in the target tenant")
+
+	assigned, err := roles.ForUser(rolesContext(tenantTarget, adminTarget), member)
+	mustNoErr(t, err, "list the member's roles as the target tenant")
+	for _, r := range assigned {
+		if r.RoleID == role.RoleID {
+			t.Fatalf("expected the revoke to remove the grant, target tenant still sees %+v", assigned)
+		}
 	}
 }
 

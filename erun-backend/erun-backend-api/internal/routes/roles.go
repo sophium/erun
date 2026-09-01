@@ -18,7 +18,7 @@ type RoleRepository interface {
 	Create(ctx context.Context, name string, permissions []apirepository.RolePermissionInput) (model.Role, error)
 	ForUser(ctx context.Context, userID string) ([]model.Role, error)
 	Grant(ctx context.Context, userID string, roleID string, tenantID string) (model.UserRole, error)
-	Revoke(ctx context.Context, userID string, roleID string) error
+	Revoke(ctx context.Context, userID string, roleID string, tenantID string) error
 }
 
 type RoleRoutes struct {
@@ -118,7 +118,7 @@ type grantUserRoleRequest struct {
 func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	var body grantUserRoleRequest
@@ -159,8 +159,28 @@ func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusCreated, grant)
 }
 
+// revokeUserRole takes its optional tenantId from the query string, not a body:
+// a DELETE carries no body here, the same way GET /v1/invites and
+// GET /v1/environments take theirs. Grant and Revoke have to be symmetrical —
+// a cross-tenant grant an operations caller could not undo would trade one
+// unrecoverable state for another.
 func (routes RoleRoutes) revokeUserRole(w http.ResponseWriter, req *http.Request) {
-	err := routes.roles.Revoke(req.Context(), req.PathValue("user_id"), req.PathValue("role_id"))
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	targetTenantID, err := resolveTargetTenant(securityContext, req.URL.Query().Get("tenantId"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	overrideTenantID := ""
+	if targetTenantID != securityContext.TenantID {
+		overrideTenantID = targetTenantID
+	}
+
+	err = routes.roles.Revoke(req.Context(), req.PathValue("user_id"), req.PathValue("role_id"), overrideTenantID)
 	if err != nil {
 		if errors.Is(err, apirepository.ErrLastGrantCapableRole) {
 			writeError(w, http.StatusConflict, err.Error())

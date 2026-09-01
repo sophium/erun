@@ -29,8 +29,9 @@ type stubRoleRepository struct {
 	gotGrant   struct{ userID, roleID, tenantID string }
 	grantCalls int
 
-	revokeErr error
-	gotRevoke struct{ userID, roleID string }
+	revokeErr   error
+	gotRevoke   struct{ userID, roleID, tenantID string }
+	revokeCalls int
 }
 
 func (r *stubRoleRepository) List(_ context.Context) ([]model.Role, error) {
@@ -66,8 +67,9 @@ func (r *stubRoleRepository) Grant(_ context.Context, userID string, roleID stri
 	return r.granted, nil
 }
 
-func (r *stubRoleRepository) Revoke(_ context.Context, userID string, roleID string) error {
-	r.gotRevoke = struct{ userID, roleID string }{userID, roleID}
+func (r *stubRoleRepository) Revoke(_ context.Context, userID string, roleID string, tenantID string) error {
+	r.revokeCalls++
+	r.gotRevoke = struct{ userID, roleID, tenantID string }{userID, roleID, tenantID}
 	return r.revokeErr
 }
 
@@ -243,18 +245,67 @@ func TestGrantUserRoleMapsNotFoundToStatusNotFound(t *testing.T) {
 	}
 }
 
-func TestRevokeUserRoleSucceeds(t *testing.T) {
-	roles := &stubRoleRepository{}
-	req := httptest.NewRequest(http.MethodDelete, "/v1/users/user-1/roles/role-1", nil)
+// deleteGrant drives the revoke route with the security context the
+// authentication middleware always stamps, and an optional ?tenantId=.
+func deleteGrant(t *testing.T, roles *stubRoleRepository, tenantType, tenantID, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/v1/users/user-1/roles/role-1"+query, nil)
 	req.SetPathValue("user_id", "user-1")
 	req.SetPathValue("role_id", "role-1")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID:   tenantID,
+		TenantType: tenantType,
+		ErunUserID: "caller-user",
+	}))
 	rec := httptest.NewRecorder()
 	RoleRoutes{roles: roles}.revokeUserRole(rec, req)
+	return rec
+}
+
+func TestRevokeUserRoleSucceeds(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "")
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
 	}
-	if roles.gotRevoke.userID != "user-1" || roles.gotRevoke.roleID != "role-1" {
-		t.Fatalf("Revoke called with %+v, want user-1/role-1", roles.gotRevoke)
+	if roles.gotRevoke.userID != "user-1" || roles.gotRevoke.roleID != "role-1" || roles.gotRevoke.tenantID != "" {
+		t.Fatalf("Revoke called with %+v, want user-1/role-1 and no tenant override", roles.gotRevoke)
+	}
+}
+
+// TestRevokeUserRoleForbidsCrossTenantWithoutOperations is the same guard the
+// grant route has: naming another tenant must not be a way in for an ordinary
+// tenant.
+func TestRevokeUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "?tenantId=tenant-b")
+	if rec.Code != http.StatusForbidden || roles.revokeCalls != 0 {
+		t.Fatalf("status=%d revokeCalls=%d, want 403 / 0 calls", rec.Code, roles.revokeCalls)
+	}
+}
+
+// TestRevokeUserRoleFromOperationsTargetsNamedTenant keeps grant and revoke
+// symmetrical: an operations caller that can create a cross-tenant grant must be
+// able to undo it, or the fix trades one unrecoverable state for another.
+func TestRevokeUserRoleFromOperationsTargetsNamedTenant(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := deleteGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", "?tenantId=tenant-b")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if roles.gotRevoke.tenantID != "tenant-b" {
+		t.Fatalf("Revoke called with %+v, want tenantID=tenant-b", roles.gotRevoke)
+	}
+}
+
+func TestRevokeUserRoleFromOperationsOwnTenantPassesNoOverride(t *testing.T) {
+	roles := &stubRoleRepository{}
+	rec := deleteGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", "?tenantId=tenant-ops")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if roles.gotRevoke.tenantID != "" {
+		t.Fatalf("Revoke called with %+v, want no tenant override", roles.gotRevoke)
 	}
 }
 

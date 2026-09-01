@@ -169,7 +169,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/roles` | Create a tenant-owned role with one or more permissions. Body below. | Tenant member (write) |
 | `GET` | `/v1/users/{user_id}/roles` | List a user's assigned roles. | Tenant member (read) |
 | `POST` | `/v1/users/{user_id}/roles` | Grant a role to a user. Body below; an `OPERATIONS` caller may name another `tenantId`. | Tenant member (write) |
-| `DELETE` | `/v1/users/{user_id}/roles/{role_id}` | Revoke a role from a user; refused if it would leave the tenant with no user able to grant roles. | Tenant member (write) |
+| `DELETE` | `/v1/users/{user_id}/roles/{role_id}` | Revoke a role from a user; refused if it would leave the tenant with no user able to grant roles. An `OPERATIONS` caller may name another tenant with `?tenantId=`. | Tenant member (write) |
 | `POST` | `/v1/invites` | Create a revocable, single-use invite for the caller's tenant, or — operations-only — an explicitly named other tenant. Body below. | Tenant member (write); cross-tenant needs Operations |
 | `GET` | `/v1/invites` | List the caller's tenant's outstanding (unconsumed) invites, or — operations-only — an explicitly named other tenant's via `?tenantId=`. | Tenant member (read); cross-tenant needs Operations |
 | `DELETE` | `/v1/invites/{invite_id}` | Revoke an outstanding invite. `204` on success. | Tenant member (write) |
@@ -1200,7 +1200,11 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 
 **Cross-tenant grants.** The grant lands in the caller's own resolved tenant by default. An explicit `tenantId` targets a **different** tenant and is honored only when the caller's resolved tenant is `OPERATIONS`, the same cross-tenant precedent [`POST`/`GET /v1/users`](#post-v1users-and-get-v1users) and [`POST /v1/invites`](#invites) use; any other caller naming another tenant gets `403`. It exists because the lockout guard above cannot cover every lockout: a tenant can reach a state where its only grant-capable user is an identity that can no longer authenticate — for instance a first-user bootstrap that ran against an identity from another IdP org, whose token can never resolve to this tenant again (issue #1830). The identity that *can* sign in holds no grant-capable role, and granting a role is itself a grant-capable call, so nothing inside the tenant can break the cycle. The target tenant must be named explicitly rather than left to the `tenant_id` default: the default fills in the *operations* tenant, and `user_roles`' composite foreign keys on `(tenant_id, user_id)` / `(tenant_id, role_id)` then match nothing, so an operations caller omitting `tenantId` gets `404` however valid the ids are.
 
+`DELETE /v1/users/{user_id}/roles/{role_id}` takes the same override as a query parameter (`?tenantId=`), under the same operations-only rule. Grant and revoke have to be symmetrical: a cross-tenant grant an operations caller could not undo would trade one unrecoverable state for another.
+
 **The lockout guard.** `DELETE /v1/users/{user_id}/roles/{role_id}` refuses when the revoke would leave the tenant with **no user holding a role that can grant roles** (a permission matching `POST /v1/users/{user_id}/roles` itself) — the one failure this feature makes impossible rather than merely recoverable, since there would be no lever left inside the product to undo it. The check runs against every user in the tenant, not just the one being revoked, so revoking a role from one admin while another admin still holds a grant-capable role succeeds normally.
+
+Both halves of that revoke — the delete and the guard's count — are scoped to the **target** tenant explicitly, not left to row-level security. An `OPERATIONS` session bypasses RLS, so an unscoped delete would remove the matching `(user_id, role_id)` row in whatever tenant it happened to live in, and an unscoped count would pass as long as *some other* tenant on the platform still had a grant-capable user — the one invariant this feature makes impossible would silently not hold for the only caller able to reach across tenants.
 
 **Error behaviour.** Same generic JSON `{code, message}` envelope as `/v1/users`:
 
@@ -1208,7 +1212,7 @@ Each permission needs **exactly one** of the exact pair or the pattern pair (mat
 |---|---|---|
 | `400` | `POST /v1/roles`: `name` is empty, no permissions given, or a permission fails the exact/pattern-exclusivity, method-enum, or regex-compile checks above. `POST /v1/users/{user_id}/roles`: `roleId` is empty. | Fix the request body per the rules above. |
 | `404` | The `role_id` or `user_id` does not exist in the target tenant (for a tenant-scoped caller a cross-tenant reference is invisible under RLS, not merely forbidden). | Use an ID that belongs to the target tenant. |
-| `403` | `POST /v1/users/{user_id}/roles`: `tenantId` names a tenant other than the caller's own and the caller's resolved tenant is not `OPERATIONS`. | Drop `tenantId` to grant within your own tenant, or have an operations-tenant caller make the request. |
+| `403` | `POST /v1/users/{user_id}/roles` (body `tenantId`) or `DELETE .../roles/{role_id}` (`?tenantId=`) names a tenant other than the caller's own and the caller's resolved tenant is not `OPERATIONS`. | Drop `tenantId` to act within your own tenant, or have an operations-tenant caller make the request. |
 | `409` | `POST /v1/roles`: a role with this name, or one of its permissions, already exists in the tenant. `POST /v1/users/{user_id}/roles`: the user already holds this role. `DELETE .../roles/{role_id}`: the lockout guard above refused the revoke. | Use a different name, or accept the existing grant; for the lockout case, grant a recovery role to another user (or the same user) before revoking this one. |
 
 ### `POST /v1/invites`, `GET /v1/invites`, `DELETE /v1/invites/{invite_id}` {#invites}

@@ -309,7 +309,7 @@ func TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable(t *testing.T)
 	if adminRoleID == "" {
 		t.Fatalf("expected the tenant's first user to hold TenantAdmin, got %+v", adminRoles)
 	}
-	if err := roles.Revoke(adminCtx, admin.UserID, adminRoleID); !errors.Is(err, repository.ErrLastGrantCapableRole) {
+	if err := roles.Revoke(adminCtx, admin.UserID, adminRoleID, ""); !errors.Is(err, repository.ErrLastGrantCapableRole) {
 		t.Fatalf("expected revoking the tenant's only grant-capable role to be refused, got %v", err)
 	}
 }

@@ -250,13 +250,30 @@ func (r *RoleRepository) Grant(ctx context.Context, userID string, roleID string
 // tenant with no user able to grant roles — the one failure this feature must
 // make impossible rather than merely recoverable. The check runs inside the
 // same transaction as the delete and rolls the delete back on refusal.
-func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID string) error {
+//
+// tenantID mirrors Grant's: empty means the caller's own tenant, and an
+// operations caller names another explicitly. Both statements filter on the
+// resolved tenant rather than leaning on RLS, because an operations session
+// bypasses RLS and neither would otherwise be scoped at all: the delete would
+// remove the matching (user_id, role_id) row in whatever tenant it happens to
+// live in, and — worse — the guard would count every tenant's users, so it
+// would let the last grant-capable role in a tenant go as long as some *other*
+// tenant, anywhere on the platform, still had one. The invariant this function
+// exists to hold would silently not hold for exactly the caller who can reach
+// across tenants. For a tenant-scoped caller the filter is what RLS already
+// enforces, so it changes nothing there.
+func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID string, tenantID string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		targetTenantID, err := resolveRoleTenant(ctx, tenantID)
+		if err != nil {
+			return err
+		}
 		result, err := tx.NewRaw(`
 			DELETE FROM user_roles
-			 WHERE user_id = ?
+			 WHERE tenant_id = ?
+			   AND user_id = ?
 			   AND role_id = ?
-		`, userID, roleID).Exec(ctx)
+		`, targetTenantID, userID, roleID).Exec(ctx)
 		if err != nil {
 			return err
 		}
@@ -267,7 +284,7 @@ func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID strin
 		if affected == 0 {
 			return ErrNotFound
 		}
-		stillGrantCapable, err := tenantHasGrantCapableUser(ctx, tx)
+		stillGrantCapable, err := tenantHasGrantCapableUser(ctx, tx, targetTenantID)
 		if err != nil {
 			return err
 		}
@@ -278,6 +295,21 @@ func (r *RoleRepository) Revoke(ctx context.Context, userID string, roleID strin
 	})
 }
 
+// resolveRoleTenant turns an optional explicit tenant into the one this
+// operation acts on. The route has already authorized the override
+// (resolveTargetTenant refuses a non-operations caller), so an empty value
+// here means "the caller's own tenant" and nothing else.
+func resolveRoleTenant(ctx context.Context, tenantID string) (string, error) {
+	if tenantID = strings.TrimSpace(tenantID); tenantID != "" {
+		return tenantID, nil
+	}
+	securityContext, err := security.RequiredFromContext(ctx)
+	if err != nil {
+		return "", ErrMissingSecurityContext
+	}
+	return securityContext.TenantID, nil
+}
+
 // grantRoleMethod and grantRolePath are the canonical route that lets an
 // operator recover from a bad role assignment: as long as one user can reach
 // it, the tenant can always grant its way back to a working state.
@@ -286,11 +318,15 @@ const (
 	grantRolePath   = "/v1/users/{user_id}/roles"
 )
 
-// tenantHasGrantCapableUser reports whether any user in the tenant currently
-// holds a permission that would authorize granting a role to a user. It reuses
-// the same rule matcher Authorize enforces with, so this invariant and request
-// enforcement cannot disagree about what "grant-capable" means.
-func tenantHasGrantCapableUser(ctx context.Context, tx bun.Tx) (bool, error) {
+// tenantHasGrantCapableUser reports whether any user in the named tenant
+// currently holds a permission that would authorize granting a role to a user.
+// It reuses the same rule matcher Authorize enforces with, so this invariant and
+// request enforcement cannot disagree about what "grant-capable" means.
+//
+// tenantID is passed explicitly rather than left to RLS: under an operations
+// session the unfiltered query saw every tenant's grants, which turned the
+// lockout guard into a no-op for the one caller able to revoke across tenants.
+func tenantHasGrantCapableUser(ctx context.Context, tx bun.Tx, tenantID string) (bool, error) {
 	var rules []permissionRule
 	if err := tx.NewRaw(`
 		SELECT rp.api_method, rp.api_path, rp.api_method_pattern, rp.api_path_pattern
@@ -298,7 +334,8 @@ func tenantHasGrantCapableUser(ctx context.Context, tx bun.Tx) (bool, error) {
 		  JOIN role_permissions rp
 		    ON rp.tenant_id = ur.tenant_id
 		   AND rp.role_id = ur.role_id
-	`).Scan(ctx, &rules); err != nil {
+		 WHERE ur.tenant_id = ?
+	`, tenantID).Scan(ctx, &rules); err != nil {
 		return false, err
 	}
 	return rulesAllow(rules, grantRoleMethod, grantRolePath)
