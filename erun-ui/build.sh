@@ -52,16 +52,7 @@ if [ -d frontend ]; then
 	mkdir -p frontend/dist
 fi
 
-if [ -x "$WAILS_BIN" ]; then
-	"$WAILS_BIN" generate module
-else
-	WAILS_VERSION=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
-	WAILS_TMP="${TMPDIR:-/tmp}/erun-wails-$$"
-	mkdir -p "$WAILS_TMP"
-	GOBIN="$WAILS_TMP" go install "github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION"
-	"$WAILS_TMP/wails" generate module
-	rm -rf "$WAILS_TMP"
-fi
+WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
 
 if [ -d frontend ]; then
 	# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:

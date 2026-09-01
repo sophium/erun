@@ -46,9 +46,11 @@ yarn typecheck      # tsc --noEmit
 yarn lint            # eslint .
 yarn format:check    # prettier --check .
 yarn build           # vite build of harness/ — the kit's own demo app
+yarn test            # node --test src/**/*.test.ts
 yarn shadcn:check    # regenerate the pinned primitives, diff against committed output
 ```
 
 - `yarn build` builds `harness/`, a small Vite app that renders every widget in the states it's given (default, disabled, empty, with/without an action, every `StatusBadge` tone) and a light/dark toggle. It is the kit's own reviewable artifact — run `yarn dev` to preview it locally. It is not how the two apps consume the kit; they import `erun-kit`'s TypeScript source directly (see "Module role"), so nothing here needs a published build output.
-- After any change, also validate every app that consumes the changed surface: `erun-ui/frontend` (`yarn typecheck && yarn lint && yarn format:check && yarn build`, plus `./playwright/run.sh` specs covering the changed widget — see `erun-ui/playwright/AGENTS.md`) and `erun-console` (`yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test`) if it has adopted the changed surface.
+- All five of the above except `shadcn:check` are also gated centrally: the repo root `make check` (via its `test-frontend` target) runs them against this module, alongside `erun-ui/frontend` and `erun-console`. `shadcn:check` stays a local-only check (see "Adding or updating a shadcn primitive" above for why).
+- After any change, also validate every app that consumes the changed surface: `erun-ui/frontend` (`yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test`, plus `./playwright/run.sh` specs covering the changed widget — see `erun-ui/playwright/AGENTS.md`) and `erun-console` (`yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test`) if it has adopted the changed surface.
 - The desktop's Playwright suite is the regression gate that proves a kit change is byte- and behaviour-identical for its existing consumer: it must stay green with **no spec edits**. A spec edited to keep it passing after a kit change is a regression in the kit, not a test update.
