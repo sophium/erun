@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -51,14 +52,23 @@ func (r *EnvironmentRepository) Create(ctx context.Context, environment model.En
 	return created, err
 }
 
+// List returns the caller's tenant's environments. Scoped explicitly by
+// tenant_id from the security context rather than left to RLS: erun_operations
+// (an OPERATIONS tenant's role) carries an unconditional policy and would
+// otherwise return every tenant's environments.
 func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, error) {
 	var environments []model.Environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
 			SELECT `+environmentColumns+`
 			  FROM environments
+			 WHERE tenant_id = ?
 			 ORDER BY name ASC, environment_id ASC
-		`).Scan(ctx, &environments)
+		`, securityContext.TenantID).Scan(ctx, &environments)
 	})
 	return environments, err
 }
@@ -69,31 +79,47 @@ func (r *EnvironmentRepository) List(ctx context.Context) ([]model.Environment, 
 // maxExcludedMidTeardownEnvironments: a delete that cannot complete must not
 // lock the tenant out of its own allowance (#1140), while an unbounded
 // discount would let a tenant hold unlimited live namespaces that its quota
-// never sees (#1163). Both subqueries run under the caller's RLS scope, so
-// each counts only this tenant's rows.
+// never sees (#1163). Both subqueries are scoped explicitly by tenant_id from
+// the security context: erun_operations' RLS policy is unconditional, so an
+// OPERATIONS caller's quota would otherwise count every tenant's environments,
+// not its own.
 func (r *EnvironmentRepository) Count(ctx context.Context) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
-			SELECT (SELECT COUNT(*) FROM environments)
+			SELECT (SELECT COUNT(*) FROM environments WHERE tenant_id = ?)
 			     - LEAST(
-			         (SELECT COUNT(*) FROM environments WHERE status IN (?)),
+			         (SELECT COUNT(*) FROM environments WHERE tenant_id = ? AND status IN (?)),
 			         ?
 			       )
-		`, bun.List(environmentsMidTeardownStatuses), maxExcludedMidTeardownEnvironments).Scan(ctx, &count)
+		`, securityContext.TenantID, securityContext.TenantID, bun.List(environmentsMidTeardownStatuses), maxExcludedMidTeardownEnvironments).Scan(ctx, &count)
 	})
 	return count, err
 }
 
-// CountByContext returns how many environments are already placed on the
-// given context, for the placement capacity check (#1112): a context's
-// contexts.max_environments names how many it can host.
+// CountByContext returns how many of the caller's tenant's environments are
+// already placed on the given context, for the placement capacity check
+// (#1112): a context's contexts.max_environments names how many it can host.
+// Scoped explicitly by tenant_id from the security context alongside
+// context_id, the same reason Count is: erun_operations' RLS policy is
+// unconditional.
 func (r *EnvironmentRepository) CountByContext(ctx context.Context, contextID string) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		var err error
-		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Where("context_id = ?", contextID).Count(ctx)
-		return err
+		securityContext, secErr := security.RequiredFromContext(ctx)
+		if secErr != nil {
+			return ErrMissingSecurityContext
+		}
+		var countErr error
+		count, countErr = tx.NewSelect().Model((*model.Environment)(nil)).
+			Where("context_id = ?", contextID).
+			Where("tenant_id = ?", securityContext.TenantID).
+			Count(ctx)
+		return countErr
 	})
 	return count, err
 }
@@ -101,13 +127,22 @@ func (r *EnvironmentRepository) CountByContext(ctx context.Context, contextID st
 // CountByType returns how many of the caller's tenant's environments are of
 // the given type, for the aggregate resource-budget check (#1113): only
 // runtime environments ever get a namespace ResourceQuota, so the projected
-// tenant-wide total is (runtime count + 1) * the per-environment cap.
+// tenant-wide total is (runtime count + 1) * the per-environment cap. Scoped
+// explicitly by tenant_id from the security context alongside type, the same
+// reason Count is: erun_operations' RLS policy is unconditional.
 func (r *EnvironmentRepository) CountByType(ctx context.Context, envType model.EnvironmentType) (int, error) {
 	var count int
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		var err error
-		count, err = tx.NewSelect().Model((*model.Environment)(nil)).Where("type = ?", string(envType)).Count(ctx)
-		return err
+		securityContext, secErr := security.RequiredFromContext(ctx)
+		if secErr != nil {
+			return ErrMissingSecurityContext
+		}
+		var countErr error
+		count, countErr = tx.NewSelect().Model((*model.Environment)(nil)).
+			Where("type = ?", string(envType)).
+			Where("tenant_id = ?", securityContext.TenantID).
+			Count(ctx)
+		return countErr
 	})
 	return count, err
 }

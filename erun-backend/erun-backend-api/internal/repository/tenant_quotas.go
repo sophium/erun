@@ -7,6 +7,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -77,15 +78,23 @@ const tenantQuotaColumns = `tenant_id, max_environments, max_cpu_millicores, max
 
 // Get returns the caller's full quota row (env count, the per-environment
 // CPU/memory/storage namespace ceiling, and the aggregate tenant-wide
-// ceiling), defaulted when the tenant has no row yet. The unfiltered read
-// returns only the caller's row because RLS scopes it to the caller's tenant.
+// ceiling), defaulted when the tenant has no row yet. Scoped explicitly by
+// tenant_id from the security context rather than left to RLS:
+// erun_operations' policy is unconditional, so an unfiltered read for an
+// OPERATIONS caller could return an arbitrary tenant's row instead of ErrNotFound
+// defaulting to its own.
 func (r *TenantQuotaRepository) Get(ctx context.Context) (model.TenantQuota, error) {
 	var quota model.TenantQuota
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, secErr := security.RequiredFromContext(ctx)
+		if secErr != nil {
+			return ErrMissingSecurityContext
+		}
 		err := tx.NewRaw(`
 			SELECT `+tenantQuotaColumns+`
 			  FROM tenant_quotas
-		`).Scan(ctx, &quota)
+			 WHERE tenant_id = ?
+		`, securityContext.TenantID).Scan(ctx, &quota)
 		return normalizeNoRows(err)
 	})
 	if errors.Is(err, ErrNotFound) {
