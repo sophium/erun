@@ -64,11 +64,11 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 		return "", false, err
 	}
 
-	// A configured paths.docker override is authoritative: it wins over the
-	// -devops cwd shortcut and the project-root convention scan, and applies
-	// from any cwd inside the project.
+	// A configured paths.docker override (or a selected components: entry) is
+	// authoritative: it wins over the -devops cwd shortcut and the project-root
+	// convention scan, and applies from any cwd inside the project.
 	if projectRoot != "" {
-		if configured, ok, err := configuredDockerDir(projectRoot); err != nil || ok {
+		if configured, ok, err := resolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
 			return configured, ok, err
 		}
 	}
@@ -106,7 +106,26 @@ func configuredDockerDir(projectRoot string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	dockerDir := resolveProjectPath(projectRoot, paths.Docker)
+	return resolveAndValidateDockerDir(projectRoot, paths.Docker, "paths.docker")
+}
+
+// resolveComponentAwareDockerDir resolves the docker build root a build/push
+// command should use: the selected components: entry when the project
+// declares one or more (see resolveProjectComponent), otherwise the unchanged
+// paths.docker override via configuredDockerDir.
+func resolveComponentAwareDockerDir(projectRoot, selectedComponent string) (string, bool, error) {
+	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return configuredDockerDir(projectRoot)
+	}
+	return resolveAndValidateDockerDir(projectRoot, paths.Docker, fmt.Sprintf("components.%s.docker", name))
+}
+
+func resolveAndValidateDockerDir(projectRoot, override, configKey string) (string, bool, error) {
+	dockerDir := resolveProjectPath(projectRoot, override)
 	if dockerDir == "" {
 		return "", false, nil
 	}
@@ -115,7 +134,7 @@ func configuredDockerDir(projectRoot string) (string, bool, error) {
 		return "", false, err
 	}
 	if !ok {
-		return "", false, fmt.Errorf("configured docker path %q (.erun/config.yaml paths.docker) is not a docker build module: expected a directory named \"docker\" holding per-component build contexts", strings.TrimSpace(paths.Docker))
+		return "", false, fmt.Errorf("configured docker path %q (.erun/config.yaml %s) is not a docker build module: expected a directory named \"docker\" holding per-component build contexts", strings.TrimSpace(override), configKey)
 	}
 	return dockerDir, true, nil
 }

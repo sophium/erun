@@ -86,6 +86,10 @@ COPY erun-integration /src/erun-integration
 # AGENTS.md's Makefile comment for why that member's own gate still doesn't
 # run here).
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
+# TestDockerfileLdflagsActuallyStampsTheBinary reads this Dockerfile at test
+# time to lock its -ldflags target to the real release build, so the test
+# stage needs the file even though nothing here builds the eapi image itself.
+COPY erun-devops/docker/erun-backend-api/Dockerfile /src/erun-devops/docker/erun-backend-api/Dockerfile
 COPY erun-ui /src/erun-ui
 COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console

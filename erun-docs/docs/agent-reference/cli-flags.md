@@ -200,6 +200,7 @@ Scheduling honours the `FROM` graph: independent images share a **wave**, and an
 | `--no-incremental` | bool | `false` | — | Disables the fingerprint cache. Every Docker context rebuilds. |
 | `--version <version>` | string (semver) | Resolved per [Build path resolution · VERSION walking](/reference/configuration-build-paths). | Same as `erun init --version`. Conflicts with `--release` (which resolves the version itself). | Pins a bare version for this build instead of minting a snapshot. |
 | `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms`, then the default multi-arch pair. |
+| `--component <name>` | string | Auto-selects the lone [`components:`](/reference/configuration#components-block) entry when the project declares exactly one; empty otherwise. | Must name a declared `components:` entry when the project declares any. Fails naming the declared choices when omitted and more than one entry is declared. | Selects which `components:` root (`docker`/`dockercontext`/`version`) this build resolves, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Unused (falls through to `paths:`/convention) when the project declares no `components:` map. |
 
 ### `--output json` result
 
@@ -237,6 +238,8 @@ binfmt for <arch> not installed. Run:
 | `NO_BUILDABLE_CONTEXT` | Walked up from cwd and found no `<tenant>-devops/docker/<image>/` directory. | `1` |
 | `BINFMT_MISSING` | Local docker daemon cannot produce one of the target platforms. | `2` |
 | `BUILD_FAILED` | `docker buildx build` returned non-zero. | `2` |
+| `COMPONENT_NOT_DECLARED` | `--component <name>` names an entry the project's [`components:`](/reference/configuration#components-block) map does not declare (or the project declares no `components:` map at all). | `1` |
+| `AMBIGUOUS_COMPONENT_SELECTION` | No `--component` and the project declares more than one `components:` entry. | `1` |
 
 ---
 
@@ -267,7 +270,7 @@ Any other failure is treated as final and fails on the first attempt. A read tha
 
 ### Common flags
 
-`--force`, `--dry-run`, `--output`.
+`--force`, `--dry-run`, `--output`, `--component` (same selector and validation as [`erun build`'s `--component`](#erun-build) — see [`components:`](/reference/configuration#components-block)).
 
 ### Upfront registry-credential check
 
@@ -309,6 +312,8 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 | `REGISTRY_AUTH_FAILED` | All retry attempts failed (or no TTY for the interactive login). | `2` |
 | `MANIFEST_LIST_ASSEMBLY_FAILED` | Per-arch tags pushed but `docker manifest create` failed. | `2` |
 | `CHART_PUSH_FAILED` | Images pushed but a chart's `helm push`, or its `helm pull` verification after every retry, failed — the version is not yet deployable. Charts publish one at a time, so the error names the split explicitly (`published:` / `failed:` / `not attempted:`) and states the recovery: re-run `erun push --version <version>`, which republishes idempotently. | `2` |
+| `COMPONENT_NOT_DECLARED` | `--component <name>` names an entry the project's `components:` map does not declare. | `1` |
+| `AMBIGUOUS_COMPONENT_SELECTION` | No `--component` and the project declares more than one `components:` entry. | `1` |
 
 ---
 

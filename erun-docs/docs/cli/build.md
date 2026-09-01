@@ -41,7 +41,9 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 
 To capture the minted version for that kind of orchestration, run `erun build --output json`, which prints `{version, baseVersion, images}` on stdout — the version an orchestrator hands to `push` and `deploy`. `--output {text|json}` is a root flag available on every command (see [CLI flag spec · Common flags](/agent-reference/cli-flags)).
 
-Advanced flags (`--no-incremental`, `--version`) and the full build lifecycle (binfmt verification, fingerprint resolution, per-arch build → manifest list, the `--output json` shape) are on [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build).
+Advanced flags (`--no-incremental`, `--version`, `--component`) and the full build lifecycle (binfmt verification, fingerprint resolution, per-arch build → manifest list, the `--output json` shape) are on [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build).
+
+A monorepo of independent deployables — each with its own `docker`/`k8s`/`VERSION`, not sharing one `<tenant>-devops` root — declares one [`components:`](/reference/configuration#components-block) entry per deployable; `--component <name>` selects which one this build resolves. It auto-selects when the project declares exactly one, and is unused for a project with none.
 
 ## Concurrency
 

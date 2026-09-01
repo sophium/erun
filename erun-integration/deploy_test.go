@@ -2536,6 +2536,33 @@ esac
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
 	})
 
+	t.Run("components_config_scopes_component_chart_lookup", func(t *testing.T) {
+		// A declared .erun/config.yaml components.<name>.k8s (erun#1840's
+		// monorepo-of-independent-deployables shape) scopes --components' chart
+		// lookup to that harness's own k8s root instead of walking the whole
+		// project, so a same-named chart elsewhere (here, a decoy under an
+		// unrelated -devops module) cannot collide with it. Without the scoping
+		// this would resolve "multiple Helm charts found for component".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name: "ingest-worker",
+			K8s:  "harnesses/ingest-worker/k8s",
+		})
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "k8s"), "ingest-worker", "team", "dev")
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "decoy-devops", "k8s"), "ingest-worker", "team", "dev")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "ingest-worker",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/components_config_scopes_component_chart_lookup", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_umbrella_component_builds_helm_dependencies", func(t *testing.T) {
 		// A local umbrella chart (team-backend-api) declares an OCI
 		// dependency on the published erun-backend-api chart. deploy must
