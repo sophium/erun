@@ -178,7 +178,7 @@ func TestListOrchestratorsReportsHistoryForStoppedOrchestrator(t *testing.T) {
 // TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed pins
 // the "unknown, not a confident zero" contract: a persisted file that exists
 // but fails to parse must not be read back as "never nudged" — it must be
-// distinguishable, the same shape as #1800/#1808/#1815.
+// distinguishable.
 func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

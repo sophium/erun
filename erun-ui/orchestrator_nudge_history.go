@@ -21,11 +21,11 @@ var errOrchestratorNudgeHistoryUnreadable = errors.New("orchestrator nudge histo
 // only on the in-memory orchestratorSession, so a desktop restart reset it to
 // zero while the orchestrator's terminal session -- and the pacer nudging it
 // -- carried on unaffected. The hover card then read "Not nudged" for a
-// session that had been nudged continuously, exactly the ambiguity #1758
-// removed from the live cap counters. This file is the durable half: written
-// on every nudge and read back whenever a session for that orchestrator id is
-// (re)spawned, so the record outlives the process the same way the pacing it
-// describes does.
+// session that had been nudged continuously, exactly the ambiguity the
+// cumulative counters exist to remove from the live cap gauge. This file is
+// the durable half: written on every nudge and read back whenever a session
+// for that orchestrator id is (re)spawned, so the record outlives the
+// process the same way the pacing it describes does.
 //
 // It is keyed by orchestrator id and kept as one file, the same shape as
 // orchestrator-open.json (orchestrator_open_state.go), for the same reason:

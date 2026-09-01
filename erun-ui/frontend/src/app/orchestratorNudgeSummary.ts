@@ -26,10 +26,7 @@ type NudgeSummaryFields = Pick<
 // nudgeHistoryUnreadable is checked before any of that: it means the
 // persisted record behind the cumulative fields exists but could not be
 // read back, so a zero there is an unverified gap, not a confirmed "never
-// nudged" — asserting the latter for a record that was actually lost is the
-// exact defect this issue exists to close (erun#1834, following the same
-// shape as #1800/#1808/#1815: a known-unknown must not render as a
-// confident value).
+// nudged" -- a known-unknown must not render as a confident value.
 export function orchestratorNudgeSummary(orchestrator: NudgeSummaryFields, nowMs: number): string {
   if (orchestrator.nudgeCapped) {
     return `Stopped nudging after ${String(orchestrator.nudgeCount)} attempts — reply or restart`;
