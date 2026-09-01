@@ -16,10 +16,13 @@
 // local dev can still drive the read view with a desktop-signed token.
 //
 // Driving each env's per-env MCP tools over the live edge
-// (mcp.<tenant>-<env>.services.<base-domain>) stays a later increment: it is
-// RCE-sensitive (its `raw` tool can `kubectl exec`) and needs a deployed env
-// carrying the backend's public key to verify against. Minting the token is
-// already implemented (src/mcp/).
+// (mcp.<tenant>-<env>.<services-zone>) is implemented in src/mcp/
+// (liveClient.ts speaks the edge's JSON-RPC protocol directly; erun-mcp's
+// corsMiddleware unblocks the cross-origin browser call). The hostname is
+// operator-supplied rather than resolved here, since exposing `mcp` is still
+// a manual `erun expose` step for most environment types — see
+// erun-console/AGENTS.md's "What is verifiable here" section for the current
+// scope and its disclosed gap.
 //
 // signOut performs RP-initiated logout (OIDC Session Management) rather than
 // clearing the local token alone: the IdP's session otherwise outlives the

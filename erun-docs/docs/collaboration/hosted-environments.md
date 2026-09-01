@@ -91,6 +91,17 @@ erun platform context create --name prod --alias aws-main --region eu-west-2
 
 `--preview` resolves and returns the bootstrap plan without creating anything, the same way the desktop's Registration tab's "Preview context plan" button does before its "Register context" button is used for real.
 
+## Checking an environment's MCP edge from the console
+
+The console's **MCP access** panel mints a per-environment MCP bearer token (`POST /v1/environments/{id}/mcp-token` — see [Agent reference · API protocol](/agent-reference/api-protocol#mcp-token-endpoint)) and can use that token itself, from the browser, to call the environment's read-only `version` tool as a connectivity check — no separate MCP client needed to confirm the edge is reachable and the token is accepted.
+
+It needs the environment's MCP hostname, which the panel does not resolve for you:
+
+- A `runtime` environment already has one — the platform wires exposure into the same deploy (see [Automatic exposure](/concepts/hosted-platform#automatic-exposure) above), at `mcp.<tenant>-<env>.<services-zone>`.
+- Any other environment type needs it exposed first: `erun expose <tenant> <env> mcp` prints the hostname to paste into the panel.
+
+Paste that hostname in, mint a token, and click **Call the version tool**. A JSON result confirms the edge is reachable and the token is accepted; a network error most often means the hostname isn't exposed yet or the platform has no MCP signing key configured (the panel's mint step already reports that case with a 501). This is a connectivity check, not a general MCP client: it only ever calls the one read-only tool.
+
 ## Quotas
 
 Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit. An environment you have asked to delete stops counting against that cap as soon as the delete is accepted — a teardown that gets stuck can't lock you out of your own allowance. In the desktop, hitting the cap shows the same message inline on the register form rather than a raw error — it names the cap and the fix (delete or stop another environment first), the same recoverable state the CLI reports.

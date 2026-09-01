@@ -6,14 +6,88 @@ import {
   CardTitle,
   EmptyState,
   type Environment,
+  FieldLabel,
+  Input,
   SelectField,
   Textarea,
 } from 'erun-kit';
 import { KeyRound } from 'lucide-react';
 import * as React from 'react';
 
-import type { McpTokenState } from './controller';
-import { useMcpTokenController } from './controller';
+import type { McpTokenState, McpToolCallState } from './controller';
+import { useMcpTokenController, useMcpToolCallController } from './controller';
+
+// DriveToolForm is the console's first caller of an environment's live MCP
+// edge, not just the token-minting half of it. The hostname is operator-
+// supplied rather than looked up: exposing `mcp` is a manual `erun expose
+// <tenant> <env> mcp` step today (not every environment type is exposed
+// automatically), so the console has no reliable way to resolve it itself yet.
+function DriveToolForm({ mcpToken }: { mcpToken: string }): React.ReactElement {
+  const [hostname, setHostname] = React.useState('');
+  const { state, callTool } = useMcpToolCallController();
+  const calling = state.status === 'loading';
+
+  const submit = (event: React.SyntheticEvent): void => {
+    event.preventDefault();
+    if (hostname.trim() !== '') {
+      callTool(hostname, mcpToken, 'version');
+    }
+  };
+
+  return (
+    <form
+      className="grid gap-2 border-t border-border pt-3"
+      onSubmit={submit}
+      aria-labelledby="mcp-drive-heading"
+    >
+      <h3 id="mcp-drive-heading" className="text-sm font-semibold text-foreground">
+        Drive this environment
+      </h3>
+      <FieldLabel htmlFor="mcp-hostname" required>
+        MCP hostname (from erun expose &lt;tenant&gt; &lt;env&gt; mcp)
+      </FieldLabel>
+      <Input
+        id="mcp-hostname"
+        value={hostname}
+        onChange={(e) => {
+          setHostname(e.target.value);
+        }}
+        placeholder="mcp.acme-prod.services.example.com"
+        required
+      />
+      <Button type="submit" disabled={calling} className="justify-self-start">
+        {calling ? 'Calling…' : 'Call the version tool'}
+      </Button>
+      <DriveToolResult state={state} />
+    </form>
+  );
+}
+
+function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactElement | null {
+  if (state.status === 'ready') {
+    return (
+      <pre
+        role="status"
+        aria-live="polite"
+        className={
+          state.result.isError
+            ? 'whitespace-pre-wrap text-sm text-destructive'
+            : 'whitespace-pre-wrap text-sm text-muted-foreground'
+        }
+      >
+        {state.result.text}
+      </pre>
+    );
+  }
+  if (state.status === 'error') {
+    return (
+      <p className="text-sm text-destructive" role="alert">
+        Could not call the tool: {state.message}
+      </p>
+    );
+  }
+  return null;
+}
 
 function TokenResult({ state }: { state: McpTokenState }): React.ReactElement | null {
   if (state.status === 'ready') {
@@ -30,6 +104,7 @@ function TokenResult({ state }: { state: McpTokenState }): React.ReactElement | 
           rows={4}
           readOnly
         />
+        <DriveToolForm mcpToken={state.token.token} />
       </div>
     );
   }
@@ -102,8 +177,10 @@ export function MCPAccessPanel({
           >
             {loading ? 'Minting…' : 'Generate MCP token'}
           </Button>
-          <TokenResult state={state} />
         </form>
+        <div className="mt-4 grid max-w-md gap-3">
+          <TokenResult state={state} />
+        </div>
       </CardContent>
     </Card>
   );
