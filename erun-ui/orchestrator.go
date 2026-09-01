@@ -1545,6 +1545,27 @@ func (a *App) wireEnvironmentReview(ref eruncommon.OrchestratorEnvConfig) error 
 	return nil
 }
 
+// linkOrchestratorEnvironments prepares every ref the same way, shared by
+// CreateOrchestrator and UpdateOrchestrator: wire its review directory, then
+// kick off its MCP port-forward so a linked environment with a healthy pod is
+// reachable the moment an orchestrator session asks for its tools, instead of
+// only working because an operator happened to run `erun open` for it earlier
+// and nobody tells them that step is required. The forward ensure
+// reuses ensureEnvRuntimeOnce, the same mechanism a terminal tab spawn already
+// gets: fire-and-forget, deduped per (re)start window, and carrying its own
+// not-force-start and surfaced-failure contract, so a stopped or undeployed
+// environment is left alone and a genuine failure to open still reaches the
+// operator rather than leaving a configured MCP entry pointed at nothing.
+func (a *App) linkOrchestratorEnvironments(refs []eruncommon.OrchestratorEnvConfig) error {
+	for _, ref := range refs {
+		if err := a.wireEnvironmentReview(ref); err != nil {
+			return err
+		}
+		a.ensureEnvRuntimeOnce(uiSelection{Tenant: ref.Tenant, Environment: ref.Environment})
+	}
+	return nil
+}
+
 func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfig) string {
 	if trimmed := strings.TrimSpace(name); trimmed != "" {
 		return trimmed
@@ -1564,10 +1585,8 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
-	for _, ref := range refs {
-		if err := a.wireEnvironmentReview(ref); err != nil {
-			return orchestratorInfo{}, err
-		}
+	if err := a.linkOrchestratorEnvironments(refs); err != nil {
+		return orchestratorInfo{}, err
 	}
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
@@ -1604,10 +1623,8 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 	if index < 0 {
 		return orchestratorInfo{}, fmt.Errorf("orchestrator %q not found", id)
 	}
-	for _, ref := range refs {
-		if err := a.wireEnvironmentReview(ref); err != nil {
-			return orchestratorInfo{}, err
-		}
+	if err := a.linkOrchestratorEnvironments(refs); err != nil {
+		return orchestratorInfo{}, err
 	}
 	displayName := orchestratorDisplayName(name, refs)
 	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs}
@@ -1827,7 +1844,7 @@ type orchestratorSpawn struct {
 // their tools looks working and is not, and a session missing just ONE
 // environment's tools is worse -- it works, right up to the first call into the
 // environment that is not there, which an agent reads as "not linked" rather
-// than "failed to wire" (#1185).
+// than "failed to wire".
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
 	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
 	for _, skip := range skipped {
