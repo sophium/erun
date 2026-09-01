@@ -147,6 +147,44 @@ func TestJobOffEnvironment(t *testing.T) {
 		}
 	})
 
+	t.Run("start_forwards_this_processs_own_job_id_as_startedByJobId", func(t *testing.T) {
+		// The MCP edge's own server process has no ERUN_JOB_ID of its own to
+		// inherit -- it was never itself started as anyone's job -- so a start
+		// forwarded off-environment would otherwise never record its real
+		// parent no matter how deep the logical nesting is on the calling
+		// side. This is what an off-environment start (this job's own worker
+		// running elsewhere, calling out to start work here) threads
+		// explicitly instead of relying on that inheritance.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{ToolResults: map[string]string{
+			"exec_raw": `{"content":[{"type":"text","text":"started"}],` +
+				`"structuredContent":{"executed":true,"jobId":"suite","state":"running","wait":false}}`,
+			"exec_job_status": `{"content":[{"type":"text","text":"status"}],` +
+				`"structuredContent":{"tenant":"team","environment":"dev","job":{` +
+				`"id":"suite","name":"suite","state":"running","childPid":4242,` +
+				`"logPath":"/home/erun/.cache/erun/activity/team/dev/jobs/suite.log",` +
+				`"leaseId":"job-suite","outputBytes":0}}}`,
+		}}
+		edge.start(t, jobEdgeLocalPort)
+
+		envVars := append(append([]string{}, setup.Env()...), "ERUN_JOB_ID=upstream-job")
+		result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "suite", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		calls := edge.requestsFor("tools/call")
+		if len(calls) == 0 || calls[0].Tool != "exec_raw" {
+			t.Fatalf("expected exec_raw as the first tools/call request, got %+v", calls)
+		}
+		if got := calls[0].Arguments["startedByJobId"]; got != "upstream-job" {
+			t.Fatalf("expected exec_raw to carry startedByJobId %q from this process's own ERUN_JOB_ID, got %v (arguments: %+v)", "upstream-job", got, calls[0].Arguments)
+		}
+	})
+
 	t.Run("start_dry_run_traces_the_environment_call", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

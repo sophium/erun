@@ -99,7 +99,10 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the prompt. erun invokes the tool in its streaming mode, which is what makes\n" +
 			"an agent run observable at all: left to its default the tool prints nothing\n" +
 			"until it exits, so a multi-hour run reports no output while it is actively\n" +
-			"editing files. status then reports the current activity, not only \"running\".\n\n" +
+			"editing files. status then reports the current activity, not only \"running\".\n" +
+			"This is a one-shot, non-interactive run: nothing wakes it once it exits, so\n" +
+			"the prompt must not end its own turn believing something will notify it\n" +
+			"about work it is still waiting on -- there is no such notification.\n\n" +
 			"--env sets additional environment for the job's own process, on top of what\n" +
 			"it inherits from the environment's runtime pod — for example raising\n" +
 			"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
@@ -299,12 +302,20 @@ func newJobStatusCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Report one job's state and outcome, or every retained job",
-		Long: "Answers running, exited, or unknown — never a partial answer. A job whose\n" +
-			"supervisor is gone without an outcome reads as unknown rather than as\n" +
-			"success, which is what makes it safe to act on: unknown is exactly as\n" +
-			"terminal as exited, never a reason to keep waiting. Finished jobs stay\n" +
-			"readable for 24 hours so a caller that reconnects after the work ended can\n" +
-			"still learn what happened.\n\n" +
+		Long: "Answers running, exited, abandoned, gate-incomplete, or unknown — never a\n" +
+			"partial answer. A job whose supervisor is gone without an outcome reads as\n" +
+			"unknown rather than as success, which is what makes it safe to act on:\n" +
+			"unknown, abandoned, and gate-incomplete are exactly as terminal as exited,\n" +
+			"never a reason to keep waiting and never a success whatever the raw exit\n" +
+			"code says. gate-incomplete means this job's own process ended while a job\n" +
+			"it started had not reached a verdict; abandoned means it left other work it\n" +
+			"started running in its own process group, unsupervised. A job's own\n" +
+			"process exiting is therefore never the verdict on its own -- this job's own\n" +
+			"eventual state is, including for a nested job it started after that process\n" +
+			"already exited: it waits for that job before reporting exited, folding a\n" +
+			"failure into startedJobFailed rather than letting its own clean exit code\n" +
+			"hide it. Finished jobs stay readable for 24 hours so a caller that\n" +
+			"reconnects after the work ended can still learn what happened.\n\n" +
 			"aliveAgeMs is the milliseconds since the supervisor's last ~1s beat,\n" +
 			"computed in erun's own clock so nothing subtracts a pod timestamp from a\n" +
 			"caller's clock. Once it exceeds 5000, treat the job as failed (an unknown\n" +
@@ -610,7 +621,13 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"when the job exited non-zero (its real code is in the reported result). 124\n" +
 			"is never a verdict on the job -- it means only that this one call's own\n" +
 			"bounded wait elapsed, and the documented response is to call await again,\n" +
-			"not to treat the silence as an answer.",
+			"not to treat the silence as an answer.\n\n" +
+			"An agent job's own process exiting is not this command's cue to stop\n" +
+			"either: if that process started another job through its own Bash tool and\n" +
+			"left it running, this job keeps reporting 124 (not 0) until that started\n" +
+			"job reaches a verdict too. Keep awaiting this job's own id -- never trust\n" +
+			"the underlying tool's transcript ending as the answer, since nothing wakes\n" +
+			"a one-shot run back up to report one.",
 		Example: "  erun exec job await --tenant team --environment dev --id suite --timeout 2m\n\n" +
 			"  # A gate that can run longer than the 10m ceiling: keep awaiting at the\n" +
 			"  # ceiling until it stops reporting 124.\n" +
@@ -861,6 +878,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	var handoff bool
+	var startedByJobID string
 	cmd := &cobra.Command{
 		Use:    "supervise [flags] -- <command> [args...]",
 		Short:  "Run a job's work, hold its lease, and record the outcome (internal)",
@@ -883,6 +901,7 @@ func newJobSuperviseCmd() *cobra.Command {
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
 				Handoff:        handoff,
+				StartedByJobID: startedByJobID,
 			})
 		},
 	}
@@ -895,6 +914,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it")
+	cmd.Flags().StringVar(&startedByJobID, "started-by-job-id", "", "Explicit override for the job this work records as its parent, for a start forwarded through a channel (the MCP edge) that cannot carry ERUN_JOB_ID inheritance itself")
 	return cmd
 }
 

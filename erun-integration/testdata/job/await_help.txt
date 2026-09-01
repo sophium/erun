@@ -25,6 +25,13 @@ is never a verdict on the job -- it means only that this one call's own
 bounded wait elapsed, and the documented response is to call await again,
 not to treat the silence as an answer.
 
+An agent job's own process exiting is not this command's cue to stop
+either: if that process started another job through its own Bash tool and
+left it running, this job keeps reporting 124 (not 0) until that started
+job reaches a verdict too. Keep awaiting this job's own id -- never trust
+the underlying tool's transcript ending as the answer, since nothing wakes
+a one-shot run back up to report one.
+
 Usage:
   erun job await [flags]
 

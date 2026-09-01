@@ -72,8 +72,23 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx common.Context, 
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
 	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
+	putEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_agent", arguments, false)
 	return result.Job, resolved, err
+}
+
+// startedByJobIDForOffEnvironmentStart is what an off-environment start (this
+// call itself reaches the target through its MCP edge, which is a long-lived
+// process with no ERUN_JOB_ID of its own to inherit -- see
+// eruncommon.CurrentEnvironmentJobID) threads explicitly so the new job still
+// records its real parent: an explicit params.StartedByJobID wins when the
+// caller already resolved one (e.g. a re-exec of this same path), otherwise
+// this process's own job id, if it is itself running as one, applies.
+func startedByJobIDForOffEnvironmentStart(params common.StartEnvironmentJobParams) string {
+	if params.StartedByJobID != "" {
+		return params.StartedByJobID
+	}
+	return common.CurrentEnvironmentJobID()
 }
 
 func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
@@ -86,6 +101,7 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
 	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
+	putEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	arguments["wait"] = false
 	started, resolved, err := callEnvironmentTool[environmentJobEnvelopeResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_raw", arguments, false)
 	if err != nil || !resolved {

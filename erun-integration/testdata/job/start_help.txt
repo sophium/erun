@@ -13,6 +13,9 @@ the prompt. erun invokes the tool in its streaming mode, which is what makes
 an agent run observable at all: left to its default the tool prints nothing
 until it exits, so a multi-hour run reports no output while it is actively
 editing files. status then reports the current activity, not only "running".
+This is a one-shot, non-interactive run: nothing wakes it once it exits, so
+the prompt must not end its own turn believing something will notify it
+about work it is still waiting on -- there is no such notification.
 
 --env sets additional environment for the job's own process, on top of what
 it inherits from the environment's runtime pod — for example raising
