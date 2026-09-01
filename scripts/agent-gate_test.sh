@@ -361,8 +361,18 @@ stub_erun "${case_dir}/bin"
 	*) fail "status finished pass: expected the finished job's captured output, got: $OUT" ;;
 	esac
 	case "$OUT" in
-	*"already finished"*) ;;
+	*"replaying a cached PASS"*) ;;
 	*) fail "status finished pass: expected the replay notice, got: $OUT" ;;
+	esac
+	replayed_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1 | cut -d' ' -f2)
+	[ -n "$replayed_id" ] || fail "status finished pass: could not recover the job id used"
+	case "$OUT" in
+	*"$replayed_id"*) ;;
+	*) fail "status finished pass: replay notice must name the job it came from ($replayed_id), got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"exited 0: make check"*) ;;
+	*) fail "status finished pass: replay notice must include the recorded outcome, got: $OUT" ;;
 	esac
 	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
 		fail "status finished pass: must never start a new run over a finished record"
@@ -370,9 +380,12 @@ stub_erun "${case_dir}/bin"
 	grep -q -- '--timeout 1s' "$STUB_ARGV_FILE" || fail "status finished pass: must await the finished job to learn its real exit status"
 )
 
-# --- a FAILING finished job replays as failing, not as a fresh pass. This is
-# the regression that matters most: replaying a stale pass over a
-# since-broken tree would be worse than the original bug.
+# --- a FAILING finished job is never replayed: a stale failure has no value
+# and re-checking it is cheap, so the wrapper must start a genuinely fresh
+# run instead of reporting the old failure back. This is the regression that
+# matters most, in the direction that actually bit (#1798): a stale RED
+# blocked good work outright, and the same replay path could just as easily
+# have greened a since-broken tree.
 case_dir="${work_root}/status-finished-fail"
 mkdir -p "$case_dir"
 STUB_ARGV_FILE="${case_dir}/argv"
@@ -385,17 +398,23 @@ stub_erun "${case_dir}/bin"
 	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
 	export STUB_STATUS_STATUS=0
 	export STUB_STATUS_LINE='exited 7: make check'
-	export STUB_AWAIT_STATUS=1
-	export STUB_JOB_OUTPUT='earlier failing output'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='fresh output'
 	run_gate check "make check" -- make check-gate
-	[ "$STATUS" -eq 1 ] || fail "status finished fail: expected the replayed failure to exit nonzero, got $STATUS ($OUT)"
+	[ "$STATUS" -eq 0 ] || fail "status finished fail: expected the fresh run's own exit code, got $STATUS ($OUT)"
 	case "$OUT" in
-	*"earlier failing output"*) ;;
-	*) fail "status finished fail: expected the finished job's captured output, got: $OUT" ;;
+	*"fresh output"*) ;;
+	*) fail "status finished fail: expected the fresh run's captured output, got: $OUT" ;;
 	esac
-	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
-		fail "status finished fail: must never start a new run over a finished record"
-	fi
+	case "$OUT" in
+	*"non-passing recorded result"*) ;;
+	*) fail "status finished fail: expected the skip-replay notice, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"replaying a cached PASS"*) fail "status finished fail: must never report a stale failure as a replayed pass, got: $OUT" ;;
+	*) ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "status finished fail: must start a fresh run rather than replaying a recorded failure"
 )
 
 # --- AGENT_GATE_RERUN=1 skips the finished-job replay and starts a genuinely
@@ -537,6 +556,71 @@ counter_file="${case_dir}/counter"
 	esac
 	runs=$(wc -l <"$counter_file" | tr -d ' ')
 	[ "$runs" -eq 2 ] || fail "tree state replay: changed tree must actually re-execute the command instead of replaying the stale v1 result, ran $runs times"
+)
+
+# --- the id used against the job store also changes with the exact command
+# being gated, holding the tree and job id fixed. This is what stops a
+# narrower run (e.g. a focused lint) from satisfying a later request for the
+# full suite under the same job id, the second failure mode reported in
+# #1798 alongside the stale-red replay.
+case_dir="${work_root}/cmd-state-id"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT=out
+
+	run_gate check "make check" -- make check-gate >/dev/null
+	full_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+
+	: >"$STUB_ARGV_FILE"
+	run_gate check "make check" -- make lint >/dev/null
+	narrow_id=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+	[ "$full_id" != "$narrow_id" ] || fail "cmd state id: a full and a narrower command under the same job id must resolve to different ids, both got $full_id"
+
+	: >"$STUB_ARGV_FILE"
+	run_gate check "make check" -- make check-gate >/dev/null
+	full_id_again=$(grep -o -- '--id [^ ]*' "$STUB_ARGV_FILE" | head -1)
+	[ "$full_id" = "$full_id_again" ] || fail "cmd state id: the same command must keep resolving to the same id, got $full_id then $full_id_again"
+)
+
+# --- end to end: a job store that only knows a narrower command's id must be
+# treated as no record found once the full command is requested, so the
+# wrapper actually re-runs the full command instead of replaying the
+# narrower run's result under the same job id.
+case_dir="${work_root}/cmd-state-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	run_gate check "make check" -- sh -c 'echo narrow result'
+	[ "$STATUS" -eq 0 ] || fail "cmd state replay: narrow run expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"narrow result"*) ;;
+	*) fail "cmd state replay: narrow run expected its own output, got: $OUT" ;;
+	esac
+
+	# Same job id, a broader command: must not replay the narrow run's
+	# recorded result -- must actually execute the full command.
+	run_gate check "make check" -- sh -c 'echo full result'
+	[ "$STATUS" -eq 0 ] || fail "cmd state replay: full run expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"full result"*) ;;
+	*) fail "cmd state replay: full run must actually execute rather than replaying the narrow run's result, got: $OUT" ;;
+	esac
 )
 
 # --- an unrelated start failure must be fatal: never silently await a job
