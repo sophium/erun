@@ -37,7 +37,11 @@ __debug_bin*
 /erun-devops/linux/*/dist
 /erun-cli/bin
 
-# Desktop UI build outputs (not consumed by service Dockerfiles)
+# Desktop UI build outputs. /erun-ui/frontend/wailsjs is the one exception
+# to "not consumed by service Dockerfiles": the erun-devops test stage's
+# `make check` (test-frontend) regenerates it in-image via
+# erun-ui/generate-wailsjs.sh before typechecking/building erun-ui/frontend,
+# so a possibly-stale host copy must never leak into the build context.
 /erun-ui/bin
 /erun-ui/frontend/node_modules
 /erun-ui/frontend/dist
