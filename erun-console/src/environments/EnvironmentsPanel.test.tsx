@@ -293,7 +293,13 @@ describe('EnvironmentsPanel deploy flow', () => {
 // row must name it -- otherwise the row reads as the caller's own.
 describe('EnvironmentsPanel tenant scope', () => {
   const OWN_TENANT_ENV: Environment = { ...RUNTIME_ENV, tenantId: 'tenant-own' };
-  const OTHER_TENANT = { tenantId: 'tenant-other', name: 'Beta', type: 'COMPANY' };
+  const OTHER_TENANT = {
+    tenantId: 'tenant-other',
+    name: 'Beta',
+    type: 'COMPANY',
+    createdAt: '2026-06-24T10:00:00Z',
+    updatedAt: '2026-06-24T10:00:00Z',
+  };
 
   it('renders no tenant badge when no tenant list is available', () => {
     renderWithStore(
