@@ -1,0 +1,6 @@
+audit: erun exec report-commit-status --description gate build passed --dry-run --remote-url https://github.com/sophium/erun.git --state groovy deadbeefcafe
+report-commit-status: resolving commit
+report-commit-status: commit = <SHORTSHA>
+report-commit-status: resolving state
+report-commit-status: state resolution failed: "groovy" is not one of success, failure, error, pending
+state "groovy" is not one of success, failure, error, pending
