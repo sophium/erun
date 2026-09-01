@@ -2,7 +2,7 @@ class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
   url "https://github.com/sophium/erun/archive/refs/tags/v1.0.235.tar.gz"
-  sha256 "a86255459bd7ad2d6a9945bca1df97832ac7a9ce2a740ae86c328a0c62fcc1b0"
+  sha256 "8ada741c09dbdafb6c41c86065ec669cba4481d24eac19a6906aa66b484836f7"
   license "MIT"
 
   depends_on "go" => :build
