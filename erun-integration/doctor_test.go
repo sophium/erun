@@ -3,10 +3,13 @@ package integration
 import (
 	"crypto/sha1"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +55,91 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
+		// kubectl trace lines must stay byte-identical to the
+		// subprocess-mode golden (dry_run_prune_images_traces_dind_exec,
+		// modulo the "Execution modes" line itself reporting the flipped
+		// mode) even with execution.modes.kubectl-deployment-wait=library,
+		// since traceAndWaitForRuntime only ever renders the trace line
+		// (kubectlDeploymentWaitArgs) and never calls
+		// libraryWaitForDeploymentAvailable on a dry run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (the runtime deployment reports Available, so the
+		// doctor action proceeds) via a real client-go call against a fake API
+		// server instead of shelling out to kubectl. The kubectl stub fails
+		// loudly and distinctively only for the "wait" argv shape (every
+		// other kubectl subcommand this doctor run needs -- pod listing,
+		// dind exec -- still succeeds), so a fallback to the subprocess path
+		// for the wait surfaces as a recognizable failure instead of
+		// silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `printf '%s\n' "fell through to the kubectl subprocess for the wait check" >&2; exit 1`)
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-devops" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-devops","namespace":"team-dev"},`+
+				`"status":{"conditions":[{"type":"Available","status":"True"}]}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("deployment wait used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
 	})
 
 	t.Run("dry_run_rollback_traces_helm_rollback", func(t *testing.T) {

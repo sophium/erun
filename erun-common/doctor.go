@@ -89,6 +89,16 @@ func traceAndWaitForRuntime(ctx Context, req ShellLaunchParams) error {
 	if ctx.DryRun {
 		return nil
 	}
+	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
+			// pattern-match literal kubectl CLI stderr text, which a client-go
+			// error never produces, so library-mode failures return unadorned
+			// rather than trying to force them through that string matching.
+			return err
+		}
+		return nil
+	}
 	stderr, err := runDoctorKubectl(args, io.Discard)
 	if err == nil {
 		return nil

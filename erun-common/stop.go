@@ -441,7 +441,14 @@ func scaleRuntimeDeployment(ctx Context, target RuntimeScaleTarget, replicas int
 func WaitRuntimeAvailable(ctx Context, target RuntimeScaleTarget) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
-	return RunRawCommand(ctx, RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
+	ctx.TraceCommand("", "kubectl", args...)
+	if ctx.DryRun {
+		return nil
+	}
+	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+		return libraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, defaultShellLaunchWaitTimeout)
+	}
+	return RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }
 
 func kubectlRuntimeTargetArgs(target RuntimeScaleTarget) []string {

@@ -663,6 +663,12 @@ func LocalShellSetupScript(result OpenResult) string {
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
+	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+			return enrichShellDeploymentError(req, err, runOpenKubectl)
+		}
+		return nil
+	}
 	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
 		return enrichShellDeploymentError(req, err, runOpenKubectl)
 	}
