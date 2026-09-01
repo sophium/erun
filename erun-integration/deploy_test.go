@@ -680,6 +680,124 @@ esac
 		golden.Equal(t, "deploy/real_run_image_pull_secret_refuses_malformed_existing_secret", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_unaffected_by_kubectl_secret_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-secret-get: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_image_pull_secrets) even with
+		// execution.modes.kubectl-secret-get=library, since
+		// applyImagePullSecrets only ever renders the get/apply trace lines
+		// and never calls existingImagePullSecretAuths on a dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-get", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_secret_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (existing Secret read back and merged into) via a
+		// real client-go call against a fake API server instead of shelling
+		// out to kubectl. The kubectl stub fails loudly and distinctively
+		// only for the "get secret ... -o json" argv shape (the apply that
+		// follows, and every other kubectl subcommand this deploy needs,
+		// still succeeds), so a fallback to the subprocess path for the
+		// image-pull-secret read surfaces as a recognizable deploy failure
+		// instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-get", "library")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		existingSecretJSON := fmt.Sprintf(`{"kind":"Secret","apiVersion":"v1","metadata":{"name":"ecr-pull","namespace":"team-dev"},"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"legacy-other.example":{"auth":"preserved-value"}}}`)))
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/secrets/ecr-pull" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, existingSecretJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get secret"*) printf '%s\n' "fell through to the kubectl subprocess for the image pull secret read" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("image pull secret read used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_new_worktree_volume_announces_the_adoption", func(t *testing.T) {
 		// The regression this exists for: a deploy that first introduces the
 		// dedicated worktree volume to an environment whose checkout still lives

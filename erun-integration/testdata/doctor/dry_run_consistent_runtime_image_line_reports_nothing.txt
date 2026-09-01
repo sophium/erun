@@ -5,6 +5,7 @@ aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
 
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev

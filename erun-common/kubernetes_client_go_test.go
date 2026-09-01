@@ -1,10 +1,13 @@
 package eruncommon
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -275,6 +278,164 @@ func TestLibraryPersistentVolumeClaimExistsHonorsContextOverride(t *testing.T) {
 	if _, err := libraryPersistentVolumeClaimExists("unknown-context", "team-dev", "team-devops-worktree"); err == nil {
 		t.Fatalf("err = nil, want an error for an unknown context")
 	}
+}
+
+// secretGetResponseJSON renders the `kubectl get secret -o json` /
+// client-go Secret body a Secret carrying the given (already-encoded)
+// .dockerconfigjson value would return.
+func secretGetResponseJSON(namespace, name, dockerConfigJSON string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(dockerConfigJSON))
+	return fmt.Sprintf(`{"kind":"Secret","apiVersion":"v1","metadata":{"name":%q,"namespace":%q},"data":{".dockerconfigjson":%q}}`,
+		name, namespace, encoded)
+}
+
+func secretFoundHandler(namespace, name, dockerConfigJSON string) http.HandlerFunc {
+	path := "/api/v1/namespaces/" + namespace + "/secrets/" + name
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != path {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"kind":"Status","status":"Failure","reason":"NotFound"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(secretGetResponseJSON(namespace, name, dockerConfigJSON)))
+	}
+}
+
+func secretNotFoundHandler(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
+			`"message":"secrets \"` + name + `\" not found","reason":"NotFound","code":404}`))
+	}
+}
+
+// TestLibraryImagePullSecretAuthsMatchesSubprocessObservableResult pins the
+// same equivalence property the namespace/PVC tests do: the library path's
+// decoded auths must agree with what defaultExistingImagePullSecretAuths
+// derives from kubectl's own base64-encoded JSON output. A typed Secret's
+// Data field arrives already base64-decoded, so the library path needs no
+// separate decode step -- the property under test is that it lands on the
+// same auths document regardless.
+func TestLibraryImagePullSecretAuthsMatchesSubprocessObservableResult(t *testing.T) {
+	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", `{"auths":{"ghcr.io":{"auth":"alice:s3cret"}}}`))
+
+	auths, err := libraryImagePullSecretAuths("", "team-dev", "regcred")
+	if err != nil {
+		t.Fatalf("libraryImagePullSecretAuths: %v", err)
+	}
+	if got, want := auths["ghcr.io"].Auth, "alice:s3cret"; got != want {
+		t.Fatalf("auths[ghcr.io].Auth = %q, want %q", got, want)
+	}
+}
+
+func TestLibraryImagePullSecretAuthsReportsNotFoundAsNilNotError(t *testing.T) {
+	fakeKubernetesAPIServer(t, secretNotFoundHandler("regcred"))
+
+	auths, err := libraryImagePullSecretAuths("", "team-dev", "regcred")
+	if err != nil {
+		t.Fatalf("libraryImagePullSecretAuths: %v", err)
+	}
+	if auths != nil {
+		t.Fatalf("auths = %+v, want nil for a Secret that does not exist yet", auths)
+	}
+}
+
+// TestLibraryImagePullSecretAuthsPropagatesOtherErrors proves a refusal
+// distinct from NotFound (Forbidden here) surfaces as an error rather than
+// being folded into "no existing coverage" -- collapsing the two would let a
+// merge silently drop credentials the operator's RBAC only stopped it from
+// reading, not from actually needing.
+func TestLibraryImagePullSecretAuthsPropagatesOtherErrors(t *testing.T) {
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure",` +
+			`"message":"secrets \"regcred\" is forbidden","reason":"Forbidden","code":403}`))
+	})
+
+	auths, err := libraryImagePullSecretAuths("", "team-dev", "regcred")
+	if err == nil {
+		t.Fatalf("err = nil, want a forbidden error")
+	}
+	if auths != nil {
+		t.Fatalf("auths = %+v, want nil alongside the error", auths)
+	}
+}
+
+// TestLibraryImagePullSecretAuthsRefusesMalformedDockerConfig proves a
+// Secret that exists but whose .dockerconfigjson does not decode is refused
+// rather than silently read as no existing coverage -- the same
+// don't-guess-and-destroy-coverage contract
+// TestExistingImagePullSecretAuthsRefusesMalformedSecret pins for the
+// subprocess path.
+func TestLibraryImagePullSecretAuthsRefusesMalformedDockerConfig(t *testing.T) {
+	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", "not valid json"))
+
+	_, err := libraryImagePullSecretAuths("", "team-dev", "regcred")
+	if err == nil {
+		t.Fatal("expected an error for a Secret whose .dockerconfigjson does not decode, got nil")
+	}
+	if strings.Contains(err.Error(), "not valid json") {
+		t.Fatalf("error must not leak the decoded secret content: %v", err)
+	}
+}
+
+// TestLibraryImagePullSecretAuthsHonorsContextOverride proves the
+// context-name argument actually selects the kubeconfig context, the same
+// way `kubectl --context X` does, rather than always following
+// current-context.
+func TestLibraryImagePullSecretAuthsHonorsContextOverride(t *testing.T) {
+	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", `{"auths":{"ghcr.io":{"auth":"alice:s3cret"}}}`))
+
+	auths, err := libraryImagePullSecretAuths("test-context", "team-dev", "regcred")
+	if err != nil {
+		t.Fatalf("libraryImagePullSecretAuths: %v", err)
+	}
+	if got, want := auths["ghcr.io"].Auth, "alice:s3cret"; got != want {
+		t.Fatalf("auths[ghcr.io].Auth = %q, want %q", got, want)
+	}
+
+	if _, err := libraryImagePullSecretAuths("unknown-context", "team-dev", "regcred"); err == nil {
+		t.Fatalf("err = nil, want an error for an unknown context")
+	}
+}
+
+// TestImagePullSecretGetArgsSharedByBothPaths locks the one argv builder
+// applyImagePullSecrets traces and defaultExistingImagePullSecretAuths
+// executes, so the dry-run trace can never drift from the subprocess
+// execution path regardless of which execution mode is active.
+func TestImagePullSecretGetArgsSharedByBothPaths(t *testing.T) {
+	got := imagePullSecretGetArgs("team-dev", "my-context", "regcred")
+	want := []string{"--context", "my-context", "-n", "team-dev", "get", "secret", "regcred", "-o", "json"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestExecutionModeForKubectlSecretGetDefaultsToSubprocess(t *testing.T) {
+	if got := ExecutionModeFor(ERunConfig{}, kubectlSecretGetExecutionOperation); got != ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	}
+}
+
+func TestExecutionModeReportListsKubectlSecretGetOperation(t *testing.T) {
+	report := ExecutionModeReport(ERunConfig{})
+	for _, status := range report {
+		if status.Operation == kubectlSecretGetExecutionOperation {
+			if status.Mode != ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			}
+			return
+		}
+	}
+	t.Fatalf("kubectl-secret-get not found in report: %+v", report)
 }
 
 // TestKubectlGetPVCArgsSharedByBothPaths locks the one argv builder

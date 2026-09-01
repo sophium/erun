@@ -5,6 +5,7 @@ aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
 
 == Runtime image registry ==
 runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.

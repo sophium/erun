@@ -36,7 +36,7 @@ See [Troubleshooting](/reference/troubleshooting#runtime-image-registry-mismatch
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
-`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`), `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), `aws-export-credentials` (`aws configure export-credentials`), `kubectl-namespace-get` (`kubectl get namespace <name> -o name`), and `kubectl-pvc-get` (`kubectl get pvc <claim> -o name`), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
+`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`), `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), `aws-export-credentials` (`aws configure export-credentials`), `kubectl-namespace-get` (`kubectl get namespace <name> -o name`), `kubectl-pvc-get` (`kubectl get pvc <claim> -o name`), and `kubectl-secret-get` (`kubectl get secret <name> -o json`), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
 
 ```
 == Execution modes ==
@@ -45,6 +45,7 @@ aws-sts-web-identity-token: subprocess
 aws-export-credentials: subprocess
 kubectl-namespace-get: subprocess
 kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
 ```
 
 See [Configuration reference · Execution modes](/reference/configuration#execution-modes) for the config key that controls it.

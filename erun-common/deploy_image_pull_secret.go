@@ -108,15 +108,40 @@ func resolveImagePullSecretCredentials(ctx Context, deployInput HelmDeploySpec) 
 	return credentials
 }
 
-// existingImagePullSecretAuths reads a named dockerconfigjson Secret back and
-// decodes its current auths document, so applyImagePullSecrets can overlay
+// kubectlSecretGetExecutionOperation is the ExecutionModeFor/
+// ExecutionModeReport key for the `kubectl get secret <name> -o json` read
+// (existingImagePullSecretAuths below), which applyImagePullSecrets runs
+// ahead of every image-pull-secret refresh so this run's resolved
+// credentials merge into the Secret's existing auths instead of replacing
+// them outright. Picked next after kubectl-pvc-get for the same narrow
+// shape -- a single resource kind (Secret), a single Get-by-name call, no
+// streaming, no mutation -- reusing kubernetesClientsetForContext rather
+// than adding new dependency surface. Unlike the namespace/PVC existence
+// checks, what this Get returns is read for its content (the Secret's own
+// dockerconfigjson), not just checked for presence; the Secret's own
+// "apply" (mutation) side stays on the subprocess path.
+const kubectlSecretGetExecutionOperation = "kubectl-secret-get"
+
+// existingImagePullSecretAuths dispatches to the subprocess or library path
+// per the kubectl-secret-get execution mode (see execution_mode.go), reading
+// a named dockerconfigjson Secret back so applyImagePullSecrets can overlay
 // this run's resolved credentials onto it instead of replacing the whole
 // document (see refreshImagePullSecrets). Called only for a real run: a dry
 // run has no cluster read to show without every dry-run scenario needing a
 // kubectl stub it otherwise has no reason to declare, the same tradeoff
 // TraceEnsureKubernetesNamespace makes for the namespace-exists check, so
 // applyImagePullSecrets states the merge as conditional instead of asserting
-// it. args is the exact get command already traced by the caller.
+// it. args is the exact get command already traced by the caller, used by
+// the subprocess path only.
+func existingImagePullSecretAuths(contextName, namespace, name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
+	if currentExecutionMode(kubectlSecretGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryImagePullSecretAuths(contextName, namespace, name)
+	}
+	return defaultExistingImagePullSecretAuths(name, args)
+}
+
+// defaultExistingImagePullSecretAuths is the subprocess-backed path
+// existingImagePullSecretAuths dispatches to by default.
 //
 // A Secret that does not exist yet reads as no existing coverage, exactly
 // what a first deploy always saw. A Secret that exists but cannot be decoded
@@ -125,7 +150,7 @@ func resolveImagePullSecretCredentials(ctx Context, deployInput HelmDeploySpec) 
 // alone, because guessing wrong here would destroy exactly the coverage this
 // function exists to protect; a genuine cluster read failure (RBAC denial,
 // unreachable API server) is refused for the same reason.
-func existingImagePullSecretAuths(name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
+func defaultExistingImagePullSecretAuths(name string, args []string) (map[string]dockerConfigJSONAuthEntry, error) {
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		if KubernetesResourceNotFound(string(output)) {
@@ -191,7 +216,7 @@ func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials 
 			ctx.Trace("image pull secret " + name + ": every host the read above already covers keeps its existing entry except the ones just resolved, which refresh")
 			continue
 		}
-		existing, err := existingImagePullSecretAuths(name, getArgs)
+		existing, err := existingImagePullSecretAuths(deployInput.KubernetesContext, deployInput.Namespace, name, getArgs)
 		if err != nil {
 			return err
 		}
