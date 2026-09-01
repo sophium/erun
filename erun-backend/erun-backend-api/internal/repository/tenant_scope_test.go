@@ -50,6 +50,24 @@ const (
 	trackedDebt
 )
 
+// String names a kind for the classification prompt below, so the message
+// naming valid choices can't drift out of sync with the identifiers a fix
+// actually assigns.
+func (k tenantScopeKind) String() string {
+	switch k {
+	case scopedExplicitly:
+		return "scopedExplicitly"
+	case deliberatelyCrossTenant:
+		return "deliberatelyCrossTenant"
+	case notTenantOwned:
+		return "notTenantOwned"
+	case trackedDebt:
+		return "trackedDebt"
+	default:
+		return "unknown"
+	}
+}
+
 type tenantScopeEntry struct {
 	kind   tenantScopeKind
 	reason string
@@ -89,16 +107,16 @@ var tenantScopeClassification = map[string]tenantScopeEntry{
 		reason: "platform_rate_limits carries no row-level security; it is one row of global platform configuration, not a tenant-owned table",
 	},
 	"UsageEventRepository.List": {
-		kind:   trackedDebt,
-		reason: "unfiltered SELECT over usage_events with no tenant predicate; an operations caller sees every tenant's metering events",
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
 	},
 	"ContextRepository.List": {
-		kind:   trackedDebt,
-		reason: "unfiltered SELECT over contexts with no tenant predicate; an operations caller sees every tenant's cloud contexts",
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
 	},
 	"RoleRepository.List": {
-		kind:   trackedDebt,
-		reason: "reads the security context only to bootstrap predefined roles, never to filter the roles/role_permissions SELECTs; an operations caller sees every tenant's roles",
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters both the roles and role_permissions SELECTs WHERE tenant_id = ?, in addition to using it to bootstrap predefined roles",
 	},
 }
 
@@ -122,8 +140,8 @@ func TestContextOnlyRepositoryMethodsAreClassified(t *testing.T) {
 	for _, name := range found {
 		if _, ok := tenantScopeClassification[name]; !ok {
 			t.Errorf("%s takes only (ctx context.Context) with no entry in tenantScopeClassification — "+
-				"classify it as scopedExplicitly, deliberatelyCrossTenant, notTenantOwned, or trackedDebt "+
-				"and say why", name)
+				"classify it as %s, %s, %s, or %s and say why",
+				name, scopedExplicitly, deliberatelyCrossTenant, notTenantOwned, trackedDebt)
 		}
 	}
 

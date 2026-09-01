@@ -72,7 +72,11 @@ func (p RolePermissionInput) validatePattern() error {
 // Ensures TenantUser/TenantAdmin exist (and carry every route routeroles
 // currently classifies for them) before reading, so a tenant that bootstrapped
 // before these roles shipped — or before a later route reclassification —
-// still sees them here without a migration backfill.
+// still sees them here without a migration backfill. Both SELECTs filter
+// explicitly by the security context's TenantID: erun_operations' RLS policy
+// is unconditional, so an OPERATIONS caller would otherwise see every
+// tenant's roles and permissions even though this method already reads the
+// security context (to bootstrap the narrower roles) and looks scoped.
 func (r *RoleRepository) List(ctx context.Context) ([]model.Role, error) {
 	var roles []model.Role
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -86,8 +90,9 @@ func (r *RoleRepository) List(ctx context.Context) ([]model.Role, error) {
 		if err := tx.NewRaw(`
 			SELECT role_id, tenant_id, name, created_at, updated_at
 			  FROM roles
+			 WHERE tenant_id = ?
 			 ORDER BY name
-		`).Scan(ctx, &roles); err != nil {
+		`, securityContext.TenantID).Scan(ctx, &roles); err != nil {
 			return err
 		}
 		if len(roles) == 0 {
@@ -97,8 +102,9 @@ func (r *RoleRepository) List(ctx context.Context) ([]model.Role, error) {
 		if err := tx.NewRaw(`
 			SELECT role_permission_id, tenant_id, role_id, api_method, api_path, api_method_pattern, api_path_pattern, created_at, updated_at
 			  FROM role_permissions
+			 WHERE tenant_id = ?
 			 ORDER BY role_id, created_at
-		`).Scan(ctx, &permissions); err != nil {
+		`, securityContext.TenantID).Scan(ctx, &permissions); err != nil {
 			return err
 		}
 		byRole := make(map[string][]model.RolePermission, len(roles))

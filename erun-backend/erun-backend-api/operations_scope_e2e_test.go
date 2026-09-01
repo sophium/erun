@@ -37,7 +37,7 @@ func operationsScopeDatabase(t *testing.T) (opsCtx, strangerCtx context.Context,
 	strangerTenantID = seedScopeTestTenant(t, db, "stranger-scope-e2e", model.TenantTypeCompany)
 	t.Cleanup(func() {
 		for _, tenantID := range []string{opsTenantID, strangerTenantID} {
-			for _, table := range []string{"audit_events", "user_roles", "role_permissions", "roles", "users", "environments", "contexts", "tenant_quotas", "tenants"} {
+			for _, table := range []string{"audit_events", "usage_events", "user_roles", "role_permissions", "roles", "users", "environments", "contexts", "tenant_quotas", "tenants"} {
 				if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
 					t.Logf("clearing %s for tenant %s: %v", table, tenantID, err)
 				}
@@ -246,5 +246,81 @@ func TestCreateEnvironmentQuotaScopesToTheOperationsCallersOwnTenant(t *testing.
 	code, body = e2eRequest(t, opsServer.URL, http.MethodPost, "/v1/environments", map[string]any{"name": "ops-env-2", "type": "remote-agent"})
 	if code != http.StatusConflict {
 		t.Fatalf("operations tenant's second create: HTTP %d (want 409 — its own cap of 1 is now reached): %s", code, body)
+	}
+}
+
+// TestContextListScopesToTheOperationsCallersOwnTenant pins the same failure
+// scenario for cloud contexts: an OPERATIONS caller's list must not include a
+// stranger tenant's contexts even though erun_operations' RLS policy makes
+// them visible too.
+func TestContextListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
+	contexts := repository.NewContextRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	_, err := contexts.Create(strangerCtx, model.Context{Name: "stranger-context", Provider: "aws"})
+	mustNoErr(t, err, "create stranger context")
+	own, err := contexts.Create(opsCtx, model.Context{Name: "ops-context", Provider: "aws"})
+	mustNoErr(t, err, "create ops context")
+
+	list, err := contexts.List(opsCtx)
+	mustNoErr(t, err, "list as operations caller")
+	if len(list) != 1 || list[0].ContextID != own.ContextID {
+		t.Fatalf("List = %v, want exactly [%s] (the operations caller's own context, not the stranger's as well)", list, own.ContextID)
+	}
+}
+
+// TestUsageEventListScopesToTheOperationsCallersOwnTenant pins the same
+// failure scenario for metering events: an OPERATIONS caller's list must not
+// include a stranger tenant's usage events even though erun_operations' RLS
+// policy makes them visible too.
+func TestUsageEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
+	usageEvents := repository.NewUsageEventRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	mustNoErr(t, usageEvents.Record(strangerCtx, model.UsageEvent{EventType: "environment_provisioned"}), "record stranger usage event")
+	mustNoErr(t, usageEvents.Record(opsCtx, model.UsageEvent{EventType: "environment_provisioned"}), "record ops usage event")
+
+	list, err := usageEvents.List(opsCtx)
+	mustNoErr(t, err, "list as operations caller")
+	if len(list) != 1 {
+		t.Fatalf("List = %v, want exactly 1 event (the operations caller's own, not the stranger's as well)", list)
+	}
+}
+
+// TestRoleListScopesToTheOperationsCallersOwnTenant pins the worst-shaped
+// instance of this defect: RoleRepository.List already reads the security
+// context (to bootstrap the predefined TenantUser/TenantAdmin roles), which
+// makes it look scoped even though it used to apply that TenantID nowhere in
+// either SELECT. An OPERATIONS caller's list must contain only its own
+// tenant's roles.
+func TestRoleListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	opsCtx, strangerCtx, opsTenantID, _, db := operationsScopeDatabase(t)
+	roles := repository.NewRoleRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	_, err := roles.Create(strangerCtx, "StrangerRole", []repository.RolePermissionInput{
+		{APIMethod: "GET", APIPath: "/v1/reviews"},
+	})
+	mustNoErr(t, err, "create stranger role")
+	own, err := roles.Create(opsCtx, "OpsRole", []repository.RolePermissionInput{
+		{APIMethod: "GET", APIPath: "/v1/reviews"},
+	})
+	mustNoErr(t, err, "create ops role")
+
+	list, err := roles.List(opsCtx)
+	mustNoErr(t, err, "list as operations caller")
+	var foundOwn bool
+	for _, role := range list {
+		if role.TenantID != opsTenantID {
+			t.Fatalf("List returned role %q from tenant %s, want only the operations caller's own tenant %s", role.Name, role.TenantID, opsTenantID)
+		}
+		if role.RoleID == own.RoleID {
+			foundOwn = true
+			if len(role.Permissions) != 1 || role.Permissions[0].APIPath != "/v1/reviews" {
+				t.Fatalf("expected the created role's permission to round-trip, got %+v", role.Permissions)
+			}
+		}
+	}
+	if !foundOwn {
+		t.Fatalf("List = %v, want the operations caller's own OpsRole included", list)
 	}
 }

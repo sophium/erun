@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -36,15 +37,23 @@ func (r *UsageEventRepository) Record(ctx context.Context, event model.UsageEven
 	})
 }
 
-// List returns the caller's tenant's usage events, most recent first.
+// List returns the caller's tenant's usage events, most recent first,
+// filtered explicitly by the security context's TenantID: erun_operations'
+// RLS policy is unconditional, so an OPERATIONS caller would otherwise see
+// every tenant's metering events.
 func (r *UsageEventRepository) List(ctx context.Context) ([]model.UsageEvent, error) {
 	var events []model.UsageEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
 			SELECT `+usageEventColumns+`
 			  FROM usage_events
+			 WHERE tenant_id = ?
 			 ORDER BY created_at DESC, usage_event_id DESC
-		`).Scan(ctx, &events)
+		`, securityContext.TenantID).Scan(ctx, &events)
 	})
 	return events, err
 }
