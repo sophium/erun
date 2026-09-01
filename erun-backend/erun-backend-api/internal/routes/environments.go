@@ -607,6 +607,26 @@ func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
 	return nil
 }
 
+// enforceRuntimeResourceQuotaOnCreate is revalidateResourceQuota's create-time
+// counterpart: the same per-environment floor and aggregate budget checks,
+// against a quota createEnvironment has already fetched, and against
+// runtimeCount+1 — this new environment is not counted yet, unlike a
+// redeploy's recheck. Split out (rather than inlined in createEnvironment) to
+// keep that function's own branching under the cyclomatic-complexity budget.
+func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Context, quota model.TenantQuota) error {
+	if err := validateNamespaceQuotaFloor(quota); err != nil {
+		return &resourceQuotaExceededError{detail: err.Error()}
+	}
+	runtimeCount, err := r.environments.CountByType(ctx, model.EnvironmentTypeRuntime)
+	if err != nil {
+		return err
+	}
+	if err := validateAggregateResourceBudget(runtimeCount+1, quota); err != nil {
+		return &resourceQuotaExceededError{detail: err.Error()}
+	}
+	return nil
+}
+
 // resolveDeployVersion picks the version to deploy and rejects the requests that
 // have nothing deployable. Its error message is the operator-facing 400 reason.
 // Placement is a create-time decision (resolvePlacement), not re-run here: a
@@ -800,24 +820,39 @@ func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, s
 	}, body.Preview, strings.TrimSpace(body.TenantID), nil
 }
 
+// resolveCreateEnvironmentTenantScope resolves and authorizes the tenant
+// this create targets (see resolveTargetTenant), writing the response itself
+// on failure so createEnvironment only needs to check ok — split out to keep
+// createEnvironment's own branching under the cyclomatic-complexity budget.
+// homeCtx is the caller's own, unscoped context; scopedCtx is already
+// resolved to the target tenant (see scopedContextForTenant); crossTenant
+// tells the caller whether that target differs from the caller's own.
+func (r EnvironmentRoutes) resolveCreateEnvironmentTenantScope(w http.ResponseWriter, req *http.Request, requestedTenantID string) (homeCtx, scopedCtx context.Context, targetTenantID string, crossTenant, ok bool) {
+	securityContext, has := security.FromContext(req.Context())
+	if !has {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return nil, nil, "", false, false
+	}
+	targetTenantID, err := resolveTargetTenant(securityContext, requestedTenantID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return nil, nil, "", false, false
+	}
+	homeCtx = req.Context()
+	return homeCtx, scopedContextForTenant(homeCtx, securityContext, targetTenantID), targetTenantID, targetTenantID != securityContext.TenantID, true
+}
+
 func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
 	environment, preview, requestedTenantID, err := decodeCreateEnvironmentInput(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	securityContext, ok := security.FromContext(req.Context())
+	homeCtx, scopedCtx, targetTenantID, crossTenant, ok := r.resolveCreateEnvironmentTenantScope(w, req, requestedTenantID)
 	if !ok {
-		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
-	targetTenantID, err := resolveTargetTenant(securityContext, requestedTenantID)
-	if err != nil {
-		writeError(w, http.StatusForbidden, err.Error())
-		return
-	}
-	homeCtx := req.Context()
-	req = req.WithContext(scopedContextForTenant(homeCtx, securityContext, targetTenantID))
+	req = req.WithContext(scopedCtx)
 	// Placement (#1112) is decided once, here, and persisted: an explicit
 	// contextId is validated and capacity-checked, an unset one is
 	// auto-selected from the tenant's own registered contexts (or resolves to
@@ -845,21 +880,16 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if environment.Type == model.EnvironmentTypeRuntime {
-		if err := validateNamespaceQuotaFloor(quota); err != nil {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
-		runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
-		if err != nil {
+		if err := r.enforceRuntimeResourceQuotaOnCreate(req.Context(), quota); err != nil {
+			var exceeded *resourceQuotaExceededError
+			if errors.As(err, &exceeded) {
+				writeError(w, http.StatusConflict, exceeded.Error())
+				return
+			}
 			writeRepositoryError(w, req, err)
 			return
 		}
-		if err := validateAggregateResourceBudget(runtimeCount+1, quota); err != nil {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
 	}
-	crossTenant := targetTenantID != securityContext.TenantID
 	r.persistAndMaybeProvision(w, req, environment, placement, homeCtx, targetTenantID, crossTenant)
 }
 
