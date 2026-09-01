@@ -25,6 +25,14 @@ var InternalAPIRoutes = map[string]bool{
 	// flow (advancing the queue, closing a review) already has a real
 	// desktop surface, which is what actually needs one.
 	"POST /v1/reviews/{review_id}/builds": true,
+	// The environment's own AI-tool hooks report their turn-boundary status
+	// (busy/idle/awaiting-input) here -- never something an operator clicks,
+	// the same self-report shape as the build-result route above. There is
+	// deliberately no matching GET yet: a read-only route with no operator
+	// surface would itself be the dead end this map exists to name, and no
+	// hosted web console or iOS companion app exists yet to be that surface.
+	// The read route ships in the same change as its first real reader.
+	"POST /v1/environments/{environment_id}/ai-sessions": true,
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's

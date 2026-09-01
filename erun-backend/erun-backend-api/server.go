@@ -268,6 +268,7 @@ type databaseRepositories struct {
 	tenantIssuers   *repository.TenantIssuerRepository
 	tenants         *repository.TenantRepository
 	environments    *repository.EnvironmentRepository
+	aiSessions      *repository.AISessionRepository
 	contexts        *repository.ContextRepository
 	tenantQuotas    *repository.TenantQuotaRepository
 	usageEvents     *repository.UsageEventRepository
@@ -285,6 +286,7 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 		tenantIssuers:   repository.NewTenantIssuerRepository(txManager),
 		tenants:         repository.NewTenantRepository(txManager),
 		environments:    repository.NewEnvironmentRepository(txManager),
+		aiSessions:      repository.NewAISessionRepository(txManager),
 		contexts:        repository.NewContextRepository(txManager),
 		tenantQuotas:    repository.NewTenantQuotaRepository(txManager),
 		usageEvents:     repository.NewUsageEventRepository(txManager),
@@ -328,6 +330,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
 	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter)
 	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
+	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
 	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
 	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
 	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
