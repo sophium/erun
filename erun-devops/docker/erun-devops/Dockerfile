@@ -141,6 +141,19 @@ COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 
+# Gate the two heavy compiles below on the test stage instead of gating only
+# the final artefact after them: test and builder are otherwise independent
+# stages (same base image, no data dependency), so BuildKit is free to -- and
+# does -- run them at once. That lets `make check`'s own golangci-lint pass
+# race a *second* full from-source golangci-lint build (this stage's own
+# install below) plus the erun/emcp compiles -- two heavy Go compilations
+# sharing the fixed-memory erun-dind sidecar at the same time on a genuine
+# full rebuild, which is what actually exhausts it, not concurrent
+# architectures (the per-platform build loop already runs strictly one at a
+# time). Moving the gate here also means a failing test no longer lets
+# builder spend a full compile before discovering it.
+COPY --from=test /test-ok /tmp/erun-test-ok
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     ERUN_VERSION="${ERUN_VERSION:-$(tr -d '\n' < /src/erun-devops/VERSION)}" && \
@@ -169,10 +182,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}" && \
     mkdir -p /out && \
     find "$(go env GOPATH)/bin" -name golangci-lint -exec cp {} /out/golangci-lint \;
-
-# Gate the artefacts on the test stage: the runtime stage copies from /out,
-# so an image can only be tagged when the integration gate passed.
-COPY --from=test /test-ok /tmp/erun-test-ok
 
 # Target-arch Go toolchain for the final image's own `go` binary (needed for
 # in-pod contribute-mode builds, e.g. erun-ui). Deliberately not pinned to
