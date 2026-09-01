@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-frontend helm-chart-tests test-postgres-restart check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-frontend helm-chart-tests test-postgres-restart check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -124,6 +124,20 @@ test-erun-ui:
 	@echo ">> go test erun-ui"
 	@(cd erun-ui && go test -race -count=1 ./...)
 
+# erun-backend-api's own Go tests. LINT_MODULES above already gives this
+# module golangci-lint, but nothing ran `go test ./...` for it: its Dockerfile
+# carries no test stage (unlike erun-devops, which runs `make check` itself
+# in-build), so this module's tests were otherwise only a manual per-module
+# instruction. A release-time -ldflags target silently broken by a Go
+# package-main linker quirk shipped a wrong value to production undetected
+# for exactly that reason -- the regression test written for it would never
+# have run automatically without this. Opt-in ERUN_E2E_* suites skip cleanly
+# with no database configured, so this stays fast with no external
+# dependency.
+test-erun-backend-api:
+	@echo ">> go test erun-backend-api"
+	@(cd erun-backend/erun-backend-api && go test ./...)
+
 # The shared frontend kit (erun-kit) and the hosted console (erun-console) —
 # the two Yarn-workspace members outside erun-ui/frontend (in the workspace,
 # so `yarn install` here resolves all three, but its own gate stays in
@@ -237,10 +251,10 @@ integration-test-gate:
 check:
 	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
 
-# The full in-build gate: golangci-lint, erun-ui's own Go tests, the frontend
-# kit + console gates, the erun-devops/k8s chart tests, then the integration
-# suite + coverage. The erun-devops image test stage runs this (via `check`,
-# which is inert outside an agent pod); a failure tags no image.
-# test-postgres-restart is deliberately excluded -- see its own comment above
-# for why.
-check-gate: lint test-erun-ui test-frontend helm-chart-tests integration-test-gate
+# The full in-build gate: golangci-lint, erun-ui's own Go tests,
+# erun-backend-api's own Go tests, the frontend kit + console gates, the
+# erun-devops/k8s chart tests, then the integration suite + coverage. The
+# erun-devops image test stage runs this (via `check`, which is inert outside
+# an agent pod); a failure tags no image. test-postgres-restart is
+# deliberately excluded -- see its own comment above for why.
+check-gate: lint test-erun-ui test-erun-backend-api test-frontend helm-chart-tests integration-test-gate

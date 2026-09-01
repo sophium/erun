@@ -30,11 +30,15 @@ COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
 # Bakes the serving build's version into the binary (GET /v1/platform reports
 # it) the same way erun/emcp do, so a client can tell whether a released fix
-# is actually deployed without a write.
+# is actually deployed without a write. buildVersion lives in package main
+# (cmd/eapi), and the Go linker only honors -X against a package-main symbol
+# when the target is written as "main.<name>" — the full package import path
+# compiles and links with no warning but silently leaves the variable at its
+# default.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-s -w -X github.com/sophium/erun/erun-backend/erun-backend-api/cmd/eapi.buildVersion=${ERUN_VERSION}" -o /out/eapi ./cmd/eapi
+    go build -trimpath -ldflags "-s -w -X main.buildVersion=${ERUN_VERSION}" -o /out/eapi ./cmd/eapi
 
 FROM alpine:3.20
 
