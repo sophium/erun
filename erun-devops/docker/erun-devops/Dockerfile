@@ -27,6 +27,14 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
 WORKDIR /src
 
+# dtach for erun-mcp's attach/PTY test suite (test-erun-mcp, below): those
+# tests exec a real `dtach -A` session and fail with "dtach: not found" on
+# the bare `golang` base this stage runs on. The final image already installs
+# dtach for the runtime session machinery (see the apt-get layer further
+# down); this stage needs its own copy since it is a separate, unrelated base.
+RUN apt-get update && apt-get install -y --no-install-recommends dtach && \
+    rm -rf /var/lib/apt/lists/*
+
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
 # installed binary cannot drift the way a Dockerfile-only default did.
