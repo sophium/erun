@@ -39,6 +39,14 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"version":             {},
 	"list":                {},
 	"idle":                {},
+	// environment composes list/idle/doctor's own resolvers and never exposes
+	// doctor's mutating recovery flags (clearPendingHelm/rollback) — the
+	// authenticated-edge read model erun#1105 needs a scoped mobile caller to
+	// reach.
+	"environment": {},
+	// ai_sessions only reads what "erun activity ai-session report" already
+	// wrote; it has no write path of its own.
+	"ai_sessions":         {},
 	"activity_lease_list": {},
 	"idle_stop_history":   {},
 	"context_list":        {},

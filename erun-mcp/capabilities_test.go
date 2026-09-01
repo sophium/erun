@@ -73,7 +73,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	// rename's one-release alias window (#1186, #1246); the retired name
 	// authorizes as its replacement, so a read-only caller keeps it.
 	want := []string{
-		"activity_lease_list", "cloud_list", "context_list", "diff", "exec_diff",
+		"activity_lease_list", "ai_sessions", "cloud_list", "context_list", "diff", "environment", "exec_diff",
 		"exec_job_await", "exec_job_output", "exec_job_status",
 		"idle", "idle_stop_history",
 		"job_await", "job_output", "job_status", "list", "observe",
@@ -135,6 +135,26 @@ func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
 
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "version"}); err != nil {
 		t.Fatalf("a read capability must permit version: %v", err)
+	}
+}
+
+// environment and ai_sessions are the authenticated-edge read model erun#1105
+// needs a scoped mobile caller to reach; both must actually be reachable, not
+// just listed. Calling either with no tenant/environment context resolves to
+// a business error naming the missing target, not an authorization refusal --
+// proof the call reached the handler rather than being turned away at
+// registration.
+func TestReadCapabilityCanReachTheEnvironmentReadModelTools(t *testing.T) {
+	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+
+	for _, tool := range []string{"environment", "ai_sessions"} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: tool})
+		if err != nil {
+			t.Fatalf("a read capability must be allowed to call %s, got a transport error: %v", tool, err)
+		}
+		if result == nil || !result.IsError {
+			t.Fatalf("%s with no tenant/environment context should report a business error, got %+v", tool, result)
+		}
 	}
 }
 

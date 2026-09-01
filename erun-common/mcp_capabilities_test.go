@@ -14,6 +14,7 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 		"cloud_list", "diff", "outputs_list", "outputs_download",
 		"job_status", "job_output", "job_await",
 		"exec_job_status", "exec_job_output", "exec_job_await",
+		"environment", "ai_sessions",
 	} {
 		if got := MCPToolCapability(tool); got != MCPCapabilityRead {
 			t.Fatalf("%s should be readable, got %s", tool, got)
