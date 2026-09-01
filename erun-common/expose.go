@@ -287,7 +287,7 @@ func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecor
 	}
 	ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 	ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
-	ctx.TraceCommand("", "kubectl", ingressApplyArgs(ingressParams)...)
+	ctx.TraceCommand("", "kubectl", kubectlApplyStdinArgs(ingressParams.Namespace, ingressParams.KubernetesContext)...)
 	// The Ingress manifest is piped to `kubectl apply -f -` on stdin, so trace
 	// its body too — the argv alone hides the exact resource the real run applies.
 	ctx.TraceBlock("expose: ingress manifest", renderHostRoutingIngress(ingressParams))

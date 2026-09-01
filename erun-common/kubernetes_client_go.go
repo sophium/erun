@@ -29,10 +29,13 @@ import (
 // paying that dependency cost to prove the approach on the narrowest,
 // lowest-blast-radius read is preferable to spending it on the higher-traffic
 // but streaming/mutating call sites in the same pass. `kubectl wait` followed
-// once a poll-based condition check proved out (kubectlDeploymentWaitExecutionOperation
-// below); the helm deploy pod-watch poll and `apply` (mutating; a
-// server-side-apply library call is not obviously equivalent to kubectl's
-// client-side three-way merge) remain deferred.
+// once a poll-based condition check proved out
+// (kubectlDeploymentWaitExecutionOperation below), then the Secret `apply`
+// (kubectlSecretApplyExecutionOperation, kubernetes_apply.go) once the
+// mutating case was settled: server-side apply is indeed not equivalent to
+// kubectl's client-side three-way merge, so the library path reproduces the
+// latter rather than substituting the former. The helm deploy pod-watch poll
+// remains deferred.
 const kubectlNamespaceGetExecutionOperation = "kubectl-namespace-get"
 
 // kubectlGetNamespaceArgs is the single source of the `kubectl get namespace

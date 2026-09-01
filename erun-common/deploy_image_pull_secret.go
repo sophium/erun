@@ -7,18 +7,6 @@ import (
 	"strings"
 )
 
-// imagePullSecretApplyArgs mirrors cloudflareSecretApplyArgs / mcpAuthSecretApplyArgs
-// / registryCredentialSecretApplyArgs: a manifest piped via stdin, never an argv
-// element.
-func imagePullSecretApplyArgs(namespace, kubernetesContext string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", strings.TrimSpace(namespace), "apply", "-f", "-")
-	return args
-}
-
 // imagePullSecretGetArgs reads a named Secret back as JSON, so its existing
 // .dockerconfigjson can be merged into rather than replaced.
 func imagePullSecretGetArgs(namespace, kubernetesContext, name string) []string {
@@ -202,7 +190,7 @@ func mergeImagePullSecretAuths(existing map[string]dockerConfigJSONAuthEntry, cr
 // run but executes neither, stating the merge as conditional on what the get
 // above would find (see existingImagePullSecretAuths for why).
 func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials map[string]registryBasicAuth) error {
-	applyArgs := imagePullSecretApplyArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	applyArgs := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -225,10 +213,8 @@ func applyImagePullSecrets(ctx Context, deployInput HelmDeploySpec, credentials 
 			return fmt.Errorf("render image pull secret %s: %w", name, err)
 		}
 		manifest := renderImagePullSecret(name, deployInput.Namespace, dockerConfigJSON)
-		cmd := Command("kubectl", applyArgs...)
-		cmd.Stdin = strings.NewReader(manifest)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("kubectl apply image pull secret %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+		if err := applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "image pull secret "+name, manifest, applyArgs); err != nil {
+			return err
 		}
 	}
 	return nil

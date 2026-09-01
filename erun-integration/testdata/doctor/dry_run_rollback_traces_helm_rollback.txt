@@ -9,6 +9,7 @@ kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
 
 Running: Roll back to the last successful revision
 No cleanup actions selected.

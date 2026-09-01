@@ -98,13 +98,13 @@ func TestRenderRegistryCredentialSecretIsValidYAMLAndRedacted(t *testing.T) {
 	}
 }
 
-func TestRegistryCredentialSecretApplyArgs(t *testing.T) {
-	got := registryCredentialSecretApplyArgs("team-dev", "my-context")
+func TestKubectlApplyStdinArgs(t *testing.T) {
+	got := kubectlApplyStdinArgs("team-dev", "my-context")
 	want := []string{"--context", "my-context", "-n", "team-dev", "apply", "-f", "-"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if got := registryCredentialSecretApplyArgs("team-dev", ""); strings.Contains(strings.Join(got, " "), "--context") {
+	if got := kubectlApplyStdinArgs("team-dev", ""); strings.Contains(strings.Join(got, " "), "--context") {
 		t.Fatalf("no --context should render without a kubernetes context: %v", got)
 	}
 }

@@ -9,6 +9,7 @@ kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
 
 == Workspace sync (host mirror) ==
   host alias: erun-team-dev

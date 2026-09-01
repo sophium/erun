@@ -36,7 +36,7 @@ See [Troubleshooting](/reference/troubleshooting#runtime-image-registry-mismatch
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
-`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`), `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), `aws-export-credentials` (`aws configure export-credentials`), `kubectl-namespace-get` (`kubectl get namespace <name> -o name`), `kubectl-pvc-get` (`kubectl get pvc <claim> -o name`), `kubectl-secret-get` (`kubectl get secret <name> -o json`), `kubectl-pod-get` (`kubectl get pod <name> -o json`), `kubectl-deployment-get` (`kubectl get deployment <name> -o name`), and `kubectl-deployment-wait` (`kubectl wait --for=condition=Available`), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
+`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`), `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), `aws-export-credentials` (`aws configure export-credentials`), `kubectl-namespace-get` (`kubectl get namespace <name> -o name`), `kubectl-pvc-get` (`kubectl get pvc <claim> -o name`), `kubectl-secret-get` (`kubectl get secret <name> -o json`), `kubectl-pod-get` (`kubectl get pod <name> -o json`), `kubectl-deployment-get` (`kubectl get deployment <name> -o name`), `kubectl-deployment-wait` (`kubectl wait --for=condition=Available`), and `kubectl-secret-apply` (`kubectl apply -f -` of a Secret), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
 
 ```
 == Execution modes ==
@@ -49,6 +49,7 @@ kubectl-secret-get: subprocess
 kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
 ```
 
 See [Configuration reference · Execution modes](/reference/configuration#execution-modes) for the config key that controls it.
