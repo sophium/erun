@@ -123,12 +123,50 @@ picks their root. `erun deploy`'s existing `--components <name>` (Step 2's
 `components.<name>.k8s` root automatically once declared here — no separate
 deploy-side wiring needed.
 
-**Check whether the repo commits this file.** erun's own contract is that
-`.erun/config.yaml` is committed and applies to everyone who checks the repo out.
-Plenty of repos gitignore `.erun/` instead (`grep -n 'erun' .gitignore`). When it
-is ignored, the wiring is per-checkout: it must be rewritten in every environment
-that builds this repo, and it will not survive a fresh clone. State which case
-applies rather than leaving the next person to find out.
+**Make the repo keep this file — do not just report that it does not.** erun's
+contract is that `.erun/config.yaml` is committed and applies to everyone who
+checks the repo out. Plenty of repos gitignore `.erun/`, usually with a comment
+calling it local metadata, and then the onboarding exists on exactly one machine:
+the next environment's build resolves the fallback registry it cannot push to,
+and the failure surfaces as an authorization error at push time, nowhere near
+its cause.
+
+Ask git, not `.gitignore` — the rule can live in a parent directory's file, in
+`.git/info/exclude`, or in the user's global excludes:
+
+```sh
+git check-ignore -v .erun/config.yaml     # prints the file:line of the rule, if any
+git ls-files --error-unmatch .erun/config.yaml   # exit 0 = tracked
+```
+
+Untracked is the defect, whatever the cause. Fix it in the same change as the
+onboarding:
+
+```gitignore
+# erun project config: team-owned and committed (erun build/deploy read it).
+# Anything else erun drops in .erun/ stays local.
+.erun/*
+!.erun/config.yaml
+```
+
+`.erun/*` rather than `.erun/`: git cannot re-include a file whose parent
+**directory** is excluded, so a bare `.erun/` makes the `!` line silently
+ineffective — the config stays ignored and the fix looks applied.
+
+The environment overlay from Step 5 (`values.<env>.yaml`) is the same defect in
+a second file: an untracked overlay means the next person deploys the chart's
+production defaults. Commit both, then prove it — `git status --porcelain` must
+report nothing untracked under the paths you onboarded, and the onboarding is
+only done when a fresh clone could reproduce the build:
+
+```sh
+git status --porcelain .erun <path>/k8s <path>/docker    # expect no output
+```
+
+When the repo genuinely refuses the file (a policy you cannot change), say so
+explicitly and name the consequence — every environment that builds this repo
+must have the config written into it by hand — rather than leaving a green
+"onboarded" report over a per-checkout hack.
 
 ## Step 3 — Preflight before building anything
 
