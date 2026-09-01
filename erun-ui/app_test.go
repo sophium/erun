@@ -1996,6 +1996,51 @@ func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path s
 	}
 }
 
+// TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled
+// is the regression: a 401 whoami response can mean three different things
+// per its {code, message} envelope (erun-backend-api's auth.go) -- the
+// dashboard used to collapse all of them into "not enrolled", which is false
+// advice for the other two. TENANT_UNRESOLVED and RESOLUTION_FAILED must
+// fall through to the generic whole-dashboard error instead of asserting an
+// enrollment answer that is not true.
+func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled(t *testing.T) {
+	for _, code := range []string{"TENANT_UNRESOLVED", "RESOLUTION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				switch req.URL.Path {
+				case "/v1/whoami":
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(`{"code":"` + code + `","message":"platform-provided detail"}`))
+				case "/v1/invite-requests/mine":
+					http.Error(w, "no invite request found", http.StatusNotFound)
+				case "/v1/config":
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+				default:
+					t.Fatalf("unexpected request path: %s", req.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			app := testERunPlatformAliasApp(t, server.URL)
+			dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+			if err != nil {
+				t.Fatalf("LoadTenantDashboard failed: %v", err)
+			}
+			if dashboard.PlatformState == tenantPlatformStateNotEnrolled {
+				t.Fatalf("%s must not be reported as not-enrolled, got state %q message %q", code, dashboard.PlatformState, dashboard.APIError)
+			}
+			if dashboard.PlatformState != "" {
+				t.Fatalf("expected the generic whole-dashboard error state, got %q", dashboard.PlatformState)
+			}
+			if !strings.Contains(dashboard.APIError, "platform-provided detail") {
+				t.Fatalf("expected the platform's own detail in the message, got %q", dashboard.APIError)
+			}
+		})
+	}
+}
+
 // TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault
 // guards against the failure a round trip other than "not found" must not
 // silently collapse into "never submitted one": a caller with an already

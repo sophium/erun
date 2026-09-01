@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,17 +74,30 @@ func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, b
 	if err := json.Unmarshal(data, &state); err != nil {
 		return PortForwardState{}, false, fmt.Errorf("%s: %w", path, err)
 	}
-	if !environmentIsConfigured(tenant, environment) {
+	configured, err := environmentIsConfigured(tenant, environment)
+	if err != nil {
+		return PortForwardState{}, false, err
+	}
+	if !configured {
 		return PortForwardState{}, false, nil
 	}
 	return state, state.LocalPort > 0, nil
 }
 
 // environmentIsConfigured reports whether the config store still knows this
-// tenant/environment. Any error reading it — including "not initialized" —
-// is treated as "cannot confirm this is live", the same conservative reading
-// LoadPortForwardState itself gives a file it cannot read.
-func environmentIsConfigured(tenant, environment string) bool {
+// tenant/environment. A genuine absence (ErrNotInitialized) reports false,
+// nil; any other read failure is returned rather than swallowed, so a config
+// read that fails for an unrelated reason (corruption, a permission error)
+// is not silently misreported as "this environment was deleted" -- the same
+// distinction LoadPortForwardState itself draws for a state file it cannot
+// read.
+func environmentIsConfigured(tenant, environment string) (bool, error) {
 	_, _, err := ConfigStore{}.LoadEnvConfig(tenant, environment)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, ErrNotInitialized) {
+		return false, nil
+	}
+	return false, err
 }

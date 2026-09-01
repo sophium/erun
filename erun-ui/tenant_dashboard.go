@@ -450,16 +450,28 @@ func tenantDashboardReadError(read string, err error) string {
 // dashboard shows before that action. By the time this runs, the bearer
 // itself minted successfully (resolveTenantPlatform already reports
 // tenantPlatformStateNotSignedIn when it does not) — so a 401 here is the
-// platform's own auth middleware rejecting a token whose subject it does not
-// recognize, i.e. an identity that is not enrolled in this tenant, never a
-// stale session signing in again could fix. A 403 means the identity is
-// enrolled but the whoami read itself is refused, which happens only for a
-// caller with no permissions at all.
+// platform's own auth middleware rejecting the token, for one of three
+// reasons its {code, message} envelope distinguishes: NOT_ENROLLED (the
+// ordinary case, this identity's subject is not one of the tenant's users),
+// TENANT_UNRESOLVED (the platform could not even determine a tenant for this
+// token — the caller may already be enrolled somewhere else, so "ask an
+// administrator to enroll it" is wrong advice), or RESOLUTION_FAILED (an
+// internal error unrelated to enrollment at all, sanitized server-side).
+// Only NOT_ENROLLED, and an older platform's unclassified 401 with no code
+// at all, get the not-enrolled treatment; the other two fall through to the
+// generic read-error message rather than asserting an enrollment answer that
+// is not true. A 403 means the identity is enrolled but the whoami read
+// itself is refused, which happens only for a caller with no permissions at
+// all.
 func tenantDashboardIdentityFailure(err error) (state, message string) {
 	switch {
 	case errors.Is(err, eruncommon.ErrPlatformForbidden):
 		return tenantPlatformStateNoPermission, "You do not have access to this tenant's dashboard. Ask an administrator for access."
 	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
+		switch eruncommon.PlatformAuthErrorCode(err) {
+		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
+			return "", tenantDashboardReadError(tenantDashboardReadWhoami, err)
+		}
 		return tenantPlatformStateNotEnrolled, "Your signed-in identity is not enrolled in this tenant yet. Ask an administrator to enroll it, or request access below."
 	default:
 		return "", tenantDashboardReadError(tenantDashboardReadWhoami, err)

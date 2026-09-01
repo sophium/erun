@@ -670,6 +670,34 @@ func (e *PlatformStatusError) Unwrap() error {
 	return e.sentinel
 }
 
+// platformAuthErrorEnvelope mirrors the {code, message} JSON envelope
+// erun-backend-api's pre-route auth layer sends on every 401
+// (auth.go's authErrorEnvelope). TENANT_UNRESOLVED, NOT_ENROLLED, and
+// RESOLUTION_FAILED are three different situations behind the same HTTP
+// status; a caller checking only ErrPlatformUnauthorized cannot tell them
+// apart.
+type platformAuthErrorEnvelope struct {
+	Code string `json:"code"`
+}
+
+// PlatformAuthErrorCode reports the machine-readable code a 401 response
+// carried (e.g. "TENANT_UNRESOLVED", "NOT_ENROLLED", "RESOLUTION_FAILED"), or
+// "" when err is not a 401 PlatformStatusError, or its body carried no
+// recognizable code (an older platform, or a body that failed to parse) --
+// callers must treat "" the same as an unclassified 401, never as one of the
+// named codes.
+func PlatformAuthErrorCode(err error) string {
+	var statusErr *PlatformStatusError
+	if !errors.As(err, &statusErr) || statusErr.Status != http.StatusUnauthorized {
+		return ""
+	}
+	var envelope platformAuthErrorEnvelope
+	if jsonErr := json.Unmarshal(statusErr.Body, &envelope); jsonErr != nil {
+		return ""
+	}
+	return envelope.Code
+}
+
 // platformStatusError maps a non-2xx response to a sentinel a caller can
 // distinguish with errors.Is, carrying the response body (see
 // PlatformStatusError) so a caller whose endpoint returns structured detail
