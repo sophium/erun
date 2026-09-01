@@ -564,8 +564,10 @@ func (a *App) sendOrchestratorPacingNudge(id string, serial int, now time.Time, 
 		session.pacingLastAutoNudgeAtUnix = now.Unix()
 	}
 	count := session.pacingNudgeCount
+	history, persist := orchestratorNudgeHistoryEntryFromSession(session)
 	a.mu.Unlock()
 
+	a.persistOrchestratorNudgeHistory(history, persist)
 	if !a.writeOrchestratorPacingNudge(managed) {
 		log.Printf("erun-app: orchestrator %s pacing nudge write failed", id)
 		return
@@ -624,7 +626,9 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string, now time
 	}
 	session.pacingCapped = true
 	session.pacingLastCappedAtUnix = now.Unix()
+	history, persist := orchestratorNudgeHistoryEntryFromSession(session)
 	a.mu.Unlock()
+	a.persistOrchestratorNudgeHistory(history, persist)
 	a.emitOrchestratorPacingCappedMarker(serial)
 	a.emitAppNotification("warning", orchestratorPacingCappedNotice(name))
 }

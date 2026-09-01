@@ -53,7 +53,7 @@ func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) err
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := writeFileAtomic(backupPath, current, 0o644); err != nil {
+	if err := WriteFileAtomic(backupPath, current, 0o644); err != nil {
 		return err
 	}
 	return pruneOldConfigBackups(dir, base, keep)
@@ -108,7 +108,7 @@ func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPa
 	if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
 		return ErrNoUserDataFolder
 	}
-	if err := writeFileAtomic(livePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(livePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 	return nil

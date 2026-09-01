@@ -5,7 +5,10 @@ import * as React from 'react';
 import { formatElapsed } from '@/app/activityQueueState';
 import { orchestratorBusyElapsed } from '@/app/orchestratorBusyLabel';
 import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivity';
-import { orchestratorNudgeSummary } from '@/app/orchestratorNudgeSummary';
+import {
+  orchestratorHasNudgeHistory,
+  orchestratorNudgeSummary,
+} from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import {
   HOVER_CARD_CAPTION_CLASS,
@@ -119,7 +122,7 @@ export function OrchestratorHoverCard({
           <HoverCardRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverCardRow>
-          {running && (
+          {(running || orchestratorHasNudgeHistory(orchestrator)) && (
             <HoverCardRow label="Nudges">
               <OrchestratorNudges orchestrator={orchestrator} />
             </HoverCardRow>
@@ -233,9 +236,11 @@ function OrchestratorEnvironments({
 
 // Whether erun has been nudging this orchestrator (orchestrator_pacing.go):
 // a session that has gone quiet gets restated the pacing contract every 15s
-// tick once it is stale, capped after orchestratorPacingMaxNudges. Rendered
-// only while running -- a stopped orchestrator's pacing state does not
-// survive past its session, so there is nothing to report.
+// tick once it is stale, capped after orchestratorPacingMaxNudges. The live
+// cap gauge (nudgeCount/nudgeCapped) only means anything while running, but
+// the cumulative history survives a stopped session (persisted per
+// orchestrator id) -- see orchestratorHasNudgeHistory, which is why this row
+// can still render while stopped.
 function OrchestratorNudges({
   orchestrator,
 }: {

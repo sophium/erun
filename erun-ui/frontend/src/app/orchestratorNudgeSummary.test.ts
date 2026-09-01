@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { orchestratorNudgeSummary } from './orchestratorNudgeSummary';
+import { orchestratorHasNudgeHistory, orchestratorNudgeSummary } from './orchestratorNudgeSummary';
 
 function fields(overrides: Partial<Parameters<typeof orchestratorNudgeSummary>[0]> = {}) {
   return {
@@ -76,4 +76,35 @@ test('a session that resumed after hitting the cap still names that it was cappe
   );
   assert.match(summary, /previously capped .+ ago/);
   assert.notEqual(summary, 'Not nudged');
+});
+
+test('an unreadable persisted history is reported as unavailable, never as "Not nudged"', () => {
+  const summary = orchestratorNudgeSummary(fields({ nudgeHistoryUnreadable: true }), Date.now());
+  assert.equal(summary, 'Nudge history unavailable');
+  assert.notEqual(summary, 'Not nudged');
+});
+
+test('a session with real nudges still reports them even if this restore happened to hit an unreadable file', () => {
+  const now = Date.now();
+  const summary = orchestratorNudgeSummary(
+    fields({
+      autoNudgeCount: 2,
+      lastAutoNudgeAtUnix: Math.floor(now / 1000) - 10,
+      nudgeHistoryUnreadable: true,
+    }),
+    now,
+  );
+  assert.match(summary, /^Nudged 2x, last .+ ago$/);
+});
+
+test('orchestratorHasNudgeHistory is false for a session with nothing to report', () => {
+  assert.equal(orchestratorHasNudgeHistory(fields()), false);
+});
+
+test('orchestratorHasNudgeHistory is true for cumulative history, a cap, or an unreadable record', () => {
+  assert.equal(orchestratorHasNudgeHistory(fields({ autoNudgeCount: 1 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ whipCount: 1 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ lastCappedAtUnix: 123 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ nudgeCapped: true })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ nudgeHistoryUnreadable: true })), true);
 });

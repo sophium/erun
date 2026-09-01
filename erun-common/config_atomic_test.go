@@ -13,7 +13,7 @@ import (
 
 // TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders is the
 // regression for erun#1774's first acceptance criterion: a concurrent writer
-// must never let a reader observe a partial document. writeFileAtomic's
+// must never let a reader observe a partial document. WriteFileAtomic's
 // write-to-temp-then-rename contract is what every Save*Config function in
 // config.go already routes through; this pins that a reader racing a stream
 // of writes only ever sees one complete write's content, never a mix.
@@ -22,7 +22,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 	path := filepath.Join(dir, "config.yaml")
 	valueA := []byte(strings.Repeat("a", 4096) + "\n")
 	valueB := []byte(strings.Repeat("b", 8192) + "\n")
-	if err := writeFileAtomic(path, valueA, 0o644); err != nil {
+	if err := WriteFileAtomic(path, valueA, 0o644); err != nil {
 		t.Fatalf("seed write: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 			if i%2 == 1 {
 				value = valueB
 			}
-			if err := writeFileAtomic(path, value, 0o644); err != nil {
+			if err := WriteFileAtomic(path, value, 0o644); err != nil {
 				t.Errorf("concurrent write failed: %v", err)
 				return
 			}
@@ -66,7 +66,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 	<-readerDone
 
 	if n := badReads.Load(); n != 0 {
-		t.Fatalf("observed %d torn/partial reads racing writeFileAtomic", n)
+		t.Fatalf("observed %d torn/partial reads racing WriteFileAtomic", n)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	go func() {
 		defer close(healed)
 		time.Sleep(configReadRetrySleep * 2)
-		if err := writeFileAtomic(path, []byte("name: healed\n"), 0o644); err != nil {
+		if err := WriteFileAtomic(path, []byte("name: healed\n"), 0o644); err != nil {
 			t.Errorf("heal write failed: %v", err)
 		}
 	}()

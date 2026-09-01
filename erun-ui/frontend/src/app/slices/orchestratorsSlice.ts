@@ -71,17 +71,25 @@ export interface OrchestratorInfo {
   // autoNudgeCount/lastAutoNudgeAtUnix and whipCount/lastWhipAtUnix are the
   // cumulative history behind that budget: how many automatic nudges, and
   // how many explicit operator whips, this session has ever received, and
-  // when the last of each went out. Nothing resets these, so a session that
-  // answers every nudge still reports having been nudged rather than
-  // collapsing back to "never nudged". lastCappedAtUnix is the same
-  // treatment for the cap itself: it survives the rearm that clears
-  // nudgeCapped, so a session that has since resumed still reports having
-  // hit the cap before.
+  // when the last of each went out. No pacing decision resets these, and
+  // unlike the live budget above they are not lost when the session goes
+  // away: the desktop persists them per orchestrator id and restores them on
+  // a later Start/Restart, so a session that answers every nudge still
+  // reports having been nudged rather than collapsing back to "never
+  // nudged" on a desktop restart. lastCappedAtUnix is the same treatment for
+  // the cap itself: it survives the rearm that clears nudgeCapped, so a
+  // session that has since resumed still reports having hit the cap before.
   autoNudgeCount: number;
   lastAutoNudgeAtUnix?: number;
   whipCount: number;
   lastWhipAtUnix?: number;
   lastCappedAtUnix?: number;
+  // nudgeHistoryUnreadable is true when the persisted cumulative record above
+  // exists but could not be parsed back, so the counts above are an
+  // unverified zero rather than a confirmed "never nudged" — see
+  // orchestratorNudgeSummary.ts, which renders this case distinctly instead
+  // of asserting "Not nudged" for a history that was actually lost.
+  nudgeHistoryUnreadable?: boolean;
   // restartRequired mirrors the Go side's own comparison of what this
   // orchestrator's live session was actually spawned with against what it is
   // linked to right now: true means an edit changed the scope while the

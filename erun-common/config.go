@@ -861,7 +861,7 @@ func SaveERunConfig(config ERunConfig) error {
 	// Idempotent across repeated saves within one local day.
 	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -906,7 +906,7 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1011,7 +1011,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	// backup dir is unwritable would be worse.
 	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1100,7 +1100,7 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1166,11 +1166,11 @@ func projectConfigPath(projectRoot string) (string, error) {
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
 
-// writeFileAtomic writes via a sibling temp file, fsync, then rename so a crash
+// WriteFileAtomic writes via a sibling temp file, fsync, then rename so a crash
 // or kill mid-write leaves either the previous contents or no change at all —
 // never a 0-byte or partially written file. The rename is atomic because the temp
 // file shares the destination's directory, and thus its filesystem.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -1205,7 +1205,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // configReadRetryAttempts/configReadRetrySleep bound how long a read waits out
-// a torn write before surfacing ErrConfigCorrupted. writeFileAtomic makes erun's
+// a torn write before surfacing ErrConfigCorrupted. WriteFileAtomic makes erun's
 // own writers atomic, but a reader still has to tolerate a write it does not
 // control -- an external editor saving in place, another process's own
 // non-atomic writer, a crash mid-write -- and a torn read from any of those is
