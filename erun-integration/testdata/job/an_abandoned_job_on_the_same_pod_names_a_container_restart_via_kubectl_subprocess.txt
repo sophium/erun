@@ -1,0 +1,5 @@
+unknown: overnight build (job supervisor <PID> is gone without recording an exit status; the erun-devops container restarted (OOMKilled, exit code 137) at <TS> -- the pod itself was not replaced), 0 bytes of output
+audit: erun job status --environment dev --id restarted --tenant team
+unknown: overnight build (job supervisor <PID> is gone without recording an exit status; the erun-devops container restarted (OOMKilled, exit code 137) at <TS> -- the pod itself was not replaced), 0 bytes of output
+audit: erun job await --environment dev --id restarted --tenant team --timeout 1s
+job "restarted" has no recorded outcome: job supervisor <PID> is gone without recording an exit status; the erun-devops container restarted (OOMKilled, exit code 137) at <TS> -- the pod itself was not replaced

@@ -3,10 +3,13 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -689,6 +692,154 @@ func TestJob(t *testing.T) {
 		}
 		if !strings.Contains(string(body), `"state": "unknown"`) {
 			t.Errorf("expected the reconciled record to persist the unknown state, got:\n%s", body)
+		}
+	})
+
+	t.Run("an_abandoned_job_on_the_same_pod_names_a_container_restart_via_kubectl_subprocess", func(t *testing.T) {
+		// A stranded job whose recorded hostname matches this pod's own
+		// hostname rules out a pod replacement, so reconciliation asks
+		// Kubernetes whether the runtime container itself restarted
+		// (jobSupervisorContainerRestart, kubectl-pod-get execution mode).
+		// The kubectl stub answers `get pod <hostname> -o json` with a
+		// terminated erun-devops container, and the reported reason must name
+		// the real cause instead of falling back to "could not be
+		// determined".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		hostname, err := os.Hostname()
+		if err != nil {
+			t.Fatalf("os.Hostname: %v", err)
+		}
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "restarted"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		record := fmt.Sprintf(`{
+  "id": "restarted",
+  "name": "overnight build",
+  "state": "running",
+  "pid": 2147483645,
+  "hostname": %q,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": null,
+  "leaseId": "job-restarted"
+}
+`, hostname)
+		if err := os.WriteFile(filepath.Join(dir, "restarted.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pod "*) printf '%s\n' '{"status":{"containerStatuses":[{"name":"erun-devops","lastState":{"terminated":{"reason":"OOMKilled","exitCode":137,"finishedAt":"2026-01-01T00:05:00Z"}}}]}}' ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...))
+
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "restarted"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "restarted", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 125 {
+			t.Fatalf("expected the unknown-outcome exit code 125, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		golden.Equal(t, "job/an_abandoned_job_on_the_same_pod_names_a_container_restart_via_kubectl_subprocess", normalize.Apply(status.Combined+await.Combined))
+	})
+
+	t.Run("an_abandoned_job_on_the_same_pod_names_a_container_restart_via_kubectl_pod_get_library_execution_mode", func(t *testing.T) {
+		// Proves the library path (kubectl-pod-get=library) produces the same
+		// observable result as the subprocess path above -- a real client-go
+		// call against a fake API server instead of shelling out to kubectl.
+		// The kubectl stub fails loudly and distinctively only for a "get
+		// pod" argv, so a fallback to the subprocess path surfaces as a
+		// recognizable failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-pod-get", "library")
+		hostname, err := os.Hostname()
+		if err != nil {
+			t.Fatalf("os.Hostname: %v", err)
+		}
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "restarted"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		record := fmt.Sprintf(`{
+  "id": "restarted",
+  "name": "overnight build",
+  "state": "running",
+  "pid": 2147483645,
+  "hostname": %q,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": null,
+  "leaseId": "job-restarted"
+}
+`, hostname)
+		if err := os.WriteFile(filepath.Join(dir, "restarted.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+
+		var apiHits atomic.Int64
+		podPath := "/api/v1/namespaces/team-dev/pods/" + hostname
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != podPath {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"status":{"containerStatuses":[{"name":"erun-devops","lastState":{"terminated":{"reason":"OOMKilled","exitCode":137,"finishedAt":"2026-01-01T00:05:00Z"}}}]}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"      namespace: team-dev\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pod "*) printf '%s\n' "fell through to the kubectl subprocess for the container restart check" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...))
+
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "restarted"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		if strings.Contains(status.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("container restart check used the kubectl subprocess despite library execution mode:\n%s", status.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+		if !strings.Contains(status.Combined, "OOMKilled") {
+			t.Fatalf("expected the library path to report the same OOMKilled restart the subprocess path does:\n%s", status.Combined)
 		}
 	})
 

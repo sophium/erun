@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 // dockerBuildResourceExhaustionMarkers are the tells that a build step's own
@@ -101,14 +103,28 @@ type dockerBuildPodSpecDiagnostic struct {
 // dockerBuildContainerMemoryLimit reads one named container's configured
 // memory limit from this pod's own spec. found is false whenever the answer
 // cannot be trusted: kubectl unavailable, the API call failed, or the
-// container is absent from the response.
+// container is absent from the response. Dispatches to the subprocess or
+// library path per the kubectl-pod-get execution mode (see
+// execution_mode.go).
 func dockerBuildContainerMemoryLimit(podName, containerName string, runner openKubectlRunnerFunc) (limit string, found bool) {
 	podName = strings.TrimSpace(podName)
-	if podName == "" || runner == nil {
+	if podName == "" {
+		return "", false
+	}
+	if currentExecutionMode(kubectlPodGetExecutionOperation) == ExecutionModeLibrary {
+		return libraryDockerBuildContainerMemoryLimit(podName, containerName)
+	}
+	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)
+}
+
+// defaultDockerBuildContainerMemoryLimit is the subprocess-backed path
+// dockerBuildContainerMemoryLimit dispatches to by default.
+func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner openKubectlRunnerFunc) (limit string, found bool) {
+	if runner == nil {
 		return "", false
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runner([]string{"get", "pod", podName, "-o", "json"}, &stdout, &stderr); err != nil {
+	if err := runner(kubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return "", false
 	}
 	var pod dockerBuildPodSpecDiagnostic
@@ -120,6 +136,28 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner openK
 			continue
 		}
 		limit = strings.TrimSpace(container.Resources.Limits.Memory)
+		return limit, limit != ""
+	}
+	return "", false
+}
+
+// libraryDockerBuildContainerMemoryLimit is the library-backed alternative to
+// defaultDockerBuildContainerMemoryLimit, resolving the same pod via
+// k8s.io/client-go instead of shelling out to kubectl.
+func libraryDockerBuildContainerMemoryLimit(podName, containerName string) (limit string, found bool) {
+	pod, err := libraryGetPod(podName)
+	if err != nil {
+		return "", false
+	}
+	for _, container := range pod.Spec.Containers {
+		if container.Name != containerName {
+			continue
+		}
+		quantity, ok := container.Resources.Limits[corev1.ResourceMemory]
+		if !ok {
+			return "", false
+		}
+		limit = strings.TrimSpace(quantity.String())
 		return limit, limit != ""
 	}
 	return "", false

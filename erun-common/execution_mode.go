@@ -31,6 +31,7 @@ var knownExecutionOperations = []string{
 	"kubectl-namespace-get",
 	"kubectl-pvc-get",
 	"kubectl-secret-get",
+	"kubectl-pod-get",
 }
 
 // ExecutionModeFor resolves which path a promoted operation should take.

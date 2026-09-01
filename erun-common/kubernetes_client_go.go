@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -64,17 +65,27 @@ func libraryKubernetesNamespaceExists(contextName, namespace string) (bool, erro
 	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %s", namespace, contextName, err)
 }
 
-// kubernetesClientsetForContext builds a typed Kubernetes clientset from the
-// ambient kubeconfig, honoring the same KUBECONFIG env var and --context
-// override kubectl itself honors, via clientcmd's own non-interactive
-// deferred loader.
-func kubernetesClientsetForContext(contextName string) (*kubernetes.Clientset, error) {
+// kubernetesClientConfigLoader builds the same non-interactive deferred
+// loader kubectl itself resolves a kubeconfig through -- KUBECONFIG env var,
+// --context override, and (when no kubeconfig names a usable current
+// context) a fallback to the in-cluster service account. Shared by
+// kubernetesClientsetForContext (the rest config) and libraryGetPod (which
+// also needs the loader's resolved current namespace).
+func kubernetesClientConfigLoader(contextName string) clientcmd.ClientConfig {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	overrides := &clientcmd.ConfigOverrides{}
 	if contextName = strings.TrimSpace(contextName); contextName != "" {
 		overrides.CurrentContext = contextName
 	}
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+}
+
+// kubernetesClientsetForContext builds a typed Kubernetes clientset from the
+// ambient kubeconfig, honoring the same KUBECONFIG env var and --context
+// override kubectl itself honors, via clientcmd's own non-interactive
+// deferred loader.
+func kubernetesClientsetForContext(contextName string) (*kubernetes.Clientset, error) {
+	config, err := kubernetesClientConfigLoader(contextName).ClientConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -143,4 +154,59 @@ func libraryImagePullSecretAuths(contextName, namespace, name string) (map[strin
 		return nil, fmt.Errorf("read existing image pull secret %s: %s does not decode as a docker config", name, dockerConfigJSONSecretKey)
 	}
 	return file.Auths, nil
+}
+
+// kubectlPodGetExecutionOperation is the ExecutionModeFor/ExecutionModeReport
+// key for the `kubectl get pod <name> -o json` self-check two existing call
+// sites already ran through the subprocess path: jobSupervisorContainerRestart
+// (job_container_restart.go), which reads this pod's own container status to
+// attribute a vanished job supervisor to a real container restart instead of
+// guessing pod replacement, and dockerBuildContainerMemoryLimit
+// (build_resource_exhaustion.go), which reads this pod's own spec to name the
+// configured memory limit behind an OOM-killed docker build. Picked next
+// after kubectl-secret-get for the identical narrow shape -- a single
+// resource kind (Pod), a single Get-by-name call, no streaming, no mutation
+// -- and because porting it here folds both call sites onto one library seam
+// instead of leaving them duplicated. Neither caller passes its own context
+// or namespace: both run inside the pod they are asking about, so
+// libraryGetPod resolves both the same way kubectl itself would with no
+// --context/--namespace flag -- clientcmd's DeferredLoadingClientConfig falls
+// back to the in-cluster service account when no kubeconfig names a current
+// context.
+const kubectlPodGetExecutionOperation = "kubectl-pod-get"
+
+// kubectlGetPodArgs is the single source of the `kubectl get pod <name> -o
+// json` argv, shared by both subprocess call sites so neither can drift from
+// the other or from the library path's equivalent Get.
+func kubectlGetPodArgs(podName string) []string {
+	return []string{"get", "pod", strings.TrimSpace(podName), "-o", "json"}
+}
+
+// libraryGetPod is the library-backed alternative to shelling out to
+// `kubectl get pod <name> -o json`, resolving the same pod via k8s.io/client-go
+// instead. It takes no context or namespace: both current call sites read
+// this pod's own status about itself, so the namespace is resolved the same
+// way kubectl resolves it with no --namespace flag -- an explicit
+// kubeconfig context's namespace, or (in a runtime pod with no kubeconfig at
+// all) the namespace bound to the mounted service account token.
+func libraryGetPod(podName string) (*corev1.Pod, error) {
+	podName = strings.TrimSpace(podName)
+	loader := kubernetesClientConfigLoader("")
+	namespace, _, err := loader.Namespace()
+	if err != nil {
+		return nil, fmt.Errorf("read pod %q: resolve current namespace: %s", podName, err)
+	}
+	config, err := loader.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("read pod %q: %s", podName, err)
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("read pod %q: %s", podName, err)
+	}
+	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("read pod %q in namespace %q: %s", podName, namespace, err)
+	}
+	return pod, nil
 }
