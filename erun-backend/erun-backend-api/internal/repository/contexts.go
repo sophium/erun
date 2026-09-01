@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -38,14 +39,23 @@ func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Conte
 	return created, err
 }
 
+// List returns the caller's tenant's cloud contexts, filtered explicitly by
+// the security context's TenantID: erun_operations' RLS policy is
+// unconditional, so an OPERATIONS caller would otherwise see every tenant's
+// contexts.
 func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	var contexts []model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
 			SELECT `+contextColumns+`
 			  FROM contexts
+			 WHERE tenant_id = ?
 			 ORDER BY name ASC, context_id ASC
-		`).Scan(ctx, &contexts)
+		`, securityContext.TenantID).Scan(ctx, &contexts)
 	})
 	return contexts, err
 }
