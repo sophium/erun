@@ -81,7 +81,7 @@ func enrollERunPlatformUserError(err error) error {
 	if err == nil {
 		return nil
 	}
-	const handoff = "You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation."
+	handoff := "You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation."
 	switch {
 	case errors.Is(err, eruncommon.ErrPlatformForbidden):
 		log.Printf("erun-app: enroll self refused: %v", err)
