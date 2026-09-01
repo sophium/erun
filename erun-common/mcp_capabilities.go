@@ -36,9 +36,9 @@ const (
 // awake, is not here. Leases look harmless and are not: holding one defers
 // auto-stop, which spends money.
 var mcpReadOnlyTools = map[string]struct{}{
-	"version":             {},
-	"list":                {},
-	"idle":                {},
+	"version": {},
+	"list":    {},
+	"idle":    {},
 	// environment composes list/idle/doctor's own resolvers and never exposes
 	// doctor's mutating recovery flags (clearPendingHelm/rollback) — the
 	// authenticated-edge read model erun#1105 needs a scoped mobile caller to
