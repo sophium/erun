@@ -41,11 +41,12 @@ const (
 )
 
 // ResolveDockerBuildContextDirForProject picks the Docker build context root. A
-// configured paths.dockercontext wins over the positional heuristic; unset keeps
-// the heuristic, which returns the repo root only for the conventional
+// configured paths.dockercontext (or the selected components: entry's
+// dockercontext) wins over the positional heuristic; unset keeps the
+// heuristic, which returns the repo root only for the conventional
 // <devops-root>/docker/<component> layout.
-func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) (string, error) {
-	mode, ok, err := configuredDockerContext(projectRoot)
+func ResolveDockerBuildContextDirForProject(buildDir, projectRoot, selectedComponent string) (string, error) {
+	mode, ok, err := resolveComponentAwareDockerContext(projectRoot, selectedComponent)
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +73,27 @@ func configuredDockerContext(projectRoot string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	mode := strings.TrimSpace(paths.DockerContext)
+	return validateDockerContextMode(paths.DockerContext, "paths.dockercontext")
+}
+
+// resolveComponentAwareDockerContext resolves the docker build context mode a
+// build/push command should use: the selected components: entry's
+// dockercontext when the project declares one or more (see
+// resolveProjectComponent), otherwise the unchanged paths.dockercontext
+// override via configuredDockerContext.
+func resolveComponentAwareDockerContext(projectRoot, selectedComponent string) (string, bool, error) {
+	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return configuredDockerContext(projectRoot)
+	}
+	return validateDockerContextMode(paths.DockerContext, fmt.Sprintf("components.%s.dockercontext", name))
+}
+
+func validateDockerContextMode(mode, configKey string) (string, bool, error) {
+	mode = strings.TrimSpace(mode)
 	if mode == "" {
 		return "", false, nil
 	}
@@ -80,22 +101,23 @@ func configuredDockerContext(projectRoot string) (string, bool, error) {
 	case dockerContextRepoRoot, dockerContextComponent:
 		return mode, true, nil
 	default:
-		return "", false, fmt.Errorf("invalid docker context %q (.erun/config.yaml paths.dockercontext): expected %q or %q", mode, dockerContextRepoRoot, dockerContextComponent)
+		return "", false, fmt.Errorf("invalid docker context %q (.erun/config.yaml %s): expected %q or %q", mode, configKey, dockerContextRepoRoot, dockerContextComponent)
 	}
 }
 
-func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, string, error) {
-	configured, hasConfigured, err := configuredVersionFile(projectRoot)
+func ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent string) (string, bool, string, error) {
+	configured, hasConfigured, configKey, err := resolveComponentAwareVersionFile(projectRoot, selectedComponent)
 	if err != nil {
 		return "", false, "", err
 	}
 
 	candidates := dockerBuildVersionCandidates(buildDir, projectRoot)
 	if hasConfigured {
-		// paths.version relocates the project-level VERSION: it stands in for the
-		// project-root candidate, so a component's own VERSION and any intermediate
-		// <module>/VERSION still take precedence (most-specific first). This keeps
-		// version-pinned base components (VERSION in their own build dir) pinned.
+		// paths.version (or a selected components: entry's version) relocates the
+		// project-level VERSION: it stands in for the project-root candidate, so a
+		// component's own VERSION and any intermediate <module>/VERSION still take
+		// precedence (most-specific first). This keeps version-pinned base
+		// components (VERSION in their own build dir) pinned.
 		candidates = replaceProjectRootVersionCandidate(candidates, projectRoot, configured)
 	}
 
@@ -110,7 +132,7 @@ func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, stri
 	}
 
 	if hasConfigured {
-		return "", false, "", fmt.Errorf("configured version file %s (.erun/config.yaml paths.version) not found", configured)
+		return "", false, "", fmt.Errorf("configured version file %s (.erun/config.yaml %s) not found", configured, configKey)
 	}
 	return "", false, "", ErrVersionFileNotFound
 }
@@ -136,6 +158,24 @@ func replaceProjectRootVersionCandidate(candidates []string, projectRoot, config
 	return out
 }
 
+// resolveComponentAwareVersionFile resolves the VERSION file path a
+// build/push command should use: the selected components: entry's version
+// when the project declares one or more (see resolveProjectComponent),
+// otherwise the unchanged paths.version override. Returns (path, true,
+// configKey, nil) when set, (,false,,nil) when unset.
+func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (string, bool, string, error) {
+	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	if err != nil {
+		return "", false, "", err
+	}
+	if !ok {
+		path, hasPath, err := configuredVersionFile(projectRoot)
+		return path, hasPath, "paths.version", err
+	}
+	path, hasPath := resolveVersionFilePath(projectRoot, paths.Version)
+	return path, hasPath, fmt.Sprintf("components.%s.version", name), nil
+}
+
 // configuredVersionFile resolves the project-global paths.version override to
 // the VERSION file path. A configured directory resolves to <dir>/VERSION.
 // Returns (path, true, nil) when set, (,false,nil) when unset.
@@ -144,14 +184,22 @@ func configuredVersionFile(projectRoot string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	versionPath := resolveProjectPath(projectRoot, paths.Version)
+	path, ok := resolveVersionFilePath(projectRoot, paths.Version)
+	return path, ok, nil
+}
+
+// resolveVersionFilePath resolves a configured paths.version-shaped override
+// to the VERSION file path. A configured directory resolves to <dir>/VERSION.
+// Returns (path, true) when set, (,false) when unset.
+func resolveVersionFilePath(projectRoot, override string) (string, bool) {
+	versionPath := resolveProjectPath(projectRoot, override)
 	if versionPath == "" {
-		return "", false, nil
+		return "", false
 	}
 	if info, statErr := os.Stat(versionPath); statErr == nil && info.IsDir() {
 		versionPath = filepath.Join(versionPath, "VERSION")
 	}
-	return filepath.Clean(versionPath), true, nil
+	return filepath.Clean(versionPath), true
 }
 
 func dockerBuildVersionCandidates(buildDir, projectRoot string) []string {

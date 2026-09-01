@@ -113,6 +113,104 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_configured_docker_and_version_paths", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_component_auto_selects_lone_entry", func(t *testing.T) {
+		// A single components: entry auto-selects with no --component flag,
+		// exactly like today's implicit single-paths behavior. Each harness's
+		// docker/version root lives outside the shared paths: block (erun#1840's
+		// monorepo-of-independent-deployables shape), so without selection this
+		// harness's build would be unreachable at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name:    "platform-validator",
+			Docker:  "harnesses/platform-validator/docker",
+			Version: "harnesses/platform-validator/VERSION",
+		})
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_component_auto_selects_lone_entry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
+		// Two components: entries declared (two independent harnesses in one
+		// monorepo); --component selects one by name, without editing the
+		// committed config — the "two operators, two harnesses, no local edit"
+		// requirement from erun#1840.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup,
+			fixture.ComponentPathsConfig{
+				Name:    "platform-validator",
+				Docker:  "harnesses/platform-validator/docker",
+				Version: "harnesses/platform-validator/VERSION",
+			},
+			fixture.ComponentPathsConfig{
+				Name:    "ingest-worker",
+				Docker:  "harnesses/ingest-worker/docker",
+				Version: "harnesses/ingest-worker/VERSION",
+			},
+		)
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "VERSION"), "2.3.4\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "docker"), "ingest-worker")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "VERSION"), "9.9.9\n")
+		result := erun.Run(t, []string{"build", "--component", "ingest-worker", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "platform-validator") {
+			t.Errorf("expected only the selected ingest-worker harness in the plan, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_component_flag_selects_entry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("component_selection_ambiguous_errors", func(t *testing.T) {
+		// More than one components: entry with no --component flag fails naming
+		// the choices, rather than silently building whichever one convention
+		// discovery happens to land on (erun#1840's acceptance criterion).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup,
+			fixture.ComponentPathsConfig{Name: "ingest-worker", Docker: "harnesses/ingest-worker/docker"},
+			fixture.ComponentPathsConfig{Name: "platform-validator", Docker: "harnesses/platform-validator/docker"},
+		)
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "docker"), "ingest-worker")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an ambiguous component selection, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "ingest-worker") || !strings.Contains(result.Combined, "platform-validator") {
+			t.Errorf("expected the ambiguity error to name both declared components:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/component_selection_ambiguous_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("component_flag_unknown_name_errors", func(t *testing.T) {
+		// --component naming a component that .erun/config.yaml does not declare
+		// fails loudly rather than silently falling back to convention discovery.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name:   "platform-validator",
+			Docker: "harnesses/platform-validator/docker",
+		})
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		result := erun.Run(t, []string{"build", "--component", "nope", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unknown --component name, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/component_flag_unknown_name_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_paths_version_keeps_pinned_base", func(t *testing.T) {
 		// Regression: a project-global paths.version is the project-level default and
 		// must NOT clobber a component's own in-build-dir VERSION. The pinned base

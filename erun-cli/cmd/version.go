@@ -176,7 +176,7 @@ func resolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (v
 		projectRoot = ""
 	}
 
-	version, _, versionFilePath, err := common.ResolveDockerBuildVersion(buildDir, projectRoot)
+	version, _, versionFilePath, err := common.ResolveDockerBuildVersion(buildDir, projectRoot, "")
 	if err != nil {
 		if errors.Is(err, errVersionFileNotFound) {
 			return info, nil

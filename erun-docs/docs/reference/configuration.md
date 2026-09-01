@@ -133,6 +133,7 @@ Committed to the repo, applies to anyone who checks it out. A gitignored copy de
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
 | `platform` | map | `erun deploy` (PowerDNS), `erun expose` | Per-instance platform deployment config. Absent for non-platform projects. See [`platform:` block](#platform-block). |
 | `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/` and `k8s/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
+| `components` | map | `erun build`, `erun push`, `erun deploy` | Declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Absent → `paths:` is the project's only root, unchanged. See [`components:` block](#components-block). |
 
 #### `paths:` block {#paths-block}
 
@@ -163,6 +164,37 @@ paths:
 - `paths.terraform` with no `<base>/<environment>/` directory → `no Terraform root at <dir> … the .erun/config.yaml paths.terraform base "<p>" must contain a <env>/ dir …`.
 - `paths.version` pointing at a missing file → `configured version file <p> (.erun/config.yaml paths.version) not found`.
 - `paths.dockercontext` set to anything other than `repo-root` or `component` → `invalid docker context "<v>" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`.
+
+#### `components:` block {#components-block}
+
+The `components:` block declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root — a repo shaped like `harnesses/<name>/{docker,k8s}`, where each harness carries its own `docker/`, `k8s/`, and `VERSION`. `paths:` cannot express this: it is a single, project-global root, so a repo with N independent harnesses could commit only one of them at a time. `components:` is additive — present only for a repo that needs it — and each entry is exactly `paths:`-shaped (`docker`, `dockercontext`, `k8s`, `terraform`, `version`), reusing the same fields and resolution rules documented above. A project with no `components:` map keeps resolving through `paths:` exactly as before this block existed.
+
+```yaml
+# <repo>/.erun/config.yaml — a monorepo of independent harnesses
+components:
+  platform-validator:
+    docker: harnesses/platform-validator/docker
+    k8s: harnesses/platform-validator/k8s
+    version: harnesses/platform-validator/VERSION
+  ingest-worker:
+    docker: harnesses/ingest-worker/docker
+    k8s: harnesses/ingest-worker/k8s
+    version: harnesses/ingest-worker/VERSION
+```
+
+**Selection.** `erun build` and `erun push` take `--component <name>` to select one entry; the selected entry's `docker`/`dockercontext`/`version` then resolve exactly like the `paths:` block's fields, scoped to that root. Selection is committed in `.erun/config.yaml`, not per-machine — two operators working on different harnesses in the same repo need no local edit, only a different flag.
+
+- Exactly one `components:` entry and no `--component` → that entry auto-selects, mirroring today's implicit single-`paths:` behavior.
+- More than one entry and no `--component` → the build fails naming the declared choices, rather than silently resolving one.
+- `--component <name>` naming an entry the project does not declare → fails naming the declared choices.
+
+`erun deploy`'s existing component selection (`--components <name>,…`, or the `environments.<env>.k8s.deployments[]` plan — see the field table above) resolves each named component's chart through `components.<name>.k8s` when that name is declared, instead of walking the whole project for a same-named chart — this only narrows *where* the chart is found (to the declared root) and never changes which chart a name selects for a project that declares no matching entry.
+
+**Error behaviour.** Same shape as the `paths:` block, with the config key naming the specific entry:
+
+- `--component <name>` when `.erun/config.yaml` declares no `components:` map, or none named `<name>` → `component "<name>" not declared in .erun/config.yaml components (declared: <names, or "none">)`.
+- No `--component` and more than one entry declared → `ambiguous component selection: .erun/config.yaml declares <N> components (<names>); pass --component <name>`.
+- A selected entry's `docker`/`k8s`/`version`/`dockercontext` that fails to resolve reports the same errors as the `paths:` block, with the config key written as `components.<name>.<field>` instead of `paths.<field>`.
 
 #### `platform:` block {#platform-block}
 

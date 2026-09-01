@@ -1,0 +1,5 @@
+audit: erun build --component nope --dry-run
+build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
+build: component selection failed: component "nope" not declared in .erun/config.yaml components (declared: platform-validator)
+component "nope" not declared in .erun/config.yaml components (declared: platform-validator)

@@ -84,8 +84,23 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 		return DockerBuildContext{}, false, nil
 	}
 
+	// A declared components: entry scopes the walk to that component's own
+	// docker root instead of the whole project, so a monorepo's build context
+	// resolves deterministically rather than by a same-named directory found
+	// elsewhere.
+	searchRoot := projectRoot
+	declared, ok, err := declaredComponentPaths(projectRoot, componentName)
+	if err != nil {
+		return DockerBuildContext{}, false, err
+	}
+	if ok {
+		if dockerRoot := resolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
+			searchRoot = dockerRoot
+		}
+	}
+
 	matches := make([]DockerBuildContext, 0, 1)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		context, ok, walkErr := componentDockerBuildContextCandidate(path, d, componentName, err)
 		if ok {
 			matches = append(matches, context)
