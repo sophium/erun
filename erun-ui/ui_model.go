@@ -335,14 +335,16 @@ type uiTenantDashboard struct {
 	Environments           []uiPlatformEnvironment `json:"environments,omitempty"`
 	EnvironmentsRestricted string                  `json:"environmentsRestricted,omitempty"`
 	EnvironmentsError      string                  `json:"environmentsError,omitempty"`
-	// CanCreateContext/CanRegisterEnvironment/CanPreviewProvision/
-	// CanDeployEnvironment/CanStopEnvironment/CanDeleteEnvironment report
-	// whether the signed-in user may attempt each registration write at all,
-	// so the composing forms/buttons can be hidden rather than rendered to
-	// fail on submit, mirroring CanCreateReview/CanAdvanceMergeQueue above.
+	// CanCreateContext/CanRegisterEnvironment/CanDeployEnvironment/
+	// CanStopEnvironment/CanDeleteEnvironment report whether the signed-in
+	// user may attempt each registration write at all, so the composing
+	// forms/buttons can be hidden rather than rendered to fail on submit,
+	// mirroring CanCreateReview/CanAdvanceMergeQueue above. Previewing an
+	// environment (PreviewPlatformEnvironment) shares CanRegisterEnvironment's
+	// own gate — it is the same POST /v1/environments route, requested with
+	// preview:true — rather than a separate capability.
 	CanCreateContext       bool `json:"canCreateContext"`
 	CanRegisterEnvironment bool `json:"canRegisterEnvironment"`
-	CanPreviewProvision    bool `json:"canPreviewProvision"`
 	CanDeployEnvironment   bool `json:"canDeployEnvironment"`
 	CanStopEnvironment     bool `json:"canStopEnvironment"`
 	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
@@ -431,23 +433,6 @@ type uiPlatformContextOutcome struct {
 	Message string             `json:"message,omitempty"`
 }
 
-// uiPlatformProvisionInput previews the ordered plan for provisioning a
-// hosted environment — quota, placement, namespace, register, deploy —
-// without creating anything. Pass either KubernetesContext to reuse an
-// existing cluster, or the Context* trio to preview bootstrapping a new one.
-type uiPlatformProvisionInput struct {
-	Tenant                    string `json:"tenant"`
-	EnvName                   string `json:"envName"`
-	EnvType                   string `json:"envType"`
-	KubernetesContext         string `json:"kubernetesContext,omitempty"`
-	ContextName               string `json:"contextName,omitempty"`
-	ContextCloudProviderAlias string `json:"contextCloudProviderAlias,omitempty"`
-	ContextRegion             string `json:"contextRegion,omitempty"`
-	ContextInstanceType       string `json:"contextInstanceType,omitempty"`
-	ContextDiskType           string `json:"contextDiskType,omitempty"`
-	ContextDiskSizeGB         int    `json:"contextDiskSizeGb,omitempty"`
-}
-
 // uiPlatformProvisionResult mirrors eruncommon.PlatformProvisionResult:
 // always a successful preview, QuotaOk names whether the plan can actually
 // register without hitting the tenant's quota cap.
@@ -456,7 +441,14 @@ type uiPlatformProvisionResult struct {
 	QuotaOk bool     `json:"quotaOk"`
 }
 
-// uiRegisterPlatformEnvironmentInput registers a hosted environment.
+// uiRegisterPlatformEnvironmentInput registers a hosted environment, or —
+// passed to PreviewPlatformEnvironment instead of RegisterPlatformEnvironment
+// — resolves the ordered plan the exact same fields would submit without
+// creating anything: one field set backs both actions, so the plan an
+// operator previews can never diverge from what register then does. Adopt
+// records an environment that already exists — see
+// eruncommon.PlatformCreateEnvironmentParams.Adopt — instead of asking the
+// platform to provision one.
 type uiRegisterPlatformEnvironmentInput struct {
 	Tenant            string `json:"tenant"`
 	Name              string `json:"name"`
@@ -464,6 +456,7 @@ type uiRegisterPlatformEnvironmentInput struct {
 	ContextID         string `json:"contextId,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	Adopt             bool   `json:"adopt,omitempty"`
 }
 
 // uiPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input: the

@@ -4,6 +4,7 @@ import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   removeEnvironment,
   seedEnvironment,
+  SEED_ENV_ALPHA,
   SEED_TENANT,
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
@@ -27,7 +28,6 @@ interface RegistrationFixture {
   environments?: unknown[];
   canCreateContext?: boolean;
   canRegisterEnvironment?: boolean;
-  canPreviewProvision?: boolean;
   canDeployEnvironment?: boolean;
   canStopEnvironment?: boolean;
   canDeleteEnvironment?: boolean;
@@ -48,7 +48,6 @@ function registrationDashboardData(
     canOverrideMergeQueue: false,
     canCreateContext: registration.canCreateContext ?? false,
     canRegisterEnvironment: registration.canRegisterEnvironment ?? false,
-    canPreviewProvision: registration.canPreviewProvision ?? false,
     canDeployEnvironment: registration.canDeployEnvironment ?? false,
     canStopEnvironment: registration.canStopEnvironment ?? false,
     canDeleteEnvironment: registration.canDeleteEnvironment ?? false,
@@ -151,11 +150,13 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
-  // The full path: preview provisioning (never a write), then register the
-  // environment it previewed, and see it land in the list — rule #3 (a
-  // preview precedes the register action) plus the round trip that proves
-  // the desktop can now do what used to dead-end at the CLI.
-  test('a full registration path: preview provisioning, then register the environment', async ({
+  // The full path: preview (never a write), then register the environment it
+  // previewed, and see it land in the list — rule #3 (a preview precedes the
+  // register action) plus the round trip that proves the desktop can now do
+  // what used to dead-end at the CLI. Preview and register submit the same
+  // field set (one form, not two), so this also pins that the plan an
+  // operator sees describes exactly the environment register then creates.
+  test('a full registration path: preview, then register the environment', async ({
     app,
     page,
   }) => {
@@ -170,14 +171,13 @@ test.describe('tenant dashboard — Registration tab', () => {
         LoadTenantDashboard: () => {
           dashboardLoads += 1;
           return registrationDashboardData(environment, {
-            canPreviewProvision: true,
             canRegisterEnvironment: true,
             environments: registerCalled
               ? [{ environmentId: 'env-2', name: 'new-env', type: 'runtime', status: 'registered' }]
               : [],
           });
         },
-        PreviewPlatformProvision: () => {
+        PreviewPlatformEnvironment: () => {
           previewCalled = true;
           return { plan: ['resolve tenant frs', 'namespace frs-new-env'], quotaOk: true };
         },
@@ -200,13 +200,12 @@ test.describe('tenant dashboard — Registration tab', () => {
       await app.tenantDashboard.selectTab('Registration');
       await expect(app.tenantDashboard.environmentsEmptyState()).toBeVisible();
 
-      await app.tenantDashboard.previewEnvNameInput().fill('new-env');
-      await app.tenantDashboard.previewProvisioningButton().click();
+      await app.tenantDashboard.envNameInput().fill('new-env');
+      await app.tenantDashboard.previewEnvironmentButton().click();
       await expect.poll(() => previewCalled).toBe(true);
       await expect(app.tenantDashboard.activePanel()).toContainText('namespace frs-new-env');
       await expect(app.tenantDashboard.activePanel()).toContainText('Quota ok');
 
-      await app.tenantDashboard.registerEnvNameInput().fill('new-env');
       await app.tenantDashboard.registerEnvironmentButton().click();
       await expect.poll(() => registerCalled).toBe(true);
 
@@ -217,6 +216,73 @@ test.describe('tenant dashboard — Registration tab', () => {
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
+  });
+
+  // The register-on-the-row affordance: putting an existing local
+  // environment on the platform prefills its name/type/kubernetes context,
+  // switches the form to adopt mode, and the preview it shows says the
+  // deploy is skipped rather than claiming one will happen — the platform
+  // never receives a runtimeVersion or contextId for this request.
+  test('putting a local environment on the platform previews and records it without deploying', async ({
+    app,
+    page,
+  }) => {
+    interface EnvironmentInputArg {
+      adopt?: boolean;
+      kubernetesContext?: string;
+      runtimeVersion?: string;
+    }
+    function firstArg(request: Request): EnvironmentInputArg {
+      const body = JSON.parse(request.postData() ?? '{}') as { args?: EnvironmentInputArg[] };
+      return body.args?.[0] ?? {};
+    }
+    let previewCalled: EnvironmentInputArg = {};
+    let registerCalled: EnvironmentInputArg = {};
+    await routeInvoke(page, {
+      LoadTenantDashboard: () =>
+        registrationDashboardData(SEED_ENV_ALPHA, { canRegisterEnvironment: true }),
+      PreviewPlatformEnvironment: (request: Request) => {
+        previewCalled = firstArg(request);
+        return {
+          plan: [
+            'adopt: tenant pw',
+            'deploy: skipped — adopting an existing environment never starts a deploy',
+          ],
+          quotaOk: true,
+        };
+      },
+      RegisterPlatformEnvironment: (request: Request) => {
+        registerCalled = firstArg(request);
+        return {
+          kind: 'accepted',
+          environment: {
+            environmentId: 'env-3',
+            name: SEED_ENV_ALPHA,
+            type: 'local-agent',
+            status: 'registered',
+          },
+        };
+      },
+    });
+
+    await app.sidebar.openTenantDashboard(SEED_TENANT);
+    await app.tenantDashboard.waitForOpen();
+    await app.tenantDashboard.selectTab('Registration');
+
+    await expect(app.tenantDashboard.localEnvironmentsHeading()).toBeVisible();
+    await app.tenantDashboard.putOnPlatformButtonFor(SEED_ENV_ALPHA).click();
+
+    await expect(app.tenantDashboard.envNameInput()).toHaveValue(SEED_ENV_ALPHA);
+    await expect(app.tenantDashboard.envAdoptToggle()).toBeChecked();
+    await expect(app.tenantDashboard.envKubernetesContextInput()).not.toHaveValue('');
+
+    await app.tenantDashboard.previewEnvironmentButton().click();
+    await expect.poll(() => previewCalled.adopt).toBe(true);
+    await expect(app.tenantDashboard.activePanel()).toContainText('deploy: skipped');
+
+    await app.tenantDashboard.recordEnvironmentButton().click();
+    await expect.poll(() => registerCalled.adopt).toBe(true);
+    expect(registerCalled.runtimeVersion).toBeFalsy();
   });
 
   // A quota cap is an expected, actionable outcome, not a fault — it must
@@ -242,7 +308,7 @@ test.describe('tenant dashboard — Registration tab', () => {
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Registration');
 
-      await app.tenantDashboard.registerEnvNameInput().fill('one-too-many');
+      await app.tenantDashboard.envNameInput().fill('one-too-many');
       await app.tenantDashboard.registerEnvironmentButton().click();
 
       const recoverable = app.tenantDashboard.recoverableNote('environment quota reached');

@@ -72,7 +72,6 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
         canOverrideMergeQueue: false,
         canCreateContext: false,
         canRegisterEnvironment: false,
-        canPreviewProvision: false,
         canDeployEnvironment: false,
         canStopEnvironment: false,
         canDeleteEnvironment: false,

@@ -143,7 +143,11 @@ type createEnvironmentRequest struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	RuntimeVersion    string `json:"runtimeVersion"`
 	Preview           bool   `json:"preview"`
-	TenantID          string `json:"tenantId,omitempty"`
+	// Adopt registers a row for an environment that already exists instead
+	// of asking the platform to provision one — see validateAdoptInput for
+	// the shape it requires.
+	Adopt    bool   `json:"adopt,omitempty"`
+	TenantID string `json:"tenantId,omitempty"`
 }
 
 func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle, deleter EnvironmentDeleter, admin EnvironmentAdminCreator) {
@@ -791,33 +795,60 @@ var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
 }
 
 // decodeCreateEnvironmentInput validates the create body and returns the
-// environment it describes, whether the caller asked for a preview, and the
-// raw requested tenant ID (empty unless the caller named one — resolved and
-// authorized by resolveTargetTenant). Its error message is the operator-
-// facing 400 reason.
-func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, string, error) {
+// environment it describes, whether the caller asked for a preview, whether
+// the caller asked to adopt an environment that already exists (see
+// validateAdoptInput), and the raw requested tenant ID (empty unless the
+// caller named one — resolved and authorized by resolveTargetTenant). Its
+// error message is the operator-facing 400 reason.
+func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, bool, string, error) {
 	var body createEnvironmentRequest
 	if err := decodeJSON(req, &body); err != nil {
-		return model.Environment{}, false, "", errors.New("invalid request body")
+		return model.Environment{}, false, false, "", errors.New("invalid request body")
 	}
 	name := strings.TrimSpace(body.Name)
 	// The tenant is hyphen-free (enforced at tenant registration), so allowing
 	// internal hyphens in the env keeps the first-hyphen split of the
 	// <tenant>-<env> namespace unambiguous.
 	if !validNamespaceLabel(name) {
-		return model.Environment{}, false, "", errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
+		return model.Environment{}, false, false, "", errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
 	if _, ok := validEnvironmentTypes[envType]; !ok {
-		return model.Environment{}, false, "", errors.New("type must be one of runtime, remote-agent, local-agent")
+		return model.Environment{}, false, false, "", errors.New("type must be one of runtime, remote-agent, local-agent")
 	}
-	return model.Environment{
+	environment := model.Environment{
 		Name:              name,
 		Type:              envType,
 		ContextID:         strings.TrimSpace(body.ContextID),
 		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
 		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
-	}, body.Preview, strings.TrimSpace(body.TenantID), nil
+	}
+	if err := validateAdoptInput(body.Adopt, environment); err != nil {
+		return model.Environment{}, false, false, "", err
+	}
+	return environment, body.Preview, body.Adopt, strings.TrimSpace(body.TenantID), nil
+}
+
+// validateAdoptInput enforces the shape of an adopt request: it describes
+// an environment that already exists rather than asking the
+// platform to provision one, so it names where that environment runs
+// (kubernetesContext) and carries nothing that would trigger a deploy
+// (runtimeVersion) or a platform-managed placement decision (contextId) —
+// see createEnvironment's placement bypass for adopt requests below.
+func validateAdoptInput(adopt bool, environment model.Environment) error {
+	if !adopt {
+		return nil
+	}
+	if environment.KubernetesContext == "" {
+		return errors.New("kubernetesContext is required when adopting an existing environment")
+	}
+	if environment.RuntimeVersion != "" {
+		return errors.New("runtimeVersion is not allowed when adopting an existing environment: adopting never starts a deploy")
+	}
+	if environment.ContextID != "" {
+		return errors.New("contextId is not allowed when adopting an existing environment: adopt records a raw kubernetesContext instead")
+	}
+	return nil
 }
 
 // resolveCreateEnvironmentTenantScope resolves and authorizes the tenant
@@ -842,8 +873,51 @@ func (r EnvironmentRoutes) resolveCreateEnvironmentTenantScope(w http.ResponseWr
 	return homeCtx, scopedContextForTenant(homeCtx, securityContext, targetTenantID), targetTenantID, targetTenantID != securityContext.TenantID, true
 }
 
+// resolveCreateEnvironmentPlacement resolves and persists the create-time
+// placement decision (#1112) for an ordinary request, or leaves it at the
+// zero value for an adopt request — split out to keep createEnvironment's
+// own branching under the cyclomatic-complexity budget. An adopt request
+// skips placement entirely: it describes an environment the platform will
+// never place or deploy, so its kubernetesContext is opaque descriptive
+// metadata, not a placement decision — applying the runtime placement rules
+// to it would wrongly refuse the exact raw kubernetesContext adopt requires.
+func (r EnvironmentRoutes) resolveCreateEnvironmentPlacement(w http.ResponseWriter, req *http.Request, environment *model.Environment, adopt bool) (resolvedPlacement, bool) {
+	if adopt {
+		return resolvedPlacement{}, true
+	}
+	placement, err := r.resolvePlacement(req.Context(), *environment)
+	if err != nil {
+		writePlacementError(w, req, err)
+		return resolvedPlacement{}, false
+	}
+	environment.ContextID = placement.ContextID
+	return placement, true
+}
+
+// enforceCreateEnvironmentResourceQuota runs enforceRuntimeResourceQuotaOnCreate
+// only for an ordinary runtime create — split out to keep createEnvironment's
+// own branching under the cyclomatic-complexity budget. An adopted environment
+// consumes no platform-managed cluster capacity (it is never placed or
+// deployed), so the runtime resource-quota floor and aggregate budget do not
+// apply to it.
+func (r EnvironmentRoutes) enforceCreateEnvironmentResourceQuota(w http.ResponseWriter, req *http.Request, environment model.Environment, adopt bool, quota model.TenantQuota) bool {
+	if adopt || environment.Type != model.EnvironmentTypeRuntime {
+		return true
+	}
+	if err := r.enforceRuntimeResourceQuotaOnCreate(req.Context(), quota); err != nil {
+		var exceeded *resourceQuotaExceededError
+		if errors.As(err, &exceeded) {
+			writeError(w, http.StatusConflict, exceeded.Error())
+			return false
+		}
+		writeRepositoryError(w, req, err)
+		return false
+	}
+	return true
+}
+
 func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
-	environment, preview, requestedTenantID, err := decodeCreateEnvironmentInput(req)
+	environment, preview, adopt, requestedTenantID, err := decodeCreateEnvironmentInput(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -853,18 +927,10 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	req = req.WithContext(scopedCtx)
-	// Placement (#1112) is decided once, here, and persisted: an explicit
-	// contextId is validated and capacity-checked, an unset one is
-	// auto-selected from the tenant's own registered contexts (or resolves to
-	// the platform's own cluster when the tenant has none), and a raw
-	// kubernetesContext is refused. The resolved contextId — not necessarily
-	// what the caller sent — is what gets persisted and deployed.
-	placement, err := r.resolvePlacement(req.Context(), environment)
-	if err != nil {
-		writePlacementError(w, req, err)
+	placement, ok := r.resolveCreateEnvironmentPlacement(w, req, &environment, adopt)
+	if !ok {
 		return
 	}
-	environment.ContextID = placement.ContextID
 
 	count, quota, err := environmentQuotaUsage(req.Context(), r.environments, r.quotas)
 	if err != nil {
@@ -872,23 +938,15 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if preview {
-		r.previewCreateEnvironment(w, req, environment, count, quota)
+		r.previewCreateEnvironment(w, req, environment, count, quota, adopt)
 		return
 	}
 	if count >= quota.MaxEnvironments {
 		writeError(w, http.StatusConflict, fmt.Sprintf("environment quota reached: this tenant already has %d of %d environments", count, quota.MaxEnvironments))
 		return
 	}
-	if environment.Type == model.EnvironmentTypeRuntime {
-		if err := r.enforceRuntimeResourceQuotaOnCreate(req.Context(), quota); err != nil {
-			var exceeded *resourceQuotaExceededError
-			if errors.As(err, &exceeded) {
-				writeError(w, http.StatusConflict, exceeded.Error())
-				return
-			}
-			writeRepositoryError(w, req, err)
-			return
-		}
+	if !r.enforceCreateEnvironmentResourceQuota(w, req, environment, adopt, quota) {
+		return
 	}
 	r.persistAndMaybeProvision(w, req, environment, placement, homeCtx, targetTenantID, crossTenant)
 }
@@ -959,17 +1017,29 @@ func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx cont
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
 
-// previewCreateEnvironment resolves and returns the same ordered plan
-// POST /v1/provision renders for this environment, without creating the row.
-// Since resolvePlacement already ran before this is reached, environment.ContextID
-// is already the resolved placement decision, and the only way this diverges
-// from what a non-preview call would do is the quota check, which — like
-// /v1/provision — reports rather than 409s so the full intended plan is
-// still visible.
-func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota) {
+// previewCreateEnvironment resolves and returns the same ordered plan a
+// non-preview call with the same body would run, without creating the row —
+// provisionPlan for an ordinary create, or adoptPlan for an adopt request
+// (never provisionPlan: it always renders an unconditional "deploy:" line
+// for a runtime environment, which would misrepresent an adopt request that
+// never deploys — the "preview that cannot model what submit does" defect
+// class). Since resolvePlacement already ran before this is reached for a
+// non-adopt request, environment.ContextID is already the resolved placement
+// decision, and the only way this diverges from what a non-preview call
+// would do is the quota check, which — like /v1/provision — reports rather
+// than 409s so the full intended plan is still visible.
+func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *http.Request, environment model.Environment, count int, quota model.TenantQuota, adopt bool) {
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
 		writeRepositoryError(w, req, err)
+		return
+	}
+	tenantName := strings.TrimSpace(tenant.Name)
+	if adopt {
+		writeJSON(w, http.StatusOK, provisionResponse{
+			Plan:    adoptPlan(tenantName, environment.Name, environment.Type, environment.KubernetesContext, count, quota),
+			QuotaOk: count < quota.MaxEnvironments,
+		})
 		return
 	}
 	runtimeCount, err := r.environments.CountByType(req.Context(), model.EnvironmentTypeRuntime)
@@ -978,7 +1048,7 @@ func (r EnvironmentRoutes) previewCreateEnvironment(w http.ResponseWriter, req *
 		return
 	}
 	plan := provisionPlanInput{
-		tenantName:        strings.TrimSpace(tenant.Name),
+		tenantName:        tenantName,
 		envName:           environment.Name,
 		envType:           environment.Type,
 		kubernetesContext: environment.ContextID,

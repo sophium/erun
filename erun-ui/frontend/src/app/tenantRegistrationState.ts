@@ -31,26 +31,28 @@ export interface RegistrationState {
   createContextConflict: string;
   contextPreviewPlan: string[] | null;
 
-  // Provision preview: always a preview, never a write, shown before a
-  // register action so an operator sees quota/placement/namespace/deploy
-  // before anything is created.
-  previewEnvName: string;
-  previewEnvType: string;
-  previewKubernetesContext: string;
-  previewing: boolean;
-  previewError: string;
-  previewPlan: string[] | null;
-  previewQuotaOk: boolean | null;
-
-  // Register-environment form.
-  registerName: string;
-  registerType: string;
-  registerContextId: string;
-  registerKubernetesContext: string;
-  registerRuntimeVersion: string;
-  registering: boolean;
-  registerError: string;
-  registerConflict: string;
+  // One environment form backs both Preview and Register: the two actions
+  // submit the exact same fields to the same POST /v1/environments route
+  // (preview:true / preview:false), so the plan an operator previews can
+  // never diverge from what register then does. envAdopt is "this
+  // environment already exists" — set from the register-on-the-row
+  // affordance (see RegistrationEnvironmentsSection's local-environments
+  // list) or toggled by hand; it requires envKubernetesContext and forbids
+  // envContextId/envRuntimeVersion, matching the platform's own adopt
+  // validation.
+  envName: string;
+  envType: string;
+  envContextId: string;
+  envKubernetesContext: string;
+  envRuntimeVersion: string;
+  envAdopt: boolean;
+  envPreviewing: boolean;
+  envPreviewError: string;
+  envPreviewPlan: string[] | null;
+  envPreviewQuotaOk: boolean | null;
+  envRegistering: boolean;
+  envRegisterError: string;
+  envRegisterConflict: string;
 
   // Per-environment deploy/stop/delete state, plus each row's own deploy-
   // version draft (kept apart so it survives while a different row is busy).
@@ -79,22 +81,19 @@ export function defaultRegistrationState(): RegistrationState {
     createContextConflict: '',
     contextPreviewPlan: null,
 
-    previewEnvName: '',
-    previewEnvType: 'runtime',
-    previewKubernetesContext: '',
-    previewing: false,
-    previewError: '',
-    previewPlan: null,
-    previewQuotaOk: null,
-
-    registerName: '',
-    registerType: 'runtime',
-    registerContextId: '',
-    registerKubernetesContext: '',
-    registerRuntimeVersion: '',
-    registering: false,
-    registerError: '',
-    registerConflict: '',
+    envName: '',
+    envType: 'runtime',
+    envContextId: '',
+    envKubernetesContext: '',
+    envRuntimeVersion: '',
+    envAdopt: false,
+    envPreviewing: false,
+    envPreviewError: '',
+    envPreviewPlan: null,
+    envPreviewQuotaOk: null,
+    envRegistering: false,
+    envRegisterError: '',
+    envRegisterConflict: '',
 
     envActions: {},
     deployVersionDrafts: {},
