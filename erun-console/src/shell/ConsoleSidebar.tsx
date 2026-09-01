@@ -1,8 +1,10 @@
 import { cn } from 'erun-kit';
 import type * as React from 'react';
 
+import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { OidcConfig } from '../auth/auth';
 import { BrandMark } from './BrandMark';
+import { ScopeSelector } from './ScopeSelector';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
 import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
 
@@ -70,6 +72,9 @@ export function ConsoleSidebar({
   active,
   counts,
   onSelect,
+  tenants,
+  scopeTenantId,
+  onScopeChange,
 }: {
   brand: string | undefined;
   token: string;
@@ -79,6 +84,9 @@ export function ConsoleSidebar({
   active: ConsoleSectionId;
   counts: Partial<Record<ConsoleSectionId, number>>;
   onSelect: (id: ConsoleSectionId) => void;
+  tenants: PlatformTenant[];
+  scopeTenantId: string | undefined;
+  onScopeChange: (tenantId: string | undefined) => void;
 }): React.ReactElement {
   return (
     <aside className="flex w-60 flex-none flex-col gap-4 border-r border-sidebar-border bg-sidebar px-3 py-4">
@@ -89,6 +97,13 @@ export function ConsoleSidebar({
         </span>
       </div>
       <TenantSwitcher token={token} current={currentTenant} oidc={oidc} />
+      <ScopeSelector
+        tenantType={currentTenant.type}
+        tenants={tenants}
+        ownTenant={currentTenant}
+        value={scopeTenantId}
+        onChange={onScopeChange}
+      />
       <nav aria-label="Console sections">
         <ul className="grid gap-0.5">
           {sections.map((section) => (

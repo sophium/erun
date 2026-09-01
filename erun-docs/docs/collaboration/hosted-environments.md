@@ -104,3 +104,4 @@ You can see your own tenant's full quota — the environment-count cap, the per-
 - [`erun platform` CLI reference](/cli/platform) — every subcommand and flag.
 - [Agent reference · Hosted platform](/concepts/hosted-platform) — the full lifecycle, placement, and RBAC spec.
 - [Cloud contexts](/concepts/cloud-contexts) — the cluster model a future multi-cluster placement will build on.
+- [Administering another tenant](/collaboration/cross-tenant-administration) — an OPERATIONS Operator viewing and registering environments in a different tenant.

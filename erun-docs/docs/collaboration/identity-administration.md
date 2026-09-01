@@ -95,3 +95,4 @@ Because that credential is so privileged, the Users/Org settings/Outbound mail s
 - [Agent reference · Identity model](/agent-reference/api-protocol#tenant-issuers) — how `(issuer, org)` resolves to a tenant.
 - [Hosted platform](/concepts/hosted-platform) — the platform this identity provider belongs to.
 - [Operator in the loop](/collaboration/operator-in-the-loop) — the audit trail every mutation here writes to.
+- [Administering another tenant](/collaboration/cross-tenant-administration) — the scope selector, a second OPERATIONS-only cross-tenant control distinct from the tenant selectors above.

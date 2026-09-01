@@ -46,6 +46,11 @@ export interface Environment {
   // "runtime" | "remote-agent" | "local-agent"; kept as a string for the
   // same forward-compatibility reason as Tenant.type.
   type: string;
+  // Always populated by the backend; optional here only for the same lenient-
+  // parse safety every field on this model gets. Distinct from Tenant.tenantId
+  // above: this is the row's own owning tenant, which can differ from the
+  // caller's when an OPERATIONS caller lists another tenant's environments.
+  tenantId?: string;
   kubernetesContext?: string;
   contextId?: string;
   runtimeVersion?: string;
@@ -143,6 +148,7 @@ export function parseEnvironment(raw: Record<string, unknown>): Environment {
     environmentId: asString(raw.environmentId),
     name: asString(raw.name),
     type: asString(raw.type),
+    tenantId: asOptionalString(raw.tenantId),
     kubernetesContext: asOptionalString(raw.kubernetesContext),
     contextId: asOptionalString(raw.contextId),
     runtimeVersion: asOptionalString(raw.runtimeVersion),

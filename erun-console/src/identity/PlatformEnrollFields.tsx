@@ -1,40 +1,9 @@
-import { FieldLabel, Input, SelectField } from 'erun-kit';
-import * as React from 'react';
+import { FieldLabel, Input } from 'erun-kit';
+import type * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { OrgTarget } from './enrollOrgTargetController';
 import type { PlatformEnrollState } from './platformEnrollController';
-
-// TenantTargetSelect is shown only to an OPERATIONS caller — the same
-// tenant.type check `shell/sections.ts` already gates the Users/Tenants nav
-// entries on, reused here rather than a new permission mechanism. A
-// non-OPERATIONS caller never reaches a component that renders this (the nav
-// gate already keeps them out), but the check stays local too so the control
-// itself never depends only on the surrounding panel for that guarantee.
-export function TenantTargetSelect({
-  tenantType,
-  tenants,
-  value,
-  onChange,
-}: {
-  tenantType: string;
-  tenants: PlatformTenant[];
-  value: string;
-  onChange: (tenantId: string) => void;
-}): React.ReactElement | null {
-  if (tenantType !== 'OPERATIONS') {
-    return null;
-  }
-  return (
-    <SelectField
-      id="enroll-target-tenant"
-      label="Tenant"
-      value={value}
-      options={tenants.map((tenant) => ({ value: tenant.tenantId, label: tenant.name }))}
-      onChange={onChange}
-    />
-  );
-}
 
 // FirstUserNotice fires only on an exact, resolved 0 — never on an
 // undefined/unresolved userCount — so a tenant whose count hasn't loaded yet
@@ -52,6 +21,82 @@ export function FirstUserNotice({
       {tenant.name} has no users yet — enrolling here makes this person its first user, and they
       will be granted TenantAdmin.
     </p>
+  );
+}
+
+// EnrollBasicFields is identity/UsersPanel.tsx's EnrollForm field set --
+// username/email required, first/last name optional -- distinct from
+// PlatformEnrollUsernameFields below (EnrollUserForm's direct-write path,
+// which takes an issuer/subject pair instead of an email).
+export function EnrollBasicFields({
+  username,
+  setUsername,
+  email,
+  setEmail,
+  firstName,
+  setFirstName,
+  lastName,
+  setLastName,
+}: {
+  username: string;
+  setUsername: (value: string) => void;
+  email: string;
+  setEmail: (value: string) => void;
+  firstName: string;
+  setFirstName: (value: string) => void;
+  lastName: string;
+  setLastName: (value: string) => void;
+}): React.ReactElement {
+  return (
+    <>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="enroll-username" required>
+          Username
+        </FieldLabel>
+        <Input
+          id="enroll-username"
+          value={username}
+          onChange={(e) => {
+            setUsername(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="enroll-email" required>
+          Email
+        </FieldLabel>
+        <Input
+          id="enroll-email"
+          type="email"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+          }}
+          required
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="enroll-first-name">First name</FieldLabel>
+        <Input
+          id="enroll-first-name"
+          value={firstName}
+          onChange={(e) => {
+            setFirstName(e.target.value);
+          }}
+        />
+      </div>
+      <div className="grid gap-2">
+        <FieldLabel htmlFor="enroll-last-name">Last name</FieldLabel>
+        <Input
+          id="enroll-last-name"
+          value={lastName}
+          onChange={(e) => {
+            setLastName(e.target.value);
+          }}
+        />
+      </div>
+    </>
   );
 }
 

@@ -2,6 +2,7 @@ import type { TenantConfigView } from 'erun-kit';
 import * as React from 'react';
 
 import { PENDING_REQUESTS_POLL_MS, useListInviteRequestsQuery } from '../app/api/requestsApi';
+import { type PlatformTenant, useListTenantsQuery } from '../app/api/tenantsApi';
 import { useGetWhoamiQuery } from '../app/api/whoamiApi';
 import type { OidcConfig } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
@@ -62,12 +63,16 @@ function SectionContent({
   token,
   config,
   docsUrl,
+  tenants,
+  scopeTenantId,
   onChanged,
 }: {
   active: ConsoleSectionId;
   token: string;
   config: TenantConfigView;
   docsUrl: string | undefined;
+  tenants: PlatformTenant[];
+  scopeTenantId: string | undefined;
   onChanged: () => void;
 }): React.ReactElement {
   switch (active) {
@@ -84,6 +89,8 @@ function SectionContent({
           token={token}
           contexts={config.contexts}
           environments={config.environments}
+          tenants={tenants}
+          scopeTenantId={scopeTenantId}
           onChanged={onChanged}
         />
       );
@@ -146,6 +153,18 @@ export function AppShell({
 }): React.ReactElement {
   const { sections, active, onSelect } = useSectionNavigation(config.tenant);
   const { theme, toggleTheme } = useTheme();
+  // scopeTenantId is undefined for "my own tenant" -- the default, and every
+  // caller's ordinary behavior before the scope selector existed. Local state
+  // rather than a store slice: it has no reason to survive past this signed-in
+  // session (shell/ScopeSelector.tsx, erun#1816).
+  const [scopeTenantId, setScopeTenantId] = React.useState<string | undefined>(undefined);
+  // The full tenant list backs both the scope selector's options and the
+  // Environments panel's per-row tenant badge; skipped for a non-OPERATIONS
+  // caller, who has no scope to administer and only ever sees their own rows.
+  const tenantsQuery = useListTenantsQuery(token, {
+    skip: config.tenant.type !== 'OPERATIONS',
+  });
+  const tenants = tenantsQuery.data ?? [];
   // The header must never fall back to the raw `sub` claim -- whoami's own
   // `username` is the platform's authoritative label for the enrolled user,
   // and the token-claim email is a reasonable interim label while that query
@@ -181,6 +200,9 @@ export function AppShell({
         active={active}
         counts={counts}
         onSelect={onSelect}
+        tenants={tenants}
+        scopeTenantId={scopeTenantId}
+        onScopeChange={setScopeTenantId}
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <ConsoleHeader
@@ -204,6 +226,8 @@ export function AppShell({
             token={token}
             config={config}
             docsUrl={docsUrl}
+            tenants={tenants}
+            scopeTenantId={scopeTenantId}
             onChanged={onChanged}
           />
         </main>

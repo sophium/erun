@@ -96,6 +96,7 @@ const sidebars: SidebarsConfig = {
         'collaboration/overview',
         'collaboration/hosted-environments',
         'collaboration/identity-administration',
+        'collaboration/cross-tenant-administration',
         'collaboration/skills',
         'collaboration/operator-in-the-loop',
       ],
