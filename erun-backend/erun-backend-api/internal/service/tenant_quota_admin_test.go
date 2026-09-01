@@ -88,8 +88,10 @@ func TestSetForTenantRecordsWhichOperatorSetWhichTenantsQuotaFromWhichHomeTenant
 	audit := &fakeTenantQuotaAdminAudit{}
 	svc := NewTenantQuotaAdminService(quotas, audit)
 
-	quota := model.TenantQuota{MaxEnvironments: 50, MaxCPUMillicores: 4000, MaxMemoryMB: 9216, MaxStorageGB: 80,
-		MaxTotalCPUMillicores: 40000, MaxTotalMemoryMB: 92160, MaxTotalStorageGB: 800}
+	quota := model.TenantQuota{
+		MaxEnvironments: 50, MaxCPUMillicores: 4000, MaxMemoryMB: 9216, MaxStorageGB: 80,
+		MaxTotalCPUMillicores: 40000, MaxTotalMemoryMB: 92160, MaxTotalStorageGB: 800,
+	}
 	if _, err := svc.SetForTenant(operatorContext("ops-tenant"), "target-tenant", quota); err != nil {
 		t.Fatalf("SetForTenant: %v", err)
 	}
