@@ -126,14 +126,19 @@ func TestClaimDeleteReclaimsAStaleAttempt(t *testing.T) {
 }
 
 // TestClaimDeleteAlwaysReclaimsABlockedAttempt pins the "no operator
-// re-issue needed" half of #1140: a previously blocked delete reached a
-// terminal outcome, so a fresh attempt (from the operator or the reconciler)
-// must not wait out any staleness window.
+// re-issue needed" half: a previously blocked delete reached a terminal
+// outcome, so a fresh attempt (from the operator or the reconciler) must not
+// wait out any staleness window. The claim itself must not clear
+// delete_error: ClaimDelete's own doc comment records that clearing it on
+// claim left the row looking uninformative for as long as the new attempt
+// took to reach the same conclusion, so the previous blocker's reason must
+// still read back until the new attempt's own outcome overwrites it.
 func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 
-	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.EnvironmentID, "namespace stuck terminating"), "mark blocked")
+	const blockedReason = "namespace stuck terminating"
+	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.EnvironmentID, blockedReason), "mark blocked")
 
 	claimed, err := repo.ClaimDelete(ctx, env.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "claim after blocked")
@@ -143,8 +148,11 @@ func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 
 	got, err := repo.Get(ctx, env.EnvironmentID)
 	mustNoErr(t, err, "get after reclaim")
-	if got.DeleteError != "" {
-		t.Fatalf("delete_error after reclaim = %q, want cleared", got.DeleteError)
+	if got.Status != model.EnvironmentStatusDeleting {
+		t.Fatalf("status after reclaim = %q, want %q", got.Status, model.EnvironmentStatusDeleting)
+	}
+	if got.DeleteError != blockedReason {
+		t.Fatalf("delete_error after reclaim = %q, want %q (unchanged until the new attempt's own outcome)", got.DeleteError, blockedReason)
 	}
 }
 

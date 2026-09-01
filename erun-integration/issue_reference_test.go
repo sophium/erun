@@ -221,7 +221,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-backend/erun-backend-api/cmd/eapi/main.go":                                1,
 	"erun-backend/erun-backend-api/comments_e2e_test.go":                            1,
 	"erun-backend/erun-backend-api/env_deploy_e2e_test.go":                          2,
-	"erun-backend/erun-backend-api/environment_delete_e2e_test.go":                  4,
+	"erun-backend/erun-backend-api/environment_delete_e2e_test.go":                  3,
 	"erun-backend/erun-backend-api/env_provisioner_rbac_e2e_test.go":                8,
 	"erun-backend/erun-backend-api/internal/deployexec/job.go":                      4,
 	"erun-backend/erun-backend-api/internal/deployexec/job_test.go":                 1,

@@ -21,6 +21,11 @@ import (
 // only the root's own creator may flip it — live in erun_validate_comments,
 // so they are exercised against a real migrated PostgreSQL rather than a fake
 // that agrees with itself.
+
+// testCommitID is a well-formed 40-character lowercase hex commit ID,
+// matching the format CommentService.PrepareCreate requires.
+const testCommitID = "0123456789abcdef0123456789abcdef01234567"
+
 type commentsFixture struct {
 	db       *sql.DB
 	comments *repository.CommentRepository
@@ -85,7 +90,7 @@ func commentsDatabase(t *testing.T) commentsFixture {
 
 func (f commentsFixture) createRoot(ctx context.Context, filePath string, line int, body string) (model.Comment, error) {
 	prepared, err := f.service.PrepareCreate(ctx, model.Comment{
-		ReviewID: f.reviewID, CommitID: "abc123def456", FilePath: filePath, Line: line, Body: body,
+		ReviewID: f.reviewID, CommitID: testCommitID, FilePath: filePath, Line: line, Body: body,
 	})
 	if err != nil {
 		return model.Comment{}, err
@@ -95,7 +100,7 @@ func (f commentsFixture) createRoot(ctx context.Context, filePath string, line i
 
 func (f commentsFixture) createReply(ctx context.Context, parentCommentID, filePath string, line int, body string) (model.Comment, error) {
 	prepared, err := f.service.PrepareCreate(ctx, model.Comment{
-		ReviewID: f.reviewID, ParentCommentID: parentCommentID, CommitID: "abc123def456", FilePath: filePath, Line: line, Body: body,
+		ReviewID: f.reviewID, ParentCommentID: parentCommentID, CommitID: testCommitID, FilePath: filePath, Line: line, Body: body,
 	})
 	if err != nil {
 		return model.Comment{}, err
