@@ -440,8 +440,8 @@ done
 
 [ "${total_cpu_millicores}" = "8000" ] ||
     fail "pod cpu limits should sum to 8000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
-[ "${total_memory_mb}" = "17832" ] ||
-    fail "pod memory limits should sum to 17832Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
+[ "${total_memory_mb}" = "29396" ] ||
+    fail "pod memory limits should sum to 29396Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
 [ "${total_storage_gb}" = "72" ] ||
     fail "the pod's PVCs should sum to 72Gi (home 2Gi + docker 50Gi + worktree 20Gi), got ${total_storage_gb}Gi"
 

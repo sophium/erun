@@ -624,17 +624,17 @@ When retained usage history has accumulated a [standing sizing recommendation](/
 Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and rolls them out, without re-running `init` to change these numbers. Takes either explicit `cpu`/`memory` for the runtime pod (each optional; naming only one leaves the other unchanged) or `applyRecommendation: true` to size the runtime pod from this environment's own standing sizing recommendation — resolved from usage history retained inside this pod, so the value is never retyped by the caller. `dindCpu`/`dindMemory` size the sidecar instead — the container that actually runs `erun build`/`erun release` — independent of the runtime-pod inputs and combinable with them (or with `applyRecommendation`) in the same call, since the sidecar has no standing recommendation of its own. See [Agent reference · `erun resize`](/agent-reference/cli-flags#erun-resize) for exactly what the recommendation reasons about and the resolution algorithm.
 
 ```jsonc
-// resize { "applyRecommendation": true, "dindMemory": "16Gi" }
+// resize { "applyRecommendation": true, "dindMemory": "24Gi" }
 {
   "plan": {
     "tenant": "myapp", "environment": "prod",
     "current": { "cpu": "4", "memory": "8916Mi" },
     "target":  { "cpu": "6", "memory": "8916Mi" },
-    "dindCurrent": { "cpu": "4", "memory": "8916Mi" },
-    "dindTarget":  { "cpu": "4", "memory": "16Gi" },
+    "dindCurrent": { "cpu": "4", "memory": "20Gi" },
+    "dindTarget":  { "cpu": "4", "memory": "24Gi" },
     "actions": [
       { "resource": "cpu", "from": "4", "to": "6" },
-      { "resource": "dind-memory", "from": "8916Mi", "to": "16Gi" }
+      { "resource": "dind-memory", "from": "20Gi", "to": "24Gi" }
     ],
     "noOp": false
   }

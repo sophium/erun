@@ -120,7 +120,7 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 			ceiling:        NamespaceResourceQuota{CPU: "8", Memory: "32Gi", Storage: "80Gi"},
 			wantAction:     RuntimeSizingRaise,
 			wantConfidence: RuntimeSizingConfidenceHigh,
-			wantSuggested:  "23808Mi",
+			wantSuggested:  "12288Mi",
 		},
 	})
 }
