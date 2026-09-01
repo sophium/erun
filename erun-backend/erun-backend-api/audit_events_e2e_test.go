@@ -61,6 +61,71 @@ func seedAuditTenant(t *testing.T, db *sql.DB) (tenantID string, userID string) 
 	return tenantID, userID
 }
 
+// seedAuditOperationsTenant is seedAuditTenant's OPERATIONS-type twin, for the
+// scoping regression test below: erun_operations' RLS policy is unconditional
+// (USING (true)), so only an OPERATIONS caller can actually exercise the
+// bypass List must guard against explicitly.
+func seedAuditOperationsTenant(t *testing.T, db *sql.DB) (tenantID string, userID string) {
+	t.Helper()
+	stamp := time.Now().Format("20060102150405.000000")
+	err := db.QueryRow(
+		`INSERT INTO tenants (name, type) VALUES ($1, 'OPERATIONS') RETURNING tenant_id`,
+		"audit-e2e-ops-"+stamp,
+	).Scan(&tenantID)
+	mustNoErr(t, err, "seed operations tenant")
+	err = db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		tenantID, "audit-e2e-ops-user-"+stamp,
+	).Scan(&userID)
+	mustNoErr(t, err, "seed operations user")
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM audit_events WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("clearing the test operations tenant's audit events: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM users WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("clearing the test operations tenant's users: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM tenants WHERE tenant_id = $1`, tenantID); err != nil {
+			t.Logf("clearing the test operations tenant: %v", err)
+		}
+	})
+	return tenantID, userID
+}
+
+// operationsAuditContext is auditContext's OPERATIONS-type twin.
+func operationsAuditContext(tenantID, userID string) context.Context {
+	return security.WithContext(context.Background(), security.Context{
+		TenantID: tenantID, TenantType: "OPERATIONS", ErunUserID: userID,
+	})
+}
+
+// TestAuditEventListScopesToTheOperationsCallersOwnTenant pins the failure
+// scenario directly: an OPERATIONS caller's List must not include a stranger
+// tenant's audit events even though erun_operations' RLS policy makes them
+// visible too.
+func TestAuditEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	repo, db := auditEventDatabase(t)
+	strangerTenantID, strangerUserID := seedAuditTenant(t, db)
+	strangerCtx := auditContext(strangerTenantID, strangerUserID)
+	logAuditEvent(t, repo, strangerCtx, model.AuditEvent{
+		TenantID: strangerTenantID, ErunUserID: strangerUserID, ExternalUserID: "ext-stranger", ExternalIssuerID: "https://issuer.example/stranger",
+		Type: model.AuditEventTypeAPI, APIMethod: "GET", APIPath: "/v1/reviews",
+	})
+
+	opsTenantID, opsUserID := seedAuditOperationsTenant(t, db)
+	opsCtx := operationsAuditContext(opsTenantID, opsUserID)
+	logAuditEvent(t, repo, opsCtx, model.AuditEvent{
+		TenantID: opsTenantID, ErunUserID: opsUserID, ExternalUserID: "ext-ops", ExternalIssuerID: "https://issuer.example/ops",
+		Type: model.AuditEventTypeAPI, APIMethod: "GET", APIPath: "/v1/reviews",
+	})
+
+	page, err := repo.List(opsCtx, repository.AuditEventFilter{})
+	mustNoErr(t, err, "list as operations caller")
+	if len(page.Events) != 1 || page.Events[0].TenantID != opsTenantID {
+		t.Fatalf("List = %+v, want exactly the operations caller's own one event, not the stranger's as well", page.Events)
+	}
+}
+
 // seedAuditUser adds a second user to an already-seeded tenant, for scenarios
 // that need two distinct erun_user_id values within one tenant.
 func seedAuditUser(t *testing.T, db *sql.DB, tenantID string) string {

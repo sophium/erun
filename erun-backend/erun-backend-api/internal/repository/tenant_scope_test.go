@@ -22,14 +22,27 @@ import (
 // EnvironmentRepository.Count/List and TenantQuotaRepository.Get answer a
 // quota question with the whole platform's total.
 //
-// tenantScopeClassification is every method of that shape found in this
+// A second, structurally different group has the same defect: a method that
+// takes a filter struct (or a plain scalar such as ListMergeQueue's
+// targetBranch) instead of bare ctx. Its caller-supplied argument narrows the
+// query but says nothing about the tenant, so an empty/wide filter has
+// exactly the context-only methods' problem — every tenant's rows for an
+// OPERATIONS caller. That shape can't be told apart from a legitimate single-
+// row `Get(ctx, id)` lookup by parameter count alone, so the scan below keys
+// on the "List" naming convention this module's AGENTS.md already
+// establishes for collection-returning methods instead: every top-level
+// method named `List` or `List*` is in scope, regardless of its parameter
+// list.
+//
+// tenantScopeClassification is every method of either shape found in this
 // package. TestContextOnlyRepositoryMethodsAreClassified fails when a new
 // one appears with no entry, forcing whoever adds it to consciously pick a
 // kind below instead of silently repeating the mistake, and fails when an
 // entry's method no longer exists, so a rename cannot leave a stale label
 // behind. It does not by itself prove a scopedExplicitly entry is correct —
 // that is what the OPERATIONS-caller regression tests in
-// environment_delete_e2e_test.go and tenant_quotas_e2e_test.go are for.
+// environment_delete_e2e_test.go, tenant_quotas_e2e_test.go, and
+// operations_scope_e2e_test.go are for.
 type tenantScopeKind int
 
 const (
@@ -118,6 +131,58 @@ var tenantScopeClassification = map[string]tenantScopeEntry{
 		kind:   scopedExplicitly,
 		reason: "reads TenantID off the security context and filters both the roles and role_permissions SELECTs WHERE tenant_id = ?, in addition to using it to bootstrap predefined roles",
 	},
+	"EnvironmentRepository.ListByStatuses": {
+		kind:   deliberatelyCrossTenant,
+		reason: "the delete reconciler's own re-attempt sweep is documented at its declaration as intentionally cross-tenant: it must see every tenant's mid-teardown rows to re-attempt them",
+	},
+	"UserRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "filter.TenantID is always resolved by the route (the caller's own tenant by default, an explicit override only for an operations-scoped caller) before this filters WHERE tenant_id = ?",
+	},
+	"InviteRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "filter.TenantID is always resolved by the route the same way UserFilter's is, before this filters WHERE tenant_id = ?",
+	},
+	"TenantIssuerRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "filter.TenantID is always resolved by the route the same way UserFilter's is, before this filters WHERE tenant_id = ?",
+	},
+	"InviteRequestRepository.List": {
+		kind:   notTenantOwned,
+		reason: "invite_requests carries no tenant_id column or RLS at all (documented at the repository's own declaration) — its submitter has no tenant yet, so there is no tenant boundary for erun_operations to bypass",
+	},
+	"AuditEventRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
+	},
+	"BuildRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE b.tenant_id = ?",
+	},
+	"CommentRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
+	},
+	"ReviewRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE r.tenant_id = ?",
+	},
+	"ReviewRepository.ListMergeQueue": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE q.tenant_id = ?",
+	},
+	"ReviewReviewerRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
+	},
+	"ReleaseRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",
+	},
+	"AISessionRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ? alongside the caller-supplied environment_id",
+	},
 }
 
 // TestContextOnlyRepositoryMethodsAreClassified is the structural half of the
@@ -132,15 +197,15 @@ func TestContextOnlyRepositoryMethodsAreClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := contextOnlyRepositoryMethods(t, root)
+	found := tenantScopeSensitiveRepositoryMethods(t, root)
 	if len(found) == 0 {
-		t.Fatal("found no context-only repository methods — the scan is misconfigured")
+		t.Fatal("found no tenant-scope-sensitive repository methods — the scan is misconfigured")
 	}
 
 	for _, name := range found {
 		if _, ok := tenantScopeClassification[name]; !ok {
-			t.Errorf("%s takes only (ctx context.Context) with no entry in tenantScopeClassification — "+
-				"classify it as %s, %s, %s, or %s and say why",
+			t.Errorf("%s takes only (ctx context.Context), or is a List-shaped method, with no entry in "+
+				"tenantScopeClassification — classify it as %s, %s, %s, or %s and say why",
 				name, scopedExplicitly, deliberatelyCrossTenant, notTenantOwned, trackedDebt)
 		}
 	}
@@ -161,16 +226,18 @@ func TestContextOnlyRepositoryMethodsAreClassified(t *testing.T) {
 	}
 }
 
-// contextOnlyRepositoryMethods parses every non-test .go file in this
-// package's directory and returns "ReceiverType.MethodName" for every method
-// whose parameter list is exactly one context.Context.
-func contextOnlyRepositoryMethods(t *testing.T, dir string) []string {
+// tenantScopeSensitiveRepositoryMethods parses every non-test .go file in
+// this package's directory and returns "ReceiverType.MethodName" for every
+// method matching either shape the classification map covers: context-only,
+// or named List/List*.
+func tenantScopeSensitiveRepositoryMethods(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fset := token.NewFileSet()
+	seen := make(map[string]bool)
 	var methods []string
 	for _, entry := range entries {
 		name := entry.Name()
@@ -181,9 +248,34 @@ func contextOnlyRepositoryMethods(t *testing.T, dir string) []string {
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
-		methods = append(methods, contextOnlyMethodsInFile(file)...)
+		for _, found := range append(contextOnlyMethodsInFile(file), listShapedMethodsInFile(file)...) {
+			if !seen[found] {
+				seen[found] = true
+				methods = append(methods, found)
+			}
+		}
 	}
 	sort.Strings(methods)
+	return methods
+}
+
+// listShapedMethodsInFile returns "ReceiverType.MethodName" for every
+// top-level method declaration in file whose name is List or starts with
+// List, regardless of its parameter list — the naming convention this
+// module's AGENTS.md establishes for methods that return a collection.
+func listShapedMethodsInFile(file *ast.File) []string {
+	var methods []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil {
+			continue
+		}
+		receiver := receiverTypeName(fn.Recv)
+		if receiver == "" || !strings.HasPrefix(fn.Name.Name, "List") {
+			continue
+		}
+		methods = append(methods, receiver+"."+fn.Name.Name)
+	}
 	return methods
 }
 

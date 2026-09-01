@@ -47,10 +47,19 @@ func releaseQueueDatabase(t *testing.T) (*repository.ReleaseRepository, context.
 // disturbs rows another tenant owns and row-level security is actually exercised.
 func seedQueueTenant(t *testing.T, db *sql.DB) string {
 	t.Helper()
+	return seedQueueTenantOfType(t, db, "COMPANY")
+}
+
+// seedQueueTenantOfType is seedQueueTenant's general form, for the
+// OPERATIONS-caller scoping regression test below: erun_operations' RLS
+// policy is unconditional (USING (true)), so only an OPERATIONS-typed tenant
+// can actually exercise the bypass List must guard against.
+func seedQueueTenantOfType(t *testing.T, db *sql.DB, tenantType string) string {
+	t.Helper()
 	var tenantID string
 	err := db.QueryRow(
-		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
-		"release-queue-e2e-"+time.Now().Format("20060102150405.000000"),
+		`INSERT INTO tenants (name, type) VALUES ($1, $2) RETURNING tenant_id`,
+		"release-queue-e2e-"+time.Now().Format("20060102150405.000000"), tenantType,
 	).Scan(&tenantID)
 	mustNoErr(t, err, "seed tenant")
 	return tenantID
@@ -262,5 +271,32 @@ func TestReleaseQueueIsScopedByTenant(t *testing.T) {
 	mustNoErr(t, err, "list the other tenant's releases")
 	if len(listed) != 1 || listed[0].ReleaseID != other.ReleaseID {
 		t.Fatalf("the other tenant sees %d releases, want only its own", len(listed))
+	}
+}
+
+// TestReleaseListScopesToTheOperationsCallersOwnTenant pins the failure
+// scenario directly: an OPERATIONS caller's List must not include a
+// stranger tenant's releases even though erun_operations' RLS policy makes
+// them visible too.
+func TestReleaseListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	repo, strangerCtx, db := releaseQueueDatabase(t)
+	enqueueRelease(t, repo, strangerCtx, "commit-stranger")
+
+	opsTenantID := seedQueueTenantOfType(t, db, "OPERATIONS")
+	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: opsTenantID, TenantType: "OPERATIONS"})
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM releases WHERE tenant_id = $1`, opsTenantID); err != nil {
+			t.Logf("clearing the operations tenant's releases: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM tenants WHERE tenant_id = $1`, opsTenantID); err != nil {
+			t.Logf("clearing the operations tenant: %v", err)
+		}
+	})
+	own := enqueueRelease(t, repo, opsCtx, "commit-ops")
+
+	listed, err := repo.List(opsCtx, repository.ReleaseFilter{})
+	mustNoErr(t, err, "list as operations caller")
+	if len(listed) != 1 || listed[0].ReleaseID != own.ReleaseID {
+		t.Fatalf("List = %+v, want exactly the operations caller's own release %s, not the stranger's as well", listed, own.ReleaseID)
 	}
 }

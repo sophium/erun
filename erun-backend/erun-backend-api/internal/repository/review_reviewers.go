@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -38,16 +39,26 @@ func (r *ReviewReviewerRepository) Create(ctx context.Context, reviewer model.Re
 	return created, err
 }
 
+// List returns the caller's tenant's review reviewers, optionally narrowed to
+// one review. Scoped explicitly by tenant_id from the security context
+// rather than left to RLS: erun_operations' policy is unconditional, so an
+// OPERATIONS caller's empty filter would otherwise read every tenant's review
+// reviewers.
 func (r *ReviewReviewerRepository) List(ctx context.Context, filter ReviewReviewerFilter) ([]model.ReviewReviewer, error) {
 	var reviewers []model.ReviewReviewer
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		query := `
 			SELECT tenant_id, review_id, user_id, created_at, updated_at
 			  FROM review_reviewers
+			 WHERE tenant_id = ?
 		`
-		var args []any
+		args := []any{securityContext.TenantID}
 		if filter.ReviewID != "" {
-			query += ` WHERE review_id = ?`
+			query += ` AND review_id = ?`
 			args = append(args, filter.ReviewID)
 		}
 		query += ` ORDER BY created_at, user_id`

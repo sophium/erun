@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -43,16 +44,24 @@ func (r *AISessionRepository) Record(ctx context.Context, event model.AISessionE
 
 // List returns every recorded session event for one environment, sorted by
 // session id for a stable, diffable listing — the DB-backed twin of
-// eruncommon.LoadAISessionStatuses.
+// eruncommon.LoadAISessionStatuses. Scoped explicitly by tenant_id from the
+// security context rather than left to RLS: erun_operations' policy is
+// unconditional, so an OPERATIONS caller naming another tenant's
+// environmentID would otherwise read that tenant's session events.
 func (r *AISessionRepository) List(ctx context.Context, environmentID string) ([]model.AISessionEvent, error) {
 	var events []model.AISessionEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
 			SELECT `+aiSessionColumns+`
 			  FROM ai_sessions
-			 WHERE environment_id = ?
+			 WHERE tenant_id = ?
+			   AND environment_id = ?
 			 ORDER BY session_id ASC
-		`, environmentID).Scan(ctx, &events)
+		`, securityContext.TenantID, environmentID).Scan(ctx, &events)
 	})
 	return events, err
 }

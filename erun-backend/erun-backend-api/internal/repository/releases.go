@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -69,11 +70,19 @@ func (r *ReleaseRepository) FindByCommit(ctx context.Context, commitID string) (
 	return release, err
 }
 
+// List returns the caller's tenant's releases matching filter. Scoped
+// explicitly by tenant_id from the security context rather than left to RLS:
+// erun_operations' policy is unconditional, so an OPERATIONS caller's empty
+// filter would otherwise read every tenant's releases.
 func (r *ReleaseRepository) List(ctx context.Context, filter ReleaseFilter) ([]model.Release, error) {
 	var releases []model.Release
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		query := `SELECT ` + releaseColumns + ` FROM releases WHERE TRUE`
-		var args []any
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
+		query := `SELECT ` + releaseColumns + ` FROM releases WHERE tenant_id = ?`
+		args := []any{securityContext.TenantID}
 		if filter.ReviewID != "" {
 			query += ` AND review_id = ?`
 			args = append(args, filter.ReviewID)
