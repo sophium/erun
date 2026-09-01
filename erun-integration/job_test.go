@@ -1117,6 +1117,138 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("an_agent_jobs_started_gate_that_failed_gets_one_bounded_resumed_turn_that_fixes_it", func(t *testing.T) {
+		// The supervisor's own wait-for-children mechanism (scenarios above)
+		// already tells the truth once an agent job's own turn
+		// ends while a gate it started fails -- startedJobFailed names it. What
+		// it could not do until now is give the agent itself a real "later" to
+		// act on that: nothing ever re-invoked it. The stubbed "claude" binary
+		// branches on whether its own argv carries --resume: its first turn
+		// starts a failing gate and exits without --resume in its own argv (it
+		// cannot see it -- this is the first turn); erun then resumes the same
+		// session (verified live against a real claude to actually carry
+		// context, see erun-common/AGENTS.md) and hands it the concrete
+		// failure. This resumed turn "fixes" it the same way a real agent would
+		// after a failing gate: it reruns the gate under the same --name with a
+		// fresh --id, which succeeds -- superseding the earlier failing attempt
+		// under that name (the same supersede rule the scenario above locks) --
+		// before it exits 0. Not starting anything new on resume would not
+		// prove a fix: the earlier failed attempt stays the latest (and only)
+		// attempt under its name forever unless something supersedes it, so the
+		// resumed turn has to actually redo the work, not just report success.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "gatefail", "sleep 0.1\nexit 1\n")
+		fixture.StubBinaryWithScript(t, stubs, "gateok", "sleep 0.1\nexit 0\n")
+		claudeScript := fmt.Sprintf(`case "$*" in
+  *--resume*)
+    printf '{"type":"system","subtype":"init","session_id":"11111111-1111-1111-1111-111111111111"}\n'
+    %q job start --tenant team --environment dev --name gate --id gate-2 -- gateok >/dev/null 2>&1
+    printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"fixed the gate"}\n'
+    ;;
+  *)
+    printf '{"type":"system","subtype":"init","session_id":"11111111-1111-1111-1111-111111111111"}\n'
+    %q job start --tenant team --environment dev --name gate --id gate -- gatefail >/dev/null 2>&1
+    printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"started the gate"}\n'
+    ;;
+esac
+`, bin, bin)
+		fixture.StubBinaryWithScript(t, stubs, "claude", claudeScript)
+		envVars := append(append(inEnvironment(setup.Env()), fixture.StubEnv(stubs, "claude", "gatefail", "gateok")...),
+			"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=2s", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms")
+
+		start := startJob(t, setup, envVars, "outer", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			for _, id := range []string{"gate", "gate-2"} {
+				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
+					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			}
+		})
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected outer to eventually succeed once its bounded resumed turn fixed the gate, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State             string `json:"state"`
+			Succeeded         bool   `json:"succeeded"`
+			StartedJobFailed  string `json:"startedJobFailed"`
+			ReinvocationCount int    `json:"reinvocationCount"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "exited" || !payload.Succeeded || payload.StartedJobFailed != "" || payload.ReinvocationCount != 1 {
+			t.Fatalf("expected outer to report exited/succeeded with exactly one resumed turn, got %+v", payload)
+		}
+	})
+
+	t.Run("an_agent_jobs_started_gate_that_keeps_failing_stops_at_the_reinvocation_bound", func(t *testing.T) {
+		// The safety half of the scenario above: a resumed turn that starts
+		// another failing gate every time must not loop forever. Every turn here
+		// (first and every resumed one) starts a new failing gate under a fresh
+		// id, so the outer job never finds anything to succeed on -- the bound
+		// itself is what has to stop it. ERUN_JOB_MAX_REINVOCATIONS pins the cap
+		// to 1 so the scenario does not need to script and assert an arbitrarily
+		// long chain to prove the bound is real.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		bin := erun.BinaryPath(t)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "gatefail", "sleep 0.1\nexit 1\n")
+		counter := filepath.Join(setup.Cwd, "turns")
+		claudeScript := fmt.Sprintf(`n=$(cat %q 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > %q
+printf '{"type":"system","subtype":"init","session_id":"11111111-1111-1111-1111-111111111111"}\n'
+%q job start --tenant team --environment dev --name "gate-$n" --id "gate-$n" -- gatefail >/dev/null 2>&1
+printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"started gate-%%s\n"}\n' "$n"
+`, counter, counter, bin)
+		fixture.StubBinaryWithScript(t, stubs, "claude", claudeScript)
+		envVars := append(append(inEnvironment(setup.Env()), fixture.StubEnv(stubs, "claude", "gatefail")...),
+			"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=2s", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms", "ERUN_JOB_MAX_REINVOCATIONS=1")
+
+		start := startJob(t, setup, envVars, "outer", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		t.Cleanup(func() {
+			for _, id := range []string{"gate-1", "gate-2", "gate-3"} {
+				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
+					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			}
+		})
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected outer to still report a failure once the reinvocation bound was exhausted, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State             string `json:"state"`
+			Succeeded         bool   `json:"succeeded"`
+			StartedJobFailed  string `json:"startedJobFailed"`
+			Reason            string `json:"reason"`
+			ReinvocationCount int    `json:"reinvocationCount"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		// Exactly one reinvocation ran (the pinned cap) even though every turn
+		// kept failing the same way -- proof the bound stopped the chain rather
+		// than the stub running out of ideas on its own.
+		if payload.State != "exited" || payload.Succeeded || payload.StartedJobFailed == "" || payload.ReinvocationCount != 1 {
+			t.Fatalf("expected outer to stop after exactly one reinvocation, still failing, got %+v", payload)
+		}
+		if !strings.Contains(payload.Reason, "already resumed 1 time(s)") {
+			t.Fatalf("expected the reason to name the exhausted reinvocation bound, got %q", payload.Reason)
+		}
+	})
+
 	t.Run("handoff_excludes_a_job_from_its_parents_finish_check", func(t *testing.T) {
 		// The other side of the contract: a job started with --handoff is meant
 		// to outlive its caller on purpose, so it must never be what a parent's

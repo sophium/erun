@@ -15,7 +15,15 @@ until it exits, so a multi-hour run reports no output while it is actively
 editing files. status then reports the current activity, not only "running".
 This is a one-shot, non-interactive run: nothing wakes it once it exits, so
 the prompt must not end its own turn believing something will notify it
-about work it is still waiting on -- there is no such notification.
+about work it is still waiting on -- there is no such notification, with one
+narrow exception. If this job's own process ends while a job it started has
+not reached a verdict, or has reached a bad one, erun resumes the same
+session with the concrete outcome so the agent can act on it -- fix it,
+verify it, or explain why it cannot be resolved. This is bounded (a small
+fixed count and a wall-clock budget, both shown by `job status` as
+"resumed N/M") and applies only to that one narrow case, never to a plain
+failing exit code: past the bound, or for any other outcome, there is still
+no notification and no further "later".
 
 --env sets additional environment for the job's own process, on top of what
 it inherits from the environment's runtime pod — for example raising

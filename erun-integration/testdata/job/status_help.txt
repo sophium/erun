@@ -13,6 +13,13 @@ failure into startedJobFailed rather than letting its own clean exit code
 hide it. Finished jobs stay readable for 24 hours so a caller that
 reconnects after the work ended can still learn what happened.
 
+For an agent job, gate-incomplete or startedJobFailed triggers one further
+thing before either is reported as final: a bounded, automatic resumption of
+the same session with the concrete outcome, so the agent gets a real chance
+to act on it. reinvocationCount says how many of those already ran; once the
+bound is reached the reason says so explicitly rather than reading the same
+as a job that never got one.
+
 aliveAgeMs is the milliseconds since the supervisor's last ~1s beat,
 computed in erun's own clock so nothing subtracts a pod timestamp from a
 caller's clock. Once it exceeds 5000, treat the job as failed (an unknown

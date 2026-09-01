@@ -102,7 +102,15 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"editing files. status then reports the current activity, not only \"running\".\n" +
 			"This is a one-shot, non-interactive run: nothing wakes it once it exits, so\n" +
 			"the prompt must not end its own turn believing something will notify it\n" +
-			"about work it is still waiting on -- there is no such notification.\n\n" +
+			"about work it is still waiting on -- there is no such notification, with one\n" +
+			"narrow exception. If this job's own process ends while a job it started has\n" +
+			"not reached a verdict, or has reached a bad one, erun resumes the same\n" +
+			"session with the concrete outcome so the agent can act on it -- fix it,\n" +
+			"verify it, or explain why it cannot be resolved. This is bounded (a small\n" +
+			"fixed count and a wall-clock budget, both shown by `job status` as\n" +
+			"\"resumed N/M\") and applies only to that one narrow case, never to a plain\n" +
+			"failing exit code: past the bound, or for any other outcome, there is still\n" +
+			"no notification and no further \"later\".\n\n" +
 			"--env sets additional environment for the job's own process, on top of what\n" +
 			"it inherits from the environment's runtime pod — for example raising\n" +
 			"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
@@ -316,6 +324,12 @@ func newJobStatusCmd(resolveOpen OpenResolver) *cobra.Command {
 			"failure into startedJobFailed rather than letting its own clean exit code\n" +
 			"hide it. Finished jobs stay readable for 24 hours so a caller that\n" +
 			"reconnects after the work ended can still learn what happened.\n\n" +
+			"For an agent job, gate-incomplete or startedJobFailed triggers one further\n" +
+			"thing before either is reported as final: a bounded, automatic resumption of\n" +
+			"the same session with the concrete outcome, so the agent gets a real chance\n" +
+			"to act on it. reinvocationCount says how many of those already ran; once the\n" +
+			"bound is reached the reason says so explicitly rather than reading the same\n" +
+			"as a job that never got one.\n\n" +
 			"aliveAgeMs is the milliseconds since the supervisor's last ~1s beat,\n" +
 			"computed in erun's own clock so nothing subtracts a pod timestamp from a\n" +
 			"caller's clock. Once it exceeds 5000, treat the job as failed (an unknown\n" +
@@ -449,7 +463,7 @@ func jobRunningLine(job common.EnvironmentJob) string {
 	} else if job.PID > 0 {
 		line += fmt.Sprintf(", pid %d", job.PID)
 	}
-	return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobOutputSuffix(job)
+	return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobOutputSuffix(job)
 }
 
 func jobExitedLine(job common.EnvironmentJob) string {
@@ -457,7 +471,7 @@ func jobExitedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
 	}
-	return line + jobAgentSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
 }
 
 // jobStartedJobFailedSuffix surfaces a job this job started and waited for
@@ -523,7 +537,7 @@ func jobAbandonedLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
 	}
-	return line + jobAgentSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
 // jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
@@ -537,7 +551,7 @@ func jobGateIncompleteLine(job common.EnvironmentJob) string {
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
 	}
-	return line + jobAgentSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
+	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
 func jobUnknownLine(job common.EnvironmentJob) string {
@@ -574,6 +588,17 @@ func jobAgentSuffix(job common.EnvironmentJob) string {
 		return suffix + ", " + summary
 	}
 	return suffix + ", no events yet"
+}
+
+// jobReinvocationSuffix surfaces a job's automatic bounded resumptions, the
+// one thing that turns "this job started work that failed" into a real second
+// chance for the agent to act rather than a silent record nobody reads. Empty
+// for a job that never needed one.
+func jobReinvocationSuffix(job common.EnvironmentJob) string {
+	if job.ReinvocationCount <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(", resumed %d/%d time(s)", job.ReinvocationCount, common.EnvironmentJobMaxReinvocations())
 }
 
 func jobOutputSuffix(job common.EnvironmentJob) string {

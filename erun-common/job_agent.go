@@ -78,6 +78,38 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	}
 }
 
+// AgentJobResumeCommand builds the argv for a bounded follow-up turn of a run
+// AgentJobCommand already started, resumed via the session/thread id that turn's
+// own stream reported (AgentJobProgress.SessionID) rather than restated from
+// scratch. Verified live against the installed claude (2.1.222): a fact told to
+// one `claude -p --session-id <id>` process was correctly recalled by a wholly
+// separate `claude -p --resume <id>` process afterwards, so this is genuine
+// conversational continuation, not a self-contained restatement of task facts.
+// codex's non-interactive twin (`codex exec resume <id> <prompt>`) is built the
+// same way but its own context-survival was not verified the same way: the
+// sandbox this was designed in had no authenticated codex, only an unauthenticated
+// CLI whose requests 401 before any content reaches the model. See
+// erun-common/AGENTS.md's note on this for the full evidence trail.
+func AgentJobResumeCommand(tool, sessionID, prompt string) ([]string, error) {
+	name := strings.ToLower(strings.TrimSpace(tool))
+	id := strings.TrimSpace(sessionID)
+	text := strings.TrimSpace(prompt)
+	if id == "" {
+		return nil, fmt.Errorf("a resumed agent turn needs the session id the earlier turn reported")
+	}
+	if text == "" {
+		return nil, fmt.Errorf("a resumed agent turn needs a prompt to run")
+	}
+	switch name {
+	case agentToolClaude:
+		return []string{agentToolClaude, "-p", text, "--resume", id, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
+	case agentToolCodex:
+		return []string{agentToolCodex, "exec", "resume", "--json", id, text}, nil
+	default:
+		return nil, fmt.Errorf("unsupported agent tool %q: expected one of %s", tool, strings.Join(AgentJobTools, ", "))
+	}
+}
+
 // NormalizeAgentJobTool resolves the tool name a job records, so a caller's
 // casing never reaches the record or the argv.
 func NormalizeAgentJobTool(tool string) (string, error) {
@@ -95,6 +127,12 @@ func NormalizeAgentJobTool(tool string) (string, error) {
 // event shape — that is what makes it a contract rather than a passthrough.
 type AgentJobProgress struct {
 	Tool string `json:"tool,omitempty"`
+	// SessionID is the tool's own identifier for this conversation -- claude's
+	// session_id (present on every stream-json event from the first) or codex's
+	// thread_id (its thread.started event) -- captured so a bounded follow-up
+	// turn can resume the real conversation instead of restating the task from
+	// scratch. Empty until the tool's first event names it, and never guessed.
+	SessionID string `json:"sessionId,omitempty"`
 	// Activity is the one-line answer to "what is it doing right now", such as
 	// "editing erun-common/mcp_client.go". It clears when the run reports a
 	// result, because at that point the answer is the outcome.
@@ -217,6 +255,10 @@ type claudeStreamEvent struct {
 	NumTurns int                  `json:"num_turns"`
 	IsError  bool                 `json:"is_error"`
 	Message  *claudeStreamMessage `json:"message"`
+	// SessionID rides on every event claude's stream-json mode emits, from the
+	// very first ("system"/"init") one -- unlike Result, which arrives only on
+	// the closing event.
+	SessionID string `json:"session_id"`
 }
 
 type claudeStreamMessage struct {
@@ -238,6 +280,9 @@ func applyClaudeAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 	var event claudeStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return false
+	}
+	if id := strings.TrimSpace(event.SessionID); id != "" {
+		progress.SessionID = id
 	}
 	switch event.Type {
 	case "assistant":
@@ -332,6 +377,10 @@ type codexStreamEvent struct {
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	// ThreadID names the conversation on codex's own "thread.started" event,
+	// the first event a `codex exec --json` run emits -- codex's twin of
+	// claude's per-event session_id above.
+	ThreadID string `json:"thread_id"`
 }
 
 type codexStreamItem struct {
@@ -356,6 +405,8 @@ func applyCodexAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 		return false
 	}
 	switch event.Type {
+	case "thread.started":
+		applyCodexThreadStartedEvent(progress, event)
 	case "turn.started":
 		progress.Turns++
 	case "item.started", "item.updated", "item.completed":
@@ -373,6 +424,15 @@ func applyCodexAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 		return false
 	}
 	return true
+}
+
+// applyCodexThreadStartedEvent captures the thread id off codex's first event,
+// split out of applyCodexAgentEvent's switch so a plain call keeps that
+// switch's own cyclomatic complexity from growing.
+func applyCodexThreadStartedEvent(progress *AgentJobProgress, event codexStreamEvent) {
+	if id := strings.TrimSpace(event.ThreadID); id != "" {
+		progress.SessionID = id
+	}
 }
 
 func applyCodexItem(progress *AgentJobProgress, item *codexStreamItem, completed bool) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -195,6 +196,63 @@ func resolveEnvironmentJobGateIncompleteWaitCap() time.Duration {
 // EnvironmentJobGateIncompletePollEnvVar-aware twin.
 func resolveEnvironmentJobGateIncompletePoll() time.Duration {
 	return resolveEnvironmentJobDurationOverride(EnvironmentJobGateIncompletePollEnvVar, environmentJobGateIncompletePoll)
+}
+
+// environmentJobMaxReinvocations bounds how many bounded follow-up turns an
+// agent job's own supervisor will run in response to the job it started coming
+// back incomplete or failed (see decideEnvironmentJobReinvocation). It is small
+// on purpose: this is a safety-bounded retry of a scoped, already-observed
+// failure, not a general "keep trying" loop, and each turn is a real LLM
+// invocation with its own cost and its own chance of causing something new. A
+// var so a test can shrink it without genuinely burning reinvocations; an
+// operator overrides via EnvironmentJobMaxReinvocationsEnvVar the same way
+// resolveEnvironmentJobGateIncompleteWaitCap works.
+var environmentJobMaxReinvocations = 2
+
+// environmentJobReinvocationBudget caps the wall-clock time a chain of
+// reinvocations may spend in total, independently of environmentJobMaxReinvocations:
+// a count cap alone does not bound cost if the model can spend an unbounded
+// amount of time (and, on some providers, budget) inside each turn. The two
+// bounds are deliberately different shapes -- one bounds how many extra
+// inferences can run, the other bounds how long the whole chain may keep the
+// environment busy -- so either one exhausting stops the chain.
+var environmentJobReinvocationBudget = 30 * time.Minute
+
+const (
+	// EnvironmentJobMaxReinvocationsEnvVar overrides environmentJobMaxReinvocations
+	// for a single job supervisor process; an empty or unparseable (non-integer,
+	// or negative) value falls back to the default. Same shape as
+	// EnvironmentJobGateIncompleteWaitCapEnvVar, for the same reason: an
+	// integration test needs to shrink or grow this without a package-level Go
+	// test's ability to swap the var directly.
+	EnvironmentJobMaxReinvocationsEnvVar = "ERUN_JOB_MAX_REINVOCATIONS"
+	// EnvironmentJobReinvocationBudgetEnvVar is EnvironmentJobMaxReinvocationsEnvVar's
+	// twin for the wall-clock budget, parsed with time.ParseDuration.
+	EnvironmentJobReinvocationBudgetEnvVar = "ERUN_JOB_REINVOCATION_BUDGET"
+)
+
+// EnvironmentJobMaxReinvocations returns the bound a caller renders alongside
+// EnvironmentJob.ReinvocationCount (e.g. `job status`'s "resumed N/M" suffix),
+// so the displayed bound can never drift from the one actually enforced.
+func EnvironmentJobMaxReinvocations() int {
+	return resolveEnvironmentJobMaxReinvocations()
+}
+
+// resolveEnvironmentJobMaxReinvocations is environmentJobMaxReinvocations,
+// EnvironmentJobMaxReinvocationsEnvVar-aware.
+func resolveEnvironmentJobMaxReinvocations() int {
+	if raw := strings.TrimSpace(os.Getenv(EnvironmentJobMaxReinvocationsEnvVar)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			return parsed
+		}
+	}
+	return environmentJobMaxReinvocations
+}
+
+// resolveEnvironmentJobReinvocationBudget is environmentJobReinvocationBudget's
+// EnvironmentJobReinvocationBudgetEnvVar-aware twin.
+func resolveEnvironmentJobReinvocationBudget() time.Duration {
+	return resolveEnvironmentJobDurationOverride(EnvironmentJobReinvocationBudgetEnvVar, environmentJobReinvocationBudget)
 }
 
 func resolveEnvironmentJobDurationOverride(envVar string, fallback time.Duration) time.Duration {
@@ -396,6 +454,17 @@ type EnvironmentJob struct {
 	// would otherwise vanish behind this job's own exit code. Empty when every
 	// non-handoff job this job started succeeded, or when it started none.
 	StartedJobFailed string `json:"startedJobFailed,omitempty"`
+
+	// ReinvocationCount is how many bounded follow-up turns an agent job's own
+	// supervisor has already run because the job it started had not reached a
+	// verdict, or had reached a bad one, by the time this job's own process
+	// exited (see decideEnvironmentJobReinvocation in job_supervisor.go). It is
+	// what makes the bound real to a caller rather than only to the code: a job
+	// stuck at EnvironmentJobMaxReinvocations here, still gate-incomplete or
+	// still naming a StartedJobFailed, has exhausted its automatic "later" and
+	// needs a human or an external caller to act. Zero for a command job and
+	// for an agent job that never needed one.
+	ReinvocationCount int `json:"reinvocationCount,omitempty"`
 }
 
 // Finished reports whether the job reached a terminal state.
