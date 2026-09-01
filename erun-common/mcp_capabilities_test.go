@@ -89,11 +89,81 @@ func TestUnrelatedRolesGrantNothingRatherThanEverything(t *testing.T) {
 	}
 }
 
+// This is the test that must fail loudly if a future tool is registered under
+// the attach tier without being re-examined against this boundary: a caller
+// scoped to attach only must never reach remote execution or anything that
+// mutates an environment, regardless of what else the tool surface grows into.
+func TestAttachCapabilityCannotReachExecutionOrMutation(t *testing.T) {
+	attach := NewMCPCapabilitySet([]string{string(MCPCapabilityAttach)})
+
+	if !attach.Allows(MCPCapabilityAttach) {
+		t.Fatalf("an attach token must allow the attach capability itself: %+v", attach)
+	}
+	for _, forbidden := range []string{
+		"exec_raw", "raw", "build", "push", "deploy", "delete", "release",
+		"upgrade", "expose", "terraform", "init", "context_init",
+	} {
+		if attach.AllowsTool(forbidden) {
+			t.Fatalf("an attach-only token must not reach %q: %+v", forbidden, attach)
+		}
+	}
+}
+
+// Attach is a distinct tier, not a wider read: it does not inherit read-only
+// observation, and neither read nor admin is granted just because a caller
+// resolves an attach token -- only admin reaches back down into attach.
+func TestAttachDoesNotImplyReadAndReadDoesNotImplyAttach(t *testing.T) {
+	attach := NewMCPCapabilitySet([]string{string(MCPCapabilityAttach)})
+	if attach.AllowsTool("version") || attach.Allows(MCPCapabilityRead) {
+		t.Fatalf("an attach-only token must not gain read observation: %+v", attach)
+	}
+
+	read := NewMCPCapabilitySet([]string{string(MCPCapabilityRead)})
+	if read.Allows(MCPCapabilityAttach) {
+		t.Fatalf("a read-only token must not gain attach: %+v", read)
+	}
+
+	admin := NewMCPCapabilitySet([]string{string(MCPCapabilityAdmin)})
+	if !admin.Allows(MCPCapabilityAttach) {
+		t.Fatalf("admin permits everything, including attach: %+v", admin)
+	}
+}
+
+// Both shapes issuers actually produce, mirroring how erun:read/erun:admin
+// already reach a token -- an issuer that wants to grant a mobile-scoped
+// caller attach only says so explicitly in scope or roles.
+func TestAttachCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
+	fromScope := MCPCapabilitiesFromClaims("openid erun:attach", nil)
+	if !fromScope.Allows(MCPCapabilityAttach) || fromScope.Allows(MCPCapabilityRead) || fromScope.Allows(MCPCapabilityAdmin) {
+		t.Fatalf("an attach scope grants attach only, got %+v", fromScope)
+	}
+
+	fromRoles := MCPCapabilitiesFromClaims("", []string{"erun:attach"})
+	if !fromRoles.Allows(MCPCapabilityAttach) {
+		t.Fatalf("an attach role grants attach, got %+v", fromRoles)
+	}
+}
+
+// A role that merely resembles the attach tier's name must not resolve to it --
+// the fail-closed-on-unrecognized-role behavior MCPCapabilitiesFromClaims
+// already applies to erun:read/erun:admin must hold for the new tier too, or
+// adding a third tier would have quietly widened what "unrecognised" means.
+func TestANearMissRoleNeverResolvesToAttach(t *testing.T) {
+	set := MCPCapabilitiesFromClaims("", []string{"erun:attaching", "mobile:attach"})
+	if !set.Empty() {
+		t.Fatalf("a role that merely resembles erun:attach must not resolve to it, got %+v", set)
+	}
+	if set.Allows(MCPCapabilityAttach) {
+		t.Fatalf("a near-miss role string must not grant attach: %+v", set)
+	}
+}
+
 // The key identifies one distinct tool surface, so servers can be cached by it.
 func TestCapabilityKeyIdentifiesTheToolSurface(t *testing.T) {
 	a := NewMCPCapabilitySet([]string{"erun:read"})
 	b := NewMCPCapabilitySet([]string{"erun:read"})
 	admin := NewMCPCapabilitySet([]string{"erun:admin"})
+	attach := NewMCPCapabilitySet([]string{"erun:attach"})
 
 	if a.Key() != b.Key() {
 		t.Fatalf("equal capabilities must share a key: %q vs %q", a.Key(), b.Key())
@@ -101,7 +171,13 @@ func TestCapabilityKeyIdentifiesTheToolSurface(t *testing.T) {
 	if a.Key() == admin.Key() {
 		t.Fatalf("different capabilities must not share a key: %q", a.Key())
 	}
+	if a.Key() == attach.Key() || admin.Key() == attach.Key() {
+		t.Fatalf("attach must be its own distinct key: read=%q admin=%q attach=%q", a.Key(), admin.Key(), attach.Key())
+	}
 	if !slices.Equal(admin.Names(), []string{"erun:admin"}) {
 		t.Fatalf("unexpected names: %v", admin.Names())
+	}
+	if !slices.Equal(attach.Names(), []string{"erun:attach"}) {
+		t.Fatalf("unexpected names: %v", attach.Names())
 	}
 }

@@ -23,6 +23,12 @@ const (
 	MCPCapabilityRead MCPCapability = "erun:read"
 	// MCPCapabilityAdmin permits everything, including remote execution.
 	MCPCapabilityAdmin MCPCapability = "erun:admin"
+	// MCPCapabilityAttach permits driving an existing environment's attach
+	// session (the dtach takeover protocol) and nothing else. It grants
+	// neither read nor admin, and neither of those grants it back -- a caller
+	// scoped to this tier only for a mobile client to reconnect to a running
+	// session without also carrying `exec_raw`/`build`/`deploy`/`delete`.
+	MCPCapabilityAttach MCPCapability = "erun:attach"
 )
 
 // mcpReadOnlyTools are the tools that only observe. Membership is the strict
@@ -66,8 +72,9 @@ func MCPToolCapability(tool string) MCPCapability {
 
 // MCPCapabilitySet is a caller's resolved capabilities.
 type MCPCapabilitySet struct {
-	read  bool
-	admin bool
+	read   bool
+	admin  bool
+	attach bool
 }
 
 // NewMCPCapabilitySet builds a set from resolved capability names. Unrecognised
@@ -81,6 +88,8 @@ func NewMCPCapabilitySet(capabilities []string) MCPCapabilitySet {
 			set.admin = true
 		case MCPCapabilityRead:
 			set.read = true
+		case MCPCapabilityAttach:
+			set.attach = true
 		}
 	}
 	return set
@@ -92,17 +101,19 @@ func NewMCPCapabilitySet(capabilities []string) MCPCapabilitySet {
 // worked yesterday — narrowing is opt-in, per the same direction as the rest of
 // the edge's auth.
 func AdminMCPCapabilitySet() MCPCapabilitySet {
-	return MCPCapabilitySet{read: true, admin: true}
+	return MCPCapabilitySet{read: true, admin: true, attach: true}
 }
 
 // Allows reports whether the set satisfies a required capability. Admin implies
-// read, so an admin token never has to carry both.
+// every other capability, so an admin token never has to carry them explicitly.
 func (s MCPCapabilitySet) Allows(required MCPCapability) bool {
 	switch required {
 	case MCPCapabilityAdmin:
 		return s.admin
 	case MCPCapabilityRead:
 		return s.read || s.admin
+	case MCPCapabilityAttach:
+		return s.attach || s.admin
 	}
 	return false
 }
@@ -114,14 +125,17 @@ func (s MCPCapabilitySet) AllowsTool(tool string) bool {
 
 // Empty reports a set that permits nothing, which is what an authenticated token
 // carrying only unrecognised roles resolves to.
-func (s MCPCapabilitySet) Empty() bool { return !s.read && !s.admin }
+func (s MCPCapabilitySet) Empty() bool { return !s.read && !s.admin && !s.attach }
 
 // Names returns the granted capabilities, sorted, for audit lines and for the
 // cache key that identifies one distinct tool set.
 func (s MCPCapabilitySet) Names() []string {
-	names := make([]string, 0, 2)
+	names := make([]string, 0, 3)
 	if s.admin {
 		names = append(names, string(MCPCapabilityAdmin))
+	}
+	if s.attach {
+		names = append(names, string(MCPCapabilityAttach))
 	}
 	if s.read {
 		names = append(names, string(MCPCapabilityRead))
