@@ -109,13 +109,33 @@ type EnvironmentRoutes struct {
 	// deleter is nil when live env provisioning is not wired; then delete is
 	// unavailable rather than acting on config no Job can realize.
 	deleter EnvironmentDeleter
+	// admin is nil unless the server wires cross-tenant administration
+	// (#1816); then a tenantId naming another tenant is refused with a
+	// clear 500 rather than silently falling back to the caller's own
+	// tenant. Only createEnvironment uses it — list needs no audit trail.
+	admin EnvironmentAdminCreator
+}
+
+// EnvironmentAdminCreator creates an environment in a tenant other than the
+// caller's own and records who did it (#1816): every ordinary repository
+// Create is a single write, but a cross-tenant one is a workflow — the write
+// plus a durable record of which operator, from which home tenant, placed a
+// row somewhere they do not otherwise operate. scopedCtx is already resolved
+// to the target tenant (see scopedContextForTenant); homeCtx is the caller's
+// own, unscoped security context, so the audit trail names the operator's
+// real home tenant rather than the tenant the write landed in.
+type EnvironmentAdminCreator interface {
+	CreateForTenant(scopedCtx, homeCtx context.Context, targetTenantID string, environment model.Environment) (model.Environment, error)
 }
 
 // createEnvironmentRequest carries only operator-authored fields; the tenant is
-// resolved from the caller's token, never trusted from the body. Preview
-// resolves and returns the same ordered plan POST /v1/provision renders,
-// without creating the row — the executing path previewing itself, so the
-// plan an operator audits here is the plan a non-preview call then runs.
+// resolved from the caller's token, never trusted from the body, with one
+// deliberate exception: TenantID, honoured only for an operations caller
+// (#1816) to place the row in a named tenant instead of their own — refused
+// with 403 for any other caller. Preview resolves and returns the same
+// ordered plan POST /v1/provision renders, without creating the row — the
+// executing path previewing itself, so the plan an operator audits here is
+// the plan a non-preview call then runs.
 type createEnvironmentRequest struct {
 	Name              string `json:"name"`
 	Type              string `json:"type"`
@@ -123,10 +143,11 @@ type createEnvironmentRequest struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	RuntimeVersion    string `json:"runtimeVersion"`
 	Preview           bool   `json:"preview"`
+	TenantID          string `json:"tenantId,omitempty"`
 }
 
-func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle, deleter EnvironmentDeleter) {
-	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, contexts: contexts, provisioner: provisioner, lifecycle: lifecycle, deleter: deleter}
+func RegisterEnvironmentRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, quotas TenantQuotaRepository, tenants ConfigTenantRepository, contexts PlacementContextRepository, provisioner EnvironmentProvisioner, lifecycle EnvironmentLifecycle, deleter EnvironmentDeleter, admin EnvironmentAdminCreator) {
+	routes := EnvironmentRoutes{environments: environments, quotas: quotas, tenants: tenants, contexts: contexts, provisioner: provisioner, lifecycle: lifecycle, deleter: deleter, admin: admin}
 	register(http.MethodGet, "/v1/environments", http.HandlerFunc(routes.listEnvironments))
 	register(http.MethodPost, "/v1/environments", http.HandlerFunc(routes.createEnvironment))
 	register(http.MethodGet, "/v1/environments/{environment_id}", http.HandlerFunc(routes.getEnvironment))
@@ -611,8 +632,36 @@ func resolveDeployVersion(req *http.Request, environment model.Environment) (str
 	return version, nil
 }
 
+// scopedContextForTenant returns ctx unchanged when targetTenantID is the
+// caller's own tenant — resolveTargetTenant's own default, and every
+// caller's ordinary behavior, unaffected by any of this existing at all — or
+// a context whose security.Context.TenantID is substituted for
+// targetTenantID, already authorized by resolveTargetTenant, so every
+// repository method this package calls that derives its tenant scope from
+// the security context (EnvironmentRepository.List/Count,
+// TenantQuotaRepository.Get, ConfigTenantRepository.Current) operates on the
+// target tenant instead (#1816). No repository method needs a parallel "or
+// this other tenant" parameter to support it.
+func scopedContextForTenant(ctx context.Context, securityContext security.Context, targetTenantID string) context.Context {
+	if targetTenantID == securityContext.TenantID {
+		return ctx
+	}
+	securityContext.TenantID = targetTenantID
+	return security.WithContext(ctx, securityContext)
+}
+
 func (r EnvironmentRoutes) listEnvironments(w http.ResponseWriter, req *http.Request) {
-	environments, err := r.environments.List(req.Context())
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	targetTenantID, err := resolveTargetTenant(securityContext, req.URL.Query().Get("tenantId"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	environments, err := r.environments.List(scopedContextForTenant(req.Context(), securityContext, targetTenantID))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -722,23 +771,25 @@ var validEnvironmentTypes = map[model.EnvironmentType]struct{}{
 }
 
 // decodeCreateEnvironmentInput validates the create body and returns the
-// environment it describes plus whether the caller asked for a preview.
-// Its error message is the operator-facing 400 reason.
-func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, error) {
+// environment it describes, whether the caller asked for a preview, and the
+// raw requested tenant ID (empty unless the caller named one — resolved and
+// authorized by resolveTargetTenant). Its error message is the operator-
+// facing 400 reason.
+func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, string, error) {
 	var body createEnvironmentRequest
 	if err := decodeJSON(req, &body); err != nil {
-		return model.Environment{}, false, errors.New("invalid request body")
+		return model.Environment{}, false, "", errors.New("invalid request body")
 	}
 	name := strings.TrimSpace(body.Name)
 	// The tenant is hyphen-free (enforced at tenant registration), so allowing
 	// internal hyphens in the env keeps the first-hyphen split of the
 	// <tenant>-<env> namespace unambiguous.
 	if !validNamespaceLabel(name) {
-		return model.Environment{}, false, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
+		return model.Environment{}, false, "", errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
 	envType := model.EnvironmentType(strings.TrimSpace(body.Type))
 	if _, ok := validEnvironmentTypes[envType]; !ok {
-		return model.Environment{}, false, errors.New("type must be one of runtime, remote-agent, local-agent")
+		return model.Environment{}, false, "", errors.New("type must be one of runtime, remote-agent, local-agent")
 	}
 	return model.Environment{
 		Name:              name,
@@ -746,15 +797,27 @@ func decodeCreateEnvironmentInput(req *http.Request) (model.Environment, bool, e
 		ContextID:         strings.TrimSpace(body.ContextID),
 		KubernetesContext: strings.TrimSpace(body.KubernetesContext),
 		RuntimeVersion:    strings.TrimSpace(body.RuntimeVersion),
-	}, body.Preview, nil
+	}, body.Preview, strings.TrimSpace(body.TenantID), nil
 }
 
 func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Request) {
-	environment, preview, err := decodeCreateEnvironmentInput(req)
+	environment, preview, requestedTenantID, err := decodeCreateEnvironmentInput(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	targetTenantID, err := resolveTargetTenant(securityContext, requestedTenantID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	homeCtx := req.Context()
+	req = req.WithContext(scopedContextForTenant(homeCtx, securityContext, targetTenantID))
 	// Placement (#1112) is decided once, here, and persisted: an explicit
 	// contextId is validated and capacity-checked, an unset one is
 	// auto-selected from the tenant's own registered contexts (or resolves to
@@ -796,7 +859,25 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 			return
 		}
 	}
-	r.persistAndMaybeProvision(w, req, environment, placement)
+	crossTenant := targetTenantID != securityContext.TenantID
+	r.persistAndMaybeProvision(w, req, environment, placement, homeCtx, targetTenantID, crossTenant)
+}
+
+// createEnvironmentRow persists the new row: the caller's own tenant by
+// default (unchanged) when crossTenant is false, or — already authorized by
+// resolveTargetTenant — targetTenantID instead, through EnvironmentAdminCreator
+// so the cross-tenant write is audited (#1816). scopedCtx is req.Context() at
+// the point of the call (already resolved to the target tenant when
+// crossTenant is true); homeCtx is the original, unscoped context the
+// request arrived with.
+func (r EnvironmentRoutes) createEnvironmentRow(scopedCtx, homeCtx context.Context, targetTenantID string, crossTenant bool, environment model.Environment) (model.Environment, error) {
+	if !crossTenant {
+		return r.environments.Create(scopedCtx, environment)
+	}
+	if r.admin == nil {
+		return model.Environment{}, errors.New("creating an environment in another tenant requires cross-tenant administration, which is not configured on this control plane")
+	}
+	return r.admin.CreateForTenant(scopedCtx, homeCtx, targetTenantID, environment)
 }
 
 // persistAndMaybeProvision creates the row and, for a runtime env with a
@@ -805,8 +886,8 @@ func (r EnvironmentRoutes) createEnvironment(w http.ResponseWriter, req *http.Re
 // decision resolvePlacement already made; created.ContextID (an FK, so a
 // context belonging to another tenant is rejected here too, the enforcement
 // point for tenant isolation on the reference) should always echo it back.
-func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment, placement resolvedPlacement) {
-	created, err := r.environments.Create(req.Context(), environment)
+func (r EnvironmentRoutes) persistAndMaybeProvision(w http.ResponseWriter, req *http.Request, environment model.Environment, placement resolvedPlacement, homeCtx context.Context, targetTenantID string, crossTenant bool) {
+	created, err := r.createEnvironmentRow(req.Context(), homeCtx, targetTenantID, crossTenant, environment)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return

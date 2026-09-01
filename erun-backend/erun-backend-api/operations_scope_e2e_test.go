@@ -3,6 +3,7 @@ package backendapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -322,5 +323,144 @@ func TestRoleListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 	if !foundOwn {
 		t.Fatalf("List = %v, want the operations caller's own OpsRole included", list)
+	}
+}
+
+// seedScopeTestUser creates a user in tenantID with the AllAccess role, so an
+// HTTP-level test exercises the tenant-scope behavior itself rather than
+// authorization.
+func seedScopeTestUser(t *testing.T, db *sql.DB, tenantID, username string) string {
+	t.Helper()
+	var userID string
+	mustNoErr(t, db.QueryRow(`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`, tenantID, username).Scan(&userID), "seed user "+username)
+	grantAllAccessRole(t, db, tenantID, userID)
+	return userID
+}
+
+// TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller drives
+// GET /v1/environments?tenantId=<target> over HTTP (#1816): an operations
+// caller naming another tenant sees exactly that tenant's environments, and
+// a company caller making the identical request is refused before any row
+// is read, proving the boundary is enforced server-side rather than by the
+// caller's own good behavior.
+func TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller(t *testing.T) {
+	_, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
+	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
+	strangerEnv, err := environments.Create(strangerCtx, model.Environment{Name: "stranger-env", Type: model.EnvironmentTypeRemoteAgent})
+	mustNoErr(t, err, "create stranger environment")
+
+	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
+	companyTenantID := seedScopeTestTenant(t, db, "company-scope-e2e", model.TenantTypeCompany)
+	t.Cleanup(func() {
+		for _, table := range []string{"audit_events", "user_roles", "role_permissions", "roles", "users", "tenants"} {
+			if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, companyTenantID); err != nil {
+				t.Logf("clearing %s for tenant %s: %v", table, companyTenantID, err)
+			}
+		}
+	})
+	companyUserID := seedScopeTestUser(t, db, companyTenantID, "company-caller")
+
+	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
+	companyServer := startEnvironmentsAPIServer(t, db, companyTenantID, model.TenantTypeCompany, companyUserID)
+
+	code, body := e2eRequest(t, opsServer.URL, http.MethodGet, "/v1/environments?tenantId="+strangerTenantID, nil)
+	if code != http.StatusOK {
+		t.Fatalf("operations caller scoped list: HTTP %d: %s", code, body)
+	}
+	var listed []model.Environment
+	mustNoErr(t, json.Unmarshal([]byte(body), &listed), "parse list response")
+	if len(listed) != 1 || listed[0].EnvironmentID != strangerEnv.EnvironmentID || listed[0].TenantID != strangerTenantID {
+		t.Fatalf("scoped list = %s, want exactly the stranger tenant's one environment (tenantId %s)", body, strangerTenantID)
+	}
+
+	code, body = e2eRequest(t, companyServer.URL, http.MethodGet, "/v1/environments?tenantId="+strangerTenantID, nil)
+	if code != http.StatusForbidden {
+		t.Fatalf("company caller scoped list: HTTP %d (want 403 — only an operations tenant may target another tenant): %s", code, body)
+	}
+}
+
+// auditParametersColumn reads api_parameters back directly: the audit read
+// API never selects it (see model.AuditEvent's own comment on why), so a
+// test proving what was recorded has to go straight to the table.
+func auditParametersColumn(t *testing.T, db *sql.DB, tenantID, apiPath string) string {
+	t.Helper()
+	var parameters sql.NullString
+	mustNoErr(t, db.QueryRow(
+		`SELECT api_parameters FROM audit_events WHERE tenant_id = $1 AND api_path = $2 AND api_parameters IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+		tenantID, apiPath,
+	).Scan(&parameters), "read audit api_parameters")
+	return parameters.String
+}
+
+// TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits proves
+// the write half server-side, end to end: an operations caller's POST
+// /v1/environments naming tenantId places the row in the target tenant (read
+// back directly, not trusted from the response), and a distinct audit event
+// records the operator's home tenant plus the target in api_parameters —
+// the attribution #1816 requires because the write itself, once persisted,
+// only ever names the target.
+func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testing.T) {
+	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
+	opsSecurity, _ := security.FromContext(opsCtx)
+	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
+	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
+
+	code, body := e2eRequest(t, opsServer.URL, http.MethodPost, "/v1/environments", map[string]any{
+		"name": "cross-tenant-env", "type": "remote-agent", "tenantId": strangerTenantID,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("operations caller cross-tenant create: HTTP %d: %s", code, body)
+	}
+	var created model.Environment
+	mustNoErr(t, json.Unmarshal([]byte(body), &created), "parse create response")
+
+	var persistedTenantID string
+	mustNoErr(t, db.QueryRow(`SELECT tenant_id FROM environments WHERE environment_id = $1`, created.EnvironmentID).Scan(&persistedTenantID), "read persisted tenant_id")
+	if persistedTenantID != strangerTenantID {
+		t.Fatalf("persisted tenant_id = %q, want %q (the target tenant, not the operator's own %q)", persistedTenantID, strangerTenantID, opsTenantID)
+	}
+
+	parameters := auditParametersColumn(t, db, opsSecurity.TenantID, "/v1/environments")
+	if parameters == "" {
+		t.Fatal("expected an audit event with api_parameters recording the cross-tenant create, found none")
+	}
+	var decoded struct {
+		TargetTenantID string `json:"targetTenantId"`
+		Name           string `json:"name"`
+	}
+	mustNoErr(t, json.Unmarshal([]byte(parameters), &decoded), "decode api_parameters")
+	if decoded.TargetTenantID != strangerTenantID || decoded.Name != "cross-tenant-env" {
+		t.Fatalf("api_parameters = %+v, want targetTenantId=%s name=cross-tenant-env", decoded, strangerTenantID)
+	}
+}
+
+// TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller is the
+// unentitled-write refusal test (#1816): a company caller naming another
+// tenant on create is refused server-side with 403, and — the property that
+// actually matters — no row is created anywhere, not even in the caller's
+// own tenant, proving the refusal happens before any write is attempted.
+func TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller(t *testing.T) {
+	_, _, _, strangerTenantID, db := operationsScopeDatabase(t)
+	strangerUserID := seedScopeTestUser(t, db, strangerTenantID, "stranger-caller")
+	strangerServer := startEnvironmentsAPIServer(t, db, strangerTenantID, model.TenantTypeCompany, strangerUserID)
+
+	otherTenantID := seedScopeTestTenant(t, db, "other-scope-e2e", model.TenantTypeCompany)
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM tenants WHERE tenant_id = $1`, otherTenantID); err != nil {
+			t.Logf("clearing tenant %s: %v", otherTenantID, err)
+		}
+	})
+
+	code, body := e2eRequest(t, strangerServer.URL, http.MethodPost, "/v1/environments", map[string]any{
+		"name": "should-not-exist", "type": "remote-agent", "tenantId": otherTenantID,
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("company caller cross-tenant create: HTTP %d (want 403): %s", code, body)
+	}
+
+	var count int
+	mustNoErr(t, db.QueryRow(`SELECT COUNT(*) FROM environments WHERE name = 'should-not-exist'`).Scan(&count), "count environments")
+	if count != 0 {
+		t.Fatalf("expected no environment to be created by a refused cross-tenant request, found %d", count)
 	}
 }
