@@ -50,6 +50,25 @@ export function orchestratorNudgeSummary(orchestrator: NudgeSummaryFields, nowMs
   return facts.length > 0 ? facts.join('; ') : 'Not nudged';
 }
 
+// orchestratorHasNudgeHistory is true exactly when orchestratorNudgeSummary
+// would report something other than "Not nudged": cumulative history that
+// survives a stopped session (persisted per orchestrator id, restored on the
+// next Start/Restart), or an unreadable record whose absence of history is
+// unverified rather than confirmed. The hover card's Nudges row uses this to
+// decide whether to render at all while the orchestrator is not running --
+// otherwise a stopped orchestrator's real nudge history would be computed by
+// the backend and then thrown away by a row that only ever rendered while
+// running.
+export function orchestratorHasNudgeHistory(orchestrator: NudgeSummaryFields): boolean {
+  return (
+    orchestrator.nudgeCapped ||
+    orchestrator.autoNudgeCount > 0 ||
+    orchestrator.whipCount > 0 ||
+    Boolean(orchestrator.lastCappedAtUnix) ||
+    Boolean(orchestrator.nudgeHistoryUnreadable)
+  );
+}
+
 function historyFact(
   verb: string,
   count: number,

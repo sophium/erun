@@ -419,7 +419,31 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await captureHoverCard(dialog, '/home/erun/.erun/outputs/1383-visual/capped-nudge.png');
   });
 
-  test('a stopped orchestrator reports no nudge row at all', async ({ app, page }) => {
+  // A restored persisted-history read is a Go-side concern (a real desktop
+  // restart, or the on-disk file, is unreachable from this harness) --
+  // covered by erun-ui/orchestrator_nudge_history_test.go. What IS reachable
+  // here is the frontend's own rendering rule once the backend reports the
+  // unreadable flag: nudgeHistoryUnreadable must read as a distinct,
+  // actionable state, never silently collapse onto "Not nudged".
+  test('an unreadable persisted history reads as unavailable, never as "Not nudged"', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(page, snapshot({ nudgeHistoryUnreadable: true }));
+    await app.reboot();
+
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
+
+    const dialog = card(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Nudge history unavailable');
+    await expect(dialog).not.toContainText('Not nudged');
+  });
+
+  test('a stopped orchestrator with no nudge history reports no nudge row at all', async ({
+    app,
+    page,
+  }) => {
     await stubOrchestratorList(page, snapshot({ status: 'stopped', sessionId: 0 }));
     await app.reboot();
 
@@ -428,6 +452,32 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     const dialog = card(page);
     await expect(dialog).toBeVisible();
     await expect(dialog).not.toContainText('Nudges');
+  });
+
+  // The persisted cumulative history survives a Stop (orchestrator_nudge_
+  // history.go), so a stopped orchestrator that WAS nudged before it stopped
+  // must still show its history -- the fix this locks in: before it, the row
+  // was hidden unconditionally whenever status was not "running", which
+  // would have thrown the backend's restored history away on the one screen
+  // an operator checking "did the pacer actually run" looks at first.
+  test('a stopped orchestrator with real nudge history still reports it', async ({ app, page }) => {
+    await stubOrchestratorList(
+      page,
+      snapshot({
+        status: 'stopped',
+        sessionId: 0,
+        autoNudgeCount: 4,
+        lastAutoNudgeAtUnix: Math.floor(Date.now() / 1000) - 300,
+      }),
+    );
+    await app.reboot();
+
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
+
+    const dialog = card(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Nudges');
+    await expect(dialog).toContainText('Nudged 4x');
   });
 
   // Linked through a stubbed ListOrchestrators (like the tests above) rather

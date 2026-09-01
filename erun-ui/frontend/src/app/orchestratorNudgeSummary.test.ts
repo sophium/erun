@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { orchestratorNudgeSummary } from './orchestratorNudgeSummary';
+import { orchestratorHasNudgeHistory, orchestratorNudgeSummary } from './orchestratorNudgeSummary';
 
 function fields(overrides: Partial<Parameters<typeof orchestratorNudgeSummary>[0]> = {}) {
   return {
@@ -95,4 +95,16 @@ test('a session with real nudges still reports them even if this restore happene
     now,
   );
   assert.match(summary, /^Nudged 2x, last .+ ago$/);
+});
+
+test('orchestratorHasNudgeHistory is false for a session with nothing to report', () => {
+  assert.equal(orchestratorHasNudgeHistory(fields()), false);
+});
+
+test('orchestratorHasNudgeHistory is true for cumulative history, a cap, or an unreadable record', () => {
+  assert.equal(orchestratorHasNudgeHistory(fields({ autoNudgeCount: 1 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ whipCount: 1 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ lastCappedAtUnix: 123 })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ nudgeCapped: true })), true);
+  assert.equal(orchestratorHasNudgeHistory(fields({ nudgeHistoryUnreadable: true })), true);
 });
