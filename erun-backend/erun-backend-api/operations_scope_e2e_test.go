@@ -434,6 +434,43 @@ func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testi
 	}
 }
 
+// TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTenantsOwnContext
+// proves the composition this PR's summary claims: now that
+// ContextRepository.List is scoped explicitly to the security context's
+// TenantID, autoSelectPlacement's list read depends on which tenant's
+// context scopedContextForTenant put in the request context. A runtime
+// create with no explicit contextId must auto-select the *target* tenant's
+// own running context, never the operator's own — even though the operator
+// has a running context of its own that would otherwise be the only
+// candidate.
+func TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTenantsOwnContext(t *testing.T) {
+	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
+	contexts := repository.NewContextRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	opsContext, err := contexts.Create(opsCtx, model.Context{Name: "ops-own-context", Provider: "aws"})
+	mustNoErr(t, err, "create ops context")
+	mustNoErr(t, contexts.UpdateProvisioningResult(opsCtx, opsContext.ContextID, "running", "ops-instance", "10.0.0.1", ""), "mark ops context running")
+
+	targetContext, err := contexts.Create(strangerCtx, model.Context{Name: "target-own-context", Provider: "aws"})
+	mustNoErr(t, err, "create target context")
+	mustNoErr(t, contexts.UpdateProvisioningResult(strangerCtx, targetContext.ContextID, "running", "target-instance", "10.0.0.2", ""), "mark target context running")
+
+	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
+	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
+
+	code, body := e2eRequest(t, opsServer.URL, http.MethodPost, "/v1/environments", map[string]any{
+		"name": "cross-tenant-runtime-env", "type": "runtime", "runtimeVersion": "1.0.0", "tenantId": strangerTenantID,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("operations caller cross-tenant runtime create: HTTP %d: %s", code, body)
+	}
+	var created model.Environment
+	mustNoErr(t, json.Unmarshal([]byte(body), &created), "parse create response")
+	if created.ContextID != targetContext.ContextID {
+		t.Fatalf("auto-selected contextId = %q, want %q (the target tenant's own running context, not the operator's %q)", created.ContextID, targetContext.ContextID, opsContext.ContextID)
+	}
+}
+
 // TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller is the
 // unentitled-write refusal test: a company caller naming another
 // tenant on create is refused server-side with 403, and — the property that
