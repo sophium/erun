@@ -1,9 +1,26 @@
 package eruncommon
 
 import (
+	"bytes"
+	"io"
+	"strings"
 	"testing"
 	"time"
 )
+
+// fakeKubectlPodRunner stubs the kubectl call jobSupervisorContainerRestart
+// makes, so a test can supply a canned `kubectl get pod -o json` response (or
+// a failure) without shelling out to a real kubectl or cluster.
+func fakeKubectlPodRunner(t *testing.T, stdout string, err error) openKubectlRunnerFunc {
+	t.Helper()
+	return func(args []string, out, errOut io.Writer) error {
+		if err != nil {
+			return err
+		}
+		_, writeErr := io.Copy(out, bytes.NewBufferString(stdout))
+		return writeErr
+	}
+}
 
 func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *testing.T) {
 	dir := t.TempDir()
@@ -20,14 +37,6 @@ func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *te
 		}
 		if resolved.Reason == "" {
 			t.Error("expected a non-empty Reason")
-		}
-	})
-
-	t.Run("same hostname, dead process is the supervisor gone case", func(t *testing.T) {
-		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "same-pod-abc123"}
-		resolved := reconcileEnvironmentJob(dir, job, now, neverAlive, "same-pod-abc123")
-		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
-			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
 		}
 	})
 
@@ -55,6 +64,67 @@ func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *te
 		}
 		if resolved.UnknownReasonKind != "" {
 			t.Errorf("UnknownReasonKind = %q, want empty for a still-running job", resolved.UnknownReasonKind)
+		}
+	})
+}
+
+// TestReconcileEnvironmentJobChecksContainerRestartOnSamePod covers the case
+// TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone does
+// not: hostname match rules out a pod replacement, and the same-pod branch
+// then asks Kubernetes whether the runtime container itself restarted rather
+// than guessing.
+func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(0, 0)
+
+	t.Run("restart check unavailable is the supervisor gone case, not a guessed replacement", func(t *testing.T) {
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "same-pod-abc123"}
+		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", nil)
+		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
+			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
+		}
+		if strings.Contains(resolved.Reason, "most likely replaced") {
+			t.Errorf("Reason = %q, must not guess a replacement when the pod is known to be the same one", resolved.Reason)
+		}
+	})
+
+	t.Run("kubectl finds no restart is also supervisor gone", func(t *testing.T) {
+		job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "same-pod-abc123"}
+		runner := fakeKubectlPodRunner(t, `{"status":{"containerStatuses":[{"name":"erun-devops","restartCount":0}]}}`, nil)
+		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
+		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
+			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
+		}
+	})
+
+	t.Run("kubectl shows an attributable OOM kill names it", func(t *testing.T) {
+		job := EnvironmentJob{
+			PID:         123,
+			State:       EnvironmentJobStateRunning,
+			Hostname:    "same-pod-abc123",
+			LastAliveAt: time.Unix(0, 0),
+		}
+		runner := fakeKubectlPodRunner(t, `{"status":{"containerStatuses":[{"name":"erun-devops","restartCount":1,"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled","finishedAt":"1970-01-01T00:00:05Z"}}}]}}`, nil)
+		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
+		if resolved.UnknownReasonKind != UnknownReasonContainerRestarted {
+			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonContainerRestarted)
+		}
+		if !strings.Contains(resolved.Reason, "OOMKilled") || !strings.Contains(resolved.Reason, "137") {
+			t.Errorf("Reason = %q, want it to name the OOMKilled reason and exit code 137", resolved.Reason)
+		}
+	})
+
+	t.Run("kubectl shows a restart from before this job started is not attributed to it", func(t *testing.T) {
+		job := EnvironmentJob{
+			PID:         123,
+			State:       EnvironmentJobStateRunning,
+			Hostname:    "same-pod-abc123",
+			LastAliveAt: time.Unix(100, 0),
+		}
+		runner := fakeKubectlPodRunner(t, `{"status":{"containerStatuses":[{"name":"erun-devops","restartCount":1,"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled","finishedAt":"1970-01-01T00:00:05Z"}}}]}}`, nil)
+		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
+		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
+			t.Fatalf("UnknownReasonKind = %q, want %q (the restart predates this job's own last known alive beat)", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
 		}
 	})
 }

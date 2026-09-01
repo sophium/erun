@@ -74,10 +74,20 @@ const (
 	// work — most often eviction (e.g. a release filling the node's disk) or an
 	// operator-triggered redeploy/restart — and the work is gone with it.
 	UnknownReasonPodReplaced = "pod-replaced"
-	// UnknownReasonSupervisorGone means the same pod is still running, but the
-	// supervisor process the job recorded is not (e.g. OOM-killed, or killed
-	// directly) without recording an outcome. Distinct from a pod replacement:
-	// the environment survived, only the one process did not.
+	// UnknownReasonContainerRestarted is certain, not a guess: the same pod
+	// answered a live `kubectl get pod` with lastState.terminated for the
+	// runtime container, naming a reason and exit code that lands at or after
+	// this job was last known alive. The pod was not replaced; its container
+	// was killed and Kubernetes restarted it in place, taking the supervisor
+	// process with it.
+	UnknownReasonContainerRestarted = "container-restarted"
+	// UnknownReasonSupervisorGone means the same pod is still running, and
+	// nothing checkable explains why the supervisor process the job recorded
+	// is not: either the Kubernetes API could not be reached to check for a
+	// container restart, or it answered and found none attributable to this
+	// job. Distinct from a pod replacement (the environment survived) and
+	// from a container restart (a checked, named cause) alike -- this is the
+	// genuinely-unknown case, and the reason says so instead of guessing.
 	UnknownReasonSupervisorGone = "supervisor-gone"
 	// UnknownReasonAttachedProcessGone means the job was never started by
 	// erun — it tracks a pid the caller named — so there was never a
@@ -246,9 +256,9 @@ type EnvironmentJob struct {
 	// work ended when it was not a plain exit.
 	Reason string `json:"reason,omitempty"`
 	// UnknownReasonKind is Reason's machine-readable twin, set only when State is
-	// unknown: one of UnknownReasonPodReplaced, UnknownReasonSupervisorGone, or
-	// UnknownReasonAttachedProcessGone. A caller branches on this rather than
-	// pattern-matching Reason's free text.
+	// unknown: one of UnknownReasonPodReplaced, UnknownReasonContainerRestarted,
+	// UnknownReasonSupervisorGone, or UnknownReasonAttachedProcessGone. A caller
+	// branches on this rather than pattern-matching Reason's free text.
 	UnknownReasonKind string `json:"unknownReasonKind,omitempty"`
 	// Attached marks work erun did not start. Its outcome is never captured,
 	// because nothing erun ran was in a position to observe it.
@@ -467,6 +477,13 @@ func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(i
 // the job is demoted to unknown and that demotion is persisted, so every later
 // read gives the same definite answer.
 func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, alive func(int) bool, hostname string) EnvironmentJob {
+	return reconcileEnvironmentJobWithRestartCheck(dir, job, now, alive, hostname, runOpenKubectl)
+}
+
+// reconcileEnvironmentJobWithRestartCheck is reconcileEnvironmentJob with the
+// Kubernetes restart lookup injectable, so a test can supply a fake pod
+// response instead of shelling out to a real kubectl.
+func reconcileEnvironmentJobWithRestartCheck(dir string, job EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner openKubectlRunnerFunc) EnvironmentJob {
 	// Computed fresh on every read, in the reader's own now, and never
 	// persisted: a stale value on disk would be meaningless without the read
 	// time that produced it, exactly like OutputBytes below.
@@ -480,6 +497,20 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 		job.Succeeded = environmentJobSucceeded(job)
 		return job
 	}
+	job = demoteEnvironmentJobToUnknown(job, now, hostname, restartRunner)
+	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
+	job.Succeeded = environmentJobSucceeded(job)
+	_ = writeEnvironmentJob(dir, job)
+	return job
+}
+
+// demoteEnvironmentJobToUnknown fills in the State/UnknownReasonKind/Reason a
+// job gets once its supervisor is confirmed gone: attached work was never in
+// a position to observe an exit, a hostname mismatch is a definite pod
+// replacement, a hostname match rules that out and defers to
+// reconcileSamePodUnknownReason, and no hostname at all leaves nothing to
+// compare against.
+func demoteEnvironmentJobToUnknown(job EnvironmentJob, now time.Time, hostname string, restartRunner openKubectlRunnerFunc) EnvironmentJob {
 	job.State = EnvironmentJobStateUnknown
 	job.EndedAt = now
 	job.ExitCode = nil
@@ -490,18 +521,33 @@ func reconcileEnvironmentJob(dir string, job EnvironmentJob, now time.Time, aliv
 	case job.Hostname != "" && job.Hostname != hostname:
 		job.UnknownReasonKind = UnknownReasonPodReplaced
 		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; the runtime pod was replaced (started on %q, this is %q)", job.PID, job.Hostname, hostname)
+	case job.Hostname != "" && job.Hostname == hostname:
+		job.UnknownReasonKind, job.Reason = reconcileSamePodUnknownReason(job, hostname, restartRunner)
 	default:
-		// Either the hostname matches (same pod, the supervisor process itself
-		// is gone) or this job predates hostname tracking and there is nothing
-		// to compare against — either way, pod replacement is a guess rather
-		// than the certainty the hostname comparison above gives.
+		// This job predates hostname tracking, or hostname resolution failed on
+		// both ends: there is nothing to compare against, so neither a
+		// replacement nor a restart can be confirmed or ruled out.
 		job.UnknownReasonKind = UnknownReasonSupervisorGone
-		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; the runtime pod was most likely replaced", job.PID)
+		job.Reason = fmt.Sprintf("job supervisor %d is gone without recording an exit status; this job predates hostname tracking, so whether the pod was replaced could not be determined", job.PID)
 	}
-	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
-	job.Succeeded = environmentJobSucceeded(job)
-	_ = writeEnvironmentJob(dir, job)
 	return job
+}
+
+// reconcileSamePodUnknownReason handles the one case where a replacement is
+// ruled out (hostname matches, so this is definitely the same pod): it asks
+// Kubernetes whether the runtime container itself restarted, and only credits
+// that restart when its timestamp lands at or after this job was last known
+// alive -- a checked, named cause beats a guessed one, but only when it is
+// actually attributable to this job rather than some earlier, unrelated one.
+func reconcileSamePodUnknownReason(job EnvironmentJob, hostname string, restartRunner openKubectlRunnerFunc) (kind, reason string) {
+	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, DevopsComponentName, restartRunner)
+	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
+		return UnknownReasonSupervisorGone, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
+	}
+	if terminatedReason == "" {
+		terminatedReason = "no reason reported"
+	}
+	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
 }
 
 // environmentJobChildren returns every job in dir that names parentID as its

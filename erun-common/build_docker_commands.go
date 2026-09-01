@@ -252,6 +252,9 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 			Err:      err,
 		}
 	}
+	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
+		return DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
+	}
 	return err
 }
 
