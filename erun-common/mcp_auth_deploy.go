@@ -302,15 +302,6 @@ func mcpAuthSecretName(releaseName string) string {
 	return strings.TrimSpace(releaseName) + "-mcp-auth"
 }
 
-func mcpAuthSecretApplyArgs(namespace, kubernetesContext string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", strings.TrimSpace(namespace), "apply", "-f", "-")
-	return args
-}
-
 // renderMCPAuthSecret writes the desktop public key under the filename the
 // chart mounts and the file:// issuer both reference, so all three agree. The
 // key is public but rides in a Secret to reuse the Cloudflare token's apply path.
@@ -335,7 +326,7 @@ func applyMCPAuthSecret(ctx Context, deployInput HelmDeploySpec) error {
 	if !deployInput.MCPAuthEnabled || strings.TrimSpace(deployInput.MCPAuthSecretName) == "" {
 		return nil
 	}
-	args := mcpAuthSecretApplyArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.Trace("apply mcp auth public key secret " + deployInput.MCPAuthSecretName)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -349,12 +340,7 @@ func applyMCPAuthSecret(ctx Context, deployInput HelmDeploySpec) error {
 		deployInput.Namespace,
 		deployInput.MCPAuthPublicKeyPEM,
 	)
-	cmd := Command("kubectl", args...)
-	cmd.Stdin = strings.NewReader(manifest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl apply mcp auth secret: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "mcp auth secret", manifest, args)
 }
 
 // applyMCPAuthDeployMetadata records the MCP-auth fields but applies no Secret

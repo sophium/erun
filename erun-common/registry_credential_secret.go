@@ -91,17 +91,6 @@ func dockerConfigJSONForCredentials(credentials map[string]registryBasicAuth) (s
 	return dockerConfigJSONForAuthEntries(dockerConfigJSONAuthEntriesForCredentials(credentials))
 }
 
-// registryCredentialSecretApplyArgs mirrors cloudflareSecretApplyArgs /
-// mcpAuthSecretApplyArgs: a manifest piped via stdin, never an argv element.
-func registryCredentialSecretApplyArgs(namespace, kubernetesContext string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", strings.TrimSpace(namespace), "apply", "-f", "-")
-	return args
-}
-
 // renderRegistryCredentialSecret wraps dockerConfigJSON in a standard
 // dockerconfigjson Secret manifest, the same shape `kubectl create secret
 // docker-registry` produces, so any tool that understands one understands the
@@ -139,7 +128,7 @@ func provisionRegistryCredentialSecret(ctx Context, tenant, namespace, kubernete
 		return "", nil
 	}
 	name := registryCredentialSecretName(tenant)
-	args := registryCredentialSecretApplyArgs(namespace, kubernetesContext)
+	args := kubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply registry credential secret " + name + " (credential redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -150,10 +139,8 @@ func provisionRegistryCredentialSecret(ctx Context, tenant, namespace, kubernete
 		return "", fmt.Errorf("render registry credential secret: %w", err)
 	}
 	manifest := renderRegistryCredentialSecret(name, namespace, dockerConfigJSON)
-	cmd := Command("kubectl", args...)
-	cmd.Stdin = strings.NewReader(manifest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("kubectl apply registry credential secret: %w: %s", err, strings.TrimSpace(string(out)))
+	if err := applySecretManifest(kubernetesContext, namespace, "registry credential secret", manifest, args); err != nil {
+		return "", err
 	}
 	return name, nil
 }

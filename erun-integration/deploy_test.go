@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -808,6 +809,146 @@ esac
 		}
 		if got := apiHits.Load(); got == 0 {
 			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_secret_apply_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-secret-apply: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_image_pull_secrets) even with
+		// execution.modes.kubectl-secret-apply=library, since
+		// applyImagePullSecrets only ever renders the get/apply trace lines
+		// and never calls applySecretManifest on a dry run. The whole point of
+		// the switch is that the rendered command is the audit contract
+		// regardless of which path executes it, and this is the assertion that
+		// says so for the first mutating operation on it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-apply", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_secret_apply_library_execution_mode_client_side_applies_via_the_api_server", func(t *testing.T) {
+		// The mutating counterpart of the read-side library scenarios, and the
+		// test that pins the design finding behind this operation: the library
+		// path must reproduce kubectl's *client-side* apply, not substitute a
+		// server-side one. Server-side apply writes no
+		// last-applied-configuration annotation and records ownership under
+		// its own field manager, so an object applied once in each mode would
+		// permanently diverge from one only ever applied by kubectl -- and the
+		// traced `kubectl apply` line would stop describing what reached the
+		// cluster. Asserting the wire format (a strategic-merge PATCH carrying
+		// the annotation, never an apply-patch) is what keeps a later
+		// "simplification" to SSA from landing silently.
+		//
+		// kubectl-secret-get stays on the subprocess path here so the stub
+		// answers the read and only the apply crosses to the library path; the
+		// stub then fails loudly and distinctively for the "apply -f -" argv
+		// shape, so a fallback surfaces as a recognizable deploy failure
+		// instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-apply", "library")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		liveSecretJSON := `{"kind":"Secret","apiVersion":"v1","metadata":{"name":"ecr-pull","namespace":"team-dev"},"type":"kubernetes.io/dockerconfigjson"}`
+
+		var patchContentType, patchBody atomic.Value
+		patchContentType.Store("")
+		patchBody.Store("")
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/namespaces/team-dev/secrets/ecr-pull" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if r.Method == http.MethodPatch {
+				body, _ := io.ReadAll(r.Body)
+				patchContentType.Store(r.Header.Get("Content-Type"))
+				patchBody.Store(string(body))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, liveSecretJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;`,
+			`  *"apply -f -"*) printf '%s\n' "fell through to the kubectl subprocess for the image pull secret apply" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("image pull secret apply used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		gotContentType, _ := patchContentType.Load().(string)
+		if gotContentType != "application/strategic-merge-patch+json" {
+			t.Fatalf("apply must be kubectl's client-side three-way strategic merge, got content type %q", gotContentType)
+		}
+		gotBody, _ := patchBody.Load().(string)
+		if !strings.Contains(gotBody, "kubectl.kubernetes.io/last-applied-configuration") {
+			t.Fatalf("the patch must record the last-applied configuration kubectl's next apply merges against, got: %s", gotBody)
 		}
 		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
 			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)

@@ -48,18 +48,6 @@ func powerDNSDeleteArgs(params DNSRecordDeleteParams) []string {
 	return append(args, "delete-rrset", params.Zone, relName, params.Type)
 }
 
-// ingressApplyArgs is shared by the dry-run trace and the live exec. Reading the
-// manifest from stdin (`-f -`) keeps a temp-file path out of the argv, so the trace
-// stays deterministic.
-func ingressApplyArgs(params IngressApplyParams) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(params.KubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", params.Namespace, "apply", "-f", "-")
-	return args
-}
-
 // upsertPowerDNSRecord is live-only: it must never run under a dry-run.
 func upsertPowerDNSRecord(params DNSRecordUpsertParams) error {
 	if out, err := Command("kubectl", powerDNSUpsertArgs(params)...).CombinedOutput(); err != nil {
@@ -80,7 +68,7 @@ func deletePowerDNSRecord(params DNSRecordDeleteParams) error {
 // applyHostRoutingIngress is live-only: RunExposeService short-circuits before
 // calling it, so it never runs under a dry-run.
 func applyHostRoutingIngress(params IngressApplyParams) error {
-	cmd := Command("kubectl", ingressApplyArgs(params)...)
+	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderHostRoutingIngress(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply ingress: %w: %s", err, strings.TrimSpace(string(out)))
@@ -88,23 +76,12 @@ func applyHostRoutingIngress(params IngressApplyParams) error {
 	return nil
 }
 
-// tlsApplyArgs is shared by every TLS-provisioning apply (the token Secret,
-// the Issuer, the Certificate) — `kubectl apply -f -` takes its manifest from
-// stdin regardless of kind, so the argv is identical across all three.
-func tlsApplyArgs(context, namespace string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(context); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	return append(args, "-n", namespace, "apply", "-f", "-")
-}
-
 // traceTLSCertPlan traces the per-env TLS provisioning plan a dry-run would
 // perform: the token Secret's apply command only (its content is a credential
 // and stays redacted, matching applyMCPAuthSecret), and the Issuer/Certificate
 // commands plus their non-secret manifests in full.
 func traceTLSCertPlan(ctx Context, params TLSCertApplyParams) {
-	args := tlsApplyArgs(params.KubernetesContext, params.Namespace)
+	args := kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
 	ctx.Trace(fmt.Sprintf("expose: tls: dns01 token secret %s (namespace %s, token read from %s, content redacted)", params.TokenSecretName, params.Namespace, params.Cert.DNS01TokenPath))
 	ctx.TraceCommand("", "kubectl", args...)
 	ctx.Trace(fmt.Sprintf("expose: tls: namespaced issuer %s -> broker %s (subzone %s.%s)", params.IssuerName, params.Cert.DNS01BrokerURL, params.EnvLabel, params.ServicesZone))
@@ -135,16 +112,17 @@ func applyDNS01TokenSecret(params TLSCertApplyParams) error {
 	if err != nil {
 		return err
 	}
-	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
-	cmd.Stdin = strings.NewReader(manifest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl apply dns01 token secret: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	args := kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
+	return applySecretManifest(params.KubernetesContext, params.Namespace, "dns01 token secret", manifest, args)
 }
 
+// applyPerEnvIssuer and applyPerEnvCertificate stay on the subprocess path
+// even when the Secret above takes the library one: a cert-manager custom
+// resource has no typed patch metadata, so kubectl merges it by a different
+// algorithm reached through discovery and a dynamic client (see
+// kubectlSecretApplyExecutionOperation).
 func applyPerEnvIssuer(params TLSCertApplyParams) error {
-	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
+	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvIssuer(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env issuer: %w: %s", err, strings.TrimSpace(string(out)))
@@ -153,7 +131,7 @@ func applyPerEnvIssuer(params TLSCertApplyParams) error {
 }
 
 func applyPerEnvCertificate(params TLSCertApplyParams) error {
-	cmd := Command("kubectl", tlsApplyArgs(params.KubernetesContext, params.Namespace)...)
+	cmd := Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvCertificate(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env certificate: %w: %s", err, strings.TrimSpace(string(out)))
