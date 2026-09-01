@@ -106,10 +106,27 @@ COPY erun-devops/k8s /src/erun-devops/k8s
 # COPY --from=test /test-ok fails, and no image is tagged. The Yarn cache
 # mount lets `yarn install` reuse fetched packages across builds the same way
 # the Go module/build caches do.
+#
+# DIND_MEMORY_LIMIT_MIB defaults to the erun-dind sidecar's own chart default
+# (runtime.dind.resources.limits.memory, "20480Mi" in
+# erun-devops/k8s/erun-devops/templates/service.yaml) and feeds
+# PARALLEL_GATE_MEMORY_LIMIT_MIB, which LINT_PARALLELISM/HELM_CHART_TEST_PARALLELISM
+# use to size their fan-out. This RUN step executes in a cgroup that is a
+# sibling of the sidecar's own limited cgroup, not a descendant of it, so
+# `cat /sys/fs/cgroup/memory.max` here reads "max" regardless of what the
+# sidecar is actually configured with -- scripts/parallel-gate.sh's own cgroup
+# reads are structurally blind in exactly this context. Passing the sidecar's
+# real ceiling in as a build arg is what lets the width calculation size
+# concurrent lint/test processes against the memory the operator actually
+# provisioned instead of silently dropping the memory term and sizing off CPU
+# quota alone (see that script's own comment on PARALLEL_GATE_MEMORY_LIMIT_MIB).
+# A tenant image built from a `<tenant>-devops` Dockerfile with a different
+# sidecar memory default should override this ARG to match.
+ARG DIND_MEMORY_LIMIT_MIB=20480
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    make check && touch /test-ok
+    PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" make check && touch /test-ok
 
 # Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit
 # GOOS/GOARCH with CGO disabled, so the compiler itself can run natively on
