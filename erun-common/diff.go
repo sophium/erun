@@ -136,7 +136,7 @@ func ResolveGitDiff(projectRoot string, runGit GitCommandRunnerFunc) (DiffResult
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
-	if err := runGit(projectRoot, stdout, stderr, "diff", "--no-color", "--no-ext-diff"); err != nil {
+	if err := runGit(projectRoot, stdout, stderr, currentScopeGitDiffArgs(gitDiffHeadFound(projectRoot, runGit))...); err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
@@ -179,7 +179,7 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit G
 	}
 
 	stdout := new(bytes.Buffer)
-	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit)
+	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit, gitDiffHeadFound(projectRoot, runGit))
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, diffArgs...); err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
@@ -237,22 +237,55 @@ func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit
 	return resolved, nil
 }
 
-func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit string) []string {
-	args := []string{"diff", "--no-color", "--no-ext-diff"}
+func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit string, headFound bool) []string {
 	switch scope {
 	case "all":
+		args := []string{"diff", "--no-color", "--no-ext-diff"}
 		if baseFound {
 			args = append(args, baseCommit)
 		}
 		return args
 	case "commit":
+		args := []string{"diff", "--no-color", "--no-ext-diff"}
 		if selectedCommit != "" {
 			args = append(args, selectedCommit+"^")
 		}
 		return args
 	default:
-		return args
+		// "current" is the panel's "Current local changes" layer: staged and
+		// unstaged edits not yet committed, distinct from the "all"/"commit"
+		// layers that reach further back into history. A bare `git diff` only
+		// compares the worktree against the index, so a staged-but-uncommitted
+		// change was invisible here even though it is exactly the kind of
+		// local change this scope exists to show.
+		return currentScopeGitDiffArgs(headFound)
 	}
+}
+
+// gitEmptyTreeHash is git's well-known SHA-1 hash for the empty tree object --
+// identical in every repository, since it depends only on being empty, not on
+// any repo-specific content or history.
+const gitEmptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// currentScopeGitDiffArgs is the "current"/plain-default git invocation:
+// worktree plus index against HEAD, so staged changes show up alongside
+// unstaged ones. A repo with no commits yet has no HEAD to diff against, so
+// this diffs against the empty tree instead -- otherwise a freshly staged
+// file would compare equal to itself (worktree == index) and vanish exactly
+// like the bug this scope exists to fix.
+func currentScopeGitDiffArgs(headFound bool) []string {
+	args := []string{"diff", "--no-color", "--no-ext-diff"}
+	if headFound {
+		return append(args, "HEAD")
+	}
+	return append(args, gitEmptyTreeHash)
+}
+
+// gitDiffHeadFound reports whether HEAD resolves to a commit, so callers can
+// fall back to the index-only diff form for a repo with no commits yet.
+func gitDiffHeadFound(projectRoot string, runGit GitCommandRunnerFunc) bool {
+	_, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", "--quiet", "HEAD")
+	return err == nil
 }
 
 func resolveGitDiffReviewBase(projectRoot string, runGit GitCommandRunnerFunc) (DiffReviewBase, bool, error) {

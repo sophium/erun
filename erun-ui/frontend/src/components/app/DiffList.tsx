@@ -3,12 +3,17 @@ import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 
 import * as React from 'react';
 
 import { loadDiffReviewStatus } from '@/app/diffReviewStatusThunks';
-import { compactDiffError, diffLineMark, visibleDiffFilePaths } from '@/app/diffUtils';
+import {
+  compactDiffError,
+  diffLineMark,
+  diffReviewCommitCount,
+  visibleDiffFilePaths,
+} from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
-import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
+import { loadReviewDiff, requestReconnect, selectReviewRange } from '@/app/reviewThunks';
 import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
-import { diffPathKey } from '@/app/slices/reviewSlice';
+import { diffPathKey, type EnvDiffState, type ReviewScope } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
@@ -101,65 +106,93 @@ function DiffEnvSection({
     </div>
   );
 
-  const body = ((): React.ReactElement => {
-    if (slot.loading) {
-      return <ReviewStatus>Loading diff...</ReviewStatus>;
-    }
-    if (slot.error) {
-      return (
-        <DiffErrorAlert
-          message={compactDiffError(slot.error)}
-          loading={slot.loading}
-          reconnectable={slot.errorReconnectable}
-          kind={slot.errorKind}
-          onRetry={() => {
-            void dispatch(loadReviewDiff());
-          }}
-          onReconnect={() => {
-            dispatch(requestReconnect(target.tenant, target.environment, slot.errorKind));
-          }}
-        />
-      );
-    }
-    const allFiles = slot.diff?.files ?? [];
-    if (allFiles.length === 0) {
-      return <ReviewStatus>No changes</ReviewStatus>;
-    }
-    // Keep the diff panel's files and their order matching the changed-files
-    // tree's visible subset; diff.files is already ordered to match the tree.
-    // Collapsed dirs are env-keyed, so one env's collapsed directory cannot
-    // hide a same-named directory in another.
-    const collapsedForEnv = new Set(
-      collapsedDiffDirs
-        .filter((entry) => entry.startsWith(`${target.envKey}:`))
-        .map((entry) => entry.slice(target.envKey.length + 1)),
-    );
-    const visiblePaths = visibleDiffFilePaths(slot.diff?.tree ?? [], diffFilter, collapsedForEnv);
-    const files = allFiles.filter((file) => visiblePaths.has(file.path));
-    if (files.length === 0) {
-      return <ReviewStatus>No matching files</ReviewStatus>;
-    }
-    const commitHash = resolveDiffCommitHash(slot.diff);
-    return (
-      <>
-        {files.map((file) => (
-          <DiffFileView
-            key={file.path}
-            file={file}
-            envKey={target.envKey}
-            selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
-            commitHash={commitHash}
-            tenant={target.tenant}
-          />
-        ))}
-      </>
-    );
-  })();
-
   return (
     <>
       {header}
-      {body}
+      <DiffEnvSectionBody
+        target={target}
+        slot={slot}
+        diffFilter={diffFilter}
+        collapsedDiffDirs={collapsedDiffDirs}
+        selectedDiffPath={selectedDiffPath}
+      />
+    </>
+  );
+}
+
+// DiffEnvSectionBody is DiffEnvSection's own body, split out so the
+// loading/error/empty/populated branching doesn't grow DiffEnvSection itself
+// past the shared function-size and complexity budget (eslint.config.mjs).
+function DiffEnvSectionBody({
+  target,
+  slot,
+  diffFilter,
+  collapsedDiffDirs,
+  selectedDiffPath,
+}: {
+  target: ReviewEnvTarget;
+  slot: EnvDiffState;
+  diffFilter: string;
+  collapsedDiffDirs: string[];
+  selectedDiffPath: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  if (slot.loading) {
+    return <ReviewStatus>Loading diff...</ReviewStatus>;
+  }
+  if (slot.error) {
+    return (
+      <DiffErrorAlert
+        message={compactDiffError(slot.error)}
+        loading={slot.loading}
+        reconnectable={slot.errorReconnectable}
+        kind={slot.errorKind}
+        onRetry={() => {
+          void dispatch(loadReviewDiff());
+        }}
+        onReconnect={() => {
+          dispatch(requestReconnect(target.tenant, target.environment, slot.errorKind));
+        }}
+      />
+    );
+  }
+  const allFiles = slot.diff?.files ?? [];
+  if (allFiles.length === 0) {
+    return (
+      <DiffEmptyState
+        envKey={target.envKey}
+        scope={slot.scope}
+        commitCount={diffReviewCommitCount(slot.diff)}
+      />
+    );
+  }
+  // Keep the diff panel's files and their order matching the changed-files
+  // tree's visible subset; diff.files is already ordered to match the tree.
+  // Collapsed dirs are env-keyed, so one env's collapsed directory cannot
+  // hide a same-named directory in another.
+  const collapsedForEnv = new Set(
+    collapsedDiffDirs
+      .filter((entry) => entry.startsWith(`${target.envKey}:`))
+      .map((entry) => entry.slice(target.envKey.length + 1)),
+  );
+  const visiblePaths = visibleDiffFilePaths(slot.diff?.tree ?? [], diffFilter, collapsedForEnv);
+  const files = allFiles.filter((file) => visiblePaths.has(file.path));
+  if (files.length === 0) {
+    return <ReviewStatus>No matching files</ReviewStatus>;
+  }
+  const commitHash = resolveDiffCommitHash(slot.diff);
+  return (
+    <>
+      {files.map((file) => (
+        <DiffFileView
+          key={file.path}
+          file={file}
+          envKey={target.envKey}
+          selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
+          commitHash={commitHash}
+          tenant={target.tenant}
+        />
+      ))}
     </>
   );
 }
@@ -461,4 +494,50 @@ function DiffHunkView({
 
 export function ReviewStatus({ children }: { children: React.ReactNode }): React.ReactElement {
   return <div className="px-3 py-3.5 text-sm leading-[1.4] text-muted-foreground">{children}</div>;
+}
+
+// DiffEmptyState is the diff panel's (and the changed-files tree's) shared
+// empty-state render. The "current" scope only ever diffs uncommitted local
+// edits, so a clean worktree with commits ahead of the review base reads as
+// a flat "No changes" even though there is history waiting to be reviewed
+// under a different scope -- the result object already carries those commits
+// (DiffResult.reviewCommits), so asserting "no changes" without looking at
+// them would be exactly the confident-but-wrong empty state this component
+// exists to avoid. Other scopes ("all", "commit") have nothing further back
+// to point at, so they keep the plain message.
+export function DiffEmptyState({
+  envKey,
+  scope,
+  commitCount,
+}: {
+  envKey: string;
+  scope: ReviewScope;
+  commitCount: number;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  if (scope !== 'current' || commitCount === 0) {
+    return <ReviewStatus>No changes</ReviewStatus>;
+  }
+  return (
+    <div
+      role="status"
+      className="mx-1.5 my-2 flex flex-col items-start gap-2 rounded-[var(--radius)] border border-border bg-muted/40 px-3 py-2.5 text-[13px] leading-[1.4] text-muted-foreground"
+    >
+      <span>
+        No local changes —{' '}
+        {commitCount === 1 ? '1 commit is' : `${String(commitCount)} commits are`} not shown in this
+        view.
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          dispatch(selectReviewRange(envKey, 'all'));
+        }}
+      >
+        View all branch changes
+      </Button>
+    </div>
+  );
 }

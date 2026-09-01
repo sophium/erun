@@ -209,4 +209,77 @@ test.describe('review diff/tree consistency', () => {
       })
       .toBe(true);
   });
+
+  // Regression coverage for the diff panel's "current" scope reading as a
+  // flat "No changes" when the environment actually has commits ahead of the
+  // review base (e.g. just-committed, unpushed work) -- DiffEmptyState must
+  // point at "All branch changes" instead of asserting nothing is there to
+  // review. Covers both surfaces DiffEmptyState renders into (the diff panel
+  // body and the changed-files tree aside), and that the pointer's own button
+  // actually switches scope and loads the commits it named.
+  test('an empty "current" scope with commits ahead of base points at "All branch changes" in both the tree and the diff panel', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const emptyWithCommits = {
+      rawDiff: '',
+      workingDirectory: '/seed',
+      summary: { fileCount: 0, additions: 0, deletions: 0 },
+      files: [],
+      tree: [],
+      reviewBase: { branch: 'main', commit: 'def456', shortCommit: 'def456' },
+      reviewCommits: [
+        {
+          hash: 'a1',
+          shortHash: 'a1',
+          subject: 'Add widget',
+          author: 'Test',
+          date: '2026-01-01T00:00:00Z',
+        },
+        {
+          hash: 'a2',
+          shortHash: 'a2',
+          subject: 'Fix widget',
+          author: 'Test',
+          date: '2026-01-02T00:00:00Z',
+        },
+      ],
+      scope: 'current',
+      includesWorktree: true,
+    };
+    const allBranchChanges = diffResult(
+      [diffFile('feature.txt', 2)],
+      [fileNode('feature.txt', 'feature.txt', '', 0)],
+    );
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as {
+        method: string;
+        args?: [unknown, { scope?: string }?];
+      };
+      if (body.method === 'LoadDiff') {
+        const requestedScope = body.args?.[1]?.scope;
+        const data = requestedScope === 'all' ? allBranchChanges : emptyWithCommits;
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data }) });
+      }
+      await route.continue();
+    });
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await app.titlebar.toggleReviewPanel();
+    const review = app.reviewPanel;
+
+    const panelNotice = review.noLocalChangesNotice(review.diffContentRegion());
+    const treeNotice = review.noLocalChangesNotice(review.changedFilesTree());
+    await expect(panelNotice).toBeVisible();
+    await expect(panelNotice).toContainText('2 commits');
+    await expect(treeNotice).toBeVisible();
+    // Never a flat "No changes" that hides the two pending commits.
+    await expect(review.diffContentRegion().getByText('No changes', { exact: true })).toHaveCount(
+      0,
+    );
+
+    await review.viewAllBranchChangesButton(review.diffContentRegion()).click();
+    await expect.poll(() => review.diffSectionPaths()).toEqual(['feature.txt']);
+    await expect(panelNotice).toHaveCount(0);
+  });
 });

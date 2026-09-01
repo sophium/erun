@@ -2,13 +2,13 @@ import { cn, FileIcon } from 'erun-kit';
 import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
 
-import { filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
+import { diffReviewCommitCount, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { selectDiffPath, toggleDiffDirectory } from '@/app/reviewThunks';
 import { selectReviewEnvTargets } from '@/app/selectors';
-import { diffPathKey } from '@/app/slices/reviewSlice';
+import { diffPathKey, type EnvDiffState } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
-import { ReviewStatus } from '@/components/app/DiffList';
+import { DiffEmptyState, ReviewStatus } from '@/components/app/DiffList';
 import type { DiffTreeNode } from '@/types';
 
 import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
@@ -66,47 +66,77 @@ function ChangedFileTreeSection({
     </div>
   ) : null;
 
-  const body = ((): React.ReactElement => {
-    if (slot.loading) {
-      return <ReviewStatus>Loading...</ReviewStatus>;
-    }
-    if (slot.error) {
-      const notRunning = slot.errorReconnectable && slot.errorKind === 'not-open';
-      return (
-        <ReviewStatus>
-          {notRunning
-            ? 'Environment not running — open it from the diff panel.'
-            : 'Diff unavailable — see the diff panel for details.'}
-        </ReviewStatus>
-      );
-    }
-    // Collapsed directories are env-keyed, so a collapsed "app/" in one
-    // environment cannot hide a same-named directory in another.
-    const collapsedForEnv = new Set(
-      collapsedDiffDirs
-        .filter((entry) => entry.startsWith(`${envKey}:`))
-        .map((entry) => entry.slice(envKey.length + 1)),
-    );
-    const tree = visibleDiffTreeNodes(
-      filterDiffTree(slot.diff?.tree ?? [], diffFilter),
-      collapsedForEnv,
-    );
-    if (tree.length === 0) {
-      return <ReviewStatus>{slot.diff ? 'No matching files' : 'No changes'}</ReviewStatus>;
-    }
-    return (
-      <>
-        {tree.map((node) => (
-          <ChangedFileNode key={node.path} envKey={envKey} node={node} />
-        ))}
-      </>
-    );
-  })();
+  const body = (
+    <ChangedFileTreeSectionBody
+      envKey={envKey}
+      slot={slot}
+      diffFilter={diffFilter}
+      collapsedDiffDirs={collapsedDiffDirs}
+    />
+  );
 
   return (
     <>
       {header}
       {body}
+    </>
+  );
+}
+
+// ChangedFileTreeSectionBody is ChangedFileTreeSection's own body, split out
+// so the loading/error/empty/populated branching doesn't grow
+// ChangedFileTreeSection past the shared function-size and complexity budget
+// (eslint.config.mjs).
+function ChangedFileTreeSectionBody({
+  envKey,
+  slot,
+  diffFilter,
+  collapsedDiffDirs,
+}: {
+  envKey: string;
+  slot: EnvDiffState;
+  diffFilter: string;
+  collapsedDiffDirs: string[];
+}): React.ReactElement {
+  if (slot.loading) {
+    return <ReviewStatus>Loading...</ReviewStatus>;
+  }
+  if (slot.error) {
+    const notRunning = slot.errorReconnectable && slot.errorKind === 'not-open';
+    return (
+      <ReviewStatus>
+        {notRunning
+          ? 'Environment not running — open it from the diff panel.'
+          : 'Diff unavailable — see the diff panel for details.'}
+      </ReviewStatus>
+    );
+  }
+  // Collapsed directories are env-keyed, so a collapsed "app/" in one
+  // environment cannot hide a same-named directory in another.
+  const collapsedForEnv = new Set(
+    collapsedDiffDirs
+      .filter((entry) => entry.startsWith(`${envKey}:`))
+      .map((entry) => entry.slice(envKey.length + 1)),
+  );
+  const rawTree = slot.diff?.tree ?? [];
+  if (rawTree.length === 0) {
+    return (
+      <DiffEmptyState
+        envKey={envKey}
+        scope={slot.scope}
+        commitCount={diffReviewCommitCount(slot.diff)}
+      />
+    );
+  }
+  const tree = visibleDiffTreeNodes(filterDiffTree(rawTree, diffFilter), collapsedForEnv);
+  if (tree.length === 0) {
+    return <ReviewStatus>No matching files</ReviewStatus>;
+  }
+  return (
+    <>
+      {tree.map((node) => (
+        <ChangedFileNode key={node.path} envKey={envKey} node={node} />
+      ))}
     </>
   );
 }
