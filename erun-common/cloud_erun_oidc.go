@@ -262,7 +262,7 @@ func runERunAuthorizationCodeLogin(ctx Context, discovery OIDCDiscovery, clientI
 	}
 	authURL := erunAuthorizationCodeURL(discovery, clientID, redirectURI, state, erunPKCEChallenge(verifier), scope)
 
-	code, err := awaitERunOIDCCallback(ctx, listener, state, authURL)
+	code, err := awaitERunOIDCCallback(ctx, listener, state, authURL, erunLoginCallbackTimeout)
 	if err != nil {
 		return ERunTokens{}, err
 	}
@@ -287,7 +287,9 @@ type erunCallbackResult struct {
 // against the shutdown and could hand the browser an aborted connection.
 // runERunAuthorizationCodeLogin's own listener.Close(), deferred until after
 // the token exchange completes, is what stops it.
-func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, authURL string) (string, error) {
+// timeout is a parameter rather than a read of the constant so the expiry
+// branch is reachable from a test; production passes erunLoginCallbackTimeout.
+func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, authURL string, timeout time.Duration) (string, error) {
 	resultCh := make(chan erunCallbackResult, 1)
 	server := &http.Server{Handler: erunCallbackHandler(state, resultCh)}
 	go func() { _ = server.Serve(listener) }()
@@ -314,7 +316,7 @@ func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, aut
 			return "", fmt.Errorf("oidc callback did not include an authorization code")
 		}
 		return result.code, nil
-	case <-time.After(erunLoginCallbackTimeout):
+	case <-time.After(timeout):
 		// The wait is asynchronous by nature: the URL goes to a person who may
 		// not be at the keyboard. Naming the listener matters because the
 		// visible symptom is on the browser's side -- the sign-in completes and
@@ -322,7 +324,7 @@ func awaitERunOIDCCallback(ctx Context, listener net.Listener, state string, aut
 		// URI rather than an expired wait. And it is why this message does not
 		// repeat the URL: once the listener is gone that URL cannot complete,
 		// so re-running the login is the only fix.
-		return "", fmt.Errorf("timed out after %s waiting for the browser sign-in to complete; the loopback listener that receives the redirect only lives for the duration of this command, so a sign-in finished after that lands on a closed port (the browser shows a connection refused). Re-run the login and complete the sign-in while it waits", erunLoginCallbackTimeout)
+		return "", fmt.Errorf("timed out after %s waiting for the browser sign-in to complete; the loopback listener that receives the redirect only lives for the duration of this command, so a sign-in finished after that lands on a closed port (the browser shows a connection refused). Re-run the login and complete the sign-in while it waits", timeout)
 	}
 }
 
