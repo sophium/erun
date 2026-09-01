@@ -189,6 +189,64 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 	})
 }
 
+// TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart pins the
+// deploy-time twin of the RuntimeImage-persistence tests above: an operator's
+// --runtime-chart override installs the named chart correctly for this one
+// deploy (applyRuntimeChartOverride already rewrites the helm inputs), but
+// until PersistRuntimeChart existed nothing wrote the coordinate back to
+// EnvConfig.RuntimeChart -- so the next plain deploy or open re-derived the
+// chart from the version and lost the operator's override.
+func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) {
+	const tenant = "frs"
+	const version = "1.0.86"
+	const override = "oci://ghcr.io/sophium/charts/erun-devops:1.0.178"
+
+	t.Run("persists an operator's --runtime-chart override", func(t *testing.T) {
+		var saved *EnvConfig
+		save := capturingSave(new(string), &saved)
+		spec := DeploySpec{
+			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{Name: "prod"}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:         RuntimeReleaseName(tenant),
+				Version:             version,
+				ContainerRegistry:   "ghcr.io/sophium",
+				PersistRuntimeChart: override,
+			},
+		}
+		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		if saved == nil {
+			t.Fatalf("expected a save")
+		}
+		if saved.RuntimeChart != override {
+			t.Fatalf("RuntimeChart = %q, want persisted %q", saved.RuntimeChart, override)
+		}
+	})
+
+	t.Run("empty PersistRuntimeChart never clobbers a recorded RuntimeChart", func(t *testing.T) {
+		var saved *EnvConfig
+		save := capturingSave(new(string), &saved)
+		spec := DeploySpec{
+			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+				Name:         "prod",
+				RuntimeChart: override,
+			}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:       RuntimeReleaseName(tenant),
+				Version:           version,
+				ContainerRegistry: "ghcr.io/sophium",
+				// PersistRuntimeChart left empty: this deploy named no override.
+			},
+		}
+		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		if saved == nil {
+			t.Fatalf("expected a save (version changed from empty)")
+		}
+		if saved.RuntimeChart != override {
+			t.Fatalf("RuntimeChart = %q, want left untouched at %q", saved.RuntimeChart, override)
+		}
+	})
+}
+
 // TestCachedDeployRunThenPersistHealsToRunningVersion drives RunDeploySpecs then
 // PersistRuntimeVersionFromDeploySpecs — the exact sequence the CLI deploy command
 // runs — to prove that a cached deploy never reaches the registry or rolls the pod

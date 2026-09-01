@@ -179,6 +179,14 @@ type HelmDeploySpec struct {
 	// deploy's resolution has no line of its own to default to (the erun
 	// product's own environments).
 	PersistRuntimeImage string
+	// PersistRuntimeChart is the operator-stated chart coordinate (as
+	// --runtime-chart names it) that PersistRuntimeVersionFromDeploySpecs writes
+	// back to EnvConfig.RuntimeChart -- without it, an operator's own
+	// --runtime-chart override would install correctly this one time and then be
+	// forgotten, the same shape RuntimeImage/PersistRuntimeImage above exists to
+	// prevent, but for the chart instead of the image. Empty leaves the
+	// persisted field untouched: no override was named on this deploy.
+	PersistRuntimeChart string
 	// ImagePullSecrets names dockerconfigjson secrets the runtime pod pulls with,
 	// threaded to the chart as imagePullSecrets[i].name. Empty renders nothing, so
 	// public-image envs are byte-for-byte unchanged. Mirrors EnvConfig.ImagePullSecrets.
@@ -445,6 +453,20 @@ func RuntimeRegistryForDeploySpec(spec DeploySpec) string {
 	return chartRegistry
 }
 
+// runtimeDeployMemoUnchanged reports whether envConfig already carries every
+// value this deploy would write, so persistRuntimeVersionIfChanged can skip
+// the save. An empty override (runtimeImage/runtimeChart) never blocks the
+// short-circuit: it means this deploy named none, not that a recorded one
+// should read as a mismatch.
+func runtimeDeployMemoUnchanged(envConfig EnvConfig, version, registry, mcpAuthKeyPath, runningImage, runtimeImage, runtimeChart string) bool {
+	return strings.TrimSpace(envConfig.RuntimeVersion) == version &&
+		strings.TrimSpace(envConfig.RuntimeRegistry) == registry &&
+		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath &&
+		strings.TrimSpace(envConfig.RuntimeRunningImage) == runningImage &&
+		(runtimeImage == "" || strings.TrimSpace(envConfig.RuntimeImage) == runtimeImage) &&
+		(runtimeChart == "" || strings.TrimSpace(envConfig.RuntimeChart) == runtimeChart)
+}
+
 func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
 	registry := RuntimeRegistryForDeploySpec(spec)
 	// The MCP-auth key path mirrors the deploy verbatim. An enabling deploy
@@ -454,12 +476,9 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
 	runningImage := strings.TrimSpace(spec.Deploy.ResolvedRuntimeImage)
 	runtimeImage := strings.TrimSpace(spec.Deploy.PersistRuntimeImage)
+	runtimeChart := strings.TrimSpace(spec.Deploy.PersistRuntimeChart)
 	envConfig := spec.Target.EnvConfig
-	if strings.TrimSpace(envConfig.RuntimeVersion) == version &&
-		strings.TrimSpace(envConfig.RuntimeRegistry) == registry &&
-		strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == mcpAuthKeyPath &&
-		strings.TrimSpace(envConfig.RuntimeRunningImage) == runningImage &&
-		(runtimeImage == "" || strings.TrimSpace(envConfig.RuntimeImage) == runtimeImage) {
+	if runtimeDeployMemoUnchanged(envConfig, version, registry, mcpAuthKeyPath, runningImage, runtimeImage, runtimeChart) {
 		return nil
 	}
 	envConfig.RuntimeVersion = version
@@ -477,6 +496,12 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	// resolveDeployRuntimeImage's doc comment for what empty means.
 	if runtimeImage != "" {
 		envConfig.RuntimeImage = runtimeImage
+	}
+	// Same reasoning as RuntimeImage above: an empty PersistRuntimeChart means
+	// this deploy named no chart override, not that the recorded one should
+	// clear.
+	if runtimeChart != "" {
+		envConfig.RuntimeChart = runtimeChart
 	}
 	if err := save(spec.Target.Tenant, envConfig); err != nil {
 		return fmt.Errorf("persist runtime version after deploy: %w", err)
@@ -515,6 +540,10 @@ func applyRuntimeChartOverride(ctx Context, target DeployTarget, spec *DeploySpe
 	spec.DeployContext.ChartPath = reference
 	spec.Deploy.ChartPath = reference
 	spec.Deploy.ChartVersion = version
+	// Record the coordinate exactly as stated so a future plain deploy or open
+	// reads back the chart this one installed, instead of re-deriving it from
+	// the version and losing the operator's override.
+	spec.Deploy.PersistRuntimeChart = override
 	// The value scope belongs to the chart, so it is recomputed from the named
 	// one rather than left as the resolved chart's. Keeping the old key would
 	// nest every runtime --set under a subchart the named chart may not wrap (or
