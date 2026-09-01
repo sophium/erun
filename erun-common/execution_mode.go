@@ -29,6 +29,7 @@ var knownExecutionOperations = []string{
 	"aws-sts-web-identity-token",
 	"aws-export-credentials",
 	"kubectl-namespace-get",
+	"kubectl-pvc-get",
 }
 
 // ExecutionModeFor resolves which path a promoted operation should take.

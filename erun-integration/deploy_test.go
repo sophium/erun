@@ -732,6 +732,98 @@ esac
 		golden.Equal(t, "deploy/real_run_unreadable_worktree_volume_still_announces", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_unaffected_by_kubectl_pvc_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-pvc-get: the plan must
+		// stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_prefers_tenant_published_runtime_chart, which
+		// already exercises the worktree-claim trace via a remote-agent env's
+		// pvc worktree storage) even with execution.modes.kubectl-pvc-get=library,
+		// since announceWorktreeVolumeChange only ever renders the trace line
+		// (kubectlWorktreeClaimArgs) and never calls worktreeClaimExists on a
+		// dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/team-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_pvc_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (worktree claim already exists, no adoption notice)
+		// via a real client-go call against a fake API server instead of
+		// shelling out to kubectl. The kubectl stub fails loudly and
+		// distinctively only for the "get pvc ... -o name" argv shape (every
+		// other kubectl subcommand this deploy needs — the post-helm rollout
+		// wait and pod-watch poll — still succeeds), so a fallback to the
+		// subprocess path for the worktree-claim check surfaces as a
+		// recognizable deploy failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/persistentvolumeclaims/team-devops-worktree" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"PersistentVolumeClaim","apiVersion":"v1","metadata":{"name":"team-devops-worktree","namespace":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pvc"*) printf '%s\n' "fell through to the kubectl subprocess for the worktree claim check" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("worktree claim check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
 	t.Run("real_run_remote_env_tenant_umbrella_pulls_bundled_values", func(t *testing.T) {
 		// Real-run deploy of a tenant's own published umbrella (team-backend-api,
 		// which wraps erun-backend-api as a subchart). Because top-level --sets do
