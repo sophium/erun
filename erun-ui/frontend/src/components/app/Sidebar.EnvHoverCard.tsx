@@ -202,10 +202,10 @@ function RuntimeVersionState({
     return <Muted>Not set</Muted>;
   }
   return (
-    <span className="grid gap-0.5">
+    <div className="grid gap-0.5">
       <span className="font-mono tabular-nums">{summary.version}</span>
       {summary.caption && <span className={HOVER_CARD_CAPTION_CLASS}>{summary.caption}</span>}
-    </span>
+    </div>
   );
 }
 
