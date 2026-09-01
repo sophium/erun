@@ -82,9 +82,8 @@ COPY erun-integration /src/erun-integration
 # desktop unstamped; it reads them with os.ReadFile and treats a missing file as
 # fatal, so omitting them here fails the gate inside the build while a full
 # checkout passes. `erun-ui` also carries the `frontend/` Yarn-workspace
-# member `test-frontend`'s `yarn install` needs to resolve (see root
-# AGENTS.md's Makefile comment for why that member's own gate still doesn't
-# run here).
+# member whose own gate `test-frontend` now runs here too (see root
+# AGENTS.md's Makefile comment).
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 # TestDockerfileLdflagsActuallyStampsTheBinary reads this Dockerfile at test
 # time to lock its -ldflags target to the real release build, so the test
