@@ -78,3 +78,87 @@ describe('MCPAccessPanel', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 });
+
+// jsonResponseWithHeaders backs the "drive this environment" flow below: it
+// needs response headers (Mcp-Session-Id) that the plain jsonResponse() above
+// never has to carry.
+function jsonResponseWithHeaders(body: unknown, headers: Record<string, string> = {}): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(headers),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
+  } as unknown as Response;
+}
+
+describe('MCPAccessPanel driving a tool over the live edge', () => {
+  it('mints a token, then calls the version tool against the operator-supplied MCP hostname', async () => {
+    mockFetch(() => jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }));
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    const liveCalls: { url: string; body: { method: string }; headers: HeadersInit | undefined }[] =
+      [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL, init?: RequestInit) => {
+        const url = input instanceof URL ? input.href : input;
+        const body = JSON.parse(init?.body as string) as { method: string };
+        liveCalls.push({ url, body, headers: init?.headers });
+        if (body.method === 'initialize') {
+          return Promise.resolve(
+            jsonResponseWithHeaders(
+              { jsonrpc: '2.0', id: 1, result: {} },
+              { 'Mcp-Session-Id': 'session-1' },
+            ),
+          );
+        }
+        if (body.method === 'notifications/initialized') {
+          return Promise.resolve(jsonResponseWithHeaders(''));
+        }
+        return Promise.resolve(
+          jsonResponseWithHeaders({
+            jsonrpc: '2.0',
+            id: 2,
+            result: { isError: false, content: [{ type: 'text', text: '{"version":"1.2.3"}' }] },
+          }),
+        );
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/MCP hostname/), {
+      target: { value: 'mcp.acme-prod.services.example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Call the version tool' }));
+
+    expect(await screen.findByText('{"version":"1.2.3"}')).toBeInTheDocument();
+    expect(liveCalls).toHaveLength(3);
+    expect(liveCalls.every((c) => c.url === 'https://mcp.acme-prod.services.example.com/mcp')).toBe(
+      true,
+    );
+    expect((liveCalls[2]?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer signed.jwt.value',
+    );
+  });
+
+  it('shows an actionable error when the live edge is unreachable', async () => {
+    mockFetch(() => jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }));
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('NetworkError when attempting to fetch resource'))),
+    );
+
+    fireEvent.change(screen.getByLabelText(/MCP hostname/), {
+      target: { value: 'mcp.not-exposed.example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Call the version tool' }));
+
+    expect(await screen.findByText(/Could not call the tool: could not reach/)).toBeInTheDocument();
+  });
+});

@@ -99,11 +99,16 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 
 	authCfg := mcpAuthConfigFromEnv()
 	mux := http.NewServeMux()
-	// Auth is the outermost layer, so even idle probes must carry a valid token
-	// before any tool runs. Traffic metering sits just inside it so a rejected
-	// call's tiny response still counts, but wraps the real MCP traffic that
+	// CORS sits outside auth: a browser preflight carries no Authorization
+	// header at all, so gating it on auth would fail every cross-origin caller
+	// before the real request is even sent. The bearer token, checked just
+	// inside it, is the real gate here -- same stance as the attach
+	// handler's permissive CheckOrigin. Auth is the outermost *authorization*
+	// layer, so even idle probes must carry a valid token before any tool
+	// runs. Traffic metering sits just inside it so a rejected call's tiny
+	// response still counts, but wraps the real MCP traffic that
 	// erun_traffic_window_bytes exists to measure.
-	mux.Handle(cfg.Path, authHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler))))
+	mux.Handle(cfg.Path, corsMiddleware(authHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
 	// The WebSocket attach edge is not wrapped in trafficMeteringMiddleware:
 	// that wrapper's byteCountingResponseWriter does not implement
 	// http.Hijacker, and the WebSocket upgrade needs to hijack the
@@ -111,6 +116,32 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	// a valid token before the handler ever inspects capabilities or upgrades.
 	registerAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
 	return mux
+}
+
+// corsMiddleware unblocks a browser calling this edge directly from a
+// different origin (the hosted console calling an env's exposed MCP
+// hostname), which is otherwise refused by the browser itself before any
+// request reaches this server. It reflects the caller's Origin rather than a
+// fixed allowlist because a PaaS instance's console hostname is runtime
+// config, not something this binary can bake in; the bearer token
+// authHTTPMiddleware requires next is what actually gates the request.
+// Mcp-Session-Id must be exposed explicitly -- fetch() hides response
+// headers from the caller's script by default unless the server lists them.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if origin := req.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
+		}
+		if req.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Mcp-Session-Id")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handler {
