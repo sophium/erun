@@ -102,3 +102,46 @@ func runtimeImageReleaseLine(image string) (line string, ok bool) {
 	}
 	return imageReleaseLine(name), true
 }
+
+// ErunVersion is the second version number the environment hover card needs
+// beside RuntimeVersionLine: the erun version an environment's runtime chart
+// carries (EnvConfig.RuntimeChart), which can differ from RuntimeVersion
+// whenever the runtime image itself rides a tenant's own release line.
+type ErunVersion struct {
+	Version string `json:"version,omitempty"`
+	// SameAsRuntimeVersion is true when the chart states no version of its own
+	// and the runtime image is confirmed on erun's own release line -- the case
+	// where a second, identical-looking number would be redundant rather than
+	// informative.
+	SameAsRuntimeVersion bool `json:"sameAsRuntimeVersion,omitempty"`
+}
+
+// ResolveErunVersion resolves EnvConfig.RuntimeChart to the erun version this
+// environment's runtime rides, from config alone -- no live probe, the same
+// "readable from config alone" contract EnvConfig.RuntimeImageLineMismatch
+// relies on. runtimeLine is the RuntimeVersionLine already resolved for the
+// same environment (nil when RuntimeVersion itself is empty); it is what
+// tells this function whether an empty RuntimeChart is safe to read as
+// "follows RuntimeVersion" -- true only once the running image is confirmed
+// on erun's own line -- rather than a guess. Returns nil whenever the erun
+// version cannot be told apart from a guess, per the same "never guess a
+// line" rule RuntimeVersionLine already follows.
+func ResolveErunVersion(env EnvConfig, runtimeLine *RuntimeVersionLine) *ErunVersion {
+	runtimeVersion := strings.TrimSpace(env.RuntimeVersion)
+	if runtimeVersion == "" {
+		return nil
+	}
+	chart := strings.TrimSpace(env.RuntimeChart)
+	if chart == "" {
+		if runtimeLine == nil || runtimeLine.Line != "erun" {
+			return nil
+		}
+		return &ErunVersion{Version: runtimeVersion, SameAsRuntimeVersion: true}
+	}
+	_, chartVersion := SplitChartReference(chart)
+	chartVersion = strings.TrimSpace(chartVersion)
+	if chartVersion == "" {
+		return nil
+	}
+	return &ErunVersion{Version: chartVersion}
+}

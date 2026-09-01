@@ -17,13 +17,15 @@ test.describe('sidebar env hover card', () => {
     await expect(card.getByText('Working on', { exact: true })).toBeVisible();
     await expect(card.getByText('Activity', { exact: true })).toBeVisible();
 
+    // dd(1) is the Erun version row, always present once the seeded env has a
+    // runtime version; Working on is dd(2).
     await expect
-      .poll(async () => (await card.locator('dd').nth(1).textContent())?.trim() ?? '')
+      .poll(async () => (await card.locator('dd').nth(2).textContent())?.trim() ?? '')
       .not.toBe('');
 
     // Whatever it resolves to, it is never the implementation
     // excuse the card used to print for remote envs.
-    expect((await card.locator('dd').nth(1).textContent()) ?? '').not.toContain(
+    expect((await card.locator('dd').nth(2).textContent()) ?? '').not.toContain(
       'worktree lives in the pod',
     );
   });
@@ -41,10 +43,12 @@ test.describe('sidebar env hover card', () => {
     const card = app.sidebar.envHoverCard(tenant, environment);
     await expect(card).toBeVisible();
 
-    const activity = card.locator('dd').nth(2);
+    // dd(1) is the Erun version row, always present once the seeded env has a
+    // runtime version; Activity is dd(3), Working on is dd(2).
+    const activity = card.locator('dd').nth(3);
     await expect(activity).toHaveText('Not open');
 
-    const workingOn = card.locator('dd').nth(1);
+    const workingOn = card.locator('dd').nth(2);
     await expect.poll(async () => (await workingOn.textContent())?.trim() ?? '').not.toBe('');
     expect((await workingOn.textContent()) ?? '').not.toContain('worktree lives in the pod');
   });
@@ -64,7 +68,9 @@ test.describe('sidebar env hover card', () => {
     await expect(dot).toBeVisible();
 
     const card = app.sidebar.envHoverCard(tenant, environment);
-    const activity = card.locator('dd').nth(2);
+    // dd(1) is the Erun version row, always present once the seeded env has a
+    // runtime version; Activity is dd(3).
+    const activity = card.locator('dd').nth(3);
     // hoverAndRead re-opens the card on each retry: an async row re-render (the
     // busy→idle transition, or the injected status changing the dot glyph) drops
     // the pointer and closes the card mid-assert, so a single hover is not stable.
@@ -115,7 +121,9 @@ test.describe('sidebar env hover card', () => {
     await expect(dot).toBeVisible();
 
     const card = app.sidebar.envHoverCard(tenant, environment);
-    const activity = card.locator('dd').nth(2);
+    // dd(1) is the Erun version row, always present once the seeded env has a
+    // runtime version; Activity is dd(3).
+    const activity = card.locator('dd').nth(3);
     const activitySettlesTo = async (matcher: RegExp | string): Promise<void> => {
       await expect(async () => {
         await page.mouse.move(0, 0);

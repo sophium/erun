@@ -423,6 +423,9 @@ export function EnvironmentRow({
     isLocal,
     isHost,
     runtimeVersion,
+    runtimeVersionLine,
+    erunVersion,
+    runtimeImageLineMismatch,
     selection,
     envState,
     indicator,
@@ -442,6 +445,9 @@ export function EnvironmentRow({
       isLocal={isLocal}
       isHost={isHost}
       runtimeVersion={runtimeVersion}
+      runtimeVersionLine={runtimeVersionLine}
+      erunVersion={erunVersion}
+      runtimeImageLineMismatch={runtimeImageLineMismatch}
       activityLabel={environmentCardActivityLabel(
         busy,
         busyFromEnvironment,

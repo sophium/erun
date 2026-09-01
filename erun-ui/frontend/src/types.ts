@@ -4,6 +4,11 @@
 import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type {
+  UIErunVersion,
+  UIRuntimeImageLineMismatch,
+  UIRuntimeVersionLine,
+} from './uiRuntimeVersionLineTypes';
 
 export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | 'host' | '';
 
@@ -23,6 +28,9 @@ export interface UIEnvironment {
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
+  runtimeVersionLine?: UIRuntimeVersionLine;
+  erunVersion?: UIErunVersion;
+  runtimeImageLineMismatch?: UIRuntimeImageLineMismatch;
   kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;

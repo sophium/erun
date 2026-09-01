@@ -2,6 +2,11 @@ import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from '@/app/en
 import type { AppState } from '@/app/state';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import type { UIEnvironment, UISelection } from '@/types';
+import type {
+  UIErunVersion,
+  UIRuntimeImageLineMismatch,
+  UIRuntimeVersionLine,
+} from '@/uiRuntimeVersionLineTypes';
 
 // pendingForTenant returns the optimistic selection for an env being created but
 // not yet present in state, so the sidebar can render a placeholder row that
@@ -56,6 +61,9 @@ export interface EnvironmentRowDerived {
   // is merely local.
   isHost: boolean;
   runtimeVersion: string;
+  runtimeVersionLine: UIRuntimeVersionLine | undefined;
+  erunVersion: UIErunVersion | undefined;
+  runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
   selection: UISelection;
 }
 
@@ -122,8 +130,25 @@ export function deriveEnvironmentRow(
     busyFromEnvironment,
     isLocal,
     isHost,
-    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
+    ...environmentVersionFields(environment),
     selection: { tenant: tenantName, environment: environmentName },
+  };
+}
+
+// environmentVersionFields is split out of deriveEnvironmentRow so that
+// function's own optional-chaining branches don't push it over the
+// complexity gate.
+function environmentVersionFields(environment: UIEnvironment | undefined): {
+  runtimeVersion: string;
+  runtimeVersionLine: UIRuntimeVersionLine | undefined;
+  erunVersion: UIErunVersion | undefined;
+  runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
+} {
+  return {
+    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
+    runtimeVersionLine: environment?.runtimeVersionLine,
+    erunVersion: environment?.erunVersion,
+    runtimeImageLineMismatch: environment?.runtimeImageLineMismatch,
   };
 }
 
