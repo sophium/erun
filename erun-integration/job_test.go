@@ -1809,6 +1809,67 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 		golden.Equal(t, "job/status_without_jobs_says_so", normalize.Apply(result.Combined))
 	})
 
+	t.Run("status_skips_a_corrupted_record_and_orders_ties_by_id", func(t *testing.T) {
+		// Listing every job tolerates an unreadable record instead of failing
+		// the whole list: a record this process cannot even parse cannot
+		// answer anything, and leaving it on disk would keep an unreadable job
+		// in every listing forever, so it is removed as the list is built.
+		// Two records sharing the same startedAt (two jobs started in the same
+		// wall-clock second, a real possibility) also proves the list's
+		// tie-break falls back to ID rather than whatever order the directory
+		// happened to return. Both are seeded running (this test binary's own,
+		// real, alive pid, the same technique the task-job scenarios above
+		// use) rather than exited, so retention never prunes them regardless of
+		// how old the fixed startedAt is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "a"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		for _, id := range []string{"b", "a"} {
+			record := fmt.Sprintf(`{
+  "id": %q,
+  "name": %q,
+  "state": "running",
+  "kind": "command",
+  "pid": %d,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "leaseId": "job-%s"
+}
+`, id, id, os.Getpid(), id)
+			if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(record), 0o644); err != nil {
+				t.Fatalf("seed job record %s: %v", id, err)
+			}
+		}
+		corrupted := filepath.Join(dir, "broken.json")
+		if err := os.WriteFile(corrupted, []byte("{not valid json"), 0o644); err != nil {
+			t.Fatalf("seed corrupted record: %v", err)
+		}
+
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		lastIndex := -1
+		for _, id := range []string{"a", "b"} {
+			index := strings.Index(result.Stdout, "  "+id+":")
+			if index < 0 {
+				t.Fatalf("expected job %q in the list, got:\n%s", id, result.Stdout)
+			}
+			if index < lastIndex {
+				t.Fatalf("expected jobs ordered a, b (ties broken by id), got:\n%s", result.Stdout)
+			}
+			lastIndex = index
+		}
+		if strings.Contains(result.Stdout, "broken") {
+			t.Errorf("expected the corrupted record to be skipped rather than listed, got:\n%s", result.Stdout)
+		}
+		if _, err := os.Stat(corrupted); !os.IsNotExist(err) {
+			t.Errorf("expected the corrupted record to be removed from disk, stat err: %v", err)
+		}
+	})
+
 	t.Run("start_requires_target_and_name", func(t *testing.T) {
 		setup := env.New(t)
 		missingTarget := erun.Run(t, []string{"job", "start", "--name", "suite", "--", "work"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
