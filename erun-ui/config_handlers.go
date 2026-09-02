@@ -379,19 +379,24 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 	}
 }
 
-func (a *App) emitAppStatus(message string, busy bool) {
+// emitAppStatus narrates a long-running busy indicator (a spinner plus what
+// it is doing). It carries no class and never represents an outcome: every
+// call site that used to report a finished/failed state through here now
+// posts a classified notification instead (emitAppNotification/
+// emitEnvNotification), so this stays the one channel for "still working",
+// never for "here is what happened".
+func (a *App) emitAppStatus(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: busy})
+	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: true})
 }
 
-// emitAppNotification pushes a transient toast-style notification.
-// Use this for one-shot info/success events that should not linger in
-// the titlebar after the state they describe has moved on (e.g. the
-// idle-stop success line). Errors and long-running busy indicators
-// still belong on emitAppStatus so their pill stays readable until the
-// user dismisses or replaces it.
+// emitAppNotification pushes a transient toast-style notification, classified
+// by kind (success | warning | error | info | debug — see AppNotification in
+// the frontend). Use this for one-shot events with no env/orchestrator
+// identity to tag; emitEnvNotification/emitOrchestratorNotification are the
+// identity-carrying siblings.
 func (a *App) emitAppNotification(kind, message string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -422,6 +427,24 @@ const notificationSourceDeployFailed = "deploy-failed"
 // exactly one linked environment's edge failed its reachability probe — the
 // only case with an unambiguous env to attach the deploy action to (#1390).
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
+
+// notificationSourceMCPUnreachable tags the "the local MCP endpoint isn't
+// reachable, reconnecting…" warning ensureMCPAvailable posts before attempting
+// its own reconnect, so a later success for the same env is free to clear it
+// through the generic wildcard clear in env_ensure.go.
+const notificationSourceMCPUnreachable = "mcp-unreachable"
+
+// notificationSourceCredentialRefreshFailed tags a host credential refresh
+// failure for the env it was refreshing on behalf of.
+const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
+
+// notificationSourceWorkspaceSyncNoPath tags the "workspace sync has no local
+// path" warning, posted once per sync start attempt for the env it names.
+const notificationSourceWorkspaceSyncNoPath = "workspace-sync-no-path"
+
+// notificationSourceWorkspaceSyncFailed tags a workspace sync failure for the
+// env it was syncing.
+const notificationSourceWorkspaceSyncFailed = "workspace-sync-failed"
 
 // notificationActionDeploy tags a notification whose remedy the frontend can
 // perform directly — opening the tagged env's deploy dialog. Passed as the

@@ -1363,11 +1363,13 @@ type appStatusPayload struct {
 	Busy    bool   `json:"busy"`
 }
 
-// appNotificationPayload carries a transient toast-style notification.
-// Unlike appStatusPayload, the frontend routes this through the auto-
-// dismissing notification slot, so one-shot info/success events cannot
-// go stale and outlive the state they describe. Kind matches the
-// frontend's AppNotification kinds: success | warning | error | info.
+// appNotificationPayload carries a classified notification retained in the
+// frontend's message-centre history for the session. success/info entries
+// auto-dismiss (leaving the history entry behind); warning/error persist
+// until acknowledged. Kind matches the frontend's AppNotification kinds:
+// success | warning | error | info | debug (debug is never emitted by this
+// backend today — the class exists so a future diagnostic emitter has
+// somewhere to go that isn't the operator-facing classes).
 type appNotificationPayload struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`

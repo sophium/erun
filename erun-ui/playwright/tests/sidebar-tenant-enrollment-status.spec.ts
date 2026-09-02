@@ -390,9 +390,12 @@ test.describe('sidebar tenant enrollment status icon', () => {
       // The approval transition (leaving a non-terminal state and landing on
       // enrolled) fires a one-shot notification -- proof the row does not
       // silently sit on a stale "pending" once an operator has approved it
-      // elsewhere; the icon re-fetched and moved on its own.
+      // elsewhere; the icon re-fetched and moved on its own. The
+      // notification is a message centre icon, not a pill with visible
+      // text, so open it to read the confirmation.
+      await app.titlebar.openMessageCenter('success');
       await expect(
-        page.getByRole('status').filter({ hasText: `Approved -- you're enrolled in ${tenant}.` }),
+        app.titlebar.messageCenterRow(`Approved -- you're enrolled in ${tenant}.`),
       ).toBeVisible();
     } finally {
       removeTenant(tenant);

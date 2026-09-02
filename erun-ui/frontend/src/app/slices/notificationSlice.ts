@@ -5,9 +5,11 @@ import type { AppNotification } from '../state';
 // This used to be a single `notification: AppNotification | null` slot, so a
 // burst of concurrent failures (e.g. several "Upgrade all" members failing
 // within milliseconds of each other) silently overwrote one another — only
-// the last write survived. notifications is a small FIFO queue instead: every
-// failure gets its own entry, and the titlebar renders (and dismisses) the
-// oldest one first.
+// the last write survived. notifications is now the session's full message
+// history (the message centre's own contract): every notification gets its
+// own entry and is *retained* after it dismisses (dismissed just flips a flag),
+// so the message centre dialog can list a session's whole history rather than
+// only whatever is still unread.
 export interface NotificationState {
   notifications: AppNotification[];
 }
@@ -22,11 +24,11 @@ export interface NotificationEnvMatch {
   source: string;
 }
 
-// notificationQueueCapacity caps in-memory queue length. Success/info entries
-// auto-dismiss quickly, so only a pile of undismissed errors/warnings could
-// approach this; dropping the oldest keeps the newest failures visible rather
-// than growing unbounded over a long desktop session.
-const notificationQueueCapacity = 20;
+// notificationHistoryCapacity caps in-memory history length. Dismissal no
+// longer removes an entry (it stays for the message centre dialog), so this
+// is the only thing bounding growth over a long desktop session; dropping the
+// oldest keeps the most recent history rather than growing unbounded.
+const notificationHistoryCapacity = 300;
 
 export const notificationSlice = createSlice({
   name: 'notification',
@@ -34,25 +36,37 @@ export const notificationSlice = createSlice({
   reducers: {
     showNotification(state, action: PayloadAction<AppNotification>) {
       state.notifications.push(action.payload);
-      if (state.notifications.length > notificationQueueCapacity) {
-        state.notifications.splice(0, state.notifications.length - notificationQueueCapacity);
+      if (state.notifications.length > notificationHistoryCapacity) {
+        state.notifications.splice(0, state.notifications.length - notificationHistoryCapacity);
       }
     },
-    dismissNotification(state, action: PayloadAction<string>) {
-      state.notifications = state.notifications.filter((n) => n.id !== action.payload);
+    // Marks an entry read rather than deleting it -- see NotificationState's
+    // own doc comment. `undefined` (the titlebar dismiss button's "whatever is
+    // currently shown" case) is a no-op rather than dismissing everything.
+    dismissNotification(state, action: PayloadAction<string | undefined>) {
+      const id = action.payload;
+      if (!id) {
+        return;
+      }
+      const entry = state.notifications.find((n) => n.id === id);
+      if (entry) {
+        entry.dismissed = true;
+      }
     },
     // Lets the deploy lifecycle retire the warning it raised without clobbering
     // an unrelated toast. Empty `source` is a wildcard so a deploy start can
     // retire both the runtime-unreachable warning and a prior deploy-failed
-    // error at once. Matches (and removes) every queued entry for the env, not
-    // just the front of the queue.
+    // error at once. Marks (rather than removes) every matching entry for the
+    // env, not just the front of the queue.
     dismissNotificationForEnv(state, action: PayloadAction<NotificationEnvMatch>) {
       const { tenant, environment, source } = action.payload;
-      state.notifications = state.notifications.filter((n) => {
+      for (const n of state.notifications) {
         const envMatches = n.tenant === tenant && n.environment === environment;
         const sourceMatches = source === '' || n.source === source;
-        return !(envMatches && sourceMatches);
-      });
+        if (envMatches && sourceMatches) {
+          n.dismissed = true;
+        }
+      }
     },
   },
 });

@@ -1,10 +1,13 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// The headless harness reaches only half of this fix: a long notification
-// escalates from a truncating hover tooltip to a click popover with selectable,
-// scrollable content, observable here. The other half — always showing the copy
-// button on errors — needs terminal-exit sessions the harness does not stage
-// during boot, and is covered by the Go-side erun-ui app_test.go suite.
+// The message centre retired LONG_STATUS_THRESHOLD's truncate-then-popover
+// escalation for classified (app-notification) messages: the dialog
+// always shows a row's full text, so there is no truncation to escalate out
+// of. The mechanism survives only for the terminal/command status pill
+// (app-status), which is unaffected by that redesign -- both are covered
+// below. The other half of the original fix — always showing the copy button
+// on errors — needs terminal-exit sessions the harness does not stage during
+// boot, and is covered by the Go-side erun-ui app_test.go suite.
 
 const LONG_MESSAGE =
   'aws ec2 start-instances --instance-ids i-0de894ac09f66d87e: An error occurred ' +
@@ -12,46 +15,30 @@ const LONG_MESSAGE =
   "'i-0de894ac09f66d87e' is not in a state from which it can be started.";
 
 test.describe('titlebar status overflow', () => {
-  test('long status message renders inside a popover with selectable text', async ({
-    app: _app,
+  test('a long classified error shows its full text in the message centre dialog, untruncated', async ({
+    app,
     page,
   }) => {
     expect(LONG_MESSAGE.length).toBeGreaterThan(160);
 
-    // Use an error notification, not app-status: a background env's own
-    // terminal-status updates would clobber an app-status message mid-assertion,
-    // whereas an error notification takes precedence and never auto-dismisses, so
-    // it stays put while we open the popover. The escalation renders identically
-    // for either source.
-    const emitLong = () =>
-      page.evaluate((message) => {
-        const runtime = (
-          window as unknown as {
-            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-          }
-        ).runtime;
-        runtime.EventsEmit('app-notification', { kind: 'error', message });
-      }, LONG_MESSAGE);
+    await page.evaluate((message) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
+      runtime.EventsEmit('app-notification', { kind: 'error', message });
+    }, LONG_MESSAGE);
 
-    await emitLong();
-
-    // Match by testid, not text: the collapsed trigger shows truncated text, so a
-    // text query would race the truncated-vs-full rendering.
-    const trigger = page.getByTestId('titlebar-status-message');
-    await expect(trigger).toBeVisible();
-
-    await emitLong();
-    await trigger.click();
-
-    const fullText = page.getByTestId('titlebar-status-full-text');
-    await expect(fullText).toBeVisible();
-    await expect(fullText).toContainText('IncorrectInstanceState');
-    await expect(fullText).toContainText('is not in a state from which it can be started');
+    await app.titlebar.openMessageCenter('error');
+    const row = app.titlebar.messageCenterRow('IncorrectInstanceState');
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('is not in a state from which it can be started');
 
     // Compare full length, not just substring presence, to catch a regression
-    // that re-introduces truncation.
-    const text = await fullText.textContent();
-    expect(text?.trim().length ?? 0).toBeGreaterThanOrEqual(LONG_MESSAGE.length);
+    // that reintroduces truncation.
+    const text = await row.textContent();
+    expect((text ?? '').length).toBeGreaterThanOrEqual(LONG_MESSAGE.length);
   });
 
   // Guard the short-message path: below the threshold, status stays a hover
@@ -69,5 +56,31 @@ test.describe('titlebar status overflow', () => {
     await expect(page.getByText(SHORT, { exact: false })).toBeVisible();
     // The popover trigger testid only renders for long messages.
     await expect(page.getByTestId('titlebar-status-message')).toHaveCount(0);
+  });
+
+  // The terminal/command status pill (app-status) keeps the truncate →
+  // click-to-expand-popover escalation this whole mechanism originally
+  // existed for; only the classified message centre had it retired, not
+  // this channel.
+  test('a long terminal-status message still escalates to a selectable popover', async ({
+    app: _app,
+    page,
+  }) => {
+    await page.evaluate((message) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
+      runtime.EventsEmit('app-status', { message, busy: false });
+    }, LONG_MESSAGE);
+
+    const trigger = page.getByTestId('titlebar-status-message');
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const fullText = page.getByTestId('titlebar-status-full-text');
+    await expect(fullText).toBeVisible();
+    await expect(fullText).toContainText('IncorrectInstanceState');
   });
 });

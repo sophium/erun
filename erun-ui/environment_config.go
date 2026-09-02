@@ -810,17 +810,17 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 		return status, ok, err
 	}
 	if strings.TrimSpace(status.Status) == eruncommon.CloudContextStatusRunning {
-		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 		return status, true, nil
 	}
-	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)), true)
+	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
 	status, err = eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return eruncommon.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
 	a.setCloudContextStatusInCache(status.Name, status.Status)
-	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 	return status, true, nil
 }
 

@@ -5,6 +5,8 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { WhipTargetSelection } from '@/app/model';
 import { selectWhipDefaultTarget } from '@/app/selectors';
+import { TRANSIENT_DISMISS_MS } from '@/app/transientDismissDuration';
+import { scheduleTransientDismiss } from '@/app/transientDismissTimer';
 import {
   countWhipTargets,
   defaultWhipTargetSelection,
@@ -17,7 +19,11 @@ import {
 } from '@/app/whipTargetSelection';
 import { whipNow, type WhipOutcome, whipTargets } from '@/app/whipThunks';
 import { InlineAlert } from '@/components/app/InlineAlert';
-import { whipOutcomeLabel, whipOutcomeTone } from '@/components/app/Titlebar.WhipAction.helpers';
+import {
+  whipOutcomeLabel,
+  whipOutcomeTone,
+  whipReportAllSucceeded,
+} from '@/components/app/Titlebar.WhipAction.helpers';
 import { TitlebarWhipTargetPicker } from '@/components/app/Titlebar.WhipAction.TargetPicker';
 
 import type { main } from '../../../wailsjs/go/models';
@@ -26,6 +32,43 @@ const whipButtonClassName =
   'size-7 flex-none cursor-pointer rounded-[var(--radius)] border-0 bg-transparent text-muted-foreground [--wails-draggable:no-drag] hover:bg-accent hover:text-accent-foreground [&_svg]:size-[18px]';
 
 const whipLabel = 'Whip: push the focused target, or choose which ones to push';
+
+// useWhipAutoDismiss is the whip popover's auto-dismiss gate, pulled out of
+// TitlebarWhipAction so that component stays under the file's function-length
+// budget. A fully successful report auto-dismisses after the app's
+// established transient duration, matching notificationThunks' own
+// success/info rule -- anything else (capped/failed/skipped, or a call
+// failure) stays on screen until the operator closes it, since that is the
+// one place a push's real outcome is reported. Keyed on
+// [outcome, pending, hovered] rather than starting the timer from onWhip
+// directly: a fresh open nulls outcome (TitlebarWhipAction's onOpenChange),
+// which reruns this effect and clears any timer left over from a previous
+// report before the new pass even starts, so a second whip issued before the
+// first timer fires can never dismiss the new report early.
+function useWhipAutoDismiss({
+  pending,
+  outcome,
+  hovered,
+  onDismiss,
+}: {
+  pending: boolean;
+  outcome: WhipOutcome | null;
+  hovered: boolean;
+  onDismiss: () => void;
+}): void {
+  React.useEffect(() => {
+    if (
+      pending ||
+      !outcome ||
+      outcome.error ||
+      hovered ||
+      !whipReportAllSucceeded(outcome.report)
+    ) {
+      return;
+    }
+    return scheduleTransientDismiss(TRANSIENT_DISMISS_MS, onDismiss);
+  }, [pending, outcome, hovered, onDismiss]);
+}
 
 function whipButtonLabel(count: number): string {
   return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
@@ -60,6 +103,14 @@ export function TitlebarWhipAction(): React.ReactElement {
   const [selection, setSelection] = React.useState<WhipTargetSelection>(
     defaultWhipTargetSelection(null),
   );
+  const [hovered, setHovered] = React.useState(false);
+  // setOpen is a stable dispatch reference, so this callback never changes
+  // identity -- useWhipAutoDismiss's effect must not re-run (and restart its
+  // timer) on every unrelated re-render.
+  const onAutoDismiss = React.useCallback(() => {
+    setOpen(false);
+  }, []);
+  useWhipAutoDismiss({ pending, outcome, hovered, onDismiss: onAutoDismiss });
 
   const onOpenChange = React.useCallback(
     (next: boolean) => {
@@ -128,7 +179,16 @@ export function TitlebarWhipAction(): React.ReactElement {
           </Button>
         </IconTooltip>
       </PopoverAnchor>
-      <PopoverContent align="end" className="w-[360px] p-0">
+      <PopoverContent
+        align="end"
+        className="w-[360px] p-0"
+        onMouseEnter={() => {
+          setHovered(true);
+        }}
+        onMouseLeave={() => {
+          setHovered(false);
+        }}
+      >
         <WhipPopoverBody
           pending={pending}
           outcome={outcome}

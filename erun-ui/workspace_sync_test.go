@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -299,6 +300,82 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	case params := <-called:
 		t.Fatalf("did not expect sync for a workspace-sync-disabled env, got %+v", params)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath locks the
+// reclassification of the "workspace sync has no local path" notice: it used
+// to go out on the unclassified emitAppStatus channel, and now goes out as a
+// classified, env-tagged warning.
+func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T) {
+	store := workspaceSyncStore(true)
+	env := store.envs["frs/dev"]
+	env.SSHD.WorkspaceSync.LocalPath = ""
+	store.envs["frs/dev"] = env
+	emits := newCapturedEmits()
+	app := NewApp(erunUIDeps{
+		store:               store,
+		canConnectLocalPort: func(int) bool { return true },
+		canReachMCPEndpoint: func(int) bool { return true },
+		// Without this, the default findProjectRoot walks the real
+		// filesystem from the test binary's cwd and resolves a real project
+		// root, masking the "no local path" case this test exercises.
+		findProjectRoot: func() (string, string, error) { return "", "", errors.New("not found") },
+	})
+	app.emitFn = emits.fn()
+	defer app.shutdown(context.Background())
+
+	app.startWorkspaceSyncForSelection(uiSelection{Tenant: "frs", Environment: "dev"})
+
+	if got := emits.events(appStatusEvent); len(got) != 0 {
+		t.Fatalf("expected no unclassified app-status emit, got %+v", got)
+	}
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected one classified notification, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if payload.Kind != "warning" {
+		t.Fatalf("kind = %q, want warning", payload.Kind)
+	}
+	if payload.Tenant != "frs" || payload.Environment != "dev" {
+		t.Fatalf("unexpected identity: tenant=%q environment=%q", payload.Tenant, payload.Environment)
+	}
+	if payload.Source != notificationSourceWorkspaceSyncNoPath {
+		t.Fatalf("source = %q, want %q", payload.Source, notificationSourceWorkspaceSyncNoPath)
+	}
+}
+
+// TestSetWorkspaceSyncErrorEmitsClassifiedError locks the reclassification of
+// a workspace sync failure from the unclassified emitAppStatus channel to a
+// classified, env-tagged error.
+func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{emitFn: emits.fn(), workspaceSyncs: map[string]*workspaceSyncWorker{
+		"frs/dev": {status: workspaceSyncStatus{Status: "syncing"}},
+	}}
+
+	app.setWorkspaceSyncError("frs/dev", "frs", "dev", errors.New("connection refused"))
+
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected one classified notification, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if payload.Kind != "error" {
+		t.Fatalf("kind = %q, want error", payload.Kind)
+	}
+	if payload.Tenant != "frs" || payload.Environment != "dev" {
+		t.Fatalf("unexpected identity: tenant=%q environment=%q", payload.Tenant, payload.Environment)
+	}
+	if payload.Source != notificationSourceWorkspaceSyncFailed {
+		t.Fatalf("source = %q, want %q", payload.Source, notificationSourceWorkspaceSyncFailed)
 	}
 }
 

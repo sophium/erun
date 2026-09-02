@@ -126,8 +126,9 @@ test.describe('tenant dashboard — refresh (#1213)', () => {
       // appears at all, since the mocked failure is never actually fetched.
       await expect(page.getByText('backend unreachable')).toBeVisible();
 
-      const successToast = page.getByRole('status').filter({ hasText: 'Dashboard refreshed.' });
-      await expect(successToast).toHaveCount(0);
+      // A success confirmation is a message centre icon, not a
+      // pill with visible text -- assert the absence there instead.
+      await expect(app.titlebar.messageCenterIcon('success')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

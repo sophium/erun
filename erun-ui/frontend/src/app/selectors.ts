@@ -3,6 +3,7 @@ import { createSelector } from '@reduxjs/toolkit';
 import type { UISelection } from '@/types';
 
 import type { SidebarFocus, WhipDefaultTarget } from './model';
+import { type NotificationCounts, unreadNotificationCounts } from './notificationCenter';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
@@ -275,3 +276,18 @@ export const selectReviewTargetBranches = createSelector(
     return [...branches].sort((left, right) => left.localeCompare(right));
   },
 );
+
+// selectNotificationUnreadCounts backs the titlebar's per-class icon badges.
+// Memoized against the notifications array so a dismiss/mark-read only
+// recomputes when the history itself actually changes.
+export const selectNotificationUnreadCounts = createSelector(
+  [(state: RootState) => state.notification.notifications],
+  (notifications): NotificationCounts => unreadNotificationCounts(notifications),
+);
+
+// selectNotificationHistoryCount backs the titlebar's fallback "message
+// history" entry point (Titlebar.MessageCenter.tsx): once every class is
+// fully read, no per-class icon renders, but a session with history is still
+// worth being able to reopen -- see that component's own doc comment.
+export const selectNotificationHistoryCount = (state: RootState): number =>
+  state.notification.notifications.length;
