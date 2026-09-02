@@ -19,6 +19,10 @@ import (
 // exactly the validation layer that rejected the extra properties.
 func TestExecAgentIsCallableWithOnlyAgentAndPrompt(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
+	// Preview mode never execs the supervisor (see job_target_test.go's same
+	// stub), so a placeholder name is enough to satisfy ResolveErunExecutable
+	// without a real erun binary on PATH.
+	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}}
 	session := connectTestMCPSession(t, eruncommon.BuildInfo{Version: "1.2.3"}, runtime)
 

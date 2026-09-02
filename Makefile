@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-frontend helm-chart-tests test-postgres-restart check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend helm-chart-tests test-postgres-restart check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -141,6 +141,27 @@ test-erun-backend-api:
 	@echo ">> go test erun-backend-api"
 	@(cd erun-backend/erun-backend-api && go test ./...)
 
+# erun-mcp's own Go tests. LINT_MODULES above already gives this module
+# golangci-lint, but nothing ran `go test ./...` for it: erun-mcp is unioned
+# into erun-cli/go.work and erun-integration/go.work, but a `use` directive in
+# a go.work only resolves local module dependencies for the build — it does
+# not make a sibling module's packages match another module's own `./...`, so
+# neither erun-cli's nor erun-integration's `go test ./...` ever runs a single
+# erun-mcp test. 282 test cases (including subtests) sat green on every
+# contributor's own machine and reachable by nobody's gate.
+test-erun-mcp:
+	@echo ">> go test erun-mcp"
+	@(cd erun-mcp && go test ./...)
+
+# erun-devops/dns01-webhook's own Go tests. This module has no entry in
+# LINT_MODULES and no test stage of its own -- its Dockerfile only builds the
+# binary (see erun-devops/AGENTS.md's Build Workflow section) -- so its real
+# regression coverage (including a deleted-token-secret cleanup fix) sat
+# reachable only by a contributor running `go test` from the module by hand.
+test-erun-dns01-webhook:
+	@echo ">> go test erun-devops/dns01-webhook"
+	@(cd erun-devops/dns01-webhook && go test ./...)
+
 # All three Yarn-workspace members: the shared frontend kit (erun-kit), the
 # desktop frontend (erun-ui/frontend), and the hosted console (erun-console).
 # Each runs its own full gate here now. Closes two gaps: the console's own
@@ -273,10 +294,11 @@ check:
 	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
-# erun-backend-api's own Go tests, the frontend kit + desktop frontend +
-# console gates, the erun-devops/k8s chart tests, then the integration suite
-# + coverage. The
+# erun-backend-api's own Go tests, erun-mcp's own Go tests,
+# erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
+# frontend + console gates, the erun-devops/k8s chart tests, then the
+# integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
-check-gate: lint test-erun-ui test-erun-backend-api test-frontend helm-chart-tests integration-test-gate
+check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend helm-chart-tests integration-test-gate

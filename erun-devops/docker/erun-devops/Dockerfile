@@ -27,6 +27,14 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
 WORKDIR /src
 
+# dtach for erun-mcp's attach/PTY test suite (test-erun-mcp, below): those
+# tests exec a real `dtach -A` session and fail with "dtach: not found" on
+# the bare `golang` base this stage runs on. The final image already installs
+# dtach for the runtime session machinery (see the apt-get layer further
+# down); this stage needs its own copy since it is a separate, unrelated base.
+RUN apt-get update && apt-get install -y --no-install-recommends dtach && \
+    rm -rf /var/lib/apt/lists/*
+
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
 # installed binary cannot drift the way a Dockerfile-only default did.
@@ -74,6 +82,10 @@ COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
 COPY erun-integration /src/erun-integration
+# erun-devops/dns01-webhook has no LINT_MODULES entry (no golangci-lint config
+# of its own) but does have a Makefile test target (test-erun-dns01-webhook),
+# so it needs the same COPY-or-`cd`-fails treatment as the modules below.
+COPY erun-devops/dns01-webhook /src/erun-devops/dns01-webhook
 # Every module in the Makefile's LINT_MODULES must land here or `make check`
 # cannot cd into it -- and so must every path those modules' tests read at run
 # time, which is not the same set. erun-ui's build-stamp guard deliberately
@@ -98,6 +110,10 @@ COPY bucket /src/bucket
 # only the charts and their *_test.sh scripts are needed, not the rest of
 # erun-devops (docker/, terraform-erun/, etc.).
 COPY erun-devops/k8s /src/erun-devops/k8s
+# TestMCPOverviewDocumentsEveryTool cross-checks erun-common's registered MCP
+# tools against this page's "Full tool index" table; only the one file is
+# needed, not the built docs site.
+COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
