@@ -690,6 +690,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_report-commit-status",
 		Description: "Report a commit status on GitHub for commit — the last step in the merge queue gate (exec_gate-merge, build, review_record-build with gate set): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in description. A required status check on the remote's branch protection has nothing to require until this reports it. commit should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit exec_gate-merge produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed. Set preview to trace the request without sending it.",
 	}, execReportCommitStatusTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_close-pr",
+		Description: "Close branch's open pull request on GitHub, once review_report-merged has already succeeded, and record landingCommit on it. GitHub never reconciles a queued merge with its pull request on its own, since exec_gate-merge's squash commit is never the branch head GitHub tracks — the commit that actually shipped exists nowhere the pull request can see until this reports it. Safe when branch has no open pull request against targetBranch: this is a no-op, not an error, since queueing a plain branch with no review is legitimate. Refuses, loudly, when the pull request's current head does not match gatedCommit — something pushed to branch after the gate fetched it, so the gated content is not what closing would discard. Set preview to trace the lookup without closing or commenting on anything.",
+	}, execClosePRTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools

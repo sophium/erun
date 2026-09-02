@@ -164,13 +164,33 @@ parent this review was gated against. A refusal here
 (`409 MERGE_NOT_VERIFIED`) means something about rungs 3–6 did not actually
 land the way this skill believes — report it plainly rather than retrying.
 
-### 8. Report and stop
+### 8. Close the pull request GitHub never reconciled with the squash merge
+
+```sh
+erun exec close-pr "${source}" --target "${target}" --remote-url "${remote_url}" \
+  --gated-commit "${source_commit}" --landing-commit "${merge_commit}"
+```
+
+`erun exec gate-merge`'s squash commit is never `${source}`'s branch head, so
+GitHub never reconciles a queue merge with its own open pull request on its
+own — without this step the review reaches `MERGED` while the GitHub PR list
+keeps showing the work as pending forever, and nothing on the PR names
+`${merge_commit}` as what actually shipped.
+
+Safe when `${source}` has no open pull request — this is a no-op, not an
+error, so a queued plain branch never warns. If it does have one, this
+closes it and comments `${merge_commit}` on it. A refusal here means
+something pushed to `${source}` after rung 3 fetched it — the review itself
+already reached `MERGED`, so report this plainly as a separate anomaly for a
+human to reconcile; do not treat it as undoing the merge.
+
+### 9. Report and stop
 
 State plainly: the review id, source and target branches, the gate build's
-id and commit, and the review's resulting status (`MERGED` or `FAILED`).
-Then stop — this skill does not trigger a release, does not advance the
-queue for the next review, and does not clean up the local `${target}`
-checkout it left behind.
+id and commit, the review's resulting status (`MERGED` or `FAILED`), and
+whether the pull request was found and closed. Then stop — this skill does
+not trigger a release, does not advance the queue for the next review, and
+does not clean up the local `${target}` checkout it left behind.
 
 ## What this skill refuses outright
 
@@ -187,6 +207,9 @@ checkout it left behind.
   record — see the exit in rung 2.
 - **Retrying a push failure automatically.** Rung 6's failure is named as an
   anomaly for an operator to look at, not retried.
+- **Closing a pull request whose head has moved since the gate ran.** Rung 8
+  refuses, loudly, rather than discarding content the gate never saw; the
+  review's `MERGED` status stands regardless.
 
 ## Resuming after a partial failure
 
@@ -201,4 +224,8 @@ case that needs a human decision rather than a plain re-run: the `GATE` build
 already recorded successful is still valid, so re-running rungs 6–7 by hand
 against that `build_id` is the right fix once the anomaly rung 6 named is
 understood — not re-running the whole skill, which would gate-build and
-record a second, redundant `GATE` build.
+record a second, redundant `GATE` build. Rung 8 is safe to re-run on its own
+after rung 7 already reported `MERGED`: closing an already-closed pull
+request is a no-op (its state is no longer `open`, so the lookup finds
+nothing), and closing one still open just repeats the same close-and-comment
+call.

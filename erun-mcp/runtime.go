@@ -66,6 +66,8 @@ type CommandOutput struct {
 	// ReportCommitStatus carries what an `exec_report-commit-status` call
 	// actually reported.
 	ReportCommitStatus *eruncommon.ReportCommitStatusResult `json:"reportCommitStatus,omitempty"`
+	// ClosePullRequest carries what an `exec_close-pr` call actually did.
+	ClosePullRequest *eruncommon.ClosePullRequestResult `json:"closePullRequest,omitempty"`
 	// Spec carries the resolved release plan `release` publishes.
 	Spec *eruncommon.ReleaseSpec `json:"spec,omitempty"`
 	// Interaction carries a structured question `init` needs answered in a

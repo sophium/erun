@@ -4,6 +4,7 @@ Usage:
   erun exec [command]
 
 Available Commands:
+  close-pr             Close the GitHub pull request a merge queue gate actually shipped
   commit               Commit every change, or only the declared paths, in the project working tree
   diff                 Show the current git diff
   gate-merge           Build the prospective squash merge a merge queue promotion gates

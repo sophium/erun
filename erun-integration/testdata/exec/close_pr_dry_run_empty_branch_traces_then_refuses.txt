@@ -1,0 +1,4 @@
+audit: erun exec close-pr --dry-run --gated-commit sourcesha0000000000000000000000000000000 --landing-commit landedsha0000000000000000000000000000000 --remote-url https://github.com/sophium/erun.git --target main
+close-pr: resolving inputs
+close-pr: input resolution failed: branch, target branch, gated commit, and landing commit are all required
+branch, target branch, gated commit, and landing commit are all required

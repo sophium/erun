@@ -80,6 +80,10 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 		Family: "exec", CLIPath: []string{"exec", "report-commit-status"}, Title: "Report a GitHub commit status for a merge queue gate result",
 		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
+	"exec_close-pr": {
+		Family: "exec", CLIPath: []string{"exec", "close-pr"}, Title: "Close the GitHub pull request a merge queue gate actually shipped",
+		ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true, AgentFacing: true,
+	},
 	// exec_agent has no CLI path: the CLI already offers this exact
 	// capability as `erun exec job start --agent`, one command covering both
 	// modes via a flag. MCP cannot do the same because each tool has one
