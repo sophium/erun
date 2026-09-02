@@ -3,16 +3,14 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// Neither sidebar hover card had a declared type scale -- the env card alone
-// mixed three sizes and two faces across a four-row card, and its value
-// column carried three different treatments on its own (mono-12px, sans-12px,
-// and unclassed-inherits-14px). Both cards now render every label/value row
-// through the shared HoverCardRow (Sidebar.HoverCardRow.tsx), which fixes the
-// scale to exactly three treatments: a 12px muted label/caption, a 14px value
-// (mono only as a face choice on identifiers, never a size change), and a
-// 10px badge pill. This spec asserts the scale computationally rather than by
+// #1901 replaced the three-treatment scale this spec used to lock (a 12px
+// label/caption, a 14px value, a 10px badge) with a stricter invariant: one
+// size, one face, always -- every element in both sidebar hover cards
+// (Sidebar.HoverCardRow.tsx) renders at 10px in the shared sans face, and an
+// element earns emphasis only through colour, weight or state, never a
+// second size or face. This spec asserts that computationally rather than by
 // reading pixel counts off a screenshot, so a future one-off className on a
-// single row fails a test instead of drifting back to six treatments quietly.
+// single row fails a test instead of drifting the scale back open.
 
 // The card is only alive while the pointer rests on the row that raised it, so
 // every read below is bounded and taken in as few round trips as possible: a
@@ -28,6 +26,13 @@ async function fontSizePx(locator: import('@playwright/test').Locator): Promise<
     timeout: READ_TIMEOUT_MS,
   });
   return Number.parseFloat(size);
+}
+
+async function fontWeight(locator: import('@playwright/test').Locator): Promise<number> {
+  const weight = await locator.evaluate((el) => window.getComputedStyle(el).fontWeight, undefined, {
+    timeout: READ_TIMEOUT_MS,
+  });
+  return Number.parseFloat(weight);
 }
 
 async function distinctFontSizes(
@@ -59,8 +64,8 @@ async function stubWorkingIssue(page: Page): Promise<void> {
   });
 }
 
-test.describe('sidebar hover card type scale (#1694)', () => {
-  test('the env card value column is exactly one font-size, distinct from the label size', async ({
+test.describe('sidebar hover card type scale (#1694, #1901)', () => {
+  test('the env card renders one size everywhere, with the title distinguished by weight alone', async ({
     app,
     page,
   }) => {
@@ -71,22 +76,22 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     let valueSizes = new Set<number>();
     let labelSizes = new Set<number>();
     let titleSize = 0;
+    let titleWeight = 0;
+    let valueWeight = 0;
     await expect(async () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-      // Wait for the working-issue fetch (stubbed above) to resolve so the
-      // mono branch value is actually rendered before sizes are sampled.
+      // Wait for the working-issue fetch (stubbed above) to resolve so every
+      // row -- including the branch value -- is actually rendered before
+      // sizes are sampled.
       await expect(card).toContainText('feature/1694-hover-card-type-scale', {
         timeout: READ_TIMEOUT_MS,
       });
       valueSizes = await distinctFontSizes(card.locator('dd'));
       labelSizes = await distinctFontSizes(card.locator('dt'));
-      // The title reuses the value treatment's size (emphasis is by weight
-      // only), never a fourth size.
-      titleSize = await fontSizePx(
-        card.getByText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: true }),
-      );
-      // Only that the card was still up for the whole read -- the scale itself
-      // is asserted once, below, on what was read.
+      const title = card.getByText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { exact: true });
+      titleSize = await fontSizePx(title);
+      titleWeight = await fontWeight(title);
+      valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
     }).toPass({ timeout: 20_000 });
@@ -96,11 +101,14 @@ test.describe('sidebar hover card type scale (#1694)', () => {
 
     const [valueSize] = [...valueSizes];
     const [labelSize] = [...labelSizes];
-    expect(valueSize).toBeGreaterThan(labelSize as number);
+    // One size everywhere: label, value and title all match -- no element
+    // earns emphasis by growing, only by weight/colour/state.
+    expect(valueSize).toBe(labelSize);
     expect(titleSize).toBeCloseTo(valueSize as number, 1);
+    expect(titleWeight).toBeGreaterThan(valueWeight);
   });
 
-  test('the orchestrator card value column is exactly one font-size, distinct from the label size', async ({
+  test('the orchestrator card renders one size everywhere, with the title distinguished by weight alone', async ({
     app,
     page,
   }) => {
@@ -140,12 +148,17 @@ test.describe('sidebar hover card type scale (#1694)', () => {
     let valueSizes = new Set<number>();
     let labelSizes = new Set<number>();
     let titleSize = 0;
+    let titleWeight = 0;
+    let valueWeight = 0;
     await expect(async () => {
       await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
       await expect(card).toContainText('Working, for', { timeout: READ_TIMEOUT_MS });
       valueSizes = await distinctFontSizes(card.locator('dd'));
       labelSizes = await distinctFontSizes(card.locator('dt'));
-      titleSize = await fontSizePx(card.getByText(SEED_ORCHESTRATOR, { exact: true }));
+      const title = card.getByText(SEED_ORCHESTRATOR, { exact: true });
+      titleSize = await fontSizePx(title);
+      titleWeight = await fontWeight(title);
+      valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
     }).toPass({ timeout: 20_000 });
@@ -155,17 +168,24 @@ test.describe('sidebar hover card type scale (#1694)', () => {
 
     const [valueSize] = [...valueSizes];
     const [labelSize] = [...labelSizes];
-    expect(valueSize).toBeGreaterThan(labelSize as number);
+    expect(valueSize).toBe(labelSize);
     expect(titleSize).toBeCloseTo(valueSize as number, 1);
+    expect(titleWeight).toBeGreaterThan(valueWeight);
   });
 
-  test('numeric values (version, usage figures) carry tabular figures', async ({ app }) => {
+  test('numeric values (version, usage figures) carry tabular figures from the card container down', async ({
+    app,
+  }) => {
     await app.reboot();
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(async () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       const version = card.locator('dd').first();
       await expect(version).toContainText('1.0.0', { timeout: READ_TIMEOUT_MS });
+      // tabular-nums is declared once on the card's wrapping container
+      // (#1901), not per value -- font-variant-numeric inherits, so the
+      // version span itself carries no class of its own and still reads
+      // tabular through inheritance.
       const variant = await version
         .locator('span')
         .first()
