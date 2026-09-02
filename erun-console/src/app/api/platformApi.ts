@@ -31,6 +31,7 @@ export const platformApi = createApi({
     'Quota',
     'PendingRequests',
     'TenantIssuers',
+    'GateRuns',
   ],
   endpoints: () => ({}),
 });

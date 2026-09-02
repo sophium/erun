@@ -5,6 +5,7 @@ import {
   Inbox,
   KeyRound,
   LayoutDashboard,
+  ListChecks,
   Mail,
   Server,
   Settings,
@@ -24,6 +25,7 @@ export type ConsoleSectionId =
   | 'mcp-access'
   | 'invites'
   | 'requests'
+  | 'gate-runs'
   | 'tenants'
   | 'users'
   | 'org-settings'
@@ -52,6 +54,10 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // on whoami's capability set rather than at the nav level (see
   // requests/RequestsPanel.tsx).
   { id: 'requests', label: 'Requests', icon: Inbox },
+  // Gate runs (erun#1932) is every tenant's own view of the merge-queue gate:
+  // what is being gated right now, and what recent gates decided (GET
+  // /v1/gate-runs is TenantUserClass -- no tenant type restricts it).
+  { id: 'gate-runs', label: 'Gate runs', icon: ListChecks },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [

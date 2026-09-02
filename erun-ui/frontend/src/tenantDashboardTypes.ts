@@ -53,6 +53,10 @@ export interface UITenantDashboard {
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
+  // gateRuns is the Gates tab's own queue: what is being gated right now,
+  // and what recent gates decided, independent of whether the change gated
+  // is an erun review at all.
+  gateRuns?: UIGateRun[];
   auditEvents?: UITenantDashboardAudit[];
   panels?: UITenantDashboardPanel[];
   // canCreateReview and canAdvanceMergeQueue report whether the signed-in user
@@ -397,6 +401,26 @@ export interface UIPlatformUser {
   userId: string;
   tenantId: string;
   username: string;
+}
+
+// UIGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
+// tab renders. failingStep/logRef are set only for a FAILED run; an
+// INCONCLUSIVE run (a wrapper timeout, an environment fault -- never a real
+// verdict) carries neither and must render as its own distinct state, not
+// as red (see erun-backend-api/AGENTS.md's "Gate Runs").
+export interface UIGateRun {
+  gateRunId: string;
+  sourceBranch: string;
+  targetBranch: string;
+  sourceCommit: string;
+  mergeCommit?: string;
+  reviewId?: string;
+  reviewName?: string;
+  status: string;
+  failingStep?: string;
+  logRef?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UITenantDashboardAudit {

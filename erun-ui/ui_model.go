@@ -341,8 +341,13 @@ type uiTenantDashboard struct {
 	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
 	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
 	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	AuditEvents     []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
-	Panels          []uiTenantDashboardPanel  `json:"panels,omitempty"`
+	// GateRuns is the Gates tab's own queue: what is being gated right now,
+	// and what recent gates decided, independent of whether the change
+	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
+	// "Gate Runs".
+	GateRuns    []uiGateRun              `json:"gateRuns,omitempty"`
+	AuditEvents []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
+	Panels      []uiTenantDashboardPanel `json:"panels,omitempty"`
 	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
 	// may attempt those writes at all, so the composing actions can be hidden
 	// rather than rendered to fail on submit — the same contract CanComment
@@ -584,6 +589,26 @@ type uiTenantDashboardBuild struct {
 	Version    string `json:"version"`
 	CreatedAt  string `json:"createdAt,omitempty"`
 	UpdatedAt  string `json:"updatedAt,omitempty"`
+}
+
+// uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
+// tab renders. FailingStep/LogRef are set only for a FAILED run; a caller
+// must never infer failure from their absence alone, since an INCONCLUSIVE
+// run (a wrapper timeout, an environment fault -- never a real verdict)
+// carries neither and must render as its own distinct state, not as red.
+type uiGateRun struct {
+	GateRunID    string `json:"gateRunId"`
+	SourceBranch string `json:"sourceBranch"`
+	TargetBranch string `json:"targetBranch"`
+	SourceCommit string `json:"sourceCommit"`
+	MergeCommit  string `json:"mergeCommit,omitempty"`
+	ReviewID     string `json:"reviewId,omitempty"`
+	ReviewName   string `json:"reviewName,omitempty"`
+	Status       string `json:"status"`
+	FailingStep  string `json:"failingStep,omitempty"`
+	LogRef       string `json:"logRef,omitempty"`
+	CreatedAt    string `json:"createdAt,omitempty"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardAudit struct {

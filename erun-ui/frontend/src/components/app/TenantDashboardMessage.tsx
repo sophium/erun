@@ -25,7 +25,7 @@ export function PanelBody({
   children,
 }: {
   data: TenantDashboardData;
-  tab: 'users' | 'reviews' | 'queue' | 'builds' | 'audit' | 'requests';
+  tab: 'users' | 'reviews' | 'queue' | 'gates' | 'builds' | 'audit' | 'requests';
   empty: React.ReactElement;
   children: React.ReactNode;
 }): React.ReactElement {
