@@ -294,6 +294,17 @@ func IsDockerCreatePackageDenied(message string) bool {
 	return strings.Contains(strings.ToLower(message), "create_package")
 }
 
+// IsDockerUnknownBlobError reports a registry refusing to link a manifest to a
+// blob it does not actually hold — "unknown blob" from the daemon's push
+// output, or the registry's own BLOB_UNKNOWN error code. This is the shape a
+// stale local record of "already pushed" takes: docker skips re-uploading a
+// layer it believes the registry already has, and the registry rejects the
+// resulting manifest because the layer was never there (or no longer is).
+func IsDockerUnknownBlobError(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "unknown blob") || strings.Contains(message, "blob_unknown")
+}
+
 // IsDockerScopeDenied reports the GitHub scope-mismatch case where docker's
 // login token lacks write:packages. It stays deliberately narrow — distinct
 // from the org-policy create_package denial and from missing credentials a
