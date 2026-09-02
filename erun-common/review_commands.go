@@ -280,13 +280,23 @@ func RunReviewClose(ctx Context, store CloudReadStore, alias, reviewID string, d
 // reports the merge queue's own GATE build kind instead of an ordinary
 // RECORDED build — see AGENTS.md "Merge Queue". A GATE build carries no
 // version, since the gate publishes nothing.
+//
+// Root and DesktopPlaywrightVerified back a fail-closed desktop-coverage
+// stopgap: a successful GATE build that changes erun-ui/** is refused unless
+// DesktopPlaywrightVerified attests the suite was actually run, since the
+// gate's own `erun build` cannot run it. Root is the project root to diff
+// the squash commit against its parent from; empty (or not a git repo) makes
+// the check inconclusive and it is skipped rather than blocking on it — see
+// resolveGateSquashChangedPaths.
 type ReviewRecordBuildParams struct {
-	ReviewID      string
-	CommitID      string
-	Gate          bool
-	Version       string
-	Successful    bool
-	FailureDetail string
+	ReviewID                  string
+	CommitID                  string
+	Gate                      bool
+	Version                   string
+	Successful                bool
+	FailureDetail             string
+	Root                      string
+	DesktopPlaywrightVerified bool
 }
 
 // RunReviewRecordBuild records a build against a review. This is the
@@ -296,6 +306,9 @@ type ReviewRecordBuildParams struct {
 // separate "set review status" call for this, by design (a READY with no
 // build is a different thing: the missed-merge-window requeue).
 func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
+	if err := checkDesktopPlaywrightCoverageForGate(ctx, params); err != nil {
+		return PlatformBuild{}, err
+	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformBuild{}, err

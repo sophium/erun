@@ -342,11 +342,12 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 
 func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
 	var (
-		commitID      string
-		gate          bool
-		version       string
-		failed        bool
-		failureDetail string
+		commitID                  string
+		gate                      bool
+		version                   string
+		failed                    bool
+		failureDetail             string
+		desktopPlaywrightVerified bool
 	)
 	cmd := &cobra.Command{
 		Use:   "record-build REVIEW_ID",
@@ -363,21 +364,30 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"prospective merge and reports the result this way. A GATE build carries no version, since the gate " +
 			"publishes nothing — omit --version when --gate is set. Only a successful GATE build can later be " +
 			"reported MERGED with `erun review report-merged`.\n\n" +
+			"A successful --gate build that changes erun-ui/** is refused unless --desktop-playwright-verified " +
+			"is also set: the gate's own `erun build` does not run the erun-ui/playwright suite (issue #1933), " +
+			"so a green GATE build proves nothing about the desktop frontend on its own. Build erun-app and run " +
+			"`erun-ui/playwright/run.sh` against this exact commit first, then pass " +
+			"--desktop-playwright-verified once it passes.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
 			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate",
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate\n" +
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate --desktop-playwright-verified",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
+			_, root, _ := common.FindProjectRoot()
 			build, err := common.RunReviewRecordBuild(ctx, store, *alias, common.ReviewRecordBuildParams{
-				ReviewID:      args[0],
-				CommitID:      commitID,
-				Gate:          gate,
-				Version:       version,
-				Successful:    !failed,
-				FailureDetail: failureDetail,
+				ReviewID:                  args[0],
+				CommitID:                  commitID,
+				Gate:                      gate,
+				Version:                   version,
+				Successful:                !failed,
+				FailureDetail:             failureDetail,
+				Root:                      root,
+				DesktopPlaywrightVerified: desktopPlaywrightVerified,
 			}, deps)
 			if err != nil {
 				return err
@@ -399,6 +409,8 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --release); omit with --gate")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
+	cmd.Flags().BoolVar(&desktopPlaywrightVerified, "desktop-playwright-verified", false,
+		"Attest that erun-ui/playwright/run.sh was run against this commit and passed; required for a successful --gate build that changes erun-ui/**")
 	addDryRunFlag(cmd)
 	return cmd
 }

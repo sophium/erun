@@ -44,6 +44,12 @@ Everything above happens somewhere with no name of its own by default: a gate bu
 
 A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. This is CLI/MCP-first today; a console/desktop view is planned as a follow-up. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
 
+### The desktop coverage gap {#desktop-coverage-gap}
+
+**The gate's `erun build` cannot verify the desktop app.** `erun-devops`'s test stage (`make check`) has no Wails/webkit toolchain, so `erun-ui/playwright` never runs inside a gate build even though `erun-ui/AGENTS.md` makes that suite mandatory for every desktop change — a green `GATE` build proves nothing about `erun-ui/**` on its own today. `erun review record-build --gate` refuses a successful call whose commit changes `erun-ui/**` unless `--desktop-playwright-verified` is also set, attesting the suite was actually run against that commit and passed; `erun-merge-queue-drive` names the gap and the remedy before that refusal happens. This is a fail-closed stopgap, not a fix — see issue #1933 for the tracked follow-up that would let the gate run the suite itself.
+
+That refusal happens on the review's `GATE` build, a record independent of the `gate_runs` row above — so a caller that hits it must report the outcome to both. `erun-merge-queue-drive` reports its `gate-run` `INCONCLUSIVE` (never `FAILED`, since the `erun build` itself genuinely passed; never left `RUNNING`, since that would be exactly the silent gap `erun gate list` exists to close) when it cannot attest desktop coverage, then stops without recording a `GATE` build at all.
+
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
 Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that uses its own bespoke shape instead of the standard `{code, message, details}` envelope, naming the count and the review so a caller can act on it instead of parsing a sentence:
