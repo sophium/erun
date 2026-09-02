@@ -10,6 +10,7 @@ kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: library
 kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
 
 Running: Remove unused Docker images
 audit: erun doctor --dry-run --prune-images team dev

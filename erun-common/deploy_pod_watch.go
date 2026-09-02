@@ -9,7 +9,27 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// kubectlPodWatchExecutionOperation is the ExecutionModeFor/
+// ExecutionModeReport key for the `kubectl [--context c] --namespace <ns> get
+// pods -o json` poll watchReleasePods runs throughout every real helm deploy
+// (runHelmDeployWithPodWatch, deploy.go) to catch an early container failure
+// before helm's own timeout fires. Its file and function names say "watch",
+// but the mechanism has always been a ticker-driven re-Get, not a real
+// client-go Watch -- exactly the shape kubectl-deployment-wait
+// (kubernetes_client_go.go) already proved out, and the design pass behind
+// kubectl-secret-apply's client-side-apply choice judged this class of
+// operation safe for a read: a List writes no ownership metadata, so there is
+// no server-side-apply-style divergence to reproduce here, only the same List
+// the subprocess path already runs. It gets its own key rather than reusing
+// kubectl-deployment-wait: a different resource kind (Pod, not Deployment), a
+// List instead of a single Get, and its own classification logic entirely --
+// exactly the two-independent-polling-loops distinction that keeps the two
+// keys apart.
+const kubectlPodWatchExecutionOperation = "kubectl-pod-watch"
 
 // HelmReleaseContainerFailureError surfaces the real pod/container failure
 // behind an aborted helm release, so callers report the underlying reason
@@ -310,10 +330,45 @@ func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[s
 	return failure, summarizePods(releasePods)
 }
 
-// runKubectlGetPods bounds a hung apiserver with its own timeout beyond the
-// parent context, and kills the subprocess only once cmd.Process is set so a
-// missing kubectl binary surfaces as the exec error rather than a nil panic.
+// runKubectlGetPods dispatches to the subprocess or library path per the
+// kubectl-pod-watch execution mode (see execution_mode.go).
 func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
+	if currentExecutionMode(kubectlPodWatchExecutionOperation) == ExecutionModeLibrary {
+		return libraryListReleasePods(parent, params)
+	}
+	return defaultRunKubectlGetPods(parent, params)
+}
+
+// libraryListReleasePods is the library-backed alternative to
+// defaultRunKubectlGetPods, listing the same namespace's pods via
+// k8s.io/client-go instead of shelling out to kubectl. The typed result is
+// re-marshaled to JSON and fed through the exact same
+// parsePodStatusList/classifyTerminalFailure/summarizePods pipeline the
+// subprocess path uses: corev1.PodList carries the identical json tags
+// kubectl's own `-o json` output does, so this is not a second parser to keep
+// in sync, only a second source of the same bytes. Bounded by the same
+// defaultPodWatchKubectlTimeout the subprocess path times its kubectl
+// invocation with, layered onto whatever deadline the parent (helm deploy
+// watch) context already carries.
+func libraryListReleasePods(parent context.Context, params podWatchParams) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, defaultPodWatchKubectlTimeout)
+	defer cancel()
+	clientset, err := kubernetesClientsetForContext(strings.TrimSpace(params.KubernetesContext))
+	if err != nil {
+		return nil, err
+	}
+	list, err := clientset.CoreV1().Pods(strings.TrimSpace(params.Namespace)).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(list)
+}
+
+// defaultRunKubectlGetPods bounds a hung apiserver with its own timeout
+// beyond the parent context, and kills the subprocess only once cmd.Process
+// is set so a missing kubectl binary surfaces as the exec error rather than a
+// nil panic.
+func defaultRunKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
 	args := []string{}
 	if c := strings.TrimSpace(params.KubernetesContext); c != "" {
 		args = append(args, "--context", c)

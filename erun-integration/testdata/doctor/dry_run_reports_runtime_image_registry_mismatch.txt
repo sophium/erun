@@ -10,6 +10,7 @@ kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
 
 == Runtime image registry ==
 runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
