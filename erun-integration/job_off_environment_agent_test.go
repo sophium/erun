@@ -17,9 +17,9 @@ import (
 )
 
 // TestJobOffEnvironmentAgentReinvocation drives the bounded-reinvocation
-// mechanism (erun-common/AGENTS.md's #1881 note, job_supervisor.go's
-// considerEnvironmentJobReinvocation) through the one dispatch path the
-// existing coverage never exercised: `erun exec job start --agent` run from
+// mechanism (job_supervisor.go's considerEnvironmentJobReinvocation) through
+// the one dispatch path the existing coverage never exercised: `erun exec job
+// start --agent` run from
 // OUTSIDE any environment (a host caller), which reaches the target's
 // exec_agent MCP tool instead of calling StartEnvironmentJob directly the way
 // job_test.go's self-dispatch scenarios do (both run inside the environment,
