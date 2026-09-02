@@ -69,38 +69,45 @@ test('the env hover card still renders every field: version, branch+issue, activ
   await app.reboot();
 
   const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+  // Every field check lives inside the one retryable block, re-hovering (and
+  // re-emitting the stale reading) on each attempt: under a loaded worker the
+  // real env-usage sweep can re-render the row between assertions and drop
+  // the card (erun-ui/playwright/AGENTS.md, "a sidebar hover card lives only
+  // while the pointer rests on the row that raised it"), and a plain
+  // un-retried assertion after the card reopens does not survive that.
   await expect(async () => {
     await emitStaleEnvUsage(page);
     await page.mouse.move(0, 0);
     await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(card).toBeVisible({ timeout: 1_000 });
+
+    // Header: tenant/env title plus the Local badge.
+    await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
+    await expect(card.getByText('Local', { exact: true })).toBeVisible({ timeout: 1_000 });
+
+    // Version row.
+    await expect(card.getByText('Version', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('1.0.0', { timeout: 1_000 });
+
+    // Working-on row: branch, issue number, and issue title all present.
+    await expect(card.getByText('Working on', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('feature/1694-hover-card-type-scale', { timeout: 1_000 });
+    await expect(card).toContainText('#1694', { timeout: 1_000 });
+    await expect(card).toContainText('Neither sidebar hover card has a type scale', {
+      timeout: 1_000,
+    });
+
+    // Activity row.
+    await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('Idle', { timeout: 1_000 });
+
+    // Usage row: headline figures, staleness flag, and the reading's age.
+    await expect(card.getByText('Usage', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('CPU 12.0%', { timeout: 1_000 });
+    await expect(card).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
     await expect(card).toContainText('Stale', { timeout: 1_000 });
+    await expect(card).toContainText('ago', { timeout: 1_000 });
   }).toPass({ timeout: 20_000 });
-
-  // Header: tenant/env title plus the Local badge.
-  await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`);
-  await expect(card.getByText('Local', { exact: true })).toBeVisible();
-
-  // Version row.
-  await expect(card.getByText('Version', { exact: true })).toBeVisible();
-  await expect(card).toContainText('1.0.0');
-
-  // Working-on row: branch, issue number, and issue title all present.
-  await expect(card.getByText('Working on', { exact: true })).toBeVisible();
-  await expect(card).toContainText('feature/1694-hover-card-type-scale');
-  await expect(card).toContainText('#1694');
-  await expect(card).toContainText('Neither sidebar hover card has a type scale');
-
-  // Activity row.
-  await expect(card.getByText('Activity', { exact: true })).toBeVisible();
-  await expect(card).toContainText('Idle');
-
-  // Usage row: headline figures, staleness flag, and the reading's age.
-  await expect(card.getByText('Usage', { exact: true })).toBeVisible();
-  await expect(card).toContainText('CPU 12.0%');
-  await expect(card).toContainText('Mem 25% of 2048Mi');
-  await expect(card).toContainText('Stale');
-  await expect(card).toContainText('ago');
 });
 
 test('the orchestrator hover card still renders every field: status, doing, linked environments, and nudges', async ({

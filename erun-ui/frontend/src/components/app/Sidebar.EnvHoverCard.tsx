@@ -12,8 +12,11 @@ import {
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import {
+  HOVER_CARD_ALERT_CLASS,
   HOVER_CARD_CAPTION_CLASS,
-  HOVER_CARD_CAPTION_SIZE_CLASS,
+  HOVER_CARD_GRID_CLASS,
+  HOVER_CARD_TRUNCATE_CLASS,
+  HOVER_CARD_VALUE_STACK_CLASS,
   HoverCardBadge,
   HoverCardMuted,
   HoverCardRow,
@@ -117,7 +120,7 @@ export function EnvHoverCard({
         }}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
-        className="w-72 p-0 text-sm"
+        className="w-72 p-0"
         role="dialog"
         aria-label={`${tenantName} / ${environmentName} details`}
       >
@@ -172,35 +175,42 @@ function EnvHoverCardFields({
   nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
   return (
-    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
-      {/* wide: a version is the card's longest literal identifier, and the
-          narrow value column shared with the label breaks it mid-token. */}
-      <HoverCardRow label="Version" wide>
-        <RuntimeVersionState runtimeVersion={runtimeVersion} line={runtimeVersionLine} />
-      </HoverCardRow>
-      {erunVersionSummary && (
-        <HoverCardRow label="Erun version" wide>
-          <ErunVersionState summary={erunVersionSummary} />
+    // Two zones, per the spacing hierarchy's level 3 (Sidebar.HoverCardRow.tsx):
+    // stable identity above the hairline, live state below it, so a conditional
+    // row here (Erun version, Line mismatch) changes only this zone's height.
+    // tabular-nums lives here, once, rather than per row -- every digit in the
+    // card is equal-width with no per-value decision left to make.
+    <div className="tabular-nums">
+      <dl className={`${HOVER_CARD_GRID_CLASS} px-3 pt-2.5 pb-2`}>
+        <HoverCardRow label="Version">
+          <RuntimeVersionState runtimeVersion={runtimeVersion} line={runtimeVersionLine} />
         </HoverCardRow>
-      )}
-      {runtimeImageLineMismatch && (
-        <HoverCardRow label="Line mismatch" wide>
-          <LineMismatchWarning mismatch={runtimeImageLineMismatch} />
+        {erunVersionSummary && (
+          <HoverCardRow label="Erun version">
+            <ErunVersionState summary={erunVersionSummary} />
+          </HoverCardRow>
+        )}
+        {runtimeImageLineMismatch && (
+          <HoverCardRow label="Line mismatch">
+            <LineMismatchWarning mismatch={runtimeImageLineMismatch} />
+          </HoverCardRow>
+        )}
+        <HoverCardRow label="Working on">
+          <WorkingOn issue={issue} />
         </HoverCardRow>
-      )}
-      <HoverCardRow label="Working on" wide>
-        <WorkingOn issue={issue} />
-      </HoverCardRow>
-      <HoverCardRow label="Activity">
-        <ActivityState activityLabel={activityLabel} indicator={indicator} />
-      </HoverCardRow>
-      <HoverCardRow label="Usage">
-        <UsageState usage={usage} />
-      </HoverCardRow>
-      <HoverCardRow label="Cloud node">
-        <NodeState node={node} nodeIndicator={nodeIndicator} />
-      </HoverCardRow>
-    </dl>
+      </dl>
+      <dl className={`${HOVER_CARD_GRID_CLASS} border-t border-border/60 px-3 pt-2 pb-2.5`}>
+        <HoverCardRow label="Activity">
+          <ActivityState activityLabel={activityLabel} indicator={indicator} />
+        </HoverCardRow>
+        <HoverCardRow label="Usage">
+          <UsageState usage={usage} />
+        </HoverCardRow>
+        <HoverCardRow label="Cloud node">
+          <NodeState node={node} nodeIndicator={nodeIndicator} />
+        </HoverCardRow>
+      </dl>
+    </div>
   );
 }
 
@@ -224,8 +234,10 @@ function RuntimeVersionState({
     return <Muted>Not set</Muted>;
   }
   return (
-    <div className="grid gap-0.5">
-      <span className="font-mono tabular-nums">{summary.version}</span>
+    <div className={HOVER_CARD_VALUE_STACK_CLASS}>
+      <span className={HOVER_CARD_TRUNCATE_CLASS} title={summary.version}>
+        {summary.version}
+      </span>
       {summary.caption && <span className={HOVER_CARD_CAPTION_CLASS}>{summary.caption}</span>}
     </div>
   );
@@ -243,7 +255,11 @@ function ErunVersionState({ summary }: { summary: ErunVersionSummary }): React.R
   if (summary.sameAsRuntime) {
     return <Muted>Same as runtime version</Muted>;
   }
-  return <span className="font-mono tabular-nums">{summary.version}</span>;
+  return (
+    <span className={HOVER_CARD_TRUNCATE_CLASS} title={summary.version}>
+      {summary.version}
+    </span>
+  );
 }
 
 // LineMismatchWarning surfaces EnvConfig.RuntimeImageLineMismatch: the
@@ -256,7 +272,7 @@ function LineMismatchWarning({
   mismatch: UIRuntimeImageLineMismatch;
 }): React.ReactElement {
   return (
-    <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+    <span className={`flex items-start gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
       <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
       <span>
         Recorded {mismatch.recordedLine} line, last observed running {mismatch.observedLine} line —
@@ -306,9 +322,11 @@ function NodeState({
   const label = environmentNodeLabel(node);
   if (nodeIndicator.state === 'stopped') {
     return (
-      <span className="grid gap-0.5">
-        <span className="font-mono">{label}</span>
-        <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+      <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+        <span className={HOVER_CARD_TRUNCATE_CLASS} title={label}>
+          {label}
+        </span>
+        <span className={`flex items-center gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
           <TriangleAlert aria-hidden="true" className="size-3 shrink-0" />
           Stopped — start it from the titlebar
         </span>
@@ -316,8 +334,10 @@ function NodeState({
     );
   }
   return (
-    <span className="grid gap-0.5">
-      <span className="font-mono">{label}</span>
+    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+      <span className={HOVER_CARD_TRUNCATE_CLASS} title={label}>
+        {label}
+      </span>
       <span className={HOVER_CARD_CAPTION_CLASS}>{nodeStateCaption(nodeIndicator.state)}</span>
     </span>
   );
@@ -342,36 +362,36 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // would read as idle-and-healthy rather than "unmeasured"), and a visible
 // staleness flag when the reading has outlived the sweep interval that
 // produced it — an unlabelled stale number is worse than none.
+// A stale or unmeasurable reading is rendered as degraded, never as an amber
+// warning: nothing the operator did caused either state and no action follows
+// from it, so it should recede rather than alarm (see the TYPE note in
+// Sidebar.HoverCardRow.tsx). This also matters beyond this card's own type
+// rules -- the percentage this row shows is not authoritative for a
+// build-capable environment (#1805: BuildKit runs as a sibling cgroup with no
+// enforced ceiling, so the limit shown does not bound what the environment
+// actually uses). A quiet, receded treatment does not overstate confidence in
+// a figure that can already be misleading; an alert-coloured one would.
 function UsageState({
   usage,
 }: {
   usage: UIEnvironmentUsageSnapshot | undefined;
 }): React.ReactElement {
   const summary = summarizeEnvironmentUsage(usage, Date.now());
-  if (!summary.hasReading) {
+  if (!summary.hasReading || !summary.headline) {
     return <Muted>{summary.detail}</Muted>;
   }
-  if (!summary.headline) {
+  if (summary.stale) {
     return (
-      <span className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
-        <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
-        <span>{summary.detail}</span>
+      <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+        <Muted>{summary.headline}</Muted>
+        <Muted>Stale — as of {summary.ageLabel} ago</Muted>
       </span>
     );
   }
   return (
-    <span className="grid gap-0.5">
-      <span className="tabular-nums">{summary.headline}</span>
-      <span
-        className={
-          summary.stale
-            ? `flex items-center gap-1 ${HOVER_CARD_CAPTION_SIZE_CLASS} text-amber-700 dark:text-amber-400`
-            : HOVER_CARD_CAPTION_CLASS
-        }
-      >
-        {summary.stale && <TriangleAlert aria-hidden="true" className="size-3 shrink-0" />}
-        {summary.stale ? `Stale — as of ${summary.ageLabel} ago` : `As of ${summary.ageLabel} ago`}
-      </span>
+    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+      <span>{summary.headline}</span>
+      <span className={HOVER_CARD_CAPTION_CLASS}>As of {summary.ageLabel} ago</span>
     </span>
   );
 }
@@ -390,13 +410,17 @@ function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement 
   if (!value.branch) {
     return <Muted>No branch checked out</Muted>;
   }
+  const issueLine = value.issueNumber
+    ? `#${String(value.issueNumber)}${value.issueTitle ? ` · ${value.issueTitle}` : ''}`
+    : null;
   return (
-    <div className="grid gap-0.5">
-      <span className="font-mono">{value.branch}</span>
-      {value.issueNumber ? (
-        <span>
-          #{value.issueNumber}
-          {value.issueTitle ? ` · ${value.issueTitle}` : ''}
+    <div className={HOVER_CARD_VALUE_STACK_CLASS}>
+      <span className={HOVER_CARD_TRUNCATE_CLASS} title={value.branch}>
+        {value.branch}
+      </span>
+      {issueLine ? (
+        <span className={HOVER_CARD_TRUNCATE_CLASS} title={issueLine}>
+          {issueLine}
         </span>
       ) : null}
     </div>

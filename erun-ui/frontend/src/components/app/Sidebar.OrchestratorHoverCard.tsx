@@ -12,8 +12,11 @@ import {
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
 import {
+  HOVER_CARD_ALERT_CLASS,
   HOVER_CARD_CAPTION_CLASS,
-  HOVER_CARD_CAPTION_SIZE_CLASS,
+  HOVER_CARD_CAPTION_DEGRADED_CLASS,
+  HOVER_CARD_GRID_CLASS,
+  HOVER_CARD_VALUE_STACK_CLASS,
   HoverCardBadge,
   HoverCardMuted,
   HoverCardRow,
@@ -72,7 +75,7 @@ export function OrchestratorHoverCard({
         }}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
-        className="w-72 p-0 text-sm"
+        className="w-72 p-0"
         role="dialog"
         aria-label={`${orchestrator.name} details`}
       >
@@ -82,11 +85,15 @@ export function OrchestratorHoverCard({
             {orchestrator.transient && <HoverCardBadge>Transient</HoverCardBadge>}
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 px-3 py-2.5">
+        {/* Single zone: unlike EnvHoverCard this card has no stable-identity vs
+            live-state split, so it skips spacing level 3 rather than inventing
+            a one-zone version of it (Sidebar.HoverCardRow.tsx). tabular-nums
+            lives on this container, not per row. */}
+        <dl className={`${HOVER_CARD_GRID_CLASS} tabular-nums px-3 py-2.5`}>
           <HoverCardRow label="Status">{running ? 'Running' : 'Stopped'}</HoverCardRow>
           {running && orchestrator.restartRequired && (
             <HoverCardRow label="Restart">
-              <span className="flex items-start gap-1.5 text-amber-600">
+              <span className={`flex items-start gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
                 <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 flex-none" />
                 <span>
                   Its environments changed while it was running. It still holds tools for the old
@@ -152,7 +159,7 @@ function OrchestratorDoing({
     return <Muted>Idle, waiting for input</Muted>;
   }
   return (
-    <span className="grid gap-0.5">
+    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
       {lines.map((line) => (
         <span key={line}>{line}</span>
       ))}
@@ -190,7 +197,7 @@ function OrchestratorEnvironments({
               {line.dot && <StatusDotGlyph state={line.dot} />}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{line.name}</span>
+              <span className="block truncate font-semibold">{line.name}</span>
               <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
               {line.roleLabel && (
                 <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>
@@ -198,12 +205,13 @@ function OrchestratorEnvironments({
                 </span>
               )}
               {line.usage && (
+                // Stale renders degraded, not amber: same reasoning as
+                // EnvHoverCard's UsageState -- an unmeasured age is not a fault
+                // and must not look more alarming than it is.
                 <span
-                  className={
-                    line.usageStale
-                      ? `block truncate tabular-nums ${HOVER_CARD_CAPTION_SIZE_CLASS} text-amber-700 dark:text-amber-400`
-                      : `block truncate tabular-nums ${HOVER_CARD_CAPTION_CLASS}`
-                  }
+                  className={`block truncate ${
+                    line.usageStale ? HOVER_CARD_CAPTION_DEGRADED_CLASS : HOVER_CARD_CAPTION_CLASS
+                  }`}
                 >
                   {line.usage}
                   {line.usageStale ? ' (stale)' : ''}
@@ -232,7 +240,7 @@ function OrchestratorNudges({
   const summary = orchestratorNudgeSummary(orchestrator, Date.now());
   if (orchestrator.nudgeCapped) {
     return (
-      <span className="flex items-start gap-1.5 text-amber-600">
+      <span className={`flex items-start gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
         <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 flex-none" />
         <span>{summary}</span>
       </span>

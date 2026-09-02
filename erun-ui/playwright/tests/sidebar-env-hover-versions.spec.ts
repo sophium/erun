@@ -103,25 +103,41 @@ test.describe('sidebar env hover card version rows', () => {
     }
   });
 
-  // The longest literal identifier on the card sat in the narrow value
-  // column it shares with the label, so a version this long broke mid-token
-  // across two lines. getClientRects() reports one rect per visual
-  // line a client renders text across, so more than one is the wrap the
-  // `wide` layout exists to prevent -- a DOM textContent assertion can't see
-  // this, since wrapping is a rendering fact, not a string fact.
+  // The longest literal identifier on the card used to sit in the narrow
+  // value column it shares with the label, so a version this long broke
+  // mid-token across two lines -- the `wide` layout (col-spanning both grid
+  // columns) existed to prevent exactly that. #1901 retired `wide` from this
+  // card and truncates identifiers instead (with the full value in `title`),
+  // which is a stronger guarantee: `white-space: nowrap` makes a mid-token
+  // break structurally impossible, not merely unlikely at this card's width.
+  //
+  // This is asserted via the computed style and the rendered box height
+  // rather than `Range.getClientRects()`: Chromium reports TWO overlapping
+  // rects (same origin, different widths -- the full logical extent and the
+  // ellipsis-clipped visible extent) for a single-line `text-overflow:
+  // ellipsis` run, so a rect count is not a reliable one-line signal once
+  // ellipsis is involved, only for plain wrapped text. `white-space: nowrap`
+  // is the actual guarantee; the single-line box height confirms it did not
+  // wrap in practice, not just in principle.
   test('a long snapshot version renders on one line, not broken mid-token', async ({ app }) => {
     const { environment, card } = await seedAndOpen(app, 'long-version-layout', {
       runtimeVersion: '1.0.356-snapshot-20260831111243',
     });
     try {
-      const versionValue = rowValue(card, 'Version').locator('.font-mono');
+      const versionValue = rowValue(card, 'Version').locator('.truncate');
       await expect(versionValue).toBeVisible();
-      const lineCount = await versionValue.evaluate((el) => {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        return range.getClientRects().length;
-      });
-      expect(lineCount).toBe(1);
+      await expect(versionValue).toHaveAttribute('title', '1.0.356-snapshot-20260831111243');
+      const whiteSpace = await versionValue.evaluate(
+        (el) => window.getComputedStyle(el).whiteSpace,
+      );
+      const valueHeight = await versionValue.evaluate((el) => el.getBoundingClientRect().height);
+      const labelHeight = await card
+        .locator('dt:text-is("Version")')
+        .evaluate((el) => el.getBoundingClientRect().height);
+      expect(whiteSpace).toBe('nowrap');
+      // A wrapped two-line value would be roughly double a single-line
+      // label's height; a truncated one-line value matches it.
+      expect(valueHeight).toBeLessThan(labelHeight * 1.5);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
