@@ -106,6 +106,18 @@ type TerraformResult struct {
 	RFC2136SecretNamespace string     `json:"rfc2136SecretNamespace,omitempty"`
 	Commands               [][]string `json:"commands"`
 	RequiresConfirmation   bool       `json:"requiresConfirmation"`
+	// Dispatched is true when this run executed non-interactively inside the
+	// target environment's own runtime pod (via kubectl exec) instead of
+	// running terraform on this machine — see resolveTerraformTargetEnvironment.
+	// Directory/WorkDir/StateFile/DataDir/VarFile/RootSource/LockReadonly are
+	// unset in this case: only the dispatched process, running inside the pod,
+	// resolves those paths.
+	Dispatched bool `json:"dispatched,omitempty"`
+	// Stdout and Stderr carry the dispatched terraform invocation's captured
+	// output back to the caller; empty when Dispatched is false; both are
+	// still folded into the returned error when the dispatch itself fails.
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
 }
 
 // terraformRootSource records which candidate location the per-env Terraform
@@ -130,12 +142,26 @@ type terraformStep struct {
 // RunTerraform resolves and (unless dry-run) runs Terraform against a platform's
 // per-env root. Every command and decision is traced before execution, so a
 // dry-run is a complete, side-effect-free plan of what a real run would do.
-func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc) (TerraformResult, error) {
+//
+// dispatch is the runner used when the target is a runtime/remote-agent env
+// invoked from off-environment (erun#1910): rather than refusing outright, the
+// run dispatches non-interactively into the env's own runtime pod via kubectl
+// exec, the same primitive erun doctor/outputs/sshd already use. nil defaults
+// to RunRemoteCommand.
+func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if store == nil {
 		store = ConfigStore{}
 	}
 
-	result, steps, err := resolveTerraformPlan(params, store)
+	target, err := resolveTerraformTargetEnvironment(params, store)
+	if err != nil {
+		return TerraformResult{}, err
+	}
+	if target.NeedsDispatch {
+		return dispatchTerraform(ctx, target, params, confirm, dispatch)
+	}
+
+	result, steps, err := resolveTerraformPlan(params, target, store)
 	if err != nil {
 		return TerraformResult{}, err
 	}
@@ -314,63 +340,156 @@ func executeTerraformSteps(ctx Context, result TerraformResult, steps []terrafor
 	return nil
 }
 
+// terraformTarget is the tenant/environment this run targets, resolved once by
+// resolveTerraformTargetEnvironment and shared by both the local-execution path
+// (resolveTerraformPlan) and the off-environment dispatch path (dispatchTerraform)
+// so the two can never resolve a different tenant/environment/context from the
+// same params.
+type terraformTarget struct {
+	Tenant         string
+	Environment    string
+	KubeContext    string
+	EnvType        EnvironmentType
+	RemoteWorktree bool
+	// NeedsDispatch is true when the target's terraform state lives on its own
+	// runtime pod's home PVC (RemoteWorktree) and this process is not verifiably
+	// running inside that exact pod — see injectedRuntimePodIdentity below.
+	NeedsDispatch bool
+}
+
 // resolveTerraformTargetEnvironment resolves the tenant and environment the run
-// targets, confirms the environment can host one at all, confirms this process
-// can actually see that env's real terraform state, and resolves the kubernetes
-// context this env's kubectl-touching reads (e.g. the RFC2136 TSIG secret)
-// should use — the same context every other kubectl call against this env uses,
-// via the same resolution every other command applies. Confirming the env is
-// configured before its root is derived turns a typo into a named error rather
-// than an opaque "no such directory".
-func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (tenant, environment, kubeContext string, envType EnvironmentType, remoteWorktree bool, err error) {
-	tenant, environment, err = resolveTerraformScope(store, params)
+// targets, confirms the environment can host one at all, decides whether this
+// process can see that env's real terraform state directly or must dispatch
+// into its own pod instead, and resolves the kubernetes context this env's
+// kubectl-touching reads (e.g. the RFC2136 TSIG secret) should use — the same
+// context every other kubectl call against this env uses, via the same
+// resolution every other command applies. Confirming the env is configured
+// before its root is derived turns a typo into a named error rather than an
+// opaque "no such directory".
+func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (terraformTarget, error) {
+	tenant, environment, err := resolveTerraformScope(store, params)
 	if err != nil {
-		return "", "", "", "", false, err
+		return terraformTarget{}, err
 	}
 	if err := ValidateTenantName(tenant); err != nil {
-		return "", "", "", "", false, err
+		return terraformTarget{}, err
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return "", "", "", "", false, err
+		return terraformTarget{}, err
 	}
-	envType = envConfig.ResolvedType()
-	remoteWorktree = envConfig.RemoteWorktree()
+	envType := envConfig.ResolvedType()
+	remoteWorktree := envConfig.RemoteWorktree()
 	// terraform apply/plan/destroy read back cluster state (e.g. an RFC2136
 	// TSIG secret) and apply/destroy target the runtime pod's own cluster; a
 	// host env has neither. Checked against ResolvedType, not the broader
 	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
 	// as it did before host existed.
 	if envType == EnvironmentTypeHost {
-		return "", "", "", "", false, fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
+		return terraformTarget{}, fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
 	}
 	// A remote-agent or runtime env's terraform state lives on its own runtime
 	// pod's home PVC, not on whatever machine invoked this process — RemoteWorktree
 	// is the same "worktree/home lives on a remote pod" fact open/delete/list
 	// already key off, so a config change to worktree storage can't drift the two
 	// decisions apart. injectedRuntimePodIdentity is the same ERUN_TENANT/
-	// ERUN_ENVIRONMENT marker deploy's in-pod guard uses; a host-side invocation
-	// against such an env resolves a state path that looks plausible but was
-	// never the real backend, so it must refuse rather than silently proceed.
+	// ERUN_ENVIRONMENT marker deploy's in-pod guard uses; anywhere else — the
+	// host, or a different environment's own pod — dispatchTerraform runs the
+	// same command inside the target's real pod instead (erun#1910) rather than
+	// resolving a state path here that looks plausible but was never the real
+	// backend.
+	needsDispatch := false
 	if remoteWorktree {
 		podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(os.Getenv)
-		if !inPod || podTenant != tenant || podEnvironment != environment {
-			return "", "", "", "", false, terraformRemoteStateError(tenant, environment, envType)
-		}
+		needsDispatch = !inPod || podTenant != tenant || podEnvironment != environment
 	}
-	kubeContext = store.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
-	return tenant, environment, kubeContext, envType, remoteWorktree, nil
+	kubeContext := store.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	return terraformTarget{
+		Tenant:         tenant,
+		Environment:    environment,
+		KubeContext:    kubeContext,
+		EnvType:        envType,
+		RemoteWorktree: remoteWorktree,
+		NeedsDispatch:  needsDispatch,
+	}, nil
 }
 
-// terraformRemoteStateError explains that env's terraform state lives inside
-// its own runtime pod's home PVC, not on the machine that invoked this command,
-// and names the concrete remedy. This is what stops a host-side `terraform
-// init` from resolving an absent backend path and silently starting from empty
-// state while the environment's real, already-applied state sits untouched
-// inside its own pod — reached only by getting a shell there first.
-func terraformRemoteStateError(tenant, environment string, envType EnvironmentType) error {
-	return fmt.Errorf("terraform %s/%s: %s is a %s environment — its terraform state lives on its own runtime pod's home PVC, not on this machine. Run `erun open %s %s` for a shell inside the environment, then run `erun terraform ...` from there",
-		tenant, environment, environment, envType, tenant, environment)
+// requiresTerraformConfirmation reports whether op mutates cloud/cluster state
+// and therefore needs the type-the-environment-name confirmation gate; init and
+// plan are read-only and never prompt.
+func requiresTerraformConfirmation(op TerraformOperation) bool {
+	return op == TerraformApply || op == TerraformDestroy
+}
+
+// dispatchTerraform runs `erun terraform <op>` non-interactively inside the
+// target environment's own runtime pod instead of refusing (erun#1910: the
+// refusal named `erun open` as the remedy, but `erun open` itself needs a TTY,
+// so no script or host orchestrator could ever reach it). It reuses the exact
+// confirm gate the local execution path uses below, so a host-invoked apply/
+// destroy is exactly as far from an unattended mutation as one run locally:
+// plan/init dispatch automatically (read-only), while apply/destroy still
+// requires --confirm-environment (or an interactive terminal that can answer
+// the same prompt) before anything runs.
+func dispatchTerraform(ctx Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
+	if len(params.ExtraArgs) > 0 {
+		return TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
+	}
+
+	req := ShellLaunchParams{
+		Tenant:            target.Tenant,
+		Environment:       target.Environment,
+		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
+		KubernetesContext: target.KubeContext,
+	}
+	script := terraformDispatchScript(target, params.Operation)
+
+	ctx.Trace(fmt.Sprintf("terraform: %s/%s is a %s environment — dispatching %s non-interactively into its own runtime pod instead of running on this machine", target.Tenant, target.Environment, terraformEnvTypeLabel(string(target.EnvType)), params.Operation))
+	traceRemoteCommand(ctx, req, "terraform-dispatch", script)
+
+	dispatched := TerraformResult{
+		Tenant:      target.Tenant,
+		Environment: target.Environment,
+		Operation:   string(params.Operation),
+		Namespace:   req.Namespace,
+		EnvType:     string(target.EnvType),
+		Dispatched:  true,
+	}
+	if ctx.DryRun {
+		return dispatched, nil
+	}
+	if requiresTerraformConfirmation(params.Operation) {
+		if confirm == nil {
+			return TerraformResult{}, fmt.Errorf("terraform %s requires confirmation but none was provided", params.Operation)
+		}
+		if err := confirm(ctx, target.Environment); err != nil {
+			return TerraformResult{}, err
+		}
+	}
+	if dispatch == nil {
+		dispatch = RunRemoteCommand
+	}
+	result, err := dispatch(req, script)
+	dispatched.Stdout = result.Stdout
+	dispatched.Stderr = result.Stderr
+	if err != nil {
+		return TerraformResult{}, fmt.Errorf("terraform %s: %w%s", params.Operation, err, formatRemoteCommandStderr(result.Stderr))
+	}
+	return dispatched, nil
+}
+
+// terraformDispatchScript builds the `erun terraform` invocation that runs
+// inside the target's own pod. Tenant/environment are always passed by flag
+// (dispatch already has them as resolved, validated strings, regardless of how
+// the outer invocation named them), and --confirm-environment is embedded for
+// apply/destroy only once dispatchTerraform's own confirm gate has already
+// approved target.Environment — the in-pod process has no stdin to prompt on,
+// so it must not need to.
+func terraformDispatchScript(target terraformTarget, op TerraformOperation) string {
+	args := []string{"erun", "terraform", string(op), "--tenant", shellQuote(target.Tenant), "--environment", shellQuote(target.Environment)}
+	if requiresTerraformConfirmation(op) {
+		args = append(args, "--confirm-environment", shellQuote(target.Environment))
+	}
+	return strings.Join(args, " ")
 }
 
 // terraformEnvTypeLabel renders EnvType for the trace, naming a legacy env with
@@ -394,7 +513,7 @@ func terraformStateLocus(remoteWorktree bool) string {
 	return "this host's home directory"
 }
 
-func resolveTerraformPlan(params TerraformParams, store TerraformStore) (TerraformResult, []terraformStep, error) {
+func resolveTerraformPlan(params TerraformParams, target terraformTarget, store TerraformStore) (TerraformResult, []terraformStep, error) {
 	op := params.Operation
 	if err := validateTerraformOperation(op); err != nil {
 		return TerraformResult{}, nil, err
@@ -404,10 +523,7 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		return TerraformResult{}, nil, fmt.Errorf("project root is required")
 	}
 
-	tenant, environment, kubeContext, envType, remoteWorktree, err := resolveTerraformTargetEnvironment(params, store)
-	if err != nil {
-		return TerraformResult{}, nil, err
-	}
+	tenant, environment, kubeContext, envType, remoteWorktree := target.Tenant, target.Environment, target.KubeContext, target.EnvType, target.RemoteWorktree
 
 	paths, err := loadProjectPaths(projectRoot)
 	if err != nil {
@@ -448,7 +564,7 @@ func resolveTerraformPlan(params TerraformParams, store TerraformStore) (Terrafo
 		LockReadonly:            lockReadonly,
 		LegacyStateInTree:       fileExists(filepath.Join(dir, "terraform.tfstate")),
 		Commands:                terraformStepCommands(steps),
-		RequiresConfirmation:    op == TerraformApply || op == TerraformDestroy,
+		RequiresConfirmation:    requiresTerraformConfirmation(op),
 	}
 	return result, steps, nil
 }

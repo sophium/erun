@@ -1,0 +1,3 @@
+audit: erun terraform apply team prod
+terraform: team/prod is a runtime environment — dispatching apply non-interactively into its own runtime pod instead of running on this machine
+Type the environment name to apply (prod): confirmation "" does not match environment "prod"; aborting apply

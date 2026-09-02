@@ -1,0 +1,5 @@
+audit: erun terraform init --dry-run team prod
+terraform: team/prod is a runtime environment — dispatching init non-interactively into its own runtime pod instead of running on this machine
+kubectl --context test-context --namespace team-prod exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+terraform-dispatch:
+  erun terraform init --tenant 'team' --environment 'prod'
