@@ -2,6 +2,7 @@ import { Button, cn, EmptyState } from 'erun-kit';
 import {
   AlertTriangle,
   Check,
+  Clock,
   Copy,
   ExternalLink,
   Globe,
@@ -16,6 +17,7 @@ import {
 import * as React from 'react';
 
 import { openPlatformBlockDocs } from '@/app/documentationThunks';
+import { exposedServiceStatus } from '@/app/exposedServiceStatus';
 import { useAppDispatch } from '@/app/hooks';
 import {
   cancelUnexposeConfirm,
@@ -43,14 +45,32 @@ type ManageDialog = AppState['manageDialog'];
 // create/remove states — per erun-ui/AGENTS.md "Degrade by permission" and
 // "Keep the three empty states distinct".
 export function ExposuresSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const exposures = dialog.exposures;
   const loading = dialog.exposuresLoading;
+  // A certificate that is still issuing resolves on its own over time, with
+  // nothing the user did to trigger a re-check -- offer one explicitly rather
+  // than making "close and reopen the dialog" the only way to see it update
+  // (Nielsen #1, visibility of system status).
+  const canRefresh = !loading && exposures.configured && !exposures.restricted && !exposures.error;
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
           Public access
         </div>
+        {canRefresh && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1.5 text-muted-foreground"
+            aria-label="Refresh public addresses"
+            onClick={() => void dispatch(refreshManageExposures())}
+          >
+            <RefreshCw aria-hidden="true" />
+          </Button>
+        )}
       </div>
       {loading ? (
         <ExposuresLoadingSkeleton />
@@ -176,14 +196,20 @@ function ExposedServiceRow({
 }): React.ReactElement {
   const url = `${service.scheme}://${service.hostname}`;
   const [copied, setCopied] = React.useState(false);
+  const status = exposedServiceStatus(service);
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
       <div className="min-w-0">
         <div className="font-medium text-foreground">{service.service}</div>
         <div className="flex items-center gap-1 text-muted-foreground [overflow-wrap:anywhere]">
-          {service.scheme === 'https' ? (
-            <Lock className="size-3 shrink-0" aria-hidden="true" />
-          ) : (
+          {status === 'https-ready' && <Lock className="size-3 shrink-0" aria-hidden="true" />}
+          {status === 'https-pending' && (
+            <Clock
+              className="size-3 shrink-0 text-amber-700 dark:text-amber-400"
+              aria-hidden="true"
+            />
+          )}
+          {status === 'http' && (
             <Unlock
               className="size-3 shrink-0 text-amber-700 dark:text-amber-400"
               aria-hidden="true"
@@ -191,6 +217,14 @@ function ExposedServiceRow({
           )}
           <span>{url}</span>
         </div>
+        {/* Never render the pending state as if it were already serving: the
+            certificate exists but has not issued, so opening this URL right
+            now would show a warning, not a working page. */}
+        {status === 'https-pending' && (
+          <div className="text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]">
+            Certificate pending{service.tlsNotReadyReason ? `: ${service.tlsNotReadyReason}` : ''}
+          </div>
+        )}
       </div>
       <Button
         type="button"

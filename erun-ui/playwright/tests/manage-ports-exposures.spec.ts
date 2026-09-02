@@ -42,7 +42,24 @@ const POPULATED = {
   data: {
     configured: true,
     restricted: false,
-    services: [{ service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https' }],
+    services: [
+      { service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https', tlsReady: true },
+    ],
+  },
+};
+const PENDING_CERTIFICATE = {
+  data: {
+    configured: true,
+    restricted: false,
+    services: [
+      {
+        service: 'web',
+        hostname: 'web.pw-alpha.services.test',
+        scheme: 'https',
+        tlsReady: false,
+        tlsNotReadyReason: 'Issuing: waiting for order to complete',
+      },
+    ],
   },
 };
 
@@ -145,6 +162,47 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await retry.click();
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(calls).toBe(2);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // A certificate that has not issued yet is a distinct state from "exposed
+  // and working": the Ingress already carries a tls block -- cert-manager
+  // writes that before issuance completes -- so scheme alone would otherwise
+  // render this row identically to a service that is actually safe to open.
+  // Also exercises the manual refresh affordance a developer needs while
+  // waiting for the certificate to issue.
+  test('a service exposed under a still-issuing certificate reads as pending, not ready', async ({
+    app,
+    page,
+  }) => {
+    let listCalls = 0;
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => {
+        listCalls++;
+        return PENDING_CERTIFICATE;
+      },
+    });
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Ports');
+    const dialog = app.manageDialog.locator();
+
+    await expect(dialog.getByText('web.pw-alpha.services.test')).toBeVisible();
+    await expect(
+      dialog.getByText('Certificate pending: Issuing: waiting for order to complete'),
+    ).toBeVisible();
+
+    await dialog.screenshot({
+      path: '/home/erun/.erun/outputs/1918-visual/ports-cert-pending.png',
+    });
+
+    const refresh = dialog.getByRole('button', { name: 'Refresh public addresses' });
+    await expect(refresh).toBeVisible();
+    expect(listCalls).toBe(1);
+    await refresh.click();
+    await expect.poll(() => listCalls).toBe(2);
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
