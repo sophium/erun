@@ -116,7 +116,7 @@ func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, s
 	if !IsDockerUnknownBlobError(err.Error()) {
 		return fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
 	}
-	fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
+	_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }
 
