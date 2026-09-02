@@ -88,6 +88,55 @@ func TestClientAgainstRealZitadel(t *testing.T) {
 	e2eRefusesDeactivatingAnInitialUser(t, ctx, client, created.ID)
 	e2eUpdatesOrgSettings(t, ctx, client)
 	e2eConfiguresSMTPAndSkipsTheEmailFlow(t, ctx, client)
+	e2eCrossOrgListAndDeactivate(t, ctx, client)
+}
+
+// e2eCrossOrgListAndDeactivate proves the actual bug this issue reports,
+// against a real instance: a user created in another org (via
+// CreateHumanUserParams.OrgID, the same as enrolling a tenant's first
+// admin) must be listable and deactivatable by naming that same org again --
+// and must NOT show up in, or be reachable through, the credential's own
+// org, which is exactly the silent wrong-org behaviour before this fix.
+func e2eCrossOrgListAndDeactivate(t *testing.T, ctx context.Context, client *Client) {
+	t.Helper()
+	orgName := fmt.Sprintf("erun-e2e-org-%d", time.Now().UnixNano())
+	org, err := client.CreateOrg(ctx, orgName)
+	if err != nil {
+		t.Fatalf("CreateOrg: %v", err)
+	}
+
+	username := fmt.Sprintf("erun-e2e-crossorg-%d", time.Now().UnixNano())
+	created, err := client.CreateHumanUser(ctx, CreateHumanUserParams{
+		Username: username, Email: username + "@erun.local", FirstName: "Erun", LastName: "CrossOrg",
+		InitialPassword: "Er7hK2mQ9xL4nP6z!",
+		OrgID:           org.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateHumanUser(orgId=%s): %v", org.ID, err)
+	}
+
+	ownOrgUsers, err := client.ListUsers(ctx, "")
+	if err != nil {
+		t.Fatalf("ListUsers (own org): %v", err)
+	}
+	if containsUserID(ownOrgUsers, created.ID) {
+		t.Fatalf("the credential's own org listed a user created in a different org: %+v", created)
+	}
+
+	targetOrgUsers, err := client.ListUsers(ctx, org.ID)
+	if err != nil {
+		t.Fatalf("ListUsers(orgId=%s): %v", org.ID, err)
+	}
+	if !containsUserID(targetOrgUsers, created.ID) {
+		t.Fatalf("ListUsers(orgId=%s) did not return the user created in it: %+v", org.ID, created)
+	}
+
+	if err := client.DeactivateUser(ctx, "", created.ID); err == nil {
+		t.Fatal("want DeactivateUser to fail to find a cross-org user with no org context (the bug this issue reports)")
+	}
+	if err := client.DeactivateUser(ctx, org.ID, created.ID); err != nil {
+		t.Fatalf("DeactivateUser(orgId=%s): %v", org.ID, err)
+	}
 }
 
 func e2eCreateAndListUser(t *testing.T, ctx context.Context, client *Client) User {
@@ -103,7 +152,7 @@ func e2eCreateAndListUser(t *testing.T, ctx context.Context, client *Client) Use
 		t.Fatal("CreateHumanUser returned no id")
 	}
 
-	users, err := client.ListUsers(ctx)
+	users, err := client.ListUsers(ctx, "")
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
@@ -118,7 +167,7 @@ func e2eCreateAndListUser(t *testing.T, ctx context.Context, client *Client) Use
 // ("can only be deleted not deactivated").
 func e2eRefusesDeactivatingAnInitialUser(t *testing.T, ctx context.Context, client *Client, userID string) {
 	t.Helper()
-	err := client.DeactivateUser(ctx, userID)
+	err := client.DeactivateUser(ctx, "", userID)
 	if err == nil {
 		t.Fatal("want DeactivateUser to refuse a USER_STATE_INITIAL user")
 	}

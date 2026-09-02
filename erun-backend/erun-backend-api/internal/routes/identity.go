@@ -18,9 +18,9 @@ import (
 // satisfies it. Enrollment goes through IdentityEnroller instead, since it
 // coordinates the IdP call with the erun-side user mapping.
 type IdentityAdminClient interface {
-	ListUsers(ctx context.Context) ([]zitadel.User, error)
-	DeactivateUser(ctx context.Context, userID string) error
-	ReactivateUser(ctx context.Context, userID string) error
+	ListUsers(ctx context.Context, orgID string) ([]zitadel.User, error)
+	DeactivateUser(ctx context.Context, orgID string, userID string) error
+	ReactivateUser(ctx context.Context, orgID string, userID string) error
 	GetOrgSettings(ctx context.Context) (zitadel.OrgSettings, error)
 	UpdateOrgSettings(ctx context.Context, params zitadel.UpdateOrgSettingsParams) (zitadel.OrgSettings, error)
 	GetSMTPStatus(ctx context.Context) (zitadel.SMTPStatus, error)
@@ -81,6 +81,27 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	register(http.MethodPatch, "/v1/identity/smtp-settings", http.HandlerFunc(routes.updateSMTPSettings))
 }
 
+// listUsers, deactivateUser, and reactivateUser all accept an optional
+// ?orgId= query parameter, addressing the same Zitadel org
+// enrollIdentityUserRequest.OrgID can already create a user in: without it,
+// a user created in another org was permanent, invisible residue --
+// listable and deactivatable only in the credential's own org, no matter
+// which org actually held it. Omitting orgId keeps that original behaviour,
+// so an existing caller sees no change.
+//
+// orgId is taken as-is, never derived from a tenantId: tenant_issuers maps a
+// tenant to zero, one, or several org_field_value rows (one per issuer), so
+// "the org for tenant X" is not a well-defined single answer the way "the
+// org for this explicit id" is. Guessing one of several candidate orgs would
+// reintroduce the same silent wrong-org resolution this parameter exists to
+// remove; refusing to guess and requiring the caller to name the org
+// directly is the default-closed choice. No new permission check is added
+// for it either: every handler here already requires an OPERATIONS-tenant
+// caller (requireOperationsTenant below) plus the matching ReadAll/WriteAll
+// permission, which is already the platform's strictest tier -- addressing a
+// different org through an already-fully-gated action is not the same kind
+// of entitlement decision as letting a caller reach a route it could not
+// reach at all before.
 var errIdentityAdminForbidden = errors.New("identity administration is restricted to an operations tenant")
 
 // requireOperationsTenant is the shared gate every handler below applies
@@ -126,7 +147,8 @@ func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	idpUsers, err := r.admin.ListUsers(req.Context())
+	orgID := strings.TrimSpace(req.URL.Query().Get("orgId"))
+	idpUsers, err := r.admin.ListUsers(req.Context(), orgID)
 	if err != nil {
 		writeIdentityAdminError(w, err)
 		return
@@ -263,7 +285,8 @@ func (r IdentityRoutes) deactivateUser(w http.ResponseWriter, req *http.Request)
 	if _, ok := r.securityContext(w, req); !ok {
 		return
 	}
-	if err := r.admin.DeactivateUser(req.Context(), req.PathValue("external_id")); err != nil {
+	orgID := strings.TrimSpace(req.URL.Query().Get("orgId"))
+	if err := r.admin.DeactivateUser(req.Context(), orgID, req.PathValue("external_id")); err != nil {
 		writeIdentityAdminError(w, err)
 		return
 	}
@@ -274,7 +297,8 @@ func (r IdentityRoutes) reactivateUser(w http.ResponseWriter, req *http.Request)
 	if _, ok := r.securityContext(w, req); !ok {
 		return
 	}
-	if err := r.admin.ReactivateUser(req.Context(), req.PathValue("external_id")); err != nil {
+	orgID := strings.TrimSpace(req.URL.Query().Get("orgId"))
+	if err := r.admin.ReactivateUser(req.Context(), orgID, req.PathValue("external_id")); err != nil {
 		writeIdentityAdminError(w, err)
 		return
 	}

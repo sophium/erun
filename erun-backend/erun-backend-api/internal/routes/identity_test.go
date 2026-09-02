@@ -29,10 +29,13 @@ type stubIdentityAdminClient struct {
 	createOrgErr      error
 	users             []zitadel.User
 	listErr           error
+	gotListOrgID      string
 	deactivateErr     error
 	reactivateErr     error
 	gotDeactivateID   string
+	gotDeactivateOrg  string
 	gotReactivateID   string
+	gotReactivateOrg  string
 	settings          zitadel.OrgSettings
 	getSettingsErr    error
 	updateSettingsErr error
@@ -43,16 +46,19 @@ type stubIdentityAdminClient struct {
 	gotSMTPParams     zitadel.SetSMTPConfigParams
 }
 
-func (s *stubIdentityAdminClient) ListUsers(context.Context) ([]zitadel.User, error) {
+func (s *stubIdentityAdminClient) ListUsers(_ context.Context, orgID string) ([]zitadel.User, error) {
+	s.gotListOrgID = orgID
 	return s.users, s.listErr
 }
 
-func (s *stubIdentityAdminClient) DeactivateUser(_ context.Context, userID string) error {
+func (s *stubIdentityAdminClient) DeactivateUser(_ context.Context, orgID string, userID string) error {
+	s.gotDeactivateOrg = orgID
 	s.gotDeactivateID = userID
 	return s.deactivateErr
 }
 
-func (s *stubIdentityAdminClient) ReactivateUser(_ context.Context, userID string) error {
+func (s *stubIdentityAdminClient) ReactivateUser(_ context.Context, orgID string, userID string) error {
+	s.gotReactivateOrg = orgID
 	s.gotReactivateID = userID
 	return s.reactivateErr
 }
@@ -128,6 +134,38 @@ func TestListUsersReturnsAdminResult(t *testing.T) {
 	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListUsersDefaultsToNoOrgOverride locks today's unchanged behaviour for
+// the common case: omitting ?orgId= must not send an override, so an
+// existing caller keeps seeing the credential's own org.
+func TestListUsersDefaultsToNoOrgOverride(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if admin.gotListOrgID != "" {
+		t.Fatalf("gotListOrgID = %q, want empty when ?orgId= is not given", admin.gotListOrgID)
+	}
+}
+
+// TestListUsersThreadsOrgIDQueryParam is the fix itself: an identity created
+// in another org via orgId is invisible to ListUsers unless that same org is
+// named again on the read.
+func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users?orgId=org-tenant-x", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if admin.gotListOrgID != "org-tenant-x" {
+		t.Fatalf("gotListOrgID = %q, want org-tenant-x", admin.gotListOrgID)
 	}
 }
 
@@ -228,6 +266,31 @@ func TestDeactivateAndReactivateUsePathValue(t *testing.T) {
 	mux.ServeHTTP(rec, identityRequest(http.MethodPost, "/v1/identity/users/idp-9/reactivate", "", string(model.TenantTypeOperations)))
 	if rec.Code != http.StatusNoContent || admin.gotReactivateID != "idp-9" {
 		t.Fatalf("status=%d gotReactivateID=%q, want 204 and idp-9", rec.Code, admin.gotReactivateID)
+	}
+}
+
+// TestDeactivateAndReactivateThreadOrgIDQueryParam is the other half of the
+// fix: an identity created in another org 404s deactivating with no org
+// context, so the route must forward ?orgId= to the client the same way it
+// forwards the path's external_id.
+func TestDeactivateAndReactivateThreadOrgIDQueryParam(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	routes := IdentityRoutes{admin: admin}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/identity/users/{external_id}/deactivate", routes.deactivateUser)
+	mux.HandleFunc("POST /v1/identity/users/{external_id}/reactivate", routes.reactivateUser)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, identityRequest(http.MethodPost, "/v1/identity/users/idp-9/deactivate?orgId=org-tenant-x", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusNoContent || admin.gotDeactivateOrg != "org-tenant-x" {
+		t.Fatalf("status=%d gotDeactivateOrg=%q, want 204 and org-tenant-x", rec.Code, admin.gotDeactivateOrg)
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, identityRequest(http.MethodPost, "/v1/identity/users/idp-9/reactivate?orgId=org-tenant-x", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusNoContent || admin.gotReactivateOrg != "org-tenant-x" {
+		t.Fatalf("status=%d gotReactivateOrg=%q, want 204 and org-tenant-x", rec.Code, admin.gotReactivateOrg)
 	}
 }
 

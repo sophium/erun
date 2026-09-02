@@ -248,11 +248,16 @@ func (r userSearchResult) toUser() User {
 	return u
 }
 
-// ListUsers lists every human and machine user of the org the client's PAT
-// belongs to.
-func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
+// ListUsers lists every human and machine user of orgID, or of the org the
+// client's PAT belongs to when orgID is empty. Without this, an identity
+// created in another org via CreateHumanUserParams.OrgID became permanent,
+// invisible residue: this credential can act in any org on the instance (see
+// callInOrg), but a call with no org header only ever sees its own --
+// silently, not as a refusal, which reads as "this org has no such user"
+// rather than "you asked the wrong org".
+func (c *Client) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 	var resp usersSearchResponse
-	if err := c.call(ctx, http.MethodPost, "/management/v1/users/_search", map[string]any{}, &resp); err != nil {
+	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/users/_search", map[string]any{}, &resp); err != nil {
 		return nil, err
 	}
 	users := make([]User, 0, len(resp.Result))
@@ -371,11 +376,17 @@ func (c *Client) CreateOrg(ctx context.Context, name string) (Org, error) {
 }
 
 // DeactivateUser deactivates the IdP user, preventing their next sign-in.
-func (c *Client) DeactivateUser(ctx context.Context, userID string) error {
-	return c.call(ctx, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_deactivate", url.PathEscape(userID)), map[string]any{}, nil)
+// orgID addresses the user's own org, the same as ListUsers; empty keeps
+// today's behaviour of acting in the client's own org. Zitadel scopes a user
+// id to the org that issued it, so a call with the wrong org (including no
+// org, for a user created elsewhere) 404s rather than silently acting on a
+// same-named user in the credential's own org -- there is no user to
+// "resolve to" by mistake here, only a wrong lookup key.
+func (c *Client) DeactivateUser(ctx context.Context, orgID string, userID string) error {
+	return c.callInOrg(ctx, orgID, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_deactivate", url.PathEscape(userID)), map[string]any{}, nil)
 }
 
-// ReactivateUser reverses DeactivateUser.
-func (c *Client) ReactivateUser(ctx context.Context, userID string) error {
-	return c.call(ctx, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_reactivate", url.PathEscape(userID)), map[string]any{}, nil)
+// ReactivateUser reverses DeactivateUser; see its doc comment for orgID.
+func (c *Client) ReactivateUser(ctx context.Context, orgID string, userID string) error {
+	return c.callInOrg(ctx, orgID, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_reactivate", url.PathEscape(userID)), map[string]any{}, nil)
 }
