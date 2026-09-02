@@ -573,4 +573,28 @@ grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q '^ 
 grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q 'key: ".dockerconfigjson"' ||
     fail "the registry credential volume should project the .dockerconfigjson key"
 
+# --- The dind sidecar starts through the MTU-deriving wrapper, and the
+# chart's own dockerd args still ride behind it. The wrapper's resolution
+# logic is covered directly in erun-devops-dind-entrypoint_test.sh; what is
+# checked here is only that the chart actually embeds and invokes it, since a
+# chart that silently stopped doing so would put every build back on a 1500
+# bridge the pod network cannot carry. ---
+rendered=$(render --set clusterRegistryInsecure=10.1.2.3:5000)
+dind_block="${work_root}/dind-entrypoint.yaml"
+dind_container "${rendered}" >"${dind_block}"
+grep -q 'exec dockerd-entrypoint.sh' "${dind_block}" ||
+    fail "the dind sidecar should start through the wrapper, which execs the stock entrypoint"
+grep -q -- '--mtu=' "${dind_block}" ||
+    fail "the embedded wrapper should pass a derived --mtu to dockerd"
+grep -q '^            - erun-dind$' "${dind_block}" ||
+    fail "the wrapper needs a \$0 placeholder so the chart's args still arrive as \$1.."
+grep -A2 '^          args:$' "${dind_block}" | grep -q -- '--insecure-registry' ||
+    fail "the insecure-registry arg should survive the entrypoint wrapper"
+
+# A runtime env renders no sidecar at all, so it must not carry the wrapper
+# either -- the same gate every other dind-related block sits behind.
+rendered=$(render --set worktreeStorage=none)
+grep -q 'dockerd-entrypoint.sh' "${rendered}" &&
+    fail "a runtime env builds nothing, so it needs no dind entrypoint wrapper"
+
 echo "PASS: erun-devops chart pod shape"

@@ -25,6 +25,7 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	if err := verifyDockerBuildPlatforms(buildInput.Platforms); err != nil {
 		return err
 	}
+	warnAboutBridgeMTUMismatch(stderr)
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
@@ -254,6 +255,15 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 	}
 	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
 		return DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
+	}
+	// Keep the step's own last words whatever else is known: they are all the
+	// durable timing record will ever have (see build_failure_reason.go).
+	reason := dockerBuildFailureReason(message)
+	if diagnosis, ok := dockerBuildNetworkDiagnosis(message); ok {
+		reason = joinFailureReason(reason, diagnosis)
+	}
+	if reason != "" {
+		return DockerBuildStepError{Reason: reason, Err: err}
 	}
 	return err
 }

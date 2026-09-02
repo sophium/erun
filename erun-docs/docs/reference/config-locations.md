@@ -53,7 +53,11 @@ Every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`
      "durationSeconds": 2713.4,
      "duration": "45m13.4s",           // Go's time.Duration.String()
      "failed": false,
-     "error": "",                      // set only when failed is true
+     "error": "",                      // set only when failed is true; for a failed image
+                                       // build this carries the failing step's own last
+                                       // output plus BuildKit's headline, not just the
+                                       // process exit status, so a detached run stays
+                                       // diagnosable once its output is gone
      "steps": [
        {
          "name": "frs-docs",           // image name, chart name ("chart <name>"),

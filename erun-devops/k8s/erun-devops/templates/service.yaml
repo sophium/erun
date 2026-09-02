@@ -802,6 +802,32 @@ spec:
             requests:
               cpu: {{ $dindRequestCPU | quote }}
               memory: {{ $dindRequestMemory | quote }}
+          {{- /* Wraps the stock docker:dind entrypoint to pin the daemon's
+                 bridge MTU to the pod network's own, which the sidecar can read
+                 because it shares that namespace.
+
+                 Why this is not cosmetic: docker bridges containers at 1500,
+                 but a CNI that encapsulates gives the pod less (a VXLAN overlay
+                 costs 50 bytes, leaving 1450). Every BuildKit step then
+                 advertises an MSS the path cannot deliver, and the oversized
+                 replies are dropped with DF set. The ICMP "fragmentation
+                 needed" that would let path-MTU discovery recover does not
+                 survive the overlay, so nothing recovers -- small packets pass
+                 and the first full-size one vanishes. A TLS handshake gets
+                 through ClientHello and ServerHello and then stalls forever on
+                 the server's certificate flight, surfacing minutes into a build
+                 as an unrelated-looking curl error against whichever
+                 third-party host that build reached first.
+
+                 The trailing element is $0 for `sh -c`, so the args below still
+                 arrive as $1.. exactly as they did when they were the
+                 entrypoint's own. */}}
+          command:
+            - sh
+            - -c
+            - |
+{{ .Files.Get "files/dind-entrypoint.sh" | indent 14 }}
+            - erun-dind
           {{- /* A context-resolved local cluster registry is plain HTTP at a
                  non-loopback ClusterIP; the docker:dind entrypoint forwards these
                  args to dockerd so an in-pod build can push to it. Empty for
