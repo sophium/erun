@@ -4,6 +4,7 @@ import {
   SEED_TENANT,
   addOrchestrators,
   removeEnvironment,
+  removeOrchestrator,
   seedEnvironment,
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
@@ -30,28 +31,35 @@ test('staging orchestrators keeps the root config readable after the desktop has
   page,
 }) => {
   const orchestrator = 'config-shape-probe';
-  await app.sidebar.newOrchestratorButton().click();
-  await app.orchestratorDialog.waitForOpen();
-  await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
-  await app.orchestratorDialog.create(orchestrator);
-  await app.orchestratorDialog.waitForClosed();
-
-  const environment = uniqueEnvironmentName('config shape');
-  const restoreOrchestrators = addOrchestrators(
-    ['config-shape-seeded'],
-    SEED_TENANT,
-    SEED_ENV_ALPHA,
-  );
   try {
-    // waitForSeededRow is the exact step that hung: it re-drives a reload until
-    // the row appears, and an unreadable root config means it never can.
-    seedEnvironment(SEED_TENANT, environment);
-    await waitForSeededRow(app, SEED_TENANT, environment);
-    await expect(
-      page.getByRole('button', { name: /Some configuration could not be read/ }),
-    ).toHaveCount(0);
+    await app.sidebar.newOrchestratorButton().click();
+    await app.orchestratorDialog.waitForOpen();
+    await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.orchestratorDialog.create(orchestrator);
+    await app.orchestratorDialog.waitForClosed();
+
+    const environment = uniqueEnvironmentName('config shape');
+    const restoreOrchestrators = addOrchestrators(
+      ['config-shape-seeded'],
+      SEED_TENANT,
+      SEED_ENV_ALPHA,
+    );
+    try {
+      // waitForSeededRow is the exact step that hung: it re-drives a reload until
+      // the row appears, and an unreadable root config means it never can.
+      seedEnvironment(SEED_TENANT, environment);
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await expect(
+        page.getByRole('button', { name: /Some configuration could not be read/ }),
+      ).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+      // restoreOrchestrators() reverts to the config it read right after this
+      // spec's own real orchestrator create above, so that entry survives
+      // the restore -- the outer finally removes it explicitly.
+      restoreOrchestrators();
+    }
   } finally {
-    removeEnvironment(SEED_TENANT, environment);
-    restoreOrchestrators();
+    removeOrchestrator(orchestrator);
   }
 });
