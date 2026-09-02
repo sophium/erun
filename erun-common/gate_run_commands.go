@@ -56,16 +56,7 @@ func RunGateRunStart(ctx Context, store CloudReadStore, alias string, params Gat
 	if ctx.DryRun {
 		return PlatformGateRun{}, nil
 	}
-	return client.StartGateRun(context.Background(), PlatformStartGateRunParams{
-		SourceBranch: params.SourceBranch,
-		TargetBranch: params.TargetBranch,
-		SourceCommit: params.SourceCommit,
-		MergeCommit:  params.MergeCommit,
-		ReviewID:     params.ReviewID,
-		Status:       params.Status,
-		FailingStep:  params.FailingStep,
-		LogRef:       params.LogRef,
-	})
+	return client.StartGateRun(context.Background(), PlatformStartGateRunParams(params))
 }
 
 // GateRunReportParams is the `erun exec gate-run report` input. Status must
@@ -131,7 +122,7 @@ func RunGateRunList(ctx Context, store CloudReadStore, alias string, params Gate
 	if err != nil {
 		return nil, err
 	}
-	filter := PlatformGateRunFilter{TargetBranch: params.TargetBranch, SourceBranch: params.SourceBranch, Status: params.Status}
+	filter := PlatformGateRunFilter(params)
 	details := gateRunFilterTraceDetails(filter)
 	tracePlatformCall(ctx, provider, "GET", "/v1/gate-runs", details...)
 	if ctx.DryRun {

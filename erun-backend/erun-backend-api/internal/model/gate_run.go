@@ -26,11 +26,11 @@ const (
 // requests, with no erun review at all, is the other (ReviewID empty).
 type GateRun struct {
 	bun.BaseModel `bun:"table:gate_runs,alias:g"`
-	GateRunID     string   `json:"gateRunId" bun:"gate_run_id,pk,scanonly"`
-	TenantID      string   `json:"tenantId" bun:"tenant_id,scanonly"`
-	SourceBranch  string   `json:"sourceBranch" bun:"source_branch"`
-	TargetBranch  string   `json:"targetBranch" bun:"target_branch"`
-	SourceCommit  string   `json:"sourceCommit" bun:"source_commit"`
+	GateRunID     string `json:"gateRunId" bun:"gate_run_id,pk,scanonly"`
+	TenantID      string `json:"tenantId" bun:"tenant_id,scanonly"`
+	SourceBranch  string `json:"sourceBranch" bun:"source_branch"`
+	TargetBranch  string `json:"targetBranch" bun:"target_branch"`
+	SourceCommit  string `json:"sourceCommit" bun:"source_commit"`
 	// MergeCommit is the prospective squash-merge commit this run actually
 	// tested; empty only for a run that failed before that commit existed at
 	// all (e.g. a squash conflict).
