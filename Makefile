@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend helm-chart-tests test-postgres-restart check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -212,6 +212,32 @@ test-frontend:
 	@(cd erun-ui/frontend && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test)
 	@echo ">> erun-console gates"
 	@(cd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test)
+
+# Builds a headless erun-app (desktop tags) and runs the mandatory
+# erun-ui/playwright suite against it, inside the same erun-devops test stage
+# that already runs the rest of `make check` (the toolchain -- Wails/
+# webkit CGO deps plus Playwright's Chromium runtime libraries -- is now
+# installed in that stage's Dockerfile, verified empirically to install
+# cleanly and run headless with zero display there, same as the final image
+# already did for in-pod contribute-mode builds). Delegates to run.sh, which
+# owns the build-if-needed/install-deps-if-needed logic (erun-ui/playwright/
+# AGENTS.md's "Headless Launch") and self-detaches through agent-gate.sh when
+# run inside an agent pod; inside this Dockerfile stage neither applies
+# (ERUN_ENV_TYPE is unset during a docker build), so it just runs in place.
+#
+# Deliberately NOT a check-gate prerequisite yet. Wiring it in now would red
+# every build on main: a real run against main found 27 failing specs, and
+# two full runs on the same commit produced different failure sets (27 vs 24,
+# only 3 files red in both) -- the suite is not deterministic under parallel
+# load today. Gating on a suite that cries wolf is worse than the coverage
+# gap it would close (see erun-ui/playwright/AGENTS.md's "No flaky tests"
+# rule: fix the nondeterminism, never retry/quarantine it away). Run this by
+# hand, or via `erun exec job` in an agent env, to validate a fix to either
+# the failures or the flakiness; check-gate grows this as a real prerequisite
+# once the suite is green and stays green across repeated runs.
+test-playwright:
+	@echo ">> erun-ui/playwright suite (desktop tags)"
+	@(cd erun-ui/playwright && ./run.sh)
 
 # Bound on how many chart-test scripts run at once. Each is a single `helm
 # template` render (no cluster, no docker), so unlike lint this scales cleanly

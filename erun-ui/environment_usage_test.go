@@ -171,3 +171,26 @@ func TestEnvUsageSnapshotNilWhenEmpty(t *testing.T) {
 		t.Fatalf("expected a nil snapshot for an empty sweep state, got %+v", snapshot)
 	}
 }
+
+// TestResetEnvironmentUsageObservationsClearsTheCache guards the headless
+// Playwright harness's fix for the shared-baseline-row race: a cached
+// reading (and its observedAt age) left by one spec must not survive into the
+// next one in the same worker.
+func TestResetEnvironmentUsageObservationsClearsTheCache(t *testing.T) {
+	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	app := &App{envUsage: map[string]environmentUsageReading{key: {usage: uiRuntimeUsage{Available: true}}}}
+
+	app.ResetEnvironmentUsageObservations()
+
+	if snapshot := app.envUsageSnapshot(); snapshot != nil {
+		t.Fatalf("expected no cached readings after reset, got %+v", snapshot)
+	}
+}
+
+func TestResetEnvironmentUsageObservationsOnEmptyCacheIsANoop(t *testing.T) {
+	app := &App{}
+	app.ResetEnvironmentUsageObservations()
+	if snapshot := app.envUsageSnapshot(); snapshot != nil {
+		t.Fatalf("expected no cached readings, got %+v", snapshot)
+	}
+}

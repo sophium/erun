@@ -3,6 +3,7 @@ import { AppShell } from '../pages/index.js';
 import { test as base } from './workerBackend.js';
 import {
   SEED_TENANT,
+  e2eK3dEnabled,
   removeEnvironment,
   seedEnvironment,
   seedHostEnvironment,
@@ -16,6 +17,47 @@ export interface SeededEnvironment {
   environment: string;
 }
 
+// resetSharedBaselineObservations clears the worker backend's cached
+// Activity/Usage observations (erun-ui/environment_activity.go,
+// environment_usage.go) before the app boots. Those maps live for the whole
+// worker process, not one spec file, so without this a genuine observation
+// sampled during an earlier spec in this worker — even a routine "not
+// reachable" reading for a never-deployed seeded env, complete with its own
+// real observedAt age — renders on SEED_ENV_ALPHA/SEED_ENV_BETA's hover card
+// as if this spec had already triggered it. This was the mechanism behind
+// the hover-card layout spec's zone-2 race. Reset unconditionally (outside e2e-k3d, see below)
+// rather than auditing every spec that touches the shared baseline rows: it
+// is a no-op for a pristine worker and cheap otherwise, and every spec
+// depends on the `app` fixture below.
+//
+// Skipped entirely in e2e-k3d mode: that mode is workers: 1 with one shared
+// backend and a real cluster for the whole run (fixtures/workerBackend.ts),
+// so a mid-run reset could plausibly race a real, in-flight deploy's own
+// activity/usage observation in ways the default inert mode's never-deployed
+// baseline rows cannot. That mode already has its own determinism rules
+// (playwright/AGENTS.md § "Opt-in k3d e2e mode"); this fix targets the
+// default suite's shared seeded baseline specifically.
+async function resetSharedBaselineObservations(
+  baseURL: string,
+  request: import('@playwright/test').APIRequestContext,
+): Promise<void> {
+  if (e2eK3dEnabled()) {
+    return;
+  }
+  for (const method of [
+    'ResetEnvironmentActivityObservations',
+    'ResetEnvironmentUsageObservations',
+  ]) {
+    const res = await request.post(`${baseURL}/__erun_invoke`, {
+      data: { method, args: [] },
+    });
+    const envelope = (await res.json()) as { error?: string };
+    if (envelope.error) {
+      throw new Error(`${method} failed: ${envelope.error}`);
+    }
+  }
+}
+
 // Use the `seededEnv` fixture in specs that mutate per-env state (open/close,
 // tab churn, status injection) so the shared baseline rows stay quiet for
 // other specs.
@@ -25,7 +67,8 @@ export const test = base.extend<{
   seededRuntimeEnv: SeededEnvironment;
   seededHostEnv: SeededEnvironment;
 }>({
-  app: async ({ page }, use) => {
+  app: async ({ page, workerBaseURL, request }, use) => {
+    await resetSharedBaselineObservations(workerBaseURL, request);
     const app = new AppShell(page);
     await app.open();
     await use(app);

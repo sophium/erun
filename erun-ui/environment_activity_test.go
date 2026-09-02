@@ -161,6 +161,29 @@ func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestResetEnvironmentActivityObservationsClearsTheCache guards the headless
+// Playwright harness's fix for the shared-baseline-row race: a cached
+// observation left by one spec must not survive into the next one in the
+// same worker.
+func TestResetEnvironmentActivityObservationsClearsTheCache(t *testing.T) {
+	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
+
+	app.ResetEnvironmentActivityObservations()
+
+	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+		t.Fatalf("expected no cached observations after reset, got %+v", snapshot)
+	}
+}
+
+func TestResetEnvironmentActivityObservationsOnEmptyCacheIsANoop(t *testing.T) {
+	app := &App{}
+	app.ResetEnvironmentActivityObservations()
+	if snapshot := app.envActivitySnapshot(); snapshot != nil {
+		t.Fatalf("expected no cached observations, got %+v", snapshot)
+	}
+}
+
 // TestLoadStateSeedsEnvironmentActivityFromThePoller exercises the full
 // wiring: LoadState (what the frontend's boot() thunk actually calls) must
 // carry the poller's last observation onto the env it just reloaded from
