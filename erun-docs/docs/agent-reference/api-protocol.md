@@ -152,6 +152,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/ai-sessions` | The environment's own AI-tool hooks report their turn-boundary status (busy/idle/awaiting-input/exited) for one session. Body below. | Tenant member (write) |
+| `GET` | `/v1/environments/{environment_id}/ai-sessions` | Read back the resolved status of every session last reported for this environment. Response below. | Tenant member (read) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
 | `POST` | `/v1/contexts` | Register a cloud context (managed cluster) and, when provisioning is configured, start its durable live bootstrap (`202`). Body below. | Tenant member (write) |
 | `GET` | `/v1/contexts/{context_id}` | Fetch one cloud context by id, including its provisioning `status`. | Tenant member |
@@ -605,8 +606,6 @@ There is no client-supplied timestamp: the backend stamps its own receipt time, 
 
 `event` → `state` resolution: `turn-start`/`tool-use` → `busy`; `turn-end`/`notify` → `awaiting-input`; `exit` with `exitReason: "oom"` → `oom-killed`; any other `exit` → `exited`. A session with no recorded event at all reads as `idle`, never as an error.
 
-**No read route yet.** This endpoint is deliberately write-only: no `GET` reads it back today, because no operator surface (hosted console or a native companion client) yet exists to consume one, and this platform does not ship a route with nothing that can call it. The read side ships alongside its first real caller.
-
 **Error behaviour.**
 
 | Status | Condition | Recovery |
@@ -615,6 +614,34 @@ There is no client-supplied timestamp: the backend stamps its own receipt time, 
 | `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env, never leaking its existence). | Report against an environment id the caller's tenant owns. |
 | `400` | `sessionId` is empty, or `event` is not one of the five recognized values. | Fix the request body; an unrecognized event is refused rather than silently resolving to `idle`. |
 | `500` | The write failed (internal wiring error or repository failure). | Retry; if it persists, it is a server bug. |
+
+### `GET /v1/environments/{environment_id}/ai-sessions` {#ai-sessions-read-endpoint}
+
+Reads back the resolved status of every session the environment above has ever reported, sorted by session id — the read-back half of the self-report above, for a caller (erun-console, and eventually a native companion client) with no local kubeconfig or port-forward to poll instead. Each entry is the same resolved shape the `POST` above returns on success:
+
+```jsonc
+// 200 response
+[
+  {
+    "sessionId": "ai",
+    "tool": "claude",
+    "state": "awaiting-input",
+    "reason": "finished its turn and is waiting for your next message",
+    "lastActivity": "2026-08-31T21:53:01Z",
+    "exitCode": null
+  }
+]
+```
+
+An environment with no reported sessions reads as `[]`, never `null` — a caller ranging over the body needs no null check.
+
+**Error behaviour.**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the read. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env, never leaking its existence). | Read against an environment id the caller's tenant owns. |
+| `500` | The read failed (internal wiring error or repository failure). | Retry; if it persists, it is a server bug. |
 
 ### DNS-01 broker: `POST /v1/dns01/present` · `POST /v1/dns01/cleanup` {#dns01-broker}
 

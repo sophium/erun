@@ -132,8 +132,10 @@ var Routes = map[string]Class{
 
 	// ai_sessions.go — an environment self-reporting its own AI-session status
 	// is the same class as reporting a build result: operating an environment
-	// that already exists, not administering the tenant.
+	// that already exists, not administering the tenant. Reading it back is
+	// the same class as reading the environment itself.
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
+	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
 
 	// contexts.go — reading registered contexts is TenantUser; registering a
 	// new one is tenant administration (explicitly named in the issue this

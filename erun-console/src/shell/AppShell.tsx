@@ -7,6 +7,7 @@ import { useGetWhoamiQuery } from '../app/api/whoamiApi';
 import type { OidcConfig } from '../auth/auth';
 import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
+import { AISessionsPanel } from '../environments/AISessionsPanel';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
 import { InvitesPanel } from '../identity/InvitesPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
@@ -85,14 +86,21 @@ function SectionContent({
       );
     case 'environments':
       return (
-        <EnvironmentsPanel
-          token={token}
-          contexts={config.contexts}
-          environments={config.environments}
-          tenants={tenants}
-          scopeTenantId={scopeTenantId}
-          onChanged={onChanged}
-        />
+        <div className="grid gap-6">
+          <EnvironmentsPanel
+            token={token}
+            contexts={config.contexts}
+            environments={config.environments}
+            tenants={tenants}
+            scopeTenantId={scopeTenantId}
+            onChanged={onChanged}
+          />
+          <AISessionsPanel
+            token={token}
+            environments={config.environments}
+            scopeTenantId={scopeTenantId}
+          />
+        </div>
       );
     case 'provisioning':
       return <ProvisionPanel token={token} />;

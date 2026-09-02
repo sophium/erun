@@ -15,6 +15,7 @@ import (
 type stubAISessionRepository struct {
 	recorded []model.AISessionEvent
 	result   model.AISessionEvent
+	listed   []model.AISessionEvent
 	err      error
 }
 
@@ -27,6 +28,13 @@ func (s *stubAISessionRepository) Record(_ context.Context, event model.AISessio
 		return event, nil
 	}
 	return s.result, nil
+}
+
+func (s *stubAISessionRepository) List(context.Context, string) ([]model.AISessionEvent, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.listed, nil
 }
 
 type stubEnvironmentGetter struct {
@@ -143,6 +151,78 @@ func TestReportAISessionEventReportsRepositoryFailures(t *testing.T) {
 	sessions := &stubAISessionRepository{err: repository.ErrConflict}
 	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
 	rec := postAISessionEvent(t, sessions, environments, "env-1", `{"sessionId":"ai","event":"turn-start"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func getAISessions(t *testing.T, sessions AISessionRepository, environments EnvironmentGetter, environmentID string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/environments/"+environmentID+"/ai-sessions", nil)
+	req.SetPathValue("environment_id", environmentID)
+	rec := httptest.NewRecorder()
+	AISessionRoutes{sessions: sessions, environments: environments}.listAISessions(rec, req)
+	return rec
+}
+
+// TestListAISessionsRefusesAnEnvironmentTheCallerCannotSee mirrors the same
+// refusal proof the write side has: a cross-tenant environment id must read
+// as not-found, the same as every other environment sub-route, before the
+// session repository is ever consulted.
+func TestListAISessionsRefusesAnEnvironmentTheCallerCannotSee(t *testing.T) {
+	sessions := &stubAISessionRepository{listed: []model.AISessionEvent{{SessionID: "ai"}}}
+	environments := stubEnvironmentGetter{err: repository.ErrNotFound}
+	rec := getAISessions(t, sessions, environments, "env-1")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestListAISessionsReturnsEmptyArrayNotNull confirms an environment with no
+// reported sessions reads as `[]`, not `null` — a caller ranging over the
+// body must not need a null check.
+func TestListAISessionsReturnsEmptyArrayNotNull(t *testing.T) {
+	sessions := &stubAISessionRepository{}
+	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
+	rec := getAISessions(t, sessions, environments, "env-1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("body = %q, want []", rec.Body.String())
+	}
+}
+
+// TestListAISessionsResolvesTheSameStatesLocalCallersSee proves the read
+// route reuses reportAISessionEvent's own resolution, never a second,
+// drifting implementation.
+func TestListAISessionsResolvesTheSameStatesLocalCallersSee(t *testing.T) {
+	sessions := &stubAISessionRepository{listed: []model.AISessionEvent{
+		{SessionID: "ai", Tool: "claude", Event: "turn-end"},
+		{SessionID: "contribute-ai", Event: "exit", ExitReason: "oom"},
+	}}
+	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
+	rec := getAISessions(t, sessions, environments, "env-1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"sessionId":"ai"`) || !strings.Contains(body, `"state":"awaiting-input"`) {
+		t.Fatalf("body = %q, want ai session resolved to awaiting-input", body)
+	}
+	if !strings.Contains(body, `"sessionId":"contribute-ai"`) || !strings.Contains(body, `"state":"oom-killed"`) {
+		t.Fatalf("body = %q, want contribute-ai session resolved to oom-killed", body)
+	}
+}
+
+func TestListAISessionsReportsRepositoryFailures(t *testing.T) {
+	sessions := &stubAISessionRepository{err: repository.ErrConflict}
+	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
+	rec := getAISessions(t, sessions, environments, "env-1")
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())

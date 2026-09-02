@@ -27,11 +27,9 @@ var InternalAPIRoutes = map[string]bool{
 	"POST /v1/reviews/{review_id}/builds": true,
 	// The environment's own AI-tool hooks report their turn-boundary status
 	// (busy/idle/awaiting-input) here -- never something an operator clicks,
-	// the same self-report shape as the build-result route above. There is
-	// deliberately no matching GET yet: a read-only route with no operator
-	// surface would itself be the dead end this map exists to name, and no
-	// hosted web console or iOS companion app exists yet to be that surface.
-	// The read route ships in the same change as its first real reader.
+	// the same self-report shape as the build-result route above. The
+	// matching GET has a real operator surface (erun-console's environments
+	// panel), so it is not listed here.
 	"POST /v1/environments/{environment_id}/ai-sessions": true,
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
