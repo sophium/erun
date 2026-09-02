@@ -157,7 +157,25 @@ why a non-verdict must never be reported as a red one.
 ### 5. Record the successful GATE build
 
 ```sh
-build_id=$(erun review record-build "${review_id}" --commit "${merge_commit}" --gate --output json | jq -r .buildId)
+desktop_flag=""
+if git diff --name-only HEAD^ HEAD | grep '^erun-ui/' | grep -qv '\.md$'; then
+  echo "This merge changes erun-ui/** (desktop). The gate's own erun build does not run erun-ui/playwright (issue #1933), so a green GATE build proves nothing about the desktop frontend by itself."
+  echo "Build erun-app and run erun-ui/playwright/run.sh against ${merge_commit} now."
+  if <the suite was actually run against ${merge_commit} and passed>; then
+    desktop_flag="--desktop-playwright-verified"
+  else
+    erun exec gate-run report "${gate_run_id}" --status inconclusive \
+      --failing-step "erun-ui/playwright not verified against ${merge_commit}"
+    echo "Cannot attest desktop coverage here; reported the gate-run INCONCLUSIVE rather than leaving it stuck RUNNING. Hand this build off to someone who can run erun-ui/playwright/run.sh against ${merge_commit}, then re-drive this review once it passes — do not record a passing GATE build for an unverified desktop change."
+    exit 1
+  fi
+fi
+if ! build_id=$(erun review record-build "${review_id}" --commit "${merge_commit}" --gate ${desktop_flag} --output json | jq -r .buildId); then
+  erun exec gate-run report "${gate_run_id}" --status inconclusive \
+    --failing-step "record-build --gate refused against ${merge_commit}"
+  echo "record-build --gate refused even with ${desktop_flag:-no desktop attestation needed} set; reported the gate-run INCONCLUSIVE — the erun build itself was green, but the review has no recorded GATE build to show for it. Read the refusal reason before re-driving."
+  exit 1
+fi
 erun exec gate-run report "${gate_run_id}" --status passed
 ```
 
@@ -170,6 +188,24 @@ No `--version`: a `GATE` build carries none, since the gate publishes
 nothing. Recording it is what makes rung 7's `report-merged` verifiable —
 `review report-merged` refuses with `MERGE_NOT_VERIFIED` if `buildId` does
 not name an already-recorded, successful `GATE` build for this exact review.
+
+`record-build --gate` itself refuses a successful call that touches
+`erun-ui/**` without `--desktop-playwright-verified` (issue #1933) — the
+check above exists so this skill explains *why* and names the remedy before
+that refusal happens, not to duplicate the enforcement. Never pass
+`--desktop-playwright-verified` without having actually run the suite against
+`${merge_commit}` and watched it pass; the flag is an attestation, not a
+formality.
+
+**A desktop-coverage refusal is reported as `INCONCLUSIVE`, never left `RUNNING`
+and never reported `FAILED`.** The gate run and the review's `GATE` build are
+independent records (`erun-backend-api/AGENTS.md` § "Gate Runs") — the
+`erun build` this attempt already ran genuinely passed, so `FAILED` would
+assert a red verdict that never happened, and leaving the gate run at
+`RUNNING` forever is exactly the silent-gap failure `erun gate list` exists
+to prevent. `INCONCLUSIVE` says plainly: the gate never reached a real
+verdict on whether this change is safe to merge, because the one piece of
+coverage it cannot produce itself was never attested.
 
 ### 6. Push — only now, because the build was green
 

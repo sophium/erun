@@ -160,12 +160,14 @@ func reviewCloseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 
 type ReviewRecordBuildInput struct {
 	platformAliasInput
-	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
-	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
-	Gate          bool   `json:"gate,omitempty" jsonschema:"record the merge queue's own GATE build kind instead of an ordinary build — set by the environment a review's merge queue promoted to MERGE, reporting its own build of the prospective merge; a GATE build carries no version"`
-	Version       string `json:"version,omitempty" jsonschema:"version the build minted (from the build tool's result), required even for a failed build since release resolves the version before the build step runs; omit when gate is true"`
-	Successful    bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
-	FailureDetail string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
+	ReviewID                  string `json:"reviewId" jsonschema:"review id to record the build against"`
+	CommitID                  string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
+	Gate                      bool   `json:"gate,omitempty" jsonschema:"record the merge queue's own GATE build kind instead of an ordinary build — set by the environment a review's merge queue promoted to MERGE, reporting its own build of the prospective merge; a GATE build carries no version"`
+	Version                   string `json:"version,omitempty" jsonschema:"version the build minted (from the build tool's result), required even for a failed build since release resolves the version before the build step runs; omit when gate is true"`
+	Successful                bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
+	FailureDetail             string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
+	ProjectRoot               string `json:"projectRoot,omitempty" jsonschema:"project root to diff the gate's squash commit against its parent from, for the desktop-coverage check below; defaults to the runtime repo path"`
+	DesktopPlaywrightVerified bool   `json:"desktopPlaywrightVerified,omitempty" jsonschema:"attest that erun-ui/playwright/run.sh was run against this commit and passed; required for a successful gate build that changes erun-ui/** (issue #1933) — the gate's own build does not run that suite"`
 }
 
 type ReviewRecordBuildResult struct {
@@ -189,9 +191,11 @@ func reviewRecordBuildTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		root := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 		build, err := eruncommon.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, eruncommon.ReviewRecordBuildParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, Gate: input.Gate, Version: input.Version,
 			Successful: input.Successful, FailureDetail: input.FailureDetail,
+			Root: root, DesktopPlaywrightVerified: input.DesktopPlaywrightVerified,
 		}, cloudDependencies())
 		if err != nil {
 			return nil, ReviewRecordBuildResult{}, err
