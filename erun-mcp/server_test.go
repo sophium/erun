@@ -855,6 +855,11 @@ func assertListEffectiveTarget(t *testing.T, target eruncommon.ListEffectiveTarg
 }
 
 func TestReleaseToolPreview(t *testing.T) {
+	// Resolving the release plan checks whether each image's fingerprint tag
+	// already exists locally (DockerImageExists), even in preview -- a stub
+	// that exits non-zero is read as "not cached yet", the same outcome a real
+	// docker with no cached tag would report.
+	t.Setenv("ERUN_DOCKER_BIN", "false")
 	projectRoot := createReleaseRuntimeRepo(t, "develop")
 	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProjectConfig failed: %v", err)

@@ -84,6 +84,10 @@ func TestJobToolsAcceptTheirOwnScope(t *testing.T) {
 // resolution the live call makes without spawning anything.
 func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
+	// ensureAgentJobToolAvailable resolves "claude" before the preview
+	// short-circuit, so it needs a real binary on PATH even though nothing
+	// actually execs it in this test.
+	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	runtime := normalizeRuntimeConfig(RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()
 
