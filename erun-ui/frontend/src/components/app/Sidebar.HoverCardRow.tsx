@@ -2,9 +2,9 @@ import * as React from 'react';
 
 // The type and layout contract both sidebar hover cards (EnvHoverCard,
 // OrchestratorHoverCard) render through, extracted so the two cards cannot
-// re-drift into their own per-row treatments (#1901; before it, the env card
-// alone carried six different size/face/weight combinations and two row
-// layouts). This file states the invariant as a prohibition, not an
+// re-drift into their own per-row treatments (before this file existed, the
+// env card alone carried six different size/face/weight combinations and two
+// row layouts). This file states the invariant as a prohibition, not an
 // enumeration -- an enumeration is what drifted last time.
 //
 // TYPE: one size, one face, always. A card element is distinguished from
@@ -52,7 +52,8 @@ import * as React from 'react';
 //   2. Inter-row (`HOVER_CARD_GRID_CLASS`'s `gap-y-2` / 8px): separates one
 //      row's fact from the next row's fact within a zone. Loose enough that
 //      stacked value+caption pairs read as units instead of a single ladder
-//      of equally-spaced lines -- the defect #1901 opened against.
+//      of equally-spaced lines -- the defect this spacing level guards
+//      against.
 //   3. Inter-zone (a hairline `border-t` plus its own padding step, applied by
 //      the card composing more than one `dl` against this shared grid class):
 //      separates a card's stable-identity rows from its live-state rows, so a
@@ -98,7 +99,7 @@ export const HOVER_CARD_CAPTION_DEGRADED_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLAS
 // site, never used alone. One declaration so the two cards' warnings (line
 // mismatch / stopped node here, restart-required / nudge-cap in
 // OrchestratorHoverCard) cannot drift into different amber shades or lose
-// their dark-mode variant the way they had before #1901.
+// their dark-mode variant the way they had before this shared class existed.
 export const HOVER_CARD_ALERT_CLASS = 'text-amber-700 dark:text-amber-400';
 
 export function HoverCardRow({
@@ -109,9 +110,9 @@ export function HoverCardRow({
   label: string;
   // wide stacks the label above the value across both grid columns, for a
   // value that needs the card's full content width rather than sharing it
-  // with the label column. Retired from EnvHoverCard (#1901 -- the type
-  // change that removed `font-mono` freed enough width that every one of its
-  // rows fits the fixed label column); still used by OrchestratorHoverCard's
+  // with the label column. Retired from EnvHoverCard (the type change that
+  // removed `font-mono` freed enough width that every one of its rows fits
+  // the fixed label column); still used by OrchestratorHoverCard's
   // "Environments" row, which genuinely needs the full width for a busy
   // detail like "held by gradle-build".
   wide?: boolean;

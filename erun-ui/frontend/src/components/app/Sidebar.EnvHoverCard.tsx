@@ -367,9 +367,9 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // from it, so it should recede rather than alarm (see the TYPE note in
 // Sidebar.HoverCardRow.tsx). This also matters beyond this card's own type
 // rules -- the percentage this row shows is not authoritative for a
-// build-capable environment (#1805: BuildKit runs as a sibling cgroup with no
+// build-capable environment: BuildKit runs as a sibling cgroup with no
 // enforced ceiling, so the limit shown does not bound what the environment
-// actually uses). A quiet, receded treatment does not overstate confidence in
+// actually uses. A quiet, receded treatment does not overstate confidence in
 // a figure that can already be misleading; an alert-coloured one would.
 function UsageState({
   usage,
