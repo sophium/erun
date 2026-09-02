@@ -1,5 +1,6 @@
 import type {
   UIEnvironmentConfig,
+  UIEnvironmentServiceList,
   UIExposedService,
   UIExposeServiceInput,
   UIExposureList,
@@ -29,6 +30,7 @@ import {
   DeleteEnvironment,
   ExposeEnvironmentService,
   ListEnvironmentExposures,
+  ListEnvironmentServices,
   LoadClusterRegistry,
   LoadEnvironmentConfig,
   LoadHostedRegistry,
@@ -209,6 +211,14 @@ export const environmentApi = wailsApi.injectEndpoints({
     listEnvironmentExposures: builder.mutation<UIExposureList, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIExposureList>((selection) =>
         ListEnvironmentExposures(selection),
+      ),
+    }),
+    // The Ports tab's service picker. A mutation for the same reason the
+    // exposure list is one: it re-reads the namespace each time rather than
+    // caching, since exposing something changes the answer immediately.
+    listEnvironmentServices: builder.mutation<UIEnvironmentServiceList, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentServiceList>((selection) =>
+        ListEnvironmentServices(selection),
       ),
     }),
     exposeEnvironmentService: builder.mutation<UIExposedService, ExposeServiceArgs>({

@@ -11,6 +11,17 @@ type ObservedIngress struct {
 	Name  string               `json:"name"`
 	Hosts []string             `json:"hosts,omitempty"`
 	TLS   []ObservedIngressTLS `json:"tls,omitempty"`
+	// Backends are the in-namespace Services this Ingress routes to. Without
+	// them an exposure can only be matched to a Service by re-deriving the
+	// naming convention that produced it, which is exactly the assumption a
+	// repo-native chart breaks.
+	Backends []ObservedIngressBackend `json:"backends,omitempty"`
+}
+
+// ObservedIngressBackend is one Service an Ingress rule routes to.
+type ObservedIngressBackend struct {
+	Service string `json:"service"`
+	Port    int    `json:"port,omitempty"`
 }
 
 type ObservedIngressTLS struct {
@@ -31,6 +42,18 @@ type ingressItem struct {
 	Spec struct {
 		Rules []struct {
 			Host string `json:"host"`
+			HTTP struct {
+				Paths []struct {
+					Backend struct {
+						Service struct {
+							Name string `json:"name"`
+							Port struct {
+								Number int `json:"number"`
+							} `json:"port"`
+						} `json:"service"`
+					} `json:"backend"`
+				} `json:"paths"`
+			} `json:"http"`
 		} `json:"rules"`
 		TLS []struct {
 			Hosts      []string `json:"hosts"`
@@ -55,6 +78,14 @@ func fetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 			if rule.Host != "" {
 				ing.Hosts = append(ing.Hosts, rule.Host)
 			}
+			for _, path := range rule.HTTP.Paths {
+				if name := path.Backend.Service.Name; name != "" {
+					ing.Backends = appendUniqueIngressBackend(ing.Backends, ObservedIngressBackend{
+						Service: name,
+						Port:    path.Backend.Service.Port.Number,
+					})
+				}
+			}
 		}
 		for _, tls := range item.Spec.TLS {
 			ing.TLS = append(ing.TLS, ObservedIngressTLS{Hosts: tls.Hosts, SecretName: tls.SecretName})
@@ -62,4 +93,16 @@ func fetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 		ingresses = append(ingresses, ing)
 	}
 	return ingresses, nil
+}
+
+// appendUniqueIngressBackend keeps one entry per (service, port): an Ingress
+// routing several paths to the same Service is the ordinary shape, and
+// repeating it would read as several backends.
+func appendUniqueIngressBackend(backends []ObservedIngressBackend, backend ObservedIngressBackend) []ObservedIngressBackend {
+	for _, existing := range backends {
+		if existing == backend {
+			return backends
+		}
+	}
+	return append(backends, backend)
 }

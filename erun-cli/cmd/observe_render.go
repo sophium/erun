@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
@@ -19,6 +20,9 @@ func writeObserveResult(ctx common.Context, result common.ObserveResult) error {
 		return err
 	}
 	if err := writeObserveLimitRanges(ctx, result.LimitRanges); err != nil {
+		return err
+	}
+	if err := writeObserveServices(ctx, result.Services); err != nil {
 		return err
 	}
 	if err := writeObserveIngresses(ctx, result.Ingresses); err != nil {
@@ -90,6 +94,30 @@ func writeObserveLimitRanges(ctx common.Context, limitRanges []common.ObservedLi
 	return nil
 }
 
+// writeObserveServices lists what the namespace runs, with the port an Ingress
+// would route to. Services come before Ingresses because that is the order the
+// question is asked in: what is running, then what is published.
+func writeObserveServices(ctx common.Context, services []common.ObservedService) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(services)); err != nil {
+		return err
+	}
+	for _, service := range services {
+		ports := make([]string, 0, len(service.Ports))
+		for _, port := range service.Ports {
+			if port.Name != "" {
+				ports = append(ports, fmt.Sprintf("%s:%d", port.Name, port.Port))
+				continue
+			}
+			ports = append(ports, strconv.Itoa(port.Port))
+		}
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s (%s): ports %s\n",
+			service.Name, valueOrNone(service.Type), formatStringList(ports)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeObserveIngresses(ctx common.Context, ingresses []common.ObservedIngress) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Ingresses (%d):\n", len(ingresses)); err != nil {
 		return err
@@ -97,6 +125,11 @@ func writeObserveIngresses(ctx common.Context, ingresses []common.ObservedIngres
 	for _, ingress := range ingresses {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: hosts %s\n", ingress.Name, formatStringList(ingress.Hosts)); err != nil {
 			return err
+		}
+		for _, backend := range ingress.Backends {
+			if _, err := fmt.Fprintf(ctx.Stdout, "    -> service %s:%d\n", backend.Service, backend.Port); err != nil {
+				return err
+			}
 		}
 		for _, tls := range ingress.TLS {
 			if _, err := fmt.Fprintf(ctx.Stdout, "    tls %s -> secret %s\n", formatStringList(tls.Hosts), valueOrNone(tls.SecretName)); err != nil {

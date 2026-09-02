@@ -7,8 +7,12 @@ ResourceQuotas (1):
 LimitRanges (1):
   erun-limits:
     Container: default cpu=1, defaultRequest cpu=100m, max none, min none
+Services (2):
+  team-mcp (ClusterIP): ports 8080
+  team-web (ClusterIP): ports http:80
 Ingresses (1):
   web: hosts dev.example.test
+    -> service team-web:80
     tls dev.example.test -> secret web-tls
 Certificates (1):
   wildcard: not Ready: Issuing (waiting for order to complete), secret wildcard-tls, dnsNames *.dev.example.test

@@ -16,7 +16,11 @@ erun expose team dev api --ip 127.0.0.1 --dry-run     # preview, no side effects
 
 ## What it does
 
-For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service name**: it becomes the DNS label in the public hostname `<service>.<tenant>-<env>.<servicesZone>` (the services zone comes from the platform config — e.g. `api.team-dev.services.erunpaas.com`) and the Ingress routes it to the tenant-scoped in-namespace Service `<tenant>-<service>` — the name that service's component chart renders (e.g. `api` → `team-api`). The public host stays a clean label while the Ingress targets the real Service. The flow:
+For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service name**: it becomes the DNS label in the public hostname `<service>.<tenant>-<env>.<servicesZone>` (the services zone comes from the platform config — e.g. `api.team-dev.services.erunpaas.com`) and the Ingress routes it to the tenant-scoped in-namespace Service `<tenant>-<service>` — the name that service's component chart renders (e.g. `api` → `team-api`). The public host stays a clean label while the Ingress targets the real Service.
+
+**When the Service is not named that way.** That derivation is right for a chart erun scaffolded and wrong for a repo that brought its own, whose chart names its Service itself. Routing to a derived name that does not exist produces the worst shape of failure: a hostname that resolves and an ingress that 503s. A caller that already knows the Service — the desktop's picker, which lists the namespace's Services — names it explicitly instead, and the derivation stays the default for everyone else. From the CLI, `erun observe` lists the Services an environment runs, so the name to route to is one read away.
+
+The flow:
 
 1. **Per-env wildcard A record.** It upserts `*.<tenant>-<env>.<servicesZone>` → `--ip` (TTL 60) in the platform's authoritative zone by exec'ing `pdnsutil` inside the platform's PowerDNS pod. The wildcard covers *every* service in that env, so exposing additional services later only adds an Ingress — the DNS record is written once.
 2. **Host-routing Ingress.** It applies an Ingress named `expose-<service>` into the env's namespace, routing the hostname to the tenant-scoped Service `<tenant>-<service>` on `--port` (default `80`).

@@ -74,6 +74,13 @@ type ExposeServiceParams struct {
 	ProjectRoot string
 	TargetIP    string
 	ServicePort int
+	// BackendService is the in-namespace Service the Ingress routes to. Empty
+	// keeps the <tenant>-<service> derivation, which is what a chart erun
+	// scaffolded renders. A caller that picked a real Service from the
+	// namespace names it here instead: a repo's own chart renders its own
+	// Service name, and routing to a derived one that does not exist produces
+	// a hostname that resolves and an ingress that 503s.
+	BackendService string
 	// NoTLS serves http instead of https. TLS is on by default: the Ingress
 	// references the env's per-env wildcard cert Secret.
 	NoTLS bool
@@ -449,7 +456,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 		Tenant:                     tenant,
 		Environment:                environment,
 		Service:                    service,
-		BackendService:             fmt.Sprintf("%s-%s", TenantResourcePrefix(tenant), service),
+		BackendService:             resolveExposeBackendService(params.BackendService, tenant, service),
 		Namespace:                  envLabel,
 		KubernetesContext:          strings.TrimSpace(envConfig.KubernetesContext),
 		Hostname:                   fmt.Sprintf("%s.%s.%s", service, envLabel, servicesZone),
@@ -516,6 +523,15 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 	// label, so its tenant prefix gives the Deployment name the exec targets.
 	platTenant, _, _ := splitTenantEnv(platform.Env)
 	return platform.ServicesZone, normalizeNamespaceName(platform.Env), TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
+}
+
+// resolveExposeBackendService picks the Service the Ingress routes to: the one
+// the caller named, or the <tenant>-<service> convention when it named none.
+func resolveExposeBackendService(backendService, tenant, service string) string {
+	if backendService = strings.TrimSpace(backendService); backendService != "" {
+		return backendService
+	}
+	return fmt.Sprintf("%s-%s", TenantResourcePrefix(tenant), service)
 }
 
 // resolveExposeTLSPlan resolves the Ingress TLS wiring: https by default,

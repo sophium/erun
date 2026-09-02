@@ -43,6 +43,34 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 	return uiExposureList{Configured: true, Services: toUIExposedServices(services)}, nil
 }
 
+// ListEnvironmentServices powers the Ports tab's service picker: what the
+// environment is actually running, and which of those already have a public
+// hostname. It answers the question that used to have no answer anywhere in
+// the product — exposing a service meant typing a name you had to know
+// already, and knowing the naming convention the Ingress backend is derived
+// from.
+func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServiceList, error) {
+	selection = normalizeSelection(selection)
+	if err := errMissingTenantOrEnvironment("list environment services", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentServiceList{}, err
+	}
+	req, configured, notConfiguredReason, err := a.resolveExposureRequest(selection)
+	if err != nil {
+		return uiEnvironmentServiceList{}, err
+	}
+	if !configured {
+		return uiEnvironmentServiceList{Services: []uiEnvironmentService{}, NotConfiguredReason: notConfiguredReason}, nil
+	}
+	services, err := eruncommon.ListEnvironmentServices(req)
+	if err != nil {
+		if errors.Is(err, eruncommon.ErrListEnvironmentServicesForbidden) {
+			return uiEnvironmentServiceList{Configured: true, Restricted: true, Services: []uiEnvironmentService{}}, nil
+		}
+		return uiEnvironmentServiceList{Configured: true, Error: err.Error(), Services: []uiEnvironmentService{}}, nil
+	}
+	return uiEnvironmentServiceList{Configured: true, Services: toUIEnvironmentServices(services)}, nil
+}
+
 // ExposeEnvironmentService exposes one Service at a public hostname under the
 // platform's services zone. See eruncommon.RunExposeService for the resolved
 // plan; it is applied here directly (no dry-run switch -- the Ports tab form
@@ -62,12 +90,13 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 		return uiExposedService{}, fmt.Errorf("this environment's project has no platform block configured, so it cannot be exposed at a public hostname")
 	}
 	result, err := eruncommon.RunExposeService(eruncommon.Context{}, eruncommon.ExposeServiceParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-		Service:     service,
-		ProjectRoot: projectRoot,
-		TargetIP:    targetIP,
-		ServicePort: input.Port,
+		Tenant:         selection.Tenant,
+		Environment:    selection.Environment,
+		Service:        service,
+		ProjectRoot:    projectRoot,
+		TargetIP:       targetIP,
+		ServicePort:    input.Port,
+		BackendService: strings.TrimSpace(input.BackendService),
 	}, a.deps.store, nil, nil)
 	if err != nil {
 		return uiExposedService{}, err
@@ -144,7 +173,29 @@ func (a *App) exposeProjectRoot() string {
 func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedService {
 	result := make([]uiExposedService, 0, len(services))
 	for _, service := range services {
-		result = append(result, uiExposedService{Service: service.Service, Hostname: service.Hostname, Scheme: service.Scheme})
+		result = append(result, uiExposedService{
+			Service:        service.Service,
+			Hostname:       service.Hostname,
+			Scheme:         service.Scheme,
+			BackendService: service.BackendService,
+		})
+	}
+	return result
+}
+
+func toUIEnvironmentServices(services []eruncommon.EnvironmentService) []uiEnvironmentService {
+	result := make([]uiEnvironmentService, 0, len(services))
+	for _, service := range services {
+		entry := uiEnvironmentService{Name: service.Name, Type: service.Type}
+		for _, port := range service.Ports {
+			entry.Ports = append(entry.Ports, uiEnvironmentServicePort{Name: port.Name, Port: port.Port})
+		}
+		if service.Exposure != nil {
+			entry.Hostname = service.Exposure.Hostname
+			entry.Scheme = service.Exposure.Scheme
+			entry.ExposedAs = service.Exposure.Label
+		}
+		result = append(result, entry)
 	}
 	return result
 }
