@@ -1,6 +1,7 @@
 package dns01broker
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -10,6 +11,19 @@ import (
 	"github.com/miekg/dns"
 )
 
+// rrValue renders the one field the tests care about from a captured RR,
+// regardless of record type.
+func rrValue(rr dns.RR) string {
+	switch v := rr.(type) {
+	case *dns.TXT:
+		return strings.Join(v.Txt, "")
+	case *dns.A:
+		return v.A.String()
+	default:
+		return ""
+	}
+}
+
 const (
 	testTSIGKeyName = "acme-dnsupdate"
 	testTSIGSecret  = "dGVzdHNlY3JldA==" // base64("testsecret")
@@ -17,17 +31,24 @@ const (
 )
 
 type capturedUpdate struct {
-	mu         sync.Mutex
-	tsigOK     bool
-	updateZone string
-	inserts    []string
-	removes    []string
+	mu          sync.Mutex
+	tsigOK      bool
+	updateZone  string
+	inserts     []string
+	removes     []string
+	rrsetClears []string
 }
 
 func (c *capturedUpdate) snapshot() capturedUpdate {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return capturedUpdate{tsigOK: c.tsigOK, updateZone: c.updateZone, inserts: append([]string(nil), c.inserts...), removes: append([]string(nil), c.removes...)}
+	return capturedUpdate{
+		tsigOK:      c.tsigOK,
+		updateZone:  c.updateZone,
+		inserts:     append([]string(nil), c.inserts...),
+		removes:     append([]string(nil), c.removes...),
+		rrsetClears: append([]string(nil), c.rrsetClears...),
+	}
 }
 
 // startTSIGServer runs an in-process DNS server that requires the same TSIG key
@@ -53,15 +74,15 @@ func startTSIGServer(t *testing.T, captured *capturedUpdate) string {
 				captured.updateZone = req.Question[0].Name
 			}
 			for _, rr := range req.Ns {
-				txt, ok := rr.(*dns.TXT)
-				if !ok {
-					continue
-				}
-				entry := rr.Header().Name + "=" + strings.Join(txt.Txt, "")
-				if rr.Header().Class == dns.ClassNONE {
-					captured.removes = append(captured.removes, entry)
-				} else {
-					captured.inserts = append(captured.inserts, entry)
+				switch rr.Header().Class {
+				case dns.ClassANY:
+					// RemoveRRset's "delete this whole rrset" directive: no
+					// rdata reaches the wire, only the name+type identify it.
+					captured.rrsetClears = append(captured.rrsetClears, fmt.Sprintf("%s %s", rr.Header().Name, dns.TypeToString[rr.Header().Rrtype]))
+				case dns.ClassNONE:
+					captured.removes = append(captured.removes, rr.Header().Name+"="+rrValue(rr))
+				default:
+					captured.inserts = append(captured.inserts, rr.Header().Name+"="+rrValue(rr))
 				}
 			}
 			captured.mu.Unlock()
@@ -109,6 +130,73 @@ func TestPowerDNSWriterPresentSignsAndShapesUpdate(t *testing.T) {
 	got = captured.snapshot()
 	if len(got.removes) != 1 || got.removes[0] != want {
 		t.Fatalf("removes = %v, want [%q]", got.removes, want)
+	}
+}
+
+// wantExactly fails the test unless got holds exactly one entry, equal to
+// want. Factored out so the calling test's own branch count stays low.
+func wantExactly(t *testing.T, label string, got []string, want string) {
+	t.Helper()
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("%s = %v, want [%q]", label, got, want)
+	}
+}
+
+func TestPowerDNSWriterUpsertAClearsThenInserts(t *testing.T) {
+	captured := &capturedUpdate{}
+	addr := startTSIGServer(t, captured)
+
+	writer, err := NewPowerDNSWriter(addr, testZone, testTSIGKeyName, "hmac-sha256", testTSIGSecret)
+	if err != nil {
+		t.Fatalf("new writer: %v", err)
+	}
+
+	const fqdn = "*.team-dev.services.example.com"
+	if err := writer.UpsertA(fqdn, "127.0.0.1"); err != nil {
+		t.Fatalf("upsert a: %v", err)
+	}
+	got := captured.snapshot()
+	if !got.tsigOK {
+		t.Fatal("server did not accept the TSIG signature — the update was not properly signed")
+	}
+	// A replace must clear the existing rrset, not merge.
+	wantExactly(t, "rrsetClears", got.rrsetClears, dns.Fqdn(fqdn)+" A")
+	wantExactly(t, "inserts", got.inserts, dns.Fqdn(fqdn)+"=127.0.0.1")
+
+	// Re-pointing at a different IP must clear+insert again, never leaving the
+	// old value alongside the new one.
+	if err := writer.UpsertA(fqdn, "203.0.113.10"); err != nil {
+		t.Fatalf("upsert a (repoint): %v", err)
+	}
+	got = captured.snapshot()
+	if len(got.rrsetClears) != 2 {
+		t.Fatalf("rrsetClears = %v, want 2 clears across both upserts", got.rrsetClears)
+	}
+	if len(got.inserts) != 2 || got.inserts[1] != dns.Fqdn(fqdn)+"=203.0.113.10" {
+		t.Fatalf("inserts = %v, want the second upsert to insert the new value", got.inserts)
+	}
+}
+
+func TestPowerDNSWriterDeleteAClearsRRset(t *testing.T) {
+	captured := &capturedUpdate{}
+	addr := startTSIGServer(t, captured)
+
+	writer, err := NewPowerDNSWriter(addr, testZone, testTSIGKeyName, "hmac-sha256", testTSIGSecret)
+	if err != nil {
+		t.Fatalf("new writer: %v", err)
+	}
+
+	const fqdn = "*.team-dev.services.example.com"
+	if err := writer.DeleteA(fqdn); err != nil {
+		t.Fatalf("delete a: %v", err)
+	}
+	got := captured.snapshot()
+	wantClear := dns.Fqdn(fqdn) + " A"
+	if len(got.rrsetClears) != 1 || got.rrsetClears[0] != wantClear {
+		t.Fatalf("rrsetClears = %v, want [%q]", got.rrsetClears, wantClear)
+	}
+	if len(got.inserts) != 0 {
+		t.Fatalf("inserts = %v, want none — delete must not insert anything", got.inserts)
 	}
 }
 

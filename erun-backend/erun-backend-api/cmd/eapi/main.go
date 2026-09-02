@@ -66,7 +66,14 @@ func run(args []string) error {
 		AWSEndpoint:   cfg.AWSEndpoint,
 		MCPSigner:     optional.mcpSigner,
 		DNS01Broker:   optional.dns01Broker,
-		KubeClient:    optional.kubeClient,
+		// The hostname route reuses the same PowerDNS write path
+		// DNS01Broker uses for ACME challenges, so both share one constructed
+		// writer -- see optionalDependencies. environmentHostnameWriter avoids
+		// assigning a typed-nil *PowerDNSWriter into the interface field,
+		// which would compare non-nil and defeat the route's own nil check.
+		EnvironmentHostnameWriter:       environmentHostnameWriter(optional.dns01Writer),
+		EnvironmentHostnameServicesZone: cfg.DNS01ServicesZone,
+		KubeClient:                      optional.kubeClient,
 		EnvDeploy: provision.EnvDeployConfig{
 			Registry:               cfg.EnvDeployRegistry,
 			PlatformNamespace:      cfg.PlatformNamespace,
@@ -166,6 +173,7 @@ type apiDependencies struct {
 	cipher        *secrets.Cipher
 	dbosCtx       dbos.DBOSContext
 	mcpSigner     *mcptoken.Signer
+	dns01Writer   *dns01broker.PowerDNSWriter
 	dns01Broker   *dns01broker.Broker
 	kubeClient    kubernetes.Interface
 	identityAdmin *zitadel.Client
@@ -184,10 +192,11 @@ func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	dns01Broker, err := optionalDNS01Broker(cfg, mcpSigner)
+	dns01Writer, err := optionalDNS01Writer(cfg)
 	if err != nil {
 		return apiDependencies{}, err
 	}
+	dns01Broker := optionalDNS01Broker(mcpSigner, dns01Writer, cfg.DNS01ServicesZone)
 	kubeClient, err := optionalKubeClient(cfg)
 	if err != nil {
 		return apiDependencies{}, err
@@ -200,14 +209,27 @@ func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
 		cipher:        cipher,
 		dbosCtx:       dbosCtx,
 		mcpSigner:     mcpSigner,
+		dns01Writer:   dns01Writer,
 		dns01Broker:   dns01Broker,
 		kubeClient:    kubeClient,
 		identityAdmin: identityAdmin,
 	}, nil
 }
 
-// optionalIdentityAdmin wires the Zitadel Management API client (issue
-// #1209). Any of the three settings missing leaves it nil -- the
+// environmentHostnameWriter adapts a possibly-nil *dns01broker.PowerDNSWriter
+// into the routes.EnvironmentHostnameWriter interface. Assigning a typed-nil
+// pointer directly into an interface field produces a non-nil interface
+// value, which would defeat EnvironmentHostnameRoutes' own `writer == nil`
+// check -- this keeps "not configured" actually nil.
+func environmentHostnameWriter(writer *dns01broker.PowerDNSWriter) routes.EnvironmentHostnameWriter {
+	if writer == nil {
+		return nil
+	}
+	return writer
+}
+
+// optionalIdentityAdmin wires the Zitadel Management API client. Any of the
+// three settings missing leaves it nil -- the
 // /v1/identity/* routes then do not register at all -- but a set-but-broken
 // PAT path (unreadable, empty) is a hard misconfiguration, matching every
 // other optional dependency's convention in this file.
@@ -502,12 +524,13 @@ func dns01BrokerURL(cfg apiConfig, broker *dns01broker.Broker) string {
 	return strings.TrimRight(cfg.PlatformAPIURL, "/") + "/v1/dns01"
 }
 
-// optionalDNS01Broker builds the DNS-01 broker when both the signing key (to
-// verify per-env tokens) and the PowerDNS write path are configured. Any missing
-// piece leaves the broker disabled — its endpoints are not registered — rather
-// than a half-wired broker; a bad TSIG algorithm is a hard misconfiguration.
-func optionalDNS01Broker(cfg apiConfig, signer *mcptoken.Signer) (*dns01broker.Broker, error) {
-	if signer == nil || cfg.DNS01ServicesZone == "" || cfg.DNS01Nameserver == "" || cfg.DNS01TSIGKeyName == "" || cfg.DNS01TSIGSecret == "" {
+// optionalDNS01Writer builds the shared PowerDNS write path when the
+// services zone and TSIG credential are all configured. Nil (with no error)
+// leaves both the DNS-01 broker and the environment hostname route
+// disabled — neither can write DNS without it; a bad TSIG algorithm is a
+// hard misconfiguration, not a silent disable.
+func optionalDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
+	if cfg.DNS01ServicesZone == "" || cfg.DNS01Nameserver == "" || cfg.DNS01TSIGKeyName == "" || cfg.DNS01TSIGSecret == "" {
 		return nil, nil
 	}
 	algorithm := cfg.DNS01TSIGAlgorithm
@@ -516,9 +539,20 @@ func optionalDNS01Broker(cfg apiConfig, signer *mcptoken.Signer) (*dns01broker.B
 	}
 	writer, err := dns01broker.NewPowerDNSWriter(cfg.DNS01Nameserver, cfg.DNS01ServicesZone, cfg.DNS01TSIGKeyName, algorithm, cfg.DNS01TSIGSecret)
 	if err != nil {
-		return nil, fmt.Errorf("dns01 broker: %w", err)
+		return nil, fmt.Errorf("dns01 writer: %w", err)
 	}
-	return dns01broker.NewBroker(signer, writer, cfg.DNS01ServicesZone, nil), nil
+	return writer, nil
+}
+
+// optionalDNS01Broker builds the DNS-01 broker when both the signing key (to
+// verify per-env tokens) and the shared PowerDNS writer are configured.
+// Either missing leaves the broker disabled — its endpoints are not
+// registered — rather than a half-wired broker.
+func optionalDNS01Broker(signer *mcptoken.Signer, writer *dns01broker.PowerDNSWriter, servicesZone string) *dns01broker.Broker {
+	if signer == nil || writer == nil {
+		return nil
+	}
+	return dns01broker.NewBroker(signer, writer, servicesZone, nil)
 }
 
 func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {

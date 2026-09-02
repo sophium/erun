@@ -151,6 +151,8 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `DELETE` | `/v1/environments/{environment_id}` | Start tearing down a runtime env's namespace (skipped if it never deployed) and removing its row — the server-side equivalent of `erun delete`. Asynchronous: `202 Accepted` with the row at `status: deleting`; poll to see it converge. Not recoverable. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience, scope}`) for the caller to present to the env's `erun-mcp` edge. Optional body `{scope}` requests a capability tier; minting `erun:admin` additionally requires the entitlement below. Response below. | Tenant member (write); `erun:admin` additionally requires the delete-environment entitlement |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
+| `PUT` | `/v1/environments/{environment_id}/hostname` | Point the caller's own environment's wildcard hostname at an IP by performing the platform's own PowerDNS write — for a caller with no direct PowerDNS access to the platform cluster (a developer's local cluster, most concretely). Body `{targetIp}`. Response below. | Tenant member (write) |
+| `DELETE` | `/v1/environments/{environment_id}/hostname` | Remove the caller's own environment's wildcard hostname record, symmetric with the `PUT` above. Body-less; `204` on success. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/ai-sessions` | The environment's own AI-tool hooks report their turn-boundary status (busy/idle/awaiting-input/exited) for one session. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}/ai-sessions` | Read back the resolved status of every session last reported for this environment. Response below. | Tenant member (read) |
 | `GET` | `/v1/contexts` | List the tenant's cloud contexts (managed clusters). | Tenant member |
@@ -578,6 +580,39 @@ The operator lands this token as the Secret the per-tenant Issuer's webhook solv
 | `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend. |
 | `500` | The tenant read or signing failed (internal wiring error). | Retry; if it persists, it is a server bug. |
+
+### `PUT` / `DELETE` `/v1/environments/{environment_id}/hostname` {#environment-hostname-endpoint}
+
+Lets a tenant point its own environment's wildcard hostname at an IP through the platform API instead of the direct `pdnsutil` exec `erun expose` otherwise uses — the write path a caller with no credentials for the platform's own cluster needs (a developer's local cluster, most concretely; see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure)). The environment is resolved from `{environment_id}` under row-level security, so a caller can only ever write `*.<its tenant>-<its env>.<servicesZone>` — never another tenant's or another environment's record.
+
+```jsonc
+// PUT /v1/environments/{environment_id}/hostname body
+{
+  "targetIp": "127.0.0.1"    // required; any valid IP -- a private or loopback address is accepted on purpose
+}
+```
+
+```jsonc
+// 200 response
+{
+  "hostname": "*.acme-prod.services.erunpaas.com",
+  "targetIp": "127.0.0.1"
+}
+```
+
+`DELETE` takes no body and returns `204` on success, removing the same wildcard record.
+
+Performs the write itself against the same PowerDNS the [DNS-01 broker](#dns01-broker) writes ACME challenges to, over RFC2136 DNS UPDATE (TSIG-signed), not the direct `kubectl exec ... pdnsutil` `erun expose` runs when it has cluster access — cluster access to the platform never has to leave the platform. `erun expose`/`erun unexpose` call this route automatically once an `erun`-type cloud alias is configured locally (`erun cloud init erun`) and no `--services-zone`/`--platform-namespace` override is given (that override is the hosted deploy Job's own signal that it already has direct PowerDNS access); `--erun-alias` disambiguates when more than one alias is configured. Enabled by the same PowerDNS write path (nameserver, zone, TSIG key/secret) the DNS-01 broker uses; unconfigured → `501`.
+
+**Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)):
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the write. |
+| `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Write against an environment id the caller's tenant owns. |
+| `400` | `targetIp` is missing or not a valid IP address. | Pass a real IP; a private or loopback one is fine. |
+| `501` | No PowerDNS write path is configured on the backend. | Configure the DNS-01 broker's PowerDNS settings on the backend. |
+| `500` | The DNS write itself failed, or the tenant/environment read failed (internal wiring error). | Retry; if it persists, it is a server bug or a PowerDNS outage. |
 
 ### `POST /v1/environments/{environment_id}/ai-sessions` {#ai-sessions-endpoint}
 

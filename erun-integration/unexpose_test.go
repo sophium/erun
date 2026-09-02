@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -78,6 +79,47 @@ func TestUnexpose(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "unexpose/real_run_via_stub", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_via_platform_alias", func(t *testing.T) {
+		// Mirrors expose's own real_run_via_platform_alias: drives the
+		// platform-route DELETE for real against a stub erun-backend-api.
+		// Substring assertion, not golden.Equal, for the same reason expose's
+		// scenario uses one -- the stub server's ephemeral port.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		server, calls := hostnameAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{"unexpose", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "removed wildcard DNS record *.team-dev.services.erunpaas.com for team/dev") {
+			t.Fatalf("expected the removed wildcard record in output, got:\n%s", result.Combined)
+		}
+		want := []string{"GET /v1/environments", "DELETE /v1/environments/env-1/hostname"}
+		if got := *calls; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("stub server calls = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("dry_run_via_platform_alias", func(t *testing.T) {
+		// Mirrors expose's own automatic switch: an erun platform alias
+		// configured (and no --services-zone/--platform-namespace override)
+		// routes the delete through the platform's API instead of a direct
+		// kubectl exec.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 203.0.113.10\n")
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"unexpose", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "unexpose/dry_run_via_platform_alias", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_skip_if_unconfigured", func(t *testing.T) {

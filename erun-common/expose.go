@@ -113,6 +113,12 @@ type ExposeServiceParams struct {
 	// references actually gets populated. A zero value skips TLS provisioning
 	// outright: the Ingress still applies exactly as it always has.
 	TLS TLSCertParams
+	// ErunAlias names which configured erun-type cloud alias to route the DNS
+	// write through when the platform route is used. Empty
+	// resolves the sole configured erun-type alias, matching every other
+	// `erun platform`/`erun review` command's own --erun-alias convention;
+	// only needed to disambiguate when more than one is configured.
+	ErunAlias string
 }
 
 // TLSCertParams provisions a namespaced cert-manager Issuer + Certificate into
@@ -241,15 +247,23 @@ const defaultExposeWildcardTTL = 60
 // covers every service in the env, so exposing additional services only adds an
 // Ingress. Every action and decision is traced before execution so a dry-run is
 // a complete, side-effect-free plan.
-func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
-	store, upsertDNSRecord, applyIngress = normalizeExposeDependencies(store, upsertDNSRecord, applyIngress)
+//
+// The DNS write goes through one of two paths: a direct
+// `pdnsutil` exec into the platform cluster's PowerDNS pod when the caller
+// has that access (the hosted deploy Job, signaled by an explicit
+// ServicesZone/PlatformNamespace override), or the platform's own API when
+// the caller instead has an erun platform alias configured (a developer's
+// local cluster, most concretely) — see resolveExposeDNSUpserter.
+// upsertDNSRecord, when non-nil, overrides the decision outright (tests).
+func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
+	store, applyIngress = normalizeExposeDependencies(store, applyIngress)
 
 	if params.SkipIfUnconfigured && !exposePlatformConfigured(params) {
 		ctx.Trace("expose: skipped, no platform block configured")
 		return ExposeServiceResult{}, nil
 	}
 
-	result, err := resolveExposeServicePlan(params, store)
+	result, upsertDNSRecord, dnsProvider, err := resolveExposePlanAndDNSWriter(ctx, params, store, cloudStore, deps, upsertDNSRecord)
 	if err != nil {
 		return ExposeServiceResult{}, err
 	}
@@ -264,7 +278,7 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 
 	// Trace the real commands, not synthetic verbs, so the dry-run plan is
 	// faithful to the live run.
-	traceExposePlan(ctx, result, dnsParams, ingressParams)
+	traceExposePlan(ctx, result, dnsParams, ingressParams, dnsProvider)
 	if provisionTLS {
 		traceTLSCertPlan(ctx, tlsParams)
 	}
@@ -283,7 +297,24 @@ func RunExposeService(ctx Context, params ExposeServiceParams, store ExposeStore
 	return result, nil
 }
 
-func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams) {
+// resolveExposePlanAndDNSWriter resolves the plan and, from it, which DNS
+// write path to use -- split out of RunExposeService purely to keep that
+// function's own branch count down; see resolveExposeDNSUpserter for the
+// actual decision.
+func resolveExposePlanAndDNSWriter(ctx Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, CloudProviderConfig, error) {
+	result, err := resolveExposeServicePlan(params, store)
+	if err != nil {
+		return ExposeServiceResult{}, nil, CloudProviderConfig{}, err
+	}
+	hasDirectOverride := strings.TrimSpace(params.ServicesZone) != "" || strings.TrimSpace(params.PlatformNamespace) != ""
+	upsertDNSRecord, dnsProvider, err := resolveExposeDNSUpserter(ctx, result.Environment, params.ErunAlias, cloudStore, deps, hasDirectOverride, upsertDNSRecord)
+	if err != nil {
+		return ExposeServiceResult{}, nil, CloudProviderConfig{}, err
+	}
+	return result, upsertDNSRecord, dnsProvider, nil
+}
+
+func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, dnsProvider CloudProviderConfig) {
 	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.BackendService, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
 	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
@@ -292,12 +323,25 @@ func traceExposePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecor
 	} else {
 		ctx.Trace(fmt.Sprintf("expose: http-only (%s)", result.TLSDisabledReason))
 	}
-	ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
-	ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
+	traceExposeDNSWritePlan(ctx, result, dnsParams, dnsProvider)
 	ctx.TraceCommand("", "kubectl", kubectlApplyStdinArgs(ingressParams.Namespace, ingressParams.KubernetesContext)...)
 	// The Ingress manifest is piped to `kubectl apply -f -` on stdin, so trace
 	// its body too — the argv alone hides the exact resource the real run applies.
 	ctx.TraceBlock("expose: ingress manifest", renderHostRoutingIngress(ingressParams))
+}
+
+// traceExposeDNSWritePlan traces exactly which of the two DNS write paths
+// will run and what it will do, so a dry-run names the record it would write
+// before it ever writes it (root AGENTS.md's "DNS changes are externally
+// visible and slow to undo").
+func traceExposeDNSWritePlan(ctx Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, dnsProvider CloudProviderConfig) {
+	if dnsProvider.Alias == "" {
+		ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
+		ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
+		return
+	}
+	tracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+	tracePlatformCall(ctx, dnsProvider, "PUT", "/v1/environments/{environment_id}/hostname", "targetIp="+result.TargetIP)
 }
 
 // applyExposeWrites performs the DNS and Ingress side effects. The Ingress
@@ -601,15 +645,12 @@ func splitTenantEnv(label string) (tenant, env string, ok bool) {
 	return label[:i], label[i+1:], true
 }
 
-func normalizeExposeDependencies(store ExposeStore, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeStore, DNSRecordUpserterFunc, IngressApplierFunc) {
+func normalizeExposeDependencies(store ExposeStore, applyIngress IngressApplierFunc) (ExposeStore, IngressApplierFunc) {
 	if store == nil {
 		store = ConfigStore{}
-	}
-	if upsertDNSRecord == nil {
-		upsertDNSRecord = upsertPowerDNSRecord
 	}
 	if applyIngress == nil {
 		applyIngress = applyHostRoutingIngress
 	}
-	return store, upsertDNSRecord, applyIngress
+	return store, applyIngress
 }

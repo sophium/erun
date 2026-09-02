@@ -75,6 +75,11 @@ func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServi
 // platform's services zone. See eruncommon.RunExposeService for the resolved
 // plan; it is applied here directly (no dry-run switch -- the Ports tab form
 // commits on submit, matching every other Manage dialog save action).
+// RunExposeService's own DNS write automatically routes through the
+// platform's API instead of a direct pdnsutil exec when an erun platform
+// alias is configured -- no separate desktop control needed,
+// since a developer's local cluster is exactly the case that alias exists
+// for.
 func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposedService, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
@@ -97,7 +102,7 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 		TargetIP:       targetIP,
 		ServicePort:    input.Port,
 		BackendService: strings.TrimSpace(input.BackendService),
-	}, a.deps.store, nil, nil)
+	}, a.deps.store, a.deps.store, a.deps.cloudDeps, nil, nil)
 	if err != nil {
 		return uiExposedService{}, err
 	}
@@ -123,7 +128,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		ProjectRoot: projectRoot,
-	}, a.deps.store, nil)
+	}, a.deps.store, a.deps.store, a.deps.cloudDeps, nil)
 	if err != nil {
 		return uiUnexposeResult{}, err
 	}

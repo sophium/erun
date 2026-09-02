@@ -22,7 +22,7 @@ For `erun expose <tenant> <env> <service>`, `<service>` is the **logical service
 
 The flow:
 
-1. **Per-env wildcard A record.** It upserts `*.<tenant>-<env>.<servicesZone>` → `--ip` (TTL 60) in the platform's authoritative zone by exec'ing `pdnsutil` inside the platform's PowerDNS pod. The wildcard covers *every* service in that env, so exposing additional services later only adds an Ingress — the DNS record is written once.
+1. **Per-env wildcard A record.** It upserts `*.<tenant>-<env>.<servicesZone>` → `--ip` (TTL 60) in the platform's authoritative zone. The wildcard covers *every* service in that env, so exposing additional services later only adds an Ingress — the DNS record is written once. It writes this directly by exec'ing `pdnsutil` inside the platform's PowerDNS pod when it has that cluster access (a hosted deploy Job); with an `erun`-type cloud alias configured instead (`erun cloud init erun`) — the case for a developer's own local cluster, which never has credentials for the platform's cluster — it performs the same write through the platform's API instead. See [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact decision.
 2. **Host-routing Ingress.** It applies an Ingress named `expose-<service>` into the env's namespace, routing the hostname to the tenant-scoped Service `<tenant>-<service>` on `--port` (default `80`).
 
 The DNS write targets the **platform** environment's cluster (where PowerDNS runs); the Ingress is applied to the **target** env's cluster. These can be different clusters — `expose` resolves each context independently.
@@ -44,7 +44,8 @@ The desktop app covers the same ground without a terminal: an environment's sett
 | `--ip <ip>` | **Required.** The env's ingress IP the per-env wildcard record points at — `127.0.0.1` for a VM-backed local cluster, a node/LAN IP, or the public LB IP for a remote cluster. |
 | `--port <int>` | Service port the Ingress routes to. Default `80`. |
 | `--skip-if-unconfigured` | Succeed as a no-op instead of the "no platform block" error below, for a script that calls `expose` after another command without knowing whether the target project is a platform deployment. |
-| `--dry-run` | Resolve and print the full plan — the hostname, the `pdnsutil` exec, and the Ingress apply — without touching DNS or the cluster. |
+| `--erun-alias <alias>` | Which configured `erun`-type cloud alias routes the DNS write through the platform's API when direct PowerDNS access is unavailable. Defaults to the sole configured alias; only needed to disambiguate when more than one is configured. |
+| `--dry-run` | Resolve and print the full plan — the hostname, the DNS write (`pdnsutil` exec or the platform API call, whichever applies), and the Ingress apply — without touching DNS or the cluster. |
 
 ## Error behaviour
 
