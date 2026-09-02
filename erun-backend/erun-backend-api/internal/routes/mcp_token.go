@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -8,8 +9,44 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
+)
+
+// EntitlementChecker answers whether the calling security context already
+// holds a specific backend permission. repository.PermissionAuthorizer
+// implements this by construction (same Authorize(ctx, method, apiPath)
+// shape backendapi.Authorizer already uses for route-level enforcement), so
+// mcp_token.go reuses the existing permission model instead of inventing a
+// parallel one.
+type EntitlementChecker interface {
+	Authorize(ctx context.Context, method string, apiPath string) error
+}
+
+// adminEntitlementMethod/Path is the routeroles.TenantAdminOnly permission
+// this route treats as a stand-in for "may mint erun:admin" (mapping
+// decision, erun#1891). routeroles' backend classes and MCP's capability
+// tiers do not line up 1:1: this route's own classification is
+// TenantUserClass ("operating an environment that already exists"), and
+// erun:read/erun:attach are exactly that -- observation and driving an
+// existing attach session, nothing an ordinary TenantUser cannot already do
+// through the API. erun:admin is not a peer of that class: MCPToolCapability's
+// default-closed table puts delete/context_init/terraform/init (each
+// TenantAdminOnly on the backend) in the very same tier as build/deploy on an
+// existing environment (TenantUserClass), so a caller must separately hold a
+// TenantAdminOnly permission to receive it -- reaching this route at all is
+// not enough. DELETE on this exact environment is the narrowest available
+// anchor for that check: whatever role structure exists in the future, "can
+// this caller delete this environment" is the closest single permission to
+// "should this caller be trusted with admin (including exec_raw) reach into
+// it" -- the more restrictive reading where the mapping is not exact. A
+// caller entitled to neither read nor attach never reaches this check at all:
+// the route's own TenantUserClass gate already refused them before the
+// handler runs.
+const (
+	adminEntitlementMethod = http.MethodDelete
+	adminEntitlementPath   = "/v1/environments/{environment_id}"
 )
 
 // MCPTokenRoutes mints a per-env MCP bearer token for the caller. The token is
@@ -22,6 +59,10 @@ type MCPTokenRoutes struct {
 	// signer is nil when no backend MCP signing key is configured; the handler
 	// then reports 501 rather than minting an unverifiable token.
 	signer *mcptoken.Signer
+	// entitlement gates erun:admin minting on adminEntitlementMethod/Path (see
+	// their doc comment). Never consulted for erun:read/erun:attach, which the
+	// route's own TenantUserClass gate already entitles every caller to.
+	entitlement EntitlementChecker
 }
 
 // mintMCPTokenRequest lets the caller request a capability tier for the token
@@ -47,8 +88,8 @@ type mcpTokenResponse struct {
 	Scope    string `json:"scope"`
 }
 
-func RegisterMCPTokenRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, tenants ConfigTenantRepository, signer *mcptoken.Signer) {
-	routes := MCPTokenRoutes{environments: environments, tenants: tenants, signer: signer}
+func RegisterMCPTokenRoutes(register ProtectedRouteRegistrar, environments EnvironmentRepository, tenants ConfigTenantRepository, signer *mcptoken.Signer, entitlement EntitlementChecker) {
+	routes := MCPTokenRoutes{environments: environments, tenants: tenants, signer: signer, entitlement: entitlement}
 	register(http.MethodPost, "/v1/environments/{environment_id}/mcp-token", http.HandlerFunc(routes.mintMCPToken))
 }
 
@@ -63,6 +104,10 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	ctx := req.Context()
+	if err := r.authorizeScope(ctx, scope); err != nil {
+		writeRepositoryError(w, req, err)
+		return
+	}
 	environment, err := r.environments.Get(ctx, req.PathValue("environment_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
@@ -84,6 +129,30 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, mcpTokenResponse{Token: token, Audience: audience, Scope: scope})
+}
+
+// authorizeScope refuses a requested erun:admin scope unless the caller
+// separately holds adminEntitlementMethod/Path (see that constant's doc
+// comment for the mapping this enforces). erun:read and erun:attach need no
+// check here: this route is itself routeroles.TenantUserClass, so reaching
+// the handler already proves that entitlement. A nil entitlement checker
+// (no permission backend wired) fails closed rather than minting admin
+// unconditionally.
+func (r MCPTokenRoutes) authorizeScope(ctx context.Context, scope string) error {
+	requestsAdmin := false
+	for _, requested := range strings.Fields(scope) {
+		if requested == string(eruncommon.MCPCapabilityAdmin) {
+			requestsAdmin = true
+			break
+		}
+	}
+	if !requestsAdmin {
+		return nil
+	}
+	if r.entitlement == nil {
+		return repository.ErrForbidden
+	}
+	return r.entitlement.Authorize(ctx, adminEntitlementMethod, adminEntitlementPath)
 }
 
 // requestedMCPScope resolves the capability tier to mint. A body-less request

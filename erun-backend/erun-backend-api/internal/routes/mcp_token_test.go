@@ -2,6 +2,7 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -15,6 +16,23 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
+
+// stubEntitlementChecker stands in for the real permission authorizer.
+// grantedMethod/Path record what authorizeScope actually asked for, so a test
+// can pin the exact mapping decision (erun#1891) rather than only its outcome.
+type stubEntitlementChecker struct {
+	err         error
+	askedMethod string
+	askedPath   string
+	calls       int
+}
+
+func (c *stubEntitlementChecker) Authorize(_ context.Context, method, apiPath string) error {
+	c.calls++
+	c.askedMethod = method
+	c.askedPath = apiPath
+	return c.err
+}
 
 func testSigner(t *testing.T) *mcptoken.Signer {
 	t.Helper()
@@ -139,15 +157,18 @@ func TestMintMCPTokenDefaultsToReadNotAdmin(t *testing.T) {
 }
 
 // TestMintMCPTokenAdminScopeIsAdminEndToEnd covers the console's own case, the
-// one erun#1877 says is defensible: an operator explicitly asking for a
-// full-capability token for their own environment gets one, verified by
-// decoding the minted token's claims through the same Capabilities() the
-// deployed edge uses to authorize tool calls.
+// one erun#1877 says is defensible: an operator who genuinely holds the
+// mapped entitlement (erun#1891) and explicitly asks for a full-capability
+// token for their own environment gets one, verified by decoding the minted
+// token's claims through the same Capabilities() the deployed edge uses to
+// authorize tool calls.
 func TestMintMCPTokenAdminScopeIsAdminEndToEnd(t *testing.T) {
+	entitlement := &stubEntitlementChecker{}
 	routes := MCPTokenRoutes{
 		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		signer:       testSigner(t),
+		entitlement:  entitlement,
 	}
 	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
 	if rec.Code != http.StatusOK {
@@ -160,6 +181,85 @@ func TestMintMCPTokenAdminScopeIsAdminEndToEnd(t *testing.T) {
 	claims := decodeMCPTokenClaims(t, response.Token)
 	if !claims.Capabilities().AllowsTool("deploy") {
 		t.Fatalf("an admin-scoped token must reach deploy, got %+v", claims.Capabilities())
+	}
+	if entitlement.calls != 1 {
+		t.Fatalf("expected exactly one entitlement check, got %d", entitlement.calls)
+	}
+	if entitlement.askedMethod != http.MethodDelete || entitlement.askedPath != "/v1/environments/{environment_id}" {
+		t.Fatalf("entitlement check asked (%s %s), want (DELETE /v1/environments/{environment_id}) -- the mapping decision this route enforces", entitlement.askedMethod, entitlement.askedPath)
+	}
+}
+
+// TestMintMCPTokenRefusesAdminWithoutEntitlement is the entitlement gate this
+// PR closes (erun#1891): a TenantUserClass caller who is not entitled to
+// delete this environment must not receive an erun:admin token, even though
+// the route itself is reachable by any tenant user. 403, and no token is
+// minted at all.
+func TestMintMCPTokenRefusesAdminWithoutEntitlement(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("expected an error body")
+	}
+	var response mcpTokenResponse
+	if err := json.NewDecoder(bytes.NewReader(rec.Body.Bytes())).Decode(&response); err == nil && response.Token != "" {
+		t.Fatalf("a refused mint must never carry a token, got %+v", response)
+	}
+}
+
+// TestMintMCPTokenNoEntitlementCheckerRefusesAdmin proves the fail-closed
+// default: a deployment with no permission backend wired (entitlement is nil)
+// must refuse erun:admin rather than mint it unconditionally, the exact
+// regression this issue exists to close.
+func TestMintMCPTokenNoEntitlementCheckerRefusesAdmin(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+// TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd proves the refusal above
+// is scoped to erun:admin, not the whole route: the same caller, still denied
+// admin entitlement, can mint the read tier the route's own TenantUserClass
+// gate already entitles every caller to -- decoded end to end, the same
+// standard TestMintMCPTokenAdminScopeIsAdminEndToEnd holds the positive case
+// to, so a caller entitled to none of the escalated tiers is never left with
+// no way to obtain a usable token at all.
+func TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityRead))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response mcpTokenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	claims := decodeMCPTokenClaims(t, response.Token)
+	capabilities := claims.Capabilities()
+	if !capabilities.AllowsTool("version") {
+		t.Fatal("a caller denied admin entitlement must still be able to mint read")
+	}
+	if capabilities.AllowsTool("deploy") {
+		t.Fatalf("a read mint must never carry admin, got %+v", capabilities)
 	}
 }
 

@@ -151,7 +151,7 @@ func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options H
 	var users routes.WhoamiUserRepository
 	if txManager != nil {
 		users = repository.NewUserRepository(txManager)
-		registerDatabaseRoutes(register, options, txManager)
+		registerDatabaseRoutes(register, options, txManager, authorizer)
 	}
 	// Whoami registers last, and reads the catalog per request, so its own route
 	// and every route above it are in the capability answer.
@@ -297,8 +297,12 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 }
 
 // registerDatabaseRoutes registers every route backed by persistence, which is
-// all of them except the health check and the DNS-01 broker.
-func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager) {
+// all of them except the health check and the DNS-01 broker. authorizer is
+// threaded through only for the routes that need a per-caller entitlement
+// check beyond the route-level TenantUser/TenantAdmin gate already enforced
+// by the outer middleware -- today just the MCP token mint route's erun:admin
+// check (erun#1891).
+func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) {
 	repos := newDatabaseRepositories(txManager)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
@@ -334,7 +338,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
 	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
 	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
-	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
+	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner, authorizer)
 	routes.RegisterDNS01TokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
 	var contextProvisioner routes.ContextProvisioner
 	if options.Cipher != nil {
