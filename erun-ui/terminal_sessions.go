@@ -890,7 +890,8 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 	// and answers nothing, so gating recovery on a dial left the env
 	// permanently unreachable behind a listener that looked fine.
 	if a.deps.ensureMCP != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		a.emitAppStatus(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), false)
+		a.emitEnvNotification("warning", result.Tenant, result.EnvConfig.Name, notificationSourceMCPUnreachable,
+			eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), "")
 		if err := a.deps.ensureMCP(ctx, result); err != nil {
 			if !a.deps.canReachMCPEndpoint(mcpPort) {
 				return err

@@ -43,21 +43,20 @@ test.describe('create → deploy → open gate (#644)', () => {
     seedEnvironment(tenant, environment);
     const erunTab = app.page.getByRole('tab', { name: 'ERun', exact: true });
     try {
+      // The success confirmation and a later deploy failure now render as
+      // independent icons (one per class) rather than sharing one pill slot,
+      // so there is no "replaces within milliseconds" race to work around by
+      // recording a stream — freezing the clock is enough to catch the
+      // transient success icon before its own auto-dismiss.
+      await app.page.clock.install();
       const deployStarted = app.page.waitForResponse(
         (response) =>
           response.url().includes('/__erun_invoke') &&
           (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
-      // The composed deploy fails fast against the inert stubs and its banner
-      // replaces the success one, so record the stream instead of sampling it.
-      await app.titlebar.recordBanners();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      await expect
-        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
-          timeout: 10_000,
-        })
-        .toBe(true);
+      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible({ timeout: 10_000 });
       await deployStarted;
       await expect(erunTab).toHaveCount(0);
 
@@ -81,18 +80,14 @@ test.describe('create → deploy → open gate (#644)', () => {
       // No pending entry yet: this deploy signal must be a no-op.
       await emitWailsEvent(app.page, 'environment-deployed', { tenant, environment });
 
+      await app.page.clock.install();
       const deployStarted = app.page.waitForResponse(
         (response) =>
           response.url().includes('/__erun_invoke') &&
           (response.request().postData() ?? '').includes('StartInitialDeploySession'),
       );
-      await app.titlebar.recordBanners();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
-      await expect
-        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
-          timeout: 10_000,
-        })
-        .toBe(true);
+      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible({ timeout: 10_000 });
       await deployStarted;
       await expect(erunTab).toHaveCount(0);
     } finally {

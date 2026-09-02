@@ -228,7 +228,6 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/components/app/TenantDashboardPanels.Reviews.tsx': 3,
   'erun-ui/frontend/src/components/app/TerminalTabStrip.tsx': 1,
   'erun-ui/frontend/src/components/app/Titlebar.Controls.tsx': 2,
-  'erun-ui/frontend/src/components/app/Titlebar.Status.tsx': 3,
   'erun-ui/frontend/src/components/app/UsageMeter.helpers.test.ts': 1,
   'erun-ui/frontend/src/uiExposureTypes.ts': 1,
 };

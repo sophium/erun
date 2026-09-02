@@ -4,40 +4,47 @@ import type { Page } from '@playwright/test';
 // A failed deploy must be visible in the top toolbar, not only as a red terminal
 // line or drawer entry — pre-rollout failures (e.g. spec resolution) weren't
 // surfaced at all. This spec locks the frontend contract: the deploy-failed error
-// renders in the toolbar; the deploy lifecycle's env-wide clear (a new deploy
-// starting, or the runtime becoming reachable) retires it, while a clear for a
-// different env leaves it alone. The Go trace→surface wiring is covered by
+// shows an unread error icon; the deploy lifecycle's env-wide clear (a new deploy
+// starting, or the runtime becoming reachable) marks it read (dismissal never
+// deletes a message, only its unread state), while a clear for a
+// different env leaves it unread. The Go trace→surface wiring is covered by
 // activity_queue_app_test.go::TestDeployFailedTraceSurfacesToToolbar.
 test.describe('failed deploys surface in the toolbar (#713)', () => {
   const message = 'Deploy of frs/prod failed: values file not found for environment "prod".';
-  const banner = (page: Page) => page.getByText(/Deploy of frs\/prod failed/);
 
-  test('the deploy-failed error shows and is retired by the env-wide lifecycle clear', async ({
+  test('the deploy-failed error is unread until the env-wide lifecycle clear marks it read', async ({
     app,
   }) => {
     const { page } = app;
+    const icon = app.titlebar.messageCenterIcon('error');
 
     await emitDeployFailed(page, message);
-    await expect(banner(page)).toBeVisible();
+    await expect(icon).toHaveAccessibleName('Error: 1 unread');
 
-    // A lifecycle clear for a different env must NOT dismiss this error. Sample
-    // over a window so a buggy "clear everything" is caught once its SSE lands.
+    // A lifecycle clear for a different env must NOT mark this one read.
+    // Sample over a window so a buggy "clear everything" is caught once its
+    // SSE lands.
     await emitClear(page, { tenant: 'other', environment: 'prod', source: '' });
-    expect(await bannerGoneWithin(page, 700)).toBe(false);
+    expect(await stillUnreadWithin(page, 'Error: 1 unread', 700)).toBe(true);
 
-    // The env-wide clear for frs/prod (empty source = any env-scoped warning) retires it.
+    // The env-wide clear for frs/prod (empty source = any env-scoped warning) marks it read.
     await emitClear(page, { tenant: 'frs', environment: 'prod', source: '' });
-    await expect(banner(page)).toBeHidden();
+    await expect(icon).toHaveCount(0);
   });
 
-  test('the deploy-failed error can be copied to the clipboard', async ({ app }) => {
+  test('the deploy-failed error can be copied to the clipboard from the message centre', async ({
+    app,
+  }) => {
     const { page } = app;
     await emitDeployFailed(page, message);
-    await expect(banner(page)).toBeVisible();
+    await app.titlebar.openMessageCenter('error');
+    const row = app.titlebar.messageCenterRow('Deploy of frs/prod failed');
+    await expect(row).toBeVisible();
 
-    // Error notifications carry long paths the operator needs to copy into a bug
-    // report, so they get a copy button like terminal-status errors do.
-    const copy = page.getByRole('button', { name: 'Copy', exact: true });
+    // Error notifications carry long paths the operator needs to copy into a
+    // bug report, so every row gets a copy button like terminal-status
+    // errors do.
+    const copy = row.getByRole('button', { name: 'Copy', exact: true });
     await expect(copy).toBeVisible();
 
     // The headless shim routes the native clipboard write to an observable HTTP
@@ -52,7 +59,7 @@ test.describe('failed deploys surface in the toolbar (#713)', () => {
     const req = await clipboardWrite;
     expect(req.postData() ?? '').toContain('Deploy of frs/prod failed');
 
-    await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
   });
 });
 
@@ -81,19 +88,28 @@ async function emitClear(
   }, target);
 }
 
-// The deterministic "assert it stayed" primitive: returns true only if the error
-// disappeared within the window (mirrors terminal-scroll-on-resize's
-// viewportEverAtBottom).
-async function bannerGoneWithin(page: Page, ms: number): Promise<boolean> {
-  return await page.evaluate(async (duration) => {
-    const present = (): boolean => document.body.innerText.includes('Deploy of frs/prod failed');
-    const deadline = Date.now() + duration;
-    while (Date.now() < deadline) {
-      if (!present()) {
-        return true;
+// The deterministic "assert it stayed unread" primitive: returns true only if
+// the error icon's accessible name still reports the unread count throughout
+// the window (mirrors terminal-scroll-on-resize's viewportEverAtBottom). The
+// polling loop runs inside page.evaluate (its own setTimeout), not
+// page.waitForTimeout, so this stays a bounded in-browser observation rather
+// than a spec-side sleep.
+async function stillUnreadWithin(page: Page, expectedLabel: string, ms: number): Promise<boolean> {
+  return await page.evaluate(
+    async ({ label, duration }) => {
+      const present = (): boolean =>
+        Array.from(document.querySelectorAll('button[aria-label]')).some(
+          (el) => el.getAttribute('aria-label') === label,
+        );
+      const deadline = Date.now() + duration;
+      while (Date.now() < deadline) {
+        if (!present()) {
+          return false;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return false;
-  }, ms);
+      return true;
+    },
+    { label: expectedLabel, duration: ms },
+  );
 }

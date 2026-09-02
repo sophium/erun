@@ -16,6 +16,8 @@ import {
 } from './slices/terminalStatusSlice';
 import type { AppNotification, TerminalStatusAction } from './state';
 import type { AppThunk } from './store';
+import { TRANSIENT_DISMISS_MS } from './transientDismissDuration';
+import { scheduleTransientDismiss } from './transientDismissTimer';
 
 // notificationIdCounter mints a unique id per queued notification within this
 // session so a specific entry's auto-dismiss timer or explicit dismiss click
@@ -131,6 +133,8 @@ export const showNotification =
         id,
         kind,
         message: trimmed,
+        timestamp: Date.now(),
+        dismissed: false,
         tenant: meta?.tenant,
         environment: meta?.environment,
         source: meta?.source,
@@ -142,24 +146,19 @@ export const showNotification =
       // Bound to this entry's own id, not a shared timer: a second toast
       // queued before this one auto-dismisses must not have its timer
       // clobbered (and must not, in turn, dismiss this one early).
-      window.setTimeout(() => {
+      scheduleTransientDismiss(TRANSIENT_DISMISS_MS, () => {
         dispatch(dismissNotificationAction(id));
-      }, 3200);
+      });
     }
   };
 
-// dismissNotification dismisses a specific queued entry by id, or — from the
-// titlebar's dismiss button, which only ever shows the front of the queue —
-// the oldest entry when no id is given.
+// dismissNotification marks one history entry read by id. It never removes
+// the entry -- see AppNotification's own doc comment -- so the message
+// centre dialog keeps showing it for the rest of the session.
 export const dismissNotification =
-  (id?: string): AppThunk =>
-  (dispatch, getState) => {
-    const notifications = getState().notification.notifications;
-    const target = id ?? notifications[0]?.id;
-    if (!target) {
-      return;
-    }
-    dispatch(dismissNotificationAction(target));
+  (id: string): AppThunk =>
+  (dispatch) => {
+    dispatch(dismissNotificationAction(id));
   };
 
 export const waitLongerForTerminalStatus =

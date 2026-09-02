@@ -203,7 +203,8 @@ func (a *App) surfaceCredentialRefreshFailure(selection uiSelection, err error, 
 	if notified != nil {
 		*notified = true
 	}
-	a.emitAppStatus(fmt.Sprintf("Host credential refresh failed for %s/%s: %v", selection.Tenant, selection.Environment, err), false)
+	a.emitEnvNotification("error", selection.Tenant, selection.Environment, notificationSourceCredentialRefreshFailed,
+		fmt.Sprintf("Host credential refresh failed for %s/%s: %v", selection.Tenant, selection.Environment, err), "")
 }
 
 func nextCredentialRefreshDelay(expiration time.Time) time.Duration {

@@ -1,4 +1,5 @@
 export type { AIActivityPayload } from './aiActivityPayload';
+export type { AppNotification, AppNotificationKind } from './appNotification';
 export type { AppNotificationAction } from './appNotificationAction';
 export type { AppNotificationClearPayload, AppNotificationPayload } from './appNotificationPayload';
 export type { AppStatusPayload } from './appStatusPayload';

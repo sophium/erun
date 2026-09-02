@@ -38,7 +38,8 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	}
 	localPath := eruncommon.WorkspaceSyncLocalPath(result, a.deps.findProjectRoot)
 	if localPath == "" {
-		a.emitAppStatus(fmt.Sprintf("Workspace sync for %s/%s has no local path.", selection.Tenant, selection.Environment), false)
+		a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceWorkspaceSyncNoPath,
+			fmt.Sprintf("Workspace sync for %s/%s has no local path.", selection.Tenant, selection.Environment), "")
 		return
 	}
 	key := selectionKey(selection)
@@ -59,7 +60,8 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	}
 	a.mu.Unlock()
 
-	a.emitAppStatus(fmt.Sprintf("Starting workspace sync for %s/%s...", selection.Tenant, selection.Environment), false)
+	a.emitEnvNotification("info", selection.Tenant, selection.Environment, "",
+		fmt.Sprintf("Starting workspace sync for %s/%s...", selection.Tenant, selection.Environment), "")
 	go a.runWorkspaceSyncLoop(ctx, key, selection, result, localPath)
 }
 
@@ -173,7 +175,7 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 		}
 		synced, err := a.deps.syncWorkspace(ctx, params)
 		if err != nil {
-			a.setWorkspaceSyncError(key, err)
+			a.setWorkspaceSyncError(key, result.Tenant, result.EnvConfig.Name, err)
 		} else {
 			message := fmt.Sprintf("Synced %d files, deleted %d", synced.FilesCopied, synced.FilesDeleted)
 			if synced.ArtifactsCopied > 0 {
@@ -205,7 +207,7 @@ const (
 func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result eruncommon.OpenResult, params eruncommon.WorkspaceSyncParams) workspaceSyncPassOutcome {
 	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {
-			a.setWorkspaceSyncError(key, err)
+			a.setWorkspaceSyncError(key, result.Tenant, result.EnvConfig.Name, err)
 			if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {
 				return workspaceSyncPassStop
 			}
@@ -235,7 +237,7 @@ func sleepWorkspaceSyncInterval(ctx context.Context, interval time.Duration) boo
 	}
 }
 
-func (a *App) setWorkspaceSyncError(key string, err error) {
+func (a *App) setWorkspaceSyncError(key, tenant, environment string, err error) {
 	message := strings.TrimSpace(err.Error())
 	if message == "" {
 		message = "unknown error"
@@ -249,7 +251,8 @@ func (a *App) setWorkspaceSyncError(key string, err error) {
 	}
 	a.mu.Unlock()
 	if shouldEmit {
-		a.emitAppStatus("Workspace sync failed: "+message, false)
+		a.emitEnvNotification("error", tenant, environment, notificationSourceWorkspaceSyncFailed,
+			"Workspace sync failed: "+message, "")
 	}
 }
 

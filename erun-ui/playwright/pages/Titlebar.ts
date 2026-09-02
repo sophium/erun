@@ -215,4 +215,48 @@ export class Titlebar {
   cloudNodePowerButton(label: string | RegExp): Locator {
     return this.page.getByRole('button', { name: label });
   }
+
+  // --- Message centre ---
+  // Titlebar.MessageCenter.tsx replaces the old single notification pill with
+  // one icon per class carrying an unread count; the review dialog it opens
+  // (Titlebar.MessageCenter.Dialog.tsx) is where every notification's full
+  // text, identity, and actions now live. 'debug' has no titlebar icon by
+  // design (only reachable from inside the dialog's toggle), so it has no
+  // icon locator here.
+  messageCenterIcon(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
+    const label = kind.charAt(0).toUpperCase() + kind.slice(1);
+    return this.page.getByRole('button', { name: new RegExp(`^${label}: \\d+ unread$`) });
+  }
+
+  async openMessageCenter(kind: 'error' | 'warning' | 'info' | 'success'): Promise<void> {
+    await this.messageCenterIcon(kind).click();
+  }
+
+  // Renders only once every class icon has nothing unread but the session
+  // still has history -- see Titlebar.MessageCenter.tsx's own doc comment.
+  messageCenterHistoryButton(): Locator {
+    return this.page.getByRole('button', { name: 'Message history' });
+  }
+
+  messageCenterDialog(): Locator {
+    return this.page.getByRole('dialog', { name: 'Messages' });
+  }
+
+  messageCenterTab(name: string): Locator {
+    return this.messageCenterDialog().getByRole('tab', { name, exact: true });
+  }
+
+  messageCenterShowDebugToggle(): Locator {
+    return this.messageCenterDialog().getByRole('checkbox', { name: 'Show debug messages' });
+  }
+
+  // Rows are the dialog's own <li> entries -- role="listitem" is implicit, no
+  // test id needed. Scope any row-local action button off this.
+  messageCenterRow(messageText: string | RegExp): Locator {
+    return this.messageCenterDialog().getByRole('listitem').filter({ hasText: messageText });
+  }
+
+  async closeMessageCenter(): Promise<void> {
+    await this.page.keyboard.press('Escape');
+  }
 }

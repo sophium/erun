@@ -26,8 +26,10 @@ import type {
 } from '@/uiDiagnosticsTypes';
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
-import type { AppNotificationAction } from './model/appNotificationAction';
+import type { AppNotification, AppNotificationKind } from './model/appNotification';
 import type { GlobalConfigCloudProviderBusyAction } from './model/globalConfigCloudProviderBusyAction';
+
+export type { AppNotification, AppNotificationKind };
 import type { ReachabilityKind } from './reconnectCopy';
 import type { TenantDashboardState } from './reviewDetailState';
 
@@ -268,27 +270,6 @@ export interface GlobalConfigDialogState {
     | GlobalConfigCloudProviderBusyAction;
   busyTarget: string;
   error: string;
-}
-
-export interface AppNotification {
-  // Unique per queued entry so a specific one can be dismissed (auto-dismiss
-  // timer, explicit dismiss click) without disturbing sibling entries queued
-  // before or after it.
-  id: string;
-  kind: 'success' | 'warning' | 'error' | 'info';
-  message: string;
-  // Optional tags so a notification can be dismissed later by the state that raised it.
-  tenant?: string;
-  environment?: string;
-  source?: string;
-  // orchestratorId is the orchestrator-scoped analogue of tenant/environment,
-  // set when the notification's action operates on a specific orchestrator
-  // (e.g. restarting it) rather than a specific env.
-  orchestratorId?: string;
-  // Action names a control TitlebarStatus can render beside the message that
-  // performs the message's own remedy directly -- see AppNotificationAction.
-  // Undefined means no action.
-  action?: AppNotificationAction;
 }
 
 export type TerminalStatusKind = 'info' | 'warning' | 'error';

@@ -1,9 +1,19 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { afterEach, beforeEach, mock, test } from 'node:test';
 
-import { showTerminalError, showTerminalFailure } from './notificationThunks';
+import {
+  dismissNotification,
+  showNotification,
+  showTerminalError,
+  showTerminalFailure,
+} from './notificationThunks';
+import {
+  dismissNotification as dismissNotificationAction,
+  showNotification as showNotificationAction,
+} from './slices/notificationSlice';
 import { setTerminalCopyOutput, setTerminalMessage } from './slices/terminalStatusSlice';
 import type { AppThunk } from './store';
+import { TRANSIENT_DISMISS_MS } from './transientDismissDuration';
 
 interface RecordedAction {
   type: string;
@@ -77,4 +87,84 @@ test('showTerminalFailure preserves genuinely captured output', () => {
   const copyAction = actions.find((action) => action.type === setTerminalCopyOutput.type);
   assert.ok(copyAction, 'expected a copy-output action');
   assert.equal(copyAction.payload, 'Deleted team / dev. namespace cleanup failed');
+});
+
+// showNotification schedules its auto-dismiss via scheduleTransientDismiss
+// (window.setTimeout plus window/document focus tracking), so these tests
+// need a window/document shim whose timers are the (mockable) Node globals --
+// same pattern as terminalFocus.test.ts. The window here always reports
+// focused: the focus-pausing behavior itself is transientDismissTimer's own
+// unit test, not this thunk's.
+function installWindow(): void {
+  const windowShim = {
+    setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms) as unknown as number,
+    clearTimeout: (id: number) => {
+      clearTimeout(id);
+    },
+    addEventListener: (): void => undefined,
+    removeEventListener: (): void => undefined,
+  };
+  const documentShim = { hasFocus: () => true };
+  (globalThis as unknown as { window: unknown }).window = windowShim;
+  (globalThis as unknown as { document: unknown }).document = documentShim;
+}
+
+beforeEach(() => {
+  installWindow();
+  mock.timers.enable({ apis: ['setTimeout'] });
+});
+
+afterEach(() => {
+  mock.timers.reset();
+});
+
+test('showNotification auto-dismisses a success entry after the shared transient duration', () => {
+  const actions = collectDispatched(showNotification('success', 'Opened VS Code.'));
+  const shown = actions.find((action) => action.type === showNotificationAction.type);
+  assert.ok(shown, 'expected the entry to be shown');
+
+  assert.equal(
+    actions.some((action) => action.type === dismissNotificationAction.type),
+    false,
+    'must not dismiss before the timer fires',
+  );
+
+  mock.timers.tick(TRANSIENT_DISMISS_MS);
+
+  const dismissed = actions.find((action) => action.type === dismissNotificationAction.type);
+  assert.ok(dismissed, 'expected an auto-dismiss after the transient duration');
+  const shownPayload = shown.payload as { id: string };
+  assert.equal(dismissed.payload, shownPayload.id, 'must dismiss the entry it just showed');
+});
+
+test('showNotification never auto-dismisses a warning or an error', () => {
+  for (const kind of ['warning', 'error'] as const) {
+    const actions = collectDispatched(showNotification(kind, 'Deploy of frs/dev failed.'));
+    mock.timers.tick(TRANSIENT_DISMISS_MS * 2);
+    assert.equal(
+      actions.some((action) => action.type === dismissNotificationAction.type),
+      false,
+      `${kind} must persist until acknowledged`,
+    );
+  }
+});
+
+test('showNotification stamps a fresh timestamp and dismissed: false on every entry', () => {
+  const actions = collectDispatched(
+    showNotification('info', 'Starting workspace sync for frs/dev...'),
+  );
+  const shown = actions.find((action) => action.type === showNotificationAction.type);
+  assert.ok(shown);
+  const payload = shown.payload as { timestamp: number; dismissed: boolean };
+  assert.equal(typeof payload.timestamp, 'number');
+  assert.equal(payload.dismissed, false);
+});
+
+// dismissNotification only marks the entry read -- see AppNotification's own
+// doc comment -- so the message centre dialog can still show it afterwards.
+// This locks the thunk's contract at the dispatch layer; notificationSlice's
+// own reducer test locks the actual state transition.
+test('dismissNotification dispatches the slice action for exactly the given id', () => {
+  const actions = collectDispatched(dismissNotification('notification-7'));
+  assert.deepEqual(actions, [{ type: dismissNotificationAction.type, payload: 'notification-7' }]);
 });
