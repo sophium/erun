@@ -86,8 +86,12 @@ func TestPin(t *testing.T) {
 	t.Run("refuses_host_environment", func(t *testing.T) {
 		// A host env has no pod and no runtime version at all, so pin must
 		// refuse it by name instead of resolving a plan with nothing to pin.
+		// The host env has a repopath, so resolvePinTarget runs before the
+		// host check and would otherwise reach the real registry for an
+		// explicit --version.
 		setup := env.New(t)
 		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		seedUnreachableRuntimeRegistry(t, filepath.Join(setup.ConfigHome, "erun"))
 		result := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "pin/refuses_host_environment", normalize.Apply(result.Combined))
 	})
