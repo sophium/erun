@@ -144,8 +144,8 @@ type terraformStep struct {
 // dry-run is a complete, side-effect-free plan of what a real run would do.
 //
 // dispatch is the runner used when the target is a runtime/remote-agent env
-// invoked from off-environment (erun#1910): rather than refusing outright, the
-// run dispatches non-interactively into the env's own runtime pod via kubectl
+// invoked from off-environment: rather than refusing outright, the run
+// dispatches non-interactively into the env's own runtime pod via kubectl
 // exec, the same primitive erun doctor/outputs/sshd already use. nil defaults
 // to RunRemoteCommand.
 func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
@@ -395,8 +395,8 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	// decisions apart. injectedRuntimePodIdentity is the same ERUN_TENANT/
 	// ERUN_ENVIRONMENT marker deploy's in-pod guard uses; anywhere else — the
 	// host, or a different environment's own pod — dispatchTerraform runs the
-	// same command inside the target's real pod instead (erun#1910) rather than
-	// resolving a state path here that looks plausible but was never the real
+	// same command inside the target's real pod instead rather than resolving
+	// a state path here that looks plausible but was never the real
 	// backend.
 	needsDispatch := false
 	if remoteWorktree {
@@ -422,9 +422,9 @@ func requiresTerraformConfirmation(op TerraformOperation) bool {
 }
 
 // dispatchTerraform runs `erun terraform <op>` non-interactively inside the
-// target environment's own runtime pod instead of refusing (erun#1910: the
-// refusal named `erun open` as the remedy, but `erun open` itself needs a TTY,
-// so no script or host orchestrator could ever reach it). It reuses the exact
+// target environment's own runtime pod instead of refusing (the refusal
+// named `erun open` as the remedy, but `erun open` itself needs a TTY, so no
+// script or host orchestrator could ever reach it). It reuses the exact
 // confirm gate the local execution path uses below, so a host-invoked apply/
 // destroy is exactly as far from an unattended mutation as one run locally:
 // plan/init dispatch automatically (read-only), while apply/destroy still

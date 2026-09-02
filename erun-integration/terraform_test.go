@@ -53,15 +53,15 @@ func TestTerraform(t *testing.T) {
 	})
 
 	t.Run("runtime_environment_dispatches_from_host", func(t *testing.T) {
-		// Regression (erun#1740, revised by erun#1910): a runtime env's terraform
-		// state lives on its own runtime pod's home PVC, so invoked from the host
-		// (no injected ERUN_TENANT/ERUN_ENVIRONMENT pod identity) erun must never
-		// resolve this host's own home directory and silently treat real, applied
-		// state as empty. #1740 refused outright; #1910 replaced the refusal with a
-		// non-interactive dispatch into the env's own pod (via kubectl exec) since
-		// the refusal's only named remedy, `erun open`, cannot be driven from a
-		// script or host orchestrator at all. init is read-only, so it dispatches
-		// with no confirmation gate.
+		// Regression: a runtime env's terraform state lives on its own runtime
+		// pod's home PVC, so invoked from the host (no injected ERUN_TENANT/
+		// ERUN_ENVIRONMENT pod identity) erun must never resolve this host's own
+		// home directory and silently treat real, applied state as empty. This
+		// used to refuse outright; it now dispatches non-interactively into the
+		// env's own pod (via kubectl exec) instead, since the refusal's only
+		// named remedy, `erun open`, cannot be driven from a script or host
+		// orchestrator at all. init is read-only, so it dispatches with no
+		// confirmation gate.
 		setup := env.New(t)
 		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -95,11 +95,11 @@ func TestTerraform(t *testing.T) {
 		// Being inside *some* runtime pod is not enough to resolve state locally —
 		// the injected identity must match the targeted tenant/environment exactly,
 		// or an operator shelled into team/dev could have applied against team/
-		// prod's never-resolved host-side state (erun#1740). Since erun#1910, the
-		// mismatch no longer refuses either: it dispatches into prod's own pod via
-		// kubectl exec, which resolves correctly regardless of which pod the
-		// command was initiated from, because the dispatched command's identity is
-		// established fresh once it actually lands in prod's pod.
+		// prod's never-resolved host-side state. The mismatch no longer refuses
+		// either: it dispatches into prod's own pod via kubectl exec, which
+		// resolves correctly regardless of which pod the command was initiated
+		// from, because the dispatched command's identity is established fresh
+		// once it actually lands in prod's pod.
 		setup := env.New(t)
 		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -129,8 +129,8 @@ func TestTerraform(t *testing.T) {
 
 	t.Run("apply_dispatch_from_host_without_confirmation_refuses", func(t *testing.T) {
 		// apply/destroy mutate real infra, so a host-invoked dispatch must not be
-		// an implicit unattended apply (erun#1910's explicit-opt-in constraint):
-		// with no --confirm-environment and no TTY to prompt on, the same confirm
+		// an implicit unattended apply — dispatch is explicit-opt-in only: with
+		// no --confirm-environment and no TTY to prompt on, the same confirm
 		// gate the local path already uses reads empty stdin and refuses before
 		// anything is dispatched into the pod.
 		setup := env.New(t)
@@ -181,8 +181,8 @@ func TestTerraform(t *testing.T) {
 	t.Run("plan_dispatch_real_run_surfaces_remote_failure", func(t *testing.T) {
 		// A dispatched command that fails in the pod (e.g. a real terraform error)
 		// must surface as a non-zero exit and the remote stderr, not a silent
-		// success — the orchestrator use case erun#1910 exists for depends on being
-		// able to trust the exit code.
+		// success — the orchestrator use case this dispatch path exists for
+		// depends on being able to trust the exit code.
 		setup := env.New(t)
 		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -204,8 +204,8 @@ func TestTerraform(t *testing.T) {
 		// The default fixture is local-agent, whose worktree is hostPath-mounted
 		// from this same machine — its terraform state genuinely is this host's
 		// own home directory, so it must keep resolving directly, with no injected
-		// pod identity required. Regression guard for erun#1740: the RemoteWorktree
-		// gate must not sweep local-agent envs into the refusal above.
+		// pod identity required. Regression guard: the RemoteWorktree gate must
+		// not sweep local-agent envs into the dispatch path above.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
