@@ -15,10 +15,10 @@ import { type AISessionStatus, useListAISessionsQuery } from '../app/api/aiSessi
 import { useListEnvironmentsQuery } from '../app/api/environmentsApi';
 
 // "AI sessions" panel: a minimal read-only view of the busy/idle/awaiting-input
-// status each environment's own AI-tool hooks have last reported (issue
-// #1105's read route). One environment expanded at a time, fetched on
-// demand rather than for every row up front, since most environments in a
-// tenant's list will never have reported a session.
+// status each environment's own AI-tool hooks have last reported. One
+// environment expanded at a time, fetched on demand rather than for every
+// row up front, since most environments in a tenant's list will never have
+// reported a session.
 
 const STATE_TONE: Record<string, StatusBadgeTone> = {
   busy: 'in-progress',
