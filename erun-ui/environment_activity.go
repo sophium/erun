@@ -124,7 +124,7 @@ func (a *App) TriggerEnvironmentActivitySweep() {
 // lifetime, not one spec file, so without this a genuine observation sampled
 // during one spec (even a never-deployed env's routine "not reachable"
 // reading) renders on the next spec's hover card as if it had already been
-// checked — the mechanism behind #1901's zone-2 race. There is no on-disk
+// checked — the mechanism behind the hover-card layout spec's zone-2 race. There is no on-disk
 // persistence to clear here, unlike ResetEnvironmentUsageObservations.
 func (a *App) ResetEnvironmentActivityObservations() {
 	a.mu.Lock()

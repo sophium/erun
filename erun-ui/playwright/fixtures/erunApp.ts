@@ -25,7 +25,7 @@ export interface SeededEnvironment {
 // reachable" reading for a never-deployed seeded env, complete with its own
 // real observedAt age — renders on SEED_ENV_ALPHA/SEED_ENV_BETA's hover card
 // as if this spec had already triggered it. This was the mechanism behind
-// #1901's zone-2 race. Reset unconditionally (outside e2e-k3d, see below)
+// the hover-card layout spec's zone-2 race. Reset unconditionally (outside e2e-k3d, see below)
 // rather than auditing every spec that touches the shared baseline rows: it
 // is a no-op for a pristine worker and cheap otherwise, and every spec
 // depends on the `app` fixture below.

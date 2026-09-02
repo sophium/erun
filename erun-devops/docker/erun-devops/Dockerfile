@@ -47,7 +47,7 @@ WORKDIR /src
 # Verified empirically against this exact base (golang:1.26.0, Debian
 # trixie): the package set installs cleanly with no conflicts, and the
 # resulting build succeeds and runs `--headless` with zero display (see root
-# AGENTS.md's Integration Test Gate section, "#1937").
+# AGENTS.md's Integration Test Gate section).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -98,7 +98,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # only inside a deployed runtime pod. Needs `npx` from the Node/Yarn install
 # just above. Verified empirically: Playwright's own install-deps recognizes
 # and succeeds on this same Debian trixie base with no unsupported-platform
-# warning (see root AGENTS.md's Integration Test Gate section, "#1937").
+# warning (see root AGENTS.md's Integration Test Gate section).
 ARG PLAYWRIGHT_VERSION
 RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
     rm -rf /var/lib/apt/lists/*

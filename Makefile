@@ -215,7 +215,7 @@ test-frontend:
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
 # erun-ui/playwright suite against it, inside the same erun-devops test stage
-# that already runs the rest of `make check` (#1937: the toolchain -- Wails/
+# that already runs the rest of `make check` (the toolchain -- Wails/
 # webkit CGO deps plus Playwright's Chromium runtime libraries -- is now
 # installed in that stage's Dockerfile, verified empirically to install
 # cleanly and run headless with zero display there, same as the final image

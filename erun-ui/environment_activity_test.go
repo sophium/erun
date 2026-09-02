@@ -162,7 +162,7 @@ func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
 }
 
 // TestResetEnvironmentActivityObservationsClearsTheCache guards the headless
-// Playwright harness's fix for #1901's shared-baseline-row race: a cached
+// Playwright harness's fix for the shared-baseline-row race: a cached
 // observation left by one spec must not survive into the next one in the
 // same worker.
 func TestResetEnvironmentActivityObservationsClearsTheCache(t *testing.T) {
