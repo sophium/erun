@@ -149,7 +149,7 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `POST` | `/v1/environments/{environment_id}/deploy` | Deploy an already-registered runtime env at a published version — the retry and version-change path (`202`). Body below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/stop` | Scale a runtime env's Deployment to zero — the server-side equivalent of `erun stop`. Does not change the env's provisioning `status`. Body-less. | Tenant member (write) |
 | `DELETE` | `/v1/environments/{environment_id}` | Start tearing down a runtime env's namespace (skipped if it never deployed) and removing its row — the server-side equivalent of `erun delete`. Asynchronous: `202 Accepted` with the row at `status: deleting`; poll to see it converge. Not recoverable. | Tenant member (write) |
-| `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience}`) for the caller to present to the env's `erun-mcp` edge. Body-less. Response below. | Tenant member (write) |
+| `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience, scope}`) for the caller to present to the env's `erun-mcp` edge. Optional body `{scope}` requests a capability tier; minting `erun:admin` additionally requires the entitlement below. Response below. | Tenant member (write); `erun:admin` additionally requires the delete-environment entitlement |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/ai-sessions` | The environment's own AI-tool hooks report their turn-boundary status (busy/idle/awaiting-input/exited) for one session. Body below. | Tenant member (write) |
 | `GET` | `/v1/environments/{environment_id}/ai-sessions` | Read back the resolved status of every session last reported for this environment. Response below. | Tenant member (read) |
@@ -511,6 +511,8 @@ An absent or empty `scope` mints `erun:read` — the least capability a token ca
 }
 ```
 
+**Requesting `erun:admin` requires an entitlement beyond reaching this route.** Every tenant member can reach this endpoint and mint `erun:read`/`erun:attach` for any environment their tenant owns — the same reach the endpoint's own permission class already grants for operating an environment that already exists. `erun:admin` is not a peer of that class: it also lets the holder delete, terraform, and initialize the environment through its MCP edge, actions no ordinary tenant member may take through the API. Requesting it therefore additionally requires the same permission that would let the caller call [`DELETE /v1/environments/{environment_id}`](#delete-endpoint) — in practice, `TenantAdmin` or a platform operator. A caller without it is refused `403` and never receives a token for that request; the same caller can still mint `erun:read`/`erun:attach` in a separate request.
+
 **Backend signing key.** The signer is enabled by pointing `ERUN_API_MCP_SIGNING_KEY_PATH` at the backend's Ed25519 private key (PKCS#8 PEM) — on a hosted deploy, the `erun-backend-api` chart's `api.mcpSigning.secretName` value mounts that key Secret and sets the path (opt-in; unset leaves the endpoint at `501`). The matching public key is what a deploy injects into the env (`erun deploy --mcp-auth-public-key`), so the edge trusts backend-signed tokens.
 
 **Usable once the env is deployed.** A minted token only authenticates against a **deployed** env whose edge already carries the backend's public key. A dedicated `409`-until-deployed guard is `(Planned.)` — the backend tracks a per-env provisioning `status` (see [`POST /v1/environments`](#post-v1environments)) but the mint endpoint does not yet gate on it reaching `running`; until it does, the endpoint mints whenever the signer is configured and the environment exists.
@@ -519,8 +521,9 @@ An absent or empty `scope` mints `erun:read` — the least capability a token ca
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `scope` names something outside `erun:read`/`erun:admin`/`erun:attach`, or the request body is malformed JSON. | Request one of the three known tiers, or send no body for the `erun:read` default. |
-| `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
+| `400` | The body is present but not valid JSON, or `scope` names something other than `erun:read`/`erun:attach`/`erun:admin`. | Send a body with a recognized `scope`, or no body at all. |
+| `401` / `403` | Standard auth failures (see [Errors](#errors)); any tenant member reaches the route itself. | Send a valid token for a member of the environment's tenant. |
+| `403` | `scope: erun:admin` was requested but the caller does not hold the delete-environment entitlement (see above). | Request `erun:read`/`erun:attach` instead, or have a `TenantAdmin`/operator mint the admin-scoped token. |
 | `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend MCP signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend, or use the desktop `file://` path. |
 | `500` | The tenant read or the signing failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
