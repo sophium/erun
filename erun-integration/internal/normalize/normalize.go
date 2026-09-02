@@ -98,9 +98,6 @@ var defaultRules = []Replacement{
 	// through the trailing newline) rather than just the duration, since a
 	// present-here-absent-there row would still fail the comparison otherwise.
 	{regexp.MustCompile(`(?m)^[ ]*\((?:unaccounted|ran concurrently, overlap)\) \[<ELAPSED>\]\n`), ""},
-	// Anchored to `--token ` so a base64url-shaped run elsewhere in the output
-	// is not swept up.
-	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},
 	// The hash covers per-test temp-dir paths, so it differs across runs
 	// despite looking like a stable digest.
 	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},

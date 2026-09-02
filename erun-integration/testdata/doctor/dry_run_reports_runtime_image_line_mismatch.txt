@@ -11,6 +11,7 @@ kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
 
 == Runtime image release line ==
 runtimeimage names the erun release line, but this env's last confirmed deploy actually ran the team line (recorded as runtimerunningimage).

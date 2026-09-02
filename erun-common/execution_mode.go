@@ -36,6 +36,7 @@ var knownExecutionOperations = []string{
 	"kubectl-deployment-wait",
 	"kubectl-secret-apply",
 	"kubectl-pod-watch",
+	"kubectl-context-configure",
 }
 
 // ExecutionModeFor resolves which path a promoted operation should take.
