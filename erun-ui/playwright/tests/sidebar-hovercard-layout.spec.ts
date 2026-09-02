@@ -5,6 +5,7 @@ import {
   SEED_ENV_ALPHA,
   SEED_TENANT,
   removeEnvironment,
+  seedEnvironment,
   seedEnvironmentWithRuntimeVersions,
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
@@ -16,6 +17,23 @@ import {
 // row changes only its own zone's height. This spec locks the layout
 // contract computationally, mirroring sidebar-hovercard-type-scale.spec.ts's
 // approach for the type contract.
+
+// Radix's PopoverContent (erun-kit/components/ui/popover.tsx) runs a ~150ms
+// zoom-in-95 + slide-in entrance transform on every open. `toBeVisible()`
+// resolves the instant the element is visible, not once that transform
+// settles, so a `getBoundingClientRect()` read taken right after can land
+// mid-transition and report a smaller-than-rest size -- indistinguishable
+// from a real difference between what two cards render unless the animation
+// is accounted for. Disabling the transform outright (rather than waiting
+// past it) makes the settled geometry available from the very first frame;
+// the same test-only-workaround shape `Sidebar.ts` already uses to freeze
+// `animate-spin` before a hover-stability check.
+async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content:
+      '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
+  });
+}
 
 async function emitStaleEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
   await page.evaluate(
@@ -52,7 +70,9 @@ async function emitStaleEnvUsage(page: Page, tenant: string, environment: string
 test.describe('sidebar env hover card layout (#1901)', () => {
   test('the label column is the same width whether or not the conditional Line mismatch row is present', async ({
     app,
+    page,
   }) => {
+    await disablePopoverEntranceAnimation(page);
     const plainCard = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(plainCard).toBeVisible();
@@ -116,15 +136,19 @@ test.describe('sidebar env hover card layout (#1901)', () => {
 
   test('adding the conditional Line mismatch row changes only zone 1, not zone 2', async ({
     app,
+    page,
   }) => {
-    const plainCard = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(plainCard).toBeVisible();
-    const plainZone2Height = await plainCard
-      .locator('dl')
-      .nth(1)
-      .evaluate((el) => el.getBoundingClientRect().height);
-
+    await disablePopoverEntranceAnimation(page);
+    // Both sides are freshly-seeded, uniquely-named envs rather than the
+    // shared SEED_ENV_ALPHA baseline row. SEED_ENV_ALPHA's zone 2 (Activity,
+    // Usage, Cloud node) is not reset between specs -- another spec earlier
+    // in the same worker (e.g. sidebar-environment-usage.spec.ts) can leave a
+    // real Usage reading cached on it, stacking an age caption under the
+    // headline that a pristine env's zone 2 never renders. Comparing against
+    // that shared, mutable row made this assertion depend on suite ordering
+    // instead of on the fixed layout it's meant to lock down.
+    const plainEnvironment = uniqueEnvironmentName('line-mismatch-zone-plain');
+    seedEnvironment(SEED_TENANT, plainEnvironment);
     const environment = uniqueEnvironmentName('line-mismatch-zone');
     seedEnvironmentWithRuntimeVersions(SEED_TENANT, environment, {
       runtimeVersion: '1.0.86',
@@ -132,6 +156,15 @@ test.describe('sidebar env hover card layout (#1901)', () => {
       runtimeRunningImage: 'ghcr.io/sophium/frs-devops:1.0.86',
     });
     try {
+      await waitForSeededRow(app, SEED_TENANT, plainEnvironment);
+      const plainCard = app.sidebar.envHoverCard(SEED_TENANT, plainEnvironment);
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, plainEnvironment);
+      await expect(plainCard).toBeVisible();
+      const plainZone2Height = await plainCard
+        .locator('dl')
+        .nth(1)
+        .evaluate((el) => el.getBoundingClientRect().height);
+
       await waitForSeededRow(app, SEED_TENANT, environment);
       const mismatchCard = app.sidebar.envHoverCard(SEED_TENANT, environment);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, environment);
@@ -144,6 +177,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
 
       expect(mismatchZone2Height).toBeCloseTo(plainZone2Height, 0);
     } finally {
+      removeEnvironment(SEED_TENANT, plainEnvironment);
       removeEnvironment(SEED_TENANT, environment);
     }
   });
