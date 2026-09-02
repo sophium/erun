@@ -4,6 +4,13 @@
 # independent defaults drifting apart.
 ARG HELM_VERSION=v4.2.2
 
+# Declared once at the top for the same reason as HELM_VERSION above: the test
+# stage's own Playwright install-deps call (below) and the final image's
+# install-deps call must stay pinned to the same version, so the installed
+# Chromium runtime library set is identical whether the suite runs inside the
+# build or inside a deployed runtime pod.
+ARG PLAYWRIGHT_VERSION=1.60.0
+
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
@@ -32,7 +39,17 @@ WORKDIR /src
 # the bare `golang` base this stage runs on. The final image already installs
 # dtach for the runtime session machinery (see the apt-get layer further
 # down); this stage needs its own copy since it is a separate, unrelated base.
-RUN apt-get update && apt-get install -y --no-install-recommends dtach && \
+#
+# build-essential/pkg-config/libgtk-3-dev/libwebkit2gtk-4.1-dev/libsoup-3.0-dev
+# are the same Wails/webkit CGO deps the final image installs below (see that
+# layer's own comment), needed here so `test-playwright` (root Makefile) can
+# `go build -tags desktop,production,webkit2_41` erun-app in this stage.
+# Verified empirically against this exact base (golang:1.26.0, Debian
+# trixie): the package set installs cleanly with no conflicts, and the
+# resulting build succeeds and runs `--headless` with zero display (see root
+# AGENTS.md's Integration Test Gate section, "#1937").
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
@@ -74,6 +91,17 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
     npm install -g yarn@1.22.22
+
+# Chromium runtime libraries for erun-ui/playwright, mirroring the final
+# image's own install below (same reasoning, same pinned version) so
+# `test-playwright` (root Makefile) can run the suite inside this stage, not
+# only inside a deployed runtime pod. Needs `npx` from the Node/Yarn install
+# just above. Verified empirically: Playwright's own install-deps recognizes
+# and succeeds on this same Debian trixie base with no unsupported-platform
+# warning (see root AGENTS.md's Integration Test Gate section, "#1937").
+ARG PLAYWRIGHT_VERSION
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY Makefile /src/Makefile
 COPY scripts /src/scripts
@@ -245,10 +273,12 @@ ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.222
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION=v1.2.0
-# Keep in sync with the @playwright/test version resolved in
-# erun-ui/playwright/yarn.lock so the installed Chromium system libraries match
-# the browser the suite downloads at run time.
-ARG PLAYWRIGHT_VERSION=1.60.0
+# Default lives in the global ARG at the top of this file, shared with the
+# test stage's own install-deps call. Keep it in sync with the
+# @playwright/test version resolved in erun-ui/playwright/yarn.lock so the
+# installed Chromium system libraries match the browser the suite downloads
+# at run time.
+ARG PLAYWRIGHT_VERSION
 
 USER root
 
