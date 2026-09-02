@@ -84,7 +84,7 @@ func mergeServicesWithExposures(services []ObservedService, ingresses []Observed
 }
 
 func exposuresByBackendService(ingresses []ObservedIngress) map[string]ServiceExposure {
-	tlsHosts := tlsHostSet(ingresses)
+	tlsSecretByHost := tlsSecretsByHost(ingresses)
 	byService := make(map[string]ServiceExposure, len(ingresses))
 	for _, ing := range ingresses {
 		label, ok := strings.CutPrefix(ing.Name, exposeIngressNamePrefix)
@@ -93,7 +93,7 @@ func exposuresByBackendService(ingresses []ObservedIngress) map[string]ServiceEx
 		}
 		host := ing.Hosts[0]
 		scheme := "http"
-		if tlsHosts[host] {
+		if _, hasTLS := tlsSecretByHost[host]; hasTLS {
 			scheme = "https"
 		}
 		for _, backend := range ing.Backends {

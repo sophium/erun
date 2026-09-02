@@ -156,6 +156,83 @@ func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
 	}
 }
 
+// stubKubectlIngressAndCertificates replaces kubectl with a script that
+// answers per resource, needed once a listing composes more than one kubectl
+// read: a single canned body (stubKubectlOutput above) would feed the same
+// JSON to both the Ingress and the Certificate reads, hiding exactly what
+// this test is about.
+func stubKubectlIngressAndCertificates(t *testing.T, ingressJSON, certificateJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *certificates*) printf %s ;;\n  *ingress*) printf %s ;;\n  *) printf '{\"items\":[]}' ;;\nesac\n",
+		shellQuote(certificateJSON), shellQuote(ingressJSON))
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestListEnvironmentExposuresReportsPendingCertificateHonestly is the
+// desktop-side half of the fix: the Ingress carries a tls block (cert-manager
+// writes that before issuance completes), but the Certificate backing it is
+// not yet Ready. The listing must say so -- TLSReady=false with a reason --
+// rather than reporting scheme "https" as if the URL is already safe to open.
+func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	stubKubectlIngressAndCertificates(t,
+		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
+			"rules":[{"host":"web.frs-prod.services.test"}],
+			"tls":[{"hosts":["web.frs-prod.services.test"],"secretName":"frs-prod-wildcard-tls"}]
+		}}]}`,
+		`{"items":[{"metadata":{"name":"wildcard"},"spec":{"secretName":"frs-prod-wildcard-tls"},"status":{"conditions":[
+			{"type":"Ready","status":"False","reason":"Issuing","message":"waiting for order to complete"}
+		]}}]}`,
+	)
+
+	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Services) != 1 {
+		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+	got := result.Services[0]
+	if got.Scheme != "https" || got.TLSReady {
+		t.Fatalf("expected https scheme with TLSReady=false, got %+v", got)
+	}
+	if got.TLSNotReadyReason != "Issuing: waiting for order to complete" {
+		t.Fatalf("TLSNotReadyReason = %q, want the certificate's own condition", got.TLSNotReadyReason)
+	}
+}
+
+// TestListEnvironmentExposuresReportsReadyCertificate is the mirror case: once
+// cert-manager actually reaches Ready, the listing says so and carries no
+// stale reason from an earlier pending state.
+func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	stubKubectlIngressAndCertificates(t,
+		`{"items":[{"metadata":{"name":"expose-web"},"spec":{
+			"rules":[{"host":"web.frs-prod.services.test"}],
+			"tls":[{"hosts":["web.frs-prod.services.test"],"secretName":"frs-prod-wildcard-tls"}]
+		}}]}`,
+		`{"items":[{"metadata":{"name":"wildcard"},"spec":{"secretName":"frs-prod-wildcard-tls"},"status":{"conditions":[
+			{"type":"Ready","status":"True"}
+		]}}]}`,
+	)
+
+	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Services) != 1 {
+		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+	got := result.Services[0]
+	if !got.TLSReady || got.TLSNotReadyReason != "" {
+		t.Fatalf("expected a ready certificate with no reason, got %+v", got)
+	}
+}
+
 func TestExposeEnvironmentServiceRequiresServiceAndTargetIP(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	if _, err := app.ExposeEnvironmentService(uiSelection{Tenant: "team", Environment: "dev"}, uiExposeServiceInput{}); err == nil {

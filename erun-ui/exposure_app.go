@@ -174,10 +174,12 @@ func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedServic
 	result := make([]uiExposedService, 0, len(services))
 	for _, service := range services {
 		result = append(result, uiExposedService{
-			Service:        service.Service,
-			Hostname:       service.Hostname,
-			Scheme:         service.Scheme,
-			BackendService: service.BackendService,
+			Service:           service.Service,
+			Hostname:          service.Hostname,
+			Scheme:            service.Scheme,
+			BackendService:    service.BackendService,
+			TLSReady:          service.TLSReady,
+			TLSNotReadyReason: service.TLSNotReadyReason,
 		})
 	}
 	return result

@@ -808,11 +808,16 @@ const (
 )
 
 // uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
+// TLSReady/TLSNotReadyReason are meaningful only when Scheme is "https": see
+// eruncommon.ExposedService for why Scheme alone cannot say whether the URL
+// is actually safe to open yet.
 type uiExposedService struct {
-	Service        string `json:"service"`
-	Hostname       string `json:"hostname"`
-	Scheme         string `json:"scheme"`
-	BackendService string `json:"backendService,omitempty"`
+	Service           string `json:"service"`
+	Hostname          string `json:"hostname"`
+	Scheme            string `json:"scheme"`
+	BackendService    string `json:"backendService,omitempty"`
+	TLSReady          bool   `json:"tlsReady,omitempty"`
+	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
 }
 
 // uiEnvironmentServiceList is the Ports tab's read model for what the

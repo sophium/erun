@@ -27,6 +27,16 @@ export interface UIExposedService {
   // rather than derived from `service`: the two differ whenever the chart that
   // rendered the Service is the repo's own.
   backendService?: string;
+  // Meaningful only when scheme is 'https'. cert-manager writes the
+  // Ingress's tls block before issuance completes, so scheme alone cannot
+  // say whether opening this URL right now hits a valid certificate or a
+  // warning -- tlsReady is true only once the backing Certificate has
+  // actually reached cert-manager's own Ready condition.
+  tlsReady?: boolean;
+  // Names why, when tlsReady is false: the Certificate's own condition, or
+  // the deepest CertificateRequest/Order/Challenge reason once that chain is
+  // walked -- the same reason `erun observe` would show.
+  tlsNotReadyReason?: string;
 }
 
 // UIEnvironmentServiceList is what the environment is actually running — the
