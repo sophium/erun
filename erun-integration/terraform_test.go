@@ -52,21 +52,25 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/refuses_host_environment", normalize.Apply(result.Combined))
 	})
 
-	t.Run("refuses_runtime_environment_from_host", func(t *testing.T) {
-		// Regression (erun#1740): a runtime env's terraform state lives on its own
-		// runtime pod's home PVC. Invoked from the host (no injected
-		// ERUN_TENANT/ERUN_ENVIRONMENT pod identity), erun must refuse rather than
-		// resolve this host's own home directory and silently treat real, applied
-		// state as empty.
+	t.Run("runtime_environment_dispatches_from_host", func(t *testing.T) {
+		// Regression: a runtime env's terraform state lives on its own runtime
+		// pod's home PVC, so invoked from the host (no injected ERUN_TENANT/
+		// ERUN_ENVIRONMENT pod identity) erun must never resolve this host's own
+		// home directory and silently treat real, applied state as empty. This
+		// used to refuse outright; it now dispatches non-interactively into the
+		// env's own pod (via kubectl exec) instead, since the refusal's only
+		// named remedy, `erun open`, cannot be driven from a script or host
+		// orchestrator at all. init is read-only, so it dispatches with no
+		// confirmation gate.
 		setup := env.New(t)
 		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
 		result := erun.Run(t, []string{"terraform", "init", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a runtime env's terraform invoked from the host, got 0:\n%s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "terraform/refuses_runtime_environment_from_host", normalize.Apply(result.Combined))
+		golden.Equal(t, "terraform/runtime_environment_dispatches_from_host", normalize.Apply(result.Combined))
 	})
 
 	t.Run("runtime_environment_allowed_in_pod", func(t *testing.T) {
@@ -87,44 +91,121 @@ func TestTerraform(t *testing.T) {
 		golden.Equal(t, "terraform/runtime_environment_allowed_in_pod", normalize.Apply(result.Combined))
 	})
 
-	t.Run("refuses_runtime_environment_from_a_different_environments_pod", func(t *testing.T) {
-		// Being inside *some* runtime pod is not enough — the injected identity
-		// must match the targeted tenant/environment exactly, or an operator
-		// shelled into team/dev could apply against team/prod's never-resolved
-		// host-side state.
+	t.Run("runtime_environment_dispatches_from_a_different_environments_pod", func(t *testing.T) {
+		// Being inside *some* runtime pod is not enough to resolve state locally —
+		// the injected identity must match the targeted tenant/environment exactly,
+		// or an operator shelled into team/dev could have applied against team/
+		// prod's never-resolved host-side state. The mismatch no longer refuses
+		// either: it dispatches into prod's own pod via kubectl exec, which
+		// resolves correctly regardless of which pod the command was initiated
+		// from, because the dispatched command's identity is established fresh
+		// once it actually lands in prod's pod.
 		setup := env.New(t)
 		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
 		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
 		result := erun.Run(t, []string{"terraform", "init", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit when the injected pod identity names a different environment, got 0:\n%s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "terraform/refuses_runtime_environment_from_a_different_environments_pod", normalize.Apply(result.Combined))
+		golden.Equal(t, "terraform/runtime_environment_dispatches_from_a_different_environments_pod", normalize.Apply(result.Combined))
 	})
 
-	t.Run("refuses_remote_agent_environment_from_host", func(t *testing.T) {
+	t.Run("remote_agent_environment_dispatches_from_host", func(t *testing.T) {
 		// A remote-agent env's worktree — and terraform state — is PVC-backed
-		// inside its own pod too, same as runtime; the host-side refusal must
+		// inside its own pod too, same as runtime; the host-side dispatch must
 		// cover it as well, not just type "runtime" by name.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		fixture.SeedTerraformEnvRoot(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"terraform", "init", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a remote-agent env's terraform invoked from the host, got 0:\n%s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "terraform/refuses_remote_agent_environment_from_host", normalize.Apply(result.Combined))
+		golden.Equal(t, "terraform/remote_agent_environment_dispatches_from_host", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dispatch_from_host_without_confirmation_refuses", func(t *testing.T) {
+		// apply/destroy mutate real infra, so a host-invoked dispatch must not be
+		// an implicit unattended apply — dispatch is explicit-opt-in only: with
+		// no --confirm-environment and no TTY to prompt on, the same confirm
+		// gate the local path already uses reads empty stdin and refuses before
+		// anything is dispatched into the pod.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "prod"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unconfirmed dispatched apply, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dispatch_from_host_without_confirmation_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("apply_dispatch_dry_run_with_confirmation", func(t *testing.T) {
+		// --confirm-environment is the explicit opt-in dispatch needs for a
+		// mutating op: dry-run traces the dispatched command with
+		// --confirm-environment already embedded, so the in-pod run (which has no
+		// stdin to prompt on) never re-prompts for what the host already confirmed.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		result := erun.Run(t, []string{"terraform", "apply", "team", "prod", "--confirm-environment", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/apply_dispatch_dry_run_with_confirmation", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_dispatch_real_run_via_stub", func(t *testing.T) {
+		// The real (non-dry-run) dispatch path: a stubbed kubectl captures the
+		// exact exec invocation and returns fixed output, which erun relays as its
+		// own stdout — the plan a host orchestrator would actually see.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "Plan: 1 to add, 0 to change, 0 to destroy.")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"terraform", "plan", "team", "prod"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "terraform/plan_dispatch_real_run_via_stub", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_dispatch_real_run_surfaces_remote_failure", func(t *testing.T) {
+		// A dispatched command that fails in the pod (e.g. a real terraform error)
+		// must surface as a non-zero exit and the remote stderr, not a silent
+		// success — the orchestrator use case this dispatch path exists for
+		// depends on being able to trust the exit code.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTerraformEnvRoot(t, setup, "team", "prod")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr:   "Error: no valid credential sources found",
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"terraform", "plan", "team", "prod"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the dispatched command fails, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "terraform/plan_dispatch_real_run_surfaces_remote_failure", normalize.Apply(result.Combined))
 	})
 
 	t.Run("local_agent_environment_still_resolves_on_host", func(t *testing.T) {
 		// The default fixture is local-agent, whose worktree is hostPath-mounted
 		// from this same machine — its terraform state genuinely is this host's
 		// own home directory, so it must keep resolving directly, with no injected
-		// pod identity required. Regression guard for erun#1740: the RemoteWorktree
-		// gate must not sweep local-agent envs into the refusal above.
+		// pod identity required. Regression guard: the RemoteWorktree gate must
+		// not sweep local-agent envs into the dispatch path above.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)

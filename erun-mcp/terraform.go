@@ -51,7 +51,7 @@ func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 				Operation:   operation,
 				ProjectRoot: projectRoot,
 				ExtraArgs:   input.ExtraArgs,
-			}, terraformStore, confirm)
+			}, terraformStore, confirm, nil)
 			return err
 		})
 		envelope, err := runJobEnvelope(runtime, "terraform", input.JobEnvelopeInput, input.Preview, execute)

@@ -1,0 +1,4 @@
+Plan: 1 to add, 0 to change, 0 to destroy.
+terraform plan complete (dispatched into team/prod's own runtime pod)
+audit: erun terraform plan team prod
+terraform: team/prod is a runtime environment — dispatching plan non-interactively into its own runtime pod instead of running on this machine
