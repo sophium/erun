@@ -110,7 +110,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-fresh.png',
+        'test-results/environment-usage-visual/env-hover-card-fresh.png',
       );
     });
   });
@@ -140,7 +140,7 @@ test.describe('environment usage on the hover cards', () => {
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-stale.png',
+          'test-results/environment-usage-visual/env-hover-card-stale.png',
         );
       },
     );
@@ -180,7 +180,7 @@ test.describe('environment usage on the hover cards', () => {
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          '/home/erun/.erun/outputs/environment-usage-visual/env-hover-card-no-pod.png',
+          'test-results/environment-usage-visual/env-hover-card-no-pod.png',
         );
       },
     );
@@ -208,7 +208,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        '/home/erun/.erun/outputs/environment-usage-visual/orchestrator-card-usage.png',
+        'test-results/environment-usage-visual/orchestrator-card-usage.png',
       );
     });
   });
