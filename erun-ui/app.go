@@ -108,6 +108,7 @@ type erunUIDeps struct {
 	orchestratorRestoreDir       string
 	orchestratorOpenPath         string
 	orchestratorNudgeHistoryPath string
+	environmentUsageHistoryPath  string
 	relaunchApp                  func() error
 	quitApp                      func()
 	desktopControlMarkerPath     string
@@ -270,6 +271,7 @@ func NewApp(deps erunUIDeps) *App {
 		orchestrators:        make(map[string]*orchestratorSession),
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
 		workingIssueCache:    make(map[string]workingIssueCacheEntry),
+		envUsage:             loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
 	}
 	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
 	app.investigations.live = func(id string) bool {
@@ -559,6 +561,9 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.loadRuntimeUsage = func(ctx context.Context, selection uiSelection) (uiRuntimeUsage, error) {
 			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
 		}
+	}
+	if deps.environmentUsageHistoryPath == "" {
+		deps.environmentUsageHistoryPath = defaultEnvironmentUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity
