@@ -13,6 +13,7 @@ Available Commands:
   merge                Merge a branch into the project working tree's current branch
   push                 Push the project working tree's current branch to a remote
   raw                  Run a raw command from the project root
+  reconcile-bypass     Check every ruleset-bypassed push against a real passed gate run
   report-commit-status Report a GitHub commit status for a merge queue gate result
   write                Write stdin to a file in the project working tree
 

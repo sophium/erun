@@ -31,6 +31,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecReportCommitStatusCmd(),
 		newExecClosePRCmd(),
 		newExecGateRunCmd(store, deps),
+		newExecReconcileBypassCmd(store, deps),
 		jobCmd,
 	)
 }
@@ -610,6 +611,92 @@ func runExecClosePRCommand(ctx common.Context, branch, target, remoteURL, gatedC
 	}
 	ctx.Info(fmt.Sprintf("Closed pull request #%d for %s/%s.", result.Number, result.Owner, result.Repo))
 	return ctx.WriteResult(result)
+}
+
+func newExecReconcileBypassCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+	var (
+		remoteURL    string
+		rulesetID    int64
+		targetBranch string
+		since        string
+		alias        string
+	)
+	cmd := &cobra.Command{
+		Use:   "reconcile-bypass",
+		Short: "Check every ruleset-bypassed push against a real passed gate run",
+		Long: "Cross-reference GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for --ruleset-id on " +
+			"--target-branch against erun's gate runs: every push that bypassed --ruleset-id is reported next to " +
+			"whether a PASSED gate run's merge commit exactly matches what actually landed. This is the " +
+			"reconciliation half of erun#1912's recorded decision -- narrowing who may hold the bypass grant is a " +
+			"separate, ops-side change; this command makes every bypass accountable after the fact regardless of " +
+			"who holds it.\n\n" +
+			"Exits non-zero, after printing the full report, when any bypassed push has no matching passed gate " +
+			"run -- an unreconcilable push is loud, never silent.\n\n" +
+			"--dry-run traces the GitHub and platform lookups without sending them.",
+		Example: "  erun exec reconcile-bypass --remote-url https://github.com/sophium/erun.git \\\n" +
+			"    --ruleset-id 11081432 --target-branch main",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runExecReconcileBypassCommand(commandContext(cmd), store, alias, common.ReconcileBypassParams{
+				RemoteURL:    remoteURL,
+				RulesetID:    rulesetID,
+				TargetBranch: targetBranch,
+				Since:        since,
+			}, deps)
+		},
+	}
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote the ruleset lives on (required)")
+	cmd.Flags().Int64Var(&rulesetID, "ruleset-id", 0, "The ruleset to check bypasses against (required)")
+	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "The ruleset's protected branch (required)")
+	cmd.Flags().StringVar(&since, "since", "", "Narrow the GitHub lookup window: hour, day, week, or month (defaults to GitHub's own window)")
+	cmd.Flags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecReconcileBypassCommand(ctx common.Context, store common.CloudReadStore, alias string, params common.ReconcileBypassParams, deps common.CloudDependencies) error {
+	result, err := common.ReconcileBypass(ctx, store, alias, params, deps, common.ReconcileBypassDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec reconcile-bypass planned.")
+		return err
+	}
+	if ctx.Output != common.OutputJSON {
+		if err := writeReconcileBypassReport(ctx, result); err != nil {
+			return err
+		}
+	}
+	if err := ctx.WriteResult(result); err != nil {
+		return err
+	}
+	if result.Unreconciled > 0 {
+		return fmt.Errorf("%d of %d bypassed push(es) on %s have no matching passed gate run",
+			result.Unreconciled, len(result.Pushes), result.TargetBranch)
+	}
+	return nil
+}
+
+func writeReconcileBypassReport(ctx common.Context, result common.ReconcileBypassResult) error {
+	if len(result.Pushes) == 0 {
+		_, err := fmt.Fprintf(ctx.Stdout, "No bypassed pushes found for %s/%s ruleset %d on %s.\n",
+			result.Owner, result.Repo, result.RulesetID, result.TargetBranch)
+		return err
+	}
+	for _, push := range result.Pushes {
+		status, detail := "RECONCILED", "gate run "+push.GateRunID
+		if !push.Reconciled {
+			status, detail = "UNRECONCILED", "no matching passed gate run"
+		}
+		if _, err := fmt.Fprintf(ctx.Stdout, "%s  %s  %s  bypassed %s by %s (%s)\n",
+			status, push.Commit, push.PushedAt, push.BypassedRule, push.Actor, detail); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "%d/%d unreconciled.\n", result.Unreconciled, len(result.Pushes))
+	return err
 }
 
 type execDiffOptions struct {

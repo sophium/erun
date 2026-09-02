@@ -1760,4 +1760,75 @@ func TestExec(t *testing.T) {
 		}
 		golden.Equal(t, "exec/gate_run_report_dry_run_missing_gate_run_id_traces_then_refuses", normalize.Apply(result.Combined))
 	})
+
+	t.Run("reconcile_bypass_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "reconcile-bypass", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("reconcile_bypass_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("reconcile_bypass_dry_run_with_since", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main", "--since", "week",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_dry_run_with_since", normalize.Apply(result.Combined))
+	})
+
+	t.Run("reconcile_bypass_dry_run_missing_ruleset_id_traces_then_refuses", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--target-branch", "main",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing ruleset id, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_dry_run_missing_ruleset_id_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("reconcile_bypass_real_run_fails_cleanly_without_a_token", func(t *testing.T) {
+		// No gh CLI and no GITHUB_TOKEN/GH_TOKEN in this sandbox: the no-token
+		// refusal fires before any network call, so this exercises real-mode
+		// resolution up through token lookup without ever reaching GitHub.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
 }

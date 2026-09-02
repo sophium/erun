@@ -1,0 +1,8 @@
+audit: erun exec reconcile-bypass --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432 --target-branch main
+reconcile-bypass: resolving inputs
+reconcile-bypass: owner = sophium, repo = erun, rulesetId = 11081432, targetBranch = main
+github: GET https://api.github.com/repos/sophium/erun/rulesets/rule-suites?per_page=100&ref=refs%2Fheads%2Fmain&rule_suite_result=bypass
+platform: GET https://api.example.test/v1/gate-runs (targetBranch=main, status=PASSED)
+reconcile-bypass: resolving a github token
+reconcile-bypass: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set
+no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN

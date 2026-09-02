@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Eleven subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), and `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change).
+Repository helpers that run from the project root. Twelve subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), and `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run).
 
 ## Synopsis
 
@@ -20,6 +20,7 @@ erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --
 erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
 erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-commit SHA [flags]
 erun exec gate-run report GATE_RUN_ID --status STATUS [flags]
+erun exec reconcile-bypass --remote-url URL --ruleset-id ID --target-branch BRANCH [flags]
 ```
 
 ## Subcommands
@@ -116,6 +117,16 @@ Reporting against a gate run that already has an outcome is refused: a verdict i
 
 `--dry-run` traces the request without sending it.
 
+### `exec reconcile-bypass` {#exec-reconcile-bypass}
+
+Cross-references GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for `--ruleset-id` on `--target-branch` against erun's gate runs: every push that bypassed `--ruleset-id` is reported next to whether a `PASSED` gate run's merge commit exactly matches what actually landed. See [merge queue](/collaboration/merge-queue) for why the queue's own push structurally needs a ruleset bypass in the first place — this is the after-the-fact accountability check for it, not a substitute for narrowing who holds the bypass grant.
+
+`--remote-url` names the github.com remote the ruleset lives on. `--ruleset-id` is required and never defaulted: a bypass GitHub attributes to some other ruleset on the same push is not folded into this one's reconciliation. `--since` narrows the GitHub lookup window to one of `hour`, `day`, `week`, or `month`; omit it to use GitHub's own default window. Reading rule suites needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+
+Prints one line per bypassed push (`RECONCILED`/`UNRECONCILED`, the commit, when it pushed, which rule it bypassed, and who pushed it) plus a summary count. **Exits non-zero, after printing the full report, when any push is `UNRECONCILED`** — an unreconcilable bypass is loud, never silent, so this command is safe to run on a schedule and alert on a non-zero exit.
+
+`--dry-run` traces the GitHub and platform lookups without sending them.
+
 ## Examples
 
 ```bash
@@ -137,6 +148,8 @@ erun exec gate-run start --source-branch feature/add-widget --target-branch main
   --source-commit $(git rev-parse feature/add-widget) --merge-commit $(git rev-parse HEAD)
 erun exec gate-run report abc123 --status passed
 erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json
+erun exec reconcile-bypass --remote-url https://github.com/org/repo.git \
+  --ruleset-id 11081432 --target-branch main
 ```
 
 ## Error behaviour
@@ -174,3 +187,7 @@ erun exec gate-run report abc123 --status failed --failing-step 'erun build' --l
 | `--merge-commit` is missing and `--status` is not `failed`/`inconclusive` (`gate-run start`). | Refuses with `mergeCommit: is required unless status is FAILED or INCONCLUSIVE`. |
 | `--status failed` with no `--failing-step` (`gate-run start` or `gate-run report`). | Refuses with `failingStep: is required when status is FAILED`. |
 | GATE_RUN_ID already has an outcome (`gate-run report`). | Refuses with `409` and `gate run ... already reached ...; a verdict cannot be re-reported`. |
+| `--target-branch` or `--ruleset-id` is missing, or `--remote-url` is not a recognized github.com remote (`reconcile-bypass`). | Refuses with a message naming the missing or invalid field; nothing is looked up, even under `--dry-run`. |
+| No GitHub token is available (`reconcile-bypass`). | Refuses with `no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
+| GitHub rejects a request (`reconcile-bypass`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
+| Any bypassed push has no matching passed gate run (`reconcile-bypass`). | The full report still prints, then the command exits non-zero naming how many pushes are unreconciled. |

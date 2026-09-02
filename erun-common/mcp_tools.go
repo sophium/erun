@@ -93,6 +93,10 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 		Family: "exec", CLIPath: []string{"exec", "gate-run", "report"}, Title: "Report a gate run's outcome",
 		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
+	"exec_reconcile-bypass": {
+		Family: "exec", CLIPath: []string{"exec", "reconcile-bypass"}, Title: "Check ruleset-bypassed pushes against passed gate runs",
+		ReadOnly: true, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
+	},
 	// exec_agent has no CLI path: the CLI already offers this exact
 	// capability as `erun exec job start --agent`, one command covering both
 	// modes via a flag. MCP cannot do the same because each tool has one
