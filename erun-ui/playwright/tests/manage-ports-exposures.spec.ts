@@ -98,7 +98,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(docsLink).toBeVisible();
 
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1351-visual/ports-not-applicable.png',
+      path: 'test-results/1351-visual/ports-not-applicable.png',
     });
 
     const [popup] = await Promise.all([app.page.waitForEvent('popup'), docsLink.click()]);
@@ -149,7 +149,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(dialog.getByText('You may not have access to see this')).toBeVisible();
     await expect(dialog.getByText('Nothing exposed yet')).toHaveCount(0);
 
-    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1351-visual/ports-restricted.png' });
+    await dialog.screenshot({ path: 'test-results/1351-visual/ports-restricted.png' });
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -176,7 +176,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const retry = dialog.getByRole('button', { name: 'Try again' });
     await expect(retry).toBeVisible();
 
-    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1351-visual/ports-failed.png' });
+    await dialog.screenshot({ path: 'test-results/1351-visual/ports-failed.png' });
 
     await retry.click();
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
@@ -215,7 +215,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     ).toBeVisible();
 
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1918-visual/ports-cert-pending.png',
+      path: 'test-results/1918-visual/ports-cert-pending.png',
     });
 
     const refresh = dialog.getByRole('button', { name: 'Refresh public addresses' });
@@ -258,7 +258,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1351-visual/ports-empty-configured.png',
+      path: 'test-results/1351-visual/ports-empty-configured.png',
     });
 
     await dialog.locator('#expose-service-name').fill('api');
@@ -268,14 +268,14 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByRole('button', { name: 'Exposing...' })).toBeVisible();
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1351-visual/ports-create-inflight.png',
+      path: 'test-results/1351-visual/ports-create-inflight.png',
     });
 
     await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
-    await dialog.screenshot({ path: '/home/erun/.erun/outputs/1351-visual/ports-populated.png' });
+    await dialog.screenshot({ path: 'test-results/1351-visual/ports-populated.png' });
 
     const clipboardWrite = page.waitForRequest(
       (req) =>
@@ -414,14 +414,14 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await confirm.scrollIntoViewIfNeeded();
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1351-visual/ports-remove-confirm.png',
+      path: 'test-results/1351-visual/ports-remove-confirm.png',
     });
 
     // Step 2: the separate explicit action that actually commits it.
     await confirm.click();
     await expect(dialog.getByRole('button', { name: 'Removing...' })).toBeVisible();
     await dialog.screenshot({
-      path: '/home/erun/.erun/outputs/1351-visual/ports-remove-inflight.png',
+      path: 'test-results/1351-visual/ports-remove-inflight.png',
     });
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
