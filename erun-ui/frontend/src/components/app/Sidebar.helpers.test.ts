@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import type { UICloudProviderStatus, UITenant } from '@/types';
+
 import {
   deriveEnvironmentRow,
   environmentCardActivityLabel,
   environmentIndicator,
+  sidebarCloudAliases,
 } from './Sidebar.helpers';
 
 // One derived row state from three inputs: the sticky condition the desktop set,
@@ -396,4 +399,57 @@ test('a lingering isOpening/reconnecting flag never disagrees with the card', ()
     );
     assert.equal(cardLabel, derived.busyLabel, JSON.stringify(overrides));
   }
+});
+
+// sidebarCloudAliases: an erun-hosted-platform alias that no local tenant
+// attaches previously never appeared in the sidebar at all, regardless of
+// which tenant was selected -- the ordinary shape for a hosted platform
+// reached from a machine whose tenants are all local.
+
+function tenant(overrides: Partial<UITenant> = {}): UITenant {
+  return { name: 'acme', environments: [], ...overrides };
+}
+
+function erunProvider(overrides: Partial<UICloudProviderStatus> = {}): UICloudProviderStatus {
+  return { alias: 'erun+api.acme.test@erun', provider: 'erun', status: 'active', ...overrides };
+}
+
+test('an unattached erun alias is surfaced even with no tenant selected', () => {
+  const aliases = sidebarCloudAliases({
+    tenants: [tenant()],
+    cloudProviders: [erunProvider()],
+    selected: null,
+    dashboardTenant: '',
+  });
+  assert.deepEqual(aliases, ['erun+api.acme.test@erun']);
+});
+
+test('an unattached erun alias is surfaced alongside the selected tenant own alias', () => {
+  const aliases = sidebarCloudAliases({
+    tenants: [tenant({ cloudProviderAliases: ['acme+aws@aws'] })],
+    cloudProviders: [{ alias: 'acme+aws@aws', provider: 'aws', status: 'active' }, erunProvider()],
+    selected: { tenant: 'acme', environment: 'dev' },
+    dashboardTenant: '',
+  });
+  assert.deepEqual(aliases.sort(), ['acme+aws@aws', 'erun+api.acme.test@erun'].sort());
+});
+
+test('an erun alias a tenant already attaches is not duplicated as unattached', () => {
+  const aliases = sidebarCloudAliases({
+    tenants: [tenant({ cloudProviderAliases: ['erun+api.acme.test@erun'] })],
+    cloudProviders: [erunProvider()],
+    selected: { tenant: 'acme', environment: 'dev' },
+    dashboardTenant: '',
+  });
+  assert.deepEqual(aliases, ['erun+api.acme.test@erun']);
+});
+
+test('no tenants and no cloud providers renders no sidebar alias rows', () => {
+  const aliases = sidebarCloudAliases({
+    tenants: [],
+    cloudProviders: [],
+    selected: null,
+    dashboardTenant: '',
+  });
+  assert.deepEqual(aliases, []);
 });

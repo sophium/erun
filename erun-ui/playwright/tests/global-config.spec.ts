@@ -210,6 +210,76 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
   });
+
+  // A connected erun alias row previously rendered only a static "Connected"
+  // badge with no action at all -- once signed in there was no way back
+  // through the UI (the CLI's `cloud logout` was the only path). These two
+  // specs lock in the row's actual escape hatches, wired through
+  // cloudApi.logoutCloudProvider / switchCloudProviderIdentity.
+  const activeERunAlias = {
+    alias: 'erun+api.acme.test@erun',
+    provider: 'erun',
+    status: 'active',
+    username: 'erun',
+    accountId: 'api.acme.test',
+  };
+
+  test('a connected erun alias can be signed out from its own row', async ({ app, page }) => {
+    const rpc = stubRPC(page, {
+      LoadERunConfig: {
+        data: { defaultTenant: SEED_TENANT, cloudProviders: [activeERunAlias], cloudContexts: [] },
+      },
+      LogoutCloudProvider: {
+        data: { ...activeERunAlias, status: 'not_configured' },
+      },
+    });
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    const row = app.globalConfigDialog.cloudAliasRow(activeERunAlias.alias);
+    await expect(row.getByText('Connected')).toBeVisible();
+    await expect(
+      app.globalConfigDialog.cloudAliasSwitchIdentityButton(activeERunAlias.alias),
+    ).toBeVisible();
+
+    await app.globalConfigDialog.logoutCloudAlias(activeERunAlias.alias);
+
+    await expect.poll(() => rpc.calls('LogoutCloudProvider')).toBe(1);
+    await expect(row.getByText('Connected')).toHaveCount(0);
+    await expect(row.getByRole('button', { name: 'Login' })).toBeVisible();
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
+
+  test('signing in as someone else re-authenticates without logging out first', async ({
+    app,
+    page,
+  }) => {
+    const rpc = stubRPC(page, {
+      LoadERunConfig: {
+        data: { defaultTenant: SEED_TENANT, cloudProviders: [activeERunAlias], cloudContexts: [] },
+      },
+      SwitchCloudProviderIdentity: {
+        data: { ...activeERunAlias, status: 'active' },
+      },
+    });
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    await app.globalConfigDialog.switchCloudAliasIdentity(activeERunAlias.alias);
+
+    await expect.poll(() => rpc.calls('SwitchCloudProviderIdentity')).toBe(1);
+    // Switching identity is a force re-login, not sign-out-then-sign-in: the
+    // row never drops out of the connected state along the way.
+    expect(rpc.calls('LogoutCloudProvider')).toBe(0);
+    await expect(
+      app.globalConfigDialog.cloudAliasRow(activeERunAlias.alias).getByText('Connected'),
+    ).toBeVisible();
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
 });
 
 test.describe('global config dialog — bounded height and scroll', () => {

@@ -11,6 +11,7 @@ export type { EnvironmentInitializedPayload } from './environmentInitializedPayl
 export type { EnvNodePayload } from './envNodePayload';
 export type { EnvStatusPayload } from './envStatusPayload';
 export type { EnvUsagePayload } from './envUsagePayload';
+export type { GlobalConfigCloudProviderBusyAction } from './globalConfigCloudProviderBusyAction';
 export type { HiddenSessionMode } from './hiddenSessionMode';
 export type { IDEKind } from './ideKind';
 export type { IdleCloudContextAction } from './idleCloudContextAction';

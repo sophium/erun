@@ -1,4 +1,9 @@
-import type { StartSessionResult, UICloudContextStatus, UIIdleStatus } from '@/types';
+import type {
+  StartSessionResult,
+  UICloudContextStatus,
+  UICloudProviderStatus,
+  UIIdleStatus,
+} from '@/types';
 
 import {
   StartCloudInitAWSSession,
@@ -16,7 +21,7 @@ import { cloudNodeOperationFor } from './cloudNodeOperations';
 import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
-import type { CloudInitProvider } from './model';
+import type { CloudInitProvider, GlobalConfigCloudProviderBusyAction } from './model';
 import {
   hideTerminalMessage,
   showNotification,
@@ -321,8 +326,39 @@ export const startERunCloudInit =
     }
   };
 
-export const loginGlobalCloudProvider =
-  (alias: string): AppThunk<Promise<void>> =>
+export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>> =>
+  updateGlobalCloudProvider(alias, 'cloud-provider-login', (target, dispatch) =>
+    dispatch(cloudApi.endpoints.loginCloudProvider.initiate(target)).unwrap(),
+  );
+
+// logoutGlobalCloudProvider signs an alias out from Settings' own row action.
+// It revokes nothing server-side (erun has no revocation endpoint to call),
+// only the locally cached access token and stored refresh token, so the
+// alias can no longer mint a fresh access token from this machine. Any
+// access token already handed out elsewhere remains valid until its own
+// short issuer-configured expiry.
+export const logoutGlobalCloudProvider = (alias: string): AppThunk<Promise<void>> =>
+  updateGlobalCloudProvider(alias, 'cloud-provider-logout', (target, dispatch) =>
+    dispatch(cloudApi.endpoints.logoutCloudProvider.initiate(target)).unwrap(),
+  );
+
+// switchGlobalCloudProviderIdentity is "Sign in as someone else" on an
+// already-connected alias row -- a force re-authentication, not a logout
+// followed by a login. The backend only overwrites the stored refresh/access
+// tokens once the new sign-in actually succeeds, so a cancelled or failed
+// switch leaves the previous identity signed in rather than landing the
+// alias fully signed out.
+export const switchGlobalCloudProviderIdentity = (alias: string): AppThunk<Promise<void>> =>
+  updateGlobalCloudProvider(alias, 'cloud-provider-switch', (target, dispatch) =>
+    dispatch(cloudApi.endpoints.switchCloudProviderIdentity.initiate(target)).unwrap(),
+  );
+
+const updateGlobalCloudProvider =
+  (
+    alias: string,
+    busyAction: GlobalConfigCloudProviderBusyAction,
+    run: (alias: string, dispatch: AppDispatch) => Promise<UICloudProviderStatus>,
+  ): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     const dialog = getState().globalConfigDialog;
     if (dialog.busy || dialog.configLoading) {
@@ -331,15 +367,13 @@ export const loginGlobalCloudProvider =
     dispatch(
       patchGlobalConfigDialog({
         busy: true,
-        busyAction: 'cloud-provider-login',
+        busyAction,
         busyTarget: alias,
         error: '',
       }),
     );
     try {
-      const provider = await dispatch(
-        cloudApi.endpoints.loginCloudProvider.initiate(alias),
-      ).unwrap();
+      const provider = await run(alias, dispatch);
       const currentConfig = getState().globalConfigDialog.config;
       dispatch(
         patchGlobalConfigDialog({

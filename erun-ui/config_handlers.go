@@ -196,6 +196,22 @@ func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
 	return cloudProviderStatusToUI(status), nil
 }
 
+// SwitchCloudProviderIdentity re-authenticates an already-connected alias as a
+// different account. LoginCloudProvider short-circuits without starting a new
+// sign-in whenever the stored session is still active, so switching needs
+// Force: true to reach the real OIDC flow at all; erunCloudProviderLogin only
+// overwrites the stored refresh/access tokens once that flow actually
+// succeeds, so a cancelled or failed switch leaves the previous identity
+// signed in rather than landing the alias signed out with nothing to show
+// for it.
+func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, error) {
+	status, err := eruncommon.LoginCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias, Force: true}, a.deps.cloudDeps)
+	if err != nil {
+		return uiCloudProviderStatus{}, err
+	}
+	return cloudProviderStatusToUI(status), nil
+}
+
 func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error) {
 	status, _, err := eruncommon.SetupCloudProviderOIDC(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {

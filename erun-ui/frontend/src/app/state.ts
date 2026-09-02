@@ -26,6 +26,7 @@ import type {
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
 import type { AppNotificationAction } from './model/appNotificationAction';
+import type { GlobalConfigCloudProviderBusyAction } from './model/globalConfigCloudProviderBusyAction';
 import type { ReachabilityKind } from './reconnectCopy';
 import type { TenantDashboardState } from './reviewDetailState';
 
@@ -279,7 +280,7 @@ export interface GlobalConfigDialogState {
     | 'cloud-provider-init'
     | 'cloud-provider-cloudflare-init'
     | 'cloud-provider-erun-init'
-    | 'cloud-provider-login';
+    | GlobalConfigCloudProviderBusyAction;
   busyTarget: string;
   error: string;
 }

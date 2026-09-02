@@ -1,7 +1,7 @@
 import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
-import type { UIEnvironment, UISelection } from '@/types';
+import { CloudProviderERun, type UIEnvironment, type UISelection } from '@/types';
 import type {
   UIErunVersion,
   UIRuntimeImageLineMismatch,
@@ -298,15 +298,36 @@ export interface CloudAliasRowInputs {
 
 // sidebarCloudAliases returns the active tenant's cloud aliases, one per provider
 // type, so an env wired to both an AWS account and a Cloudflare token shows two
-// independent login rows.
+// independent login rows. An erun-hosted-platform alias that no local tenant
+// attaches (the ordinary shape for a hosted platform reached from a machine
+// whose tenants are all local) is otherwise invisible here regardless of
+// which tenant is selected, so it is surfaced independently of the
+// tenant-scoped lookup below.
 export function sidebarCloudAliases(input: CloudAliasRowInputs): string[] {
   const tenantName = input.dashboardTenant || (input.selected?.tenant ?? '');
   const tenant = input.tenants.find((candidate) => candidate.name === tenantName);
-  if (!tenant) {
-    return [];
+  const aliasByType = tenant
+    ? firstAliasPerProviderType(tenantCloudAliases(tenant), input.cloudProviders)
+    : new Map<string, string>();
+  const unattached = firstUnattachedERunAlias(input.tenants, input.cloudProviders);
+  if (unattached && !aliasByType.has(CloudProviderERun)) {
+    aliasByType.set(CloudProviderERun, unattached);
   }
-  const aliasByType = firstAliasPerProviderType(tenantCloudAliases(tenant), input.cloudProviders);
   return orderCloudAliasRows(aliasByType);
+}
+
+// firstUnattachedERunAlias finds an erun-hosted-platform alias that no
+// tenant's config references at all. There is normally at most one hosted
+// platform per machine, so the first is surfaced.
+function firstUnattachedERunAlias(
+  tenants: AppState['tenants'],
+  cloudProviders: AppState['cloudProviders'],
+): string | undefined {
+  const attached = new Set(tenants.flatMap((tenant) => tenantCloudAliases(tenant)));
+  return cloudProviders.find(
+    (provider) =>
+      provider.provider.trim().toLowerCase() === CloudProviderERun && !attached.has(provider.alias),
+  )?.alias;
 }
 
 // The primary alias goes first so its type wins when two aliases share a
