@@ -25,7 +25,7 @@ type UnexposeInput struct {
 	// project to resolve.
 	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
 	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
-	Wait              *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UnexposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -52,7 +52,7 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			}, exposeStore, nil)
 			return err
 		})
-		envelope, err := runJobEnvelope(runtime, "unexpose", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "unexpose", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

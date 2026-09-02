@@ -24,7 +24,7 @@ type ExecClosePRInput struct {
 func execClosePRTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecClosePRInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecClosePRInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var closed *eruncommon.ClosePullRequestResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, _ string) error {
 			result, err := eruncommon.ClosePullRequest(runCtx, eruncommon.ClosePullRequestParams{
 				RemoteURL:     input.RemoteURL,
 				Branch:        input.Branch,

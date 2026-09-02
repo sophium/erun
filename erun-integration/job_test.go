@@ -563,6 +563,25 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("status_names_why_a_failed_job_failed_instead_of_only_its_exit_code", func(t *testing.T) {
+		// Every other terminal status line already rendered the recorded reason;
+		// exited did not, so a job that never even started reported a bare
+		// "exited -1" and left the one field that says what went wrong readable
+		// only in JSON. The work here is an absolute path that does not exist, so
+		// the supervisor's own start fails and the reason is the whole answer.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := inEnvironment(setup.Env())
+
+		start := startJob(t, setup, envVars, "cannot-start", "--", "/erun-integration/no-such-work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "cannot-start", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "cannot-start"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "job/status_names_why_a_failed_job_failed", normalize.Apply(await.Combined+status.Combined))
+	})
+
 	t.Run("output_is_readable_while_the_job_runs", func(t *testing.T) {
 		// Progress must be visible before the work exits, not buffered to the end,
 		// and the next offset must let a poll continue rather than repeat. The stub
@@ -1117,6 +1136,236 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("a_job_that_ends_while_a_background_task_job_it_started_is_still_running_reads_as_gate_incomplete", func(t *testing.T) {
+		// Task jobs -- what build/deploy/doctor and the rest of the job-envelope
+		// tools become when an MCP caller sets wait:false -- run in the MCP
+		// server's own long-lived process, never as a subprocess of this binary,
+		// so nothing in this suite can start one directly. Seeding the record it
+		// would have produced (kind "task", a real alive pid so reconciliation
+		// reads it as genuinely running rather than demoting it to unknown,
+		// startedByJobId naming the parent) is what proves the parent's own
+		// finish check -- previously blind to task jobs because none of them
+		// ever wrote startedByJobId at all -- now finds one exactly like it
+		// finds a nested command job (see the gate-incomplete scenario above).
+		// The seeded pid is this test binary's own: it is a real, alive process
+		// for the run's whole duration, so the child genuinely reads as running
+		// rather than as an abandoned/unknown record the way a fabricated dead
+		// pid would.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "task-child"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		logPath := filepath.Join(dir, "task-child.log")
+		if err := os.WriteFile(logPath, []byte("building...\n"), 0o644); err != nil {
+			t.Fatalf("seed task log: %v", err)
+		}
+		record := fmt.Sprintf(`{
+  "id": "task-child",
+  "name": "task-child",
+  "state": "running",
+  "kind": "task",
+  "pid": %d,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": null,
+  "leaseId": "job-task-child",
+  "startedByJobId": "outer",
+  "logPath": %q
+}
+`, os.Getpid(), logPath)
+		if err := os.WriteFile(filepath.Join(dir, "task-child.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+
+		// The seeded task job never finishes on its own, so the wait/poll are
+		// shrunk to milliseconds the same way the nested-job gate-incomplete
+		// scenario above does -- the point under test is the eventual
+		// gate-incomplete outcome once the wait is exhausted, not genuinely
+		// waiting one out.
+		envVars := append(jobStubEnv(t, setup, "exit 0"),
+			"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=100ms", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms")
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+
+		var status erun.Result
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			status = erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if !strings.HasPrefix(status.Combined, "running:") {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("job never left running: %s", status.Combined)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "1s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected a gate-incomplete job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State     string `json:"state"`
+			ExitCode  *int   `json:"exitCode"`
+			Succeeded bool   `json:"succeeded"`
+			Reason    string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "gate-incomplete" || payload.ExitCode == nil || *payload.ExitCode != 0 || payload.Succeeded {
+			t.Fatalf("expected a gate-incomplete job with exitCode 0 to report succeeded=false, got %+v", payload)
+		}
+		if !strings.Contains(payload.Reason, "task-child") {
+			t.Fatalf("expected the gate-incomplete reason to name the task job it started, got %+v", payload)
+		}
+
+		child := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "task-child", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var childPayload struct {
+			Kind           string `json:"kind"`
+			StartedByJobID string `json:"startedByJobId"`
+		}
+		if err := json.Unmarshal([]byte(child.Stdout), &childPayload); err != nil {
+			t.Fatalf("parse task job status JSON: %v\n%s", err, child.Stdout)
+		}
+		if childPayload.Kind != "task" || childPayload.StartedByJobID != "outer" {
+			t.Fatalf("expected the task job to render its own kind and parent, got %+v", childPayload)
+		}
+	})
+
+	t.Run("a_job_that_waits_for_a_failed_background_task_job_it_started_surfaces_startedJobFailed_and_leaves_its_log_readable", func(t *testing.T) {
+		// The other half of the fix: a task job that already failed before the
+		// parent's own process even exits is picked up by the same
+		// environmentJobFailedChildren scan a nested command job's failure is.
+		// A task job is a Go call with no subprocess stdio to capture, so what a
+		// poll can read back is only whatever the work itself wrote to the log
+		// it was handed -- before this PR a failed task left nothing at all to
+		// read, just a bare exit code and a bare error string.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "task-fail"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		logPath := filepath.Join(dir, "task-fail.log")
+		if err := os.WriteFile(logPath, []byte("pushing image...\nauth failed\n"), 0o644); err != nil {
+			t.Fatalf("seed task log: %v", err)
+		}
+		record := fmt.Sprintf(`{
+  "id": "task-fail",
+  "name": "task-fail",
+  "state": "exited",
+  "kind": "task",
+  "pid": 123456789,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": 1,
+  "reason": "push failed: authentication required",
+  "leaseId": "job-task-fail",
+  "startedByJobId": "outer",
+  "logPath": %q
+}
+`, logPath)
+		if err := os.WriteFile(filepath.Join(dir, "task-fail.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+
+		envVars := jobStubEnv(t, setup, "exit 0")
+		start := startJob(t, setup, envVars, "outer", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("expected outer to report a failure once the task job it started failed, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			State            string `json:"state"`
+			Succeeded        bool   `json:"succeeded"`
+			StartedJobFailed string `json:"startedJobFailed"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.State != "exited" || payload.Succeeded {
+			t.Fatalf("expected outer to still report its own exited state but succeeded=false, got %+v", payload)
+		}
+		if !strings.Contains(payload.StartedJobFailed, "task-fail") {
+			t.Fatalf("expected startedJobFailed to name the failed task job, got %+v", payload)
+		}
+
+		// The failed task job's own status line renders the recorded reason
+		// (jobExitedLine) exactly as a failed command job's does, and its log --
+		// the one thing a task job has no subprocess stdio to fall back on -- is
+		// readable through the same `job output` path as any other kind.
+		childStatus := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "task-fail"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(childStatus.Combined, "authentication required") {
+			t.Fatalf("expected the task job's own status line to name its recorded reason, got: %s", childStatus.Combined)
+		}
+		output := erun.Run(t, []string{"job", "output", "--tenant", "team", "--environment", "dev", "--id", "task-fail"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(output.Stdout, "auth failed") {
+			t.Fatalf("expected the task job's log to be readable via job output, got: %s", output.Combined)
+		}
+	})
+
+	t.Run("a_task_job_started_with_no_parent_stays_parentless", func(t *testing.T) {
+		// An orchestrator driving this environment from outside any job at all
+		// -- never itself started as a job, so it has nothing to thread as
+		// startedByJobId -- is exactly the caller TaskEnvironmentJobParams'
+		// own doc describes: empty when nothing started it, never a guess at
+		// whichever job happens to be running here. Seeded with no
+		// startedByJobId key at all (the shape StartTaskEnvironmentJob itself
+		// produces for that caller, since the field is omitempty), this proves
+		// two things: the task job's own record reports no parent, and a real,
+		// unrelated job running in the same environment at the same time is
+		// not wrongly credited with having started it merely because it
+		// happens to be the job running here.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "task-orphan"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		record := fmt.Sprintf(`{
+  "id": "task-orphan",
+  "name": "task-orphan",
+  "state": "running",
+  "kind": "task",
+  "pid": %d,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "exitCode": null,
+  "leaseId": "job-task-orphan"
+}
+`, os.Getpid())
+		if err := os.WriteFile(filepath.Join(dir, "task-orphan.json"), []byte(record), 0o644); err != nil {
+			t.Fatalf("seed job record: %v", err)
+		}
+
+		envVars := jobStubEnv(t, setup, "exit 0")
+		statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "task-orphan", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			StartedByJobID string `json:"startedByJobId"`
+		}
+		if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
+		}
+		if payload.StartedByJobID != "" {
+			t.Fatalf("expected a task job started with no parent to record none, got %+v", payload)
+		}
+
+		start := startJob(t, setup, envVars, "unrelated", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "unrelated", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("expected the unrelated job to succeed on its own, not to be blocked on the parentless task job merely running alongside it, got %d:\n%s", await.ExitCode, await.Combined)
+		}
+	})
+
 	t.Run("an_agent_jobs_started_gate_that_failed_gets_one_bounded_resumed_turn_that_fixes_it", func(t *testing.T) {
 		// The supervisor's own wait-for-children mechanism (scenarios above)
 		// already tells the truth once an agent job's own turn
@@ -1558,6 +1807,67 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "job/status_without_jobs_says_so", normalize.Apply(result.Combined))
+	})
+
+	t.Run("status_skips_a_corrupted_record_and_orders_ties_by_id", func(t *testing.T) {
+		// Listing every job tolerates an unreadable record instead of failing
+		// the whole list: a record this process cannot even parse cannot
+		// answer anything, and leaving it on disk would keep an unreadable job
+		// in every listing forever, so it is removed as the list is built.
+		// Two records sharing the same startedAt (two jobs started in the same
+		// wall-clock second, a real possibility) also proves the list's
+		// tie-break falls back to ID rather than whatever order the directory
+		// happened to return. Both are seeded running (this test binary's own,
+		// real, alive pid, the same technique the task-job scenarios above
+		// use) rather than exited, so retention never prunes them regardless of
+		// how old the fixed startedAt is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "a"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		for _, id := range []string{"b", "a"} {
+			record := fmt.Sprintf(`{
+  "id": %q,
+  "name": %q,
+  "state": "running",
+  "kind": "command",
+  "pid": %d,
+  "startedAt": "2026-01-01T00:00:00Z",
+  "leaseId": "job-%s"
+}
+`, id, id, os.Getpid(), id)
+			if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(record), 0o644); err != nil {
+				t.Fatalf("seed job record %s: %v", id, err)
+			}
+		}
+		corrupted := filepath.Join(dir, "broken.json")
+		if err := os.WriteFile(corrupted, []byte("{not valid json"), 0o644); err != nil {
+			t.Fatalf("seed corrupted record: %v", err)
+		}
+
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		lastIndex := -1
+		for _, id := range []string{"a", "b"} {
+			index := strings.Index(result.Stdout, "  "+id+":")
+			if index < 0 {
+				t.Fatalf("expected job %q in the list, got:\n%s", id, result.Stdout)
+			}
+			if index < lastIndex {
+				t.Fatalf("expected jobs ordered a, b (ties broken by id), got:\n%s", result.Stdout)
+			}
+			lastIndex = index
+		}
+		if strings.Contains(result.Stdout, "broken") {
+			t.Errorf("expected the corrupted record to be skipped rather than listed, got:\n%s", result.Stdout)
+		}
+		if _, err := os.Stat(corrupted); !os.IsNotExist(err) {
+			t.Errorf("expected the corrupted record to be removed from disk, stat err: %v", err)
+		}
 	})
 
 	t.Run("start_requires_target_and_name", func(t *testing.T) {

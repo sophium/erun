@@ -466,10 +466,19 @@ func jobRunningLine(job common.EnvironmentJob) string {
 	return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobOutputSuffix(job)
 }
 
+// jobExitedLine renders the reason a clean exit cannot carry on its own. Every
+// other terminal line already did; this one did not, so a failed job's recorded
+// reason -- the only thing on the record that says what went wrong, and for a
+// task job the only place the work's own error text lands at all -- was
+// readable in JSON and invisible to anyone reading the human line. The signal
+// takes its place when there is one: that already is the reason.
 func jobExitedLine(job common.EnvironmentJob) string {
 	line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
-	if strings.TrimSpace(job.Signal) != "" {
+	switch {
+	case strings.TrimSpace(job.Signal) != "":
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
+	case strings.TrimSpace(job.Reason) != "":
+		line += " (" + job.Reason + ")"
 	}
 	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
 }
@@ -739,7 +748,24 @@ func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
 	case strings.TrimSpace(result.Job.StartedJobFailed) != "":
 		return fmt.Errorf("job %q: %s", result.Job.ID, result.Job.StartedJobFailed)
 	default:
-		return fmt.Errorf("job %q exited %d", result.Job.ID, jobExitCodeOrUnset(result.Job))
+		return jobFailedExitError(result.Job)
+	}
+}
+
+// jobFailedExitError is the message a plain failed exit carries. Every other
+// arm of jobAwaitExit names why it failed; this is the one an orchestrator is
+// most likely to be reading, and the recorded reason is the only place a job
+// whose work never started says so at all. Signal first, for the same reason
+// jobExitedLine prefers it: it already is the reason, and the recorded text
+// would only restate it.
+func jobFailedExitError(job common.EnvironmentJob) error {
+	switch {
+	case strings.TrimSpace(job.Signal) != "":
+		return fmt.Errorf("job %q exited %d (signal %s)", job.ID, jobExitCodeOrUnset(job), job.Signal)
+	case strings.TrimSpace(job.Reason) != "":
+		return fmt.Errorf("job %q exited %d: %s", job.ID, jobExitCodeOrUnset(job), job.Reason)
+	default:
+		return fmt.Errorf("job %q exited %d", job.ID, jobExitCodeOrUnset(job))
 	}
 }
 

@@ -1,0 +1,5 @@
+exited -1: cannot-start (failed to start: fork/exec /erun-integration/no-such-work: no such file or directory), 0 bytes of output
+audit: erun job await --environment dev --id cannot-start --tenant team --timeout 30s
+job "cannot-start" exited -1: failed to start: fork/exec /erun-integration/no-such-work: no such file or directory
+exited -1: cannot-start (failed to start: fork/exec /erun-integration/no-such-work: no such file or directory), 0 bytes of output
+audit: erun job status --environment dev --id cannot-start --tenant team

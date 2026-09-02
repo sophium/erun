@@ -293,6 +293,147 @@ func TestJobOffEnvironment(t *testing.T) {
 		assertToolArgumentsNameTarget(t, call, "team", "dev")
 	})
 
+	t.Run("attach_tracks_the_environments_process", func(t *testing.T) {
+		// attach takes an activity lease on the environment, so -- like start --
+		// it must reach the environment's own exec_job_attach tool rather than
+		// resolve against the caller's local job store, and it must not carry
+		// the idle-probe header the read-only verbs above do.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"attached"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev",` +
+			`"job":{"id":"overnight-index","name":"overnight-index","state":"running","pid":4242,"leaseId":"job-overnight-index","outputBytes":0},"executed":true}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--name", "overnight-index", "--pid", "4242"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "job attached: overnight-index") {
+			t.Errorf("expected the environment's attached job to be reported, got:\n%s", result.Stdout)
+		}
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "exec_job_attach" {
+			t.Fatalf("the environment was asked for %q, want exec_job_attach", call.Tool)
+		}
+		if call.IdleProbe {
+			t.Errorf("exec_job_attach must not carry the idle-probe header: it takes a lease on the environment")
+		}
+		assertToolArgumentsNameTarget(t, call, "team", "dev")
+	})
+
+	t.Run("attach_a_malformed_request_fails_before_reaching_the_edge", func(t *testing.T) {
+		// A nameless attach is invalid on its face -- refused before the call
+		// ever reaches the environment's edge, the same shape as job start's
+		// equivalent refusal above.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--pid", "4242"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a nameless attach, got 0:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("cancel_signals_the_environments_job", func(t *testing.T) {
+		// cancel mutates the environment's process group, so it too must reach
+		// exec_job_cancel rather than resolve locally, and must not carry the
+		// idle-probe header.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"cancelled"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev",` +
+			`"cancel":{"job":{"id":"suite","name":"suite","state":"running"},"signalled":true,"signal":"KILL","targetPid":4242}}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "suite", "--signal", "KILL"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "job cancelled: suite, SIGKILL to process group 4242") {
+			t.Errorf("expected the environment's cancel outcome to be reported, got:\n%s", result.Stdout)
+		}
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "exec_job_cancel" {
+			t.Fatalf("the environment was asked for %q, want exec_job_cancel", call.Tool)
+		}
+		if call.IdleProbe {
+			t.Errorf("exec_job_cancel must not carry the idle-probe header: it signals a process in the environment")
+		}
+		assertToolArgumentsNameTarget(t, call, "team", "dev")
+	})
+
+	t.Run("start_agent_runs_the_agent_in_the_environment", func(t *testing.T) {
+		// --agent takes the exec_agent tool instead of exec_raw -- a materially
+		// different request shape (a prompt, not an argv) -- so it needs its own
+		// off-environment scenario rather than assuming exec_raw's coverage
+		// above carries over.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"started"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev",` +
+			`"job":{"id":"sweep","name":"sweep","state":"running","childPid":4242,"leaseId":"job-sweep","outputBytes":0},"executed":true}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude",
+			"--", "fix the failing tests",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "exec_agent" {
+			t.Fatalf("the environment was asked for %q, want exec_agent", call.Tool)
+		}
+		if call.IdleProbe {
+			t.Errorf("exec_agent must not carry the idle-probe header: it starts real work in the environment")
+		}
+		if got := call.Arguments["prompt"]; got != "fix the failing tests" {
+			t.Fatalf("expected exec_agent to carry the joined prompt, got %v (arguments: %+v)", got, call.Arguments)
+		}
+		assertToolArgumentsNameTarget(t, call, "team", "dev")
+	})
+
+	t.Run("status_lists_every_job_when_no_id_is_given", func(t *testing.T) {
+		// Omitting --id asks for every retained job rather than one. The
+		// environment's reply carries no single "job" field at all here (the
+		// shape a real edge sends back for a list request), which is what
+		// exercises the list branch's own nil-jobs normalization rather than
+		// the single-job branch above.
+		skipIfPortsBusy(t, jobEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"status"}],` +
+			`"structuredContent":{"tenant":"team","environment":"dev"}}`}}
+		edge.start(t, jobEdgeLocalPort)
+
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, "no jobs") {
+			t.Errorf("expected an empty environment job list to say so, got:\n%s", result.Stdout)
+		}
+		call := edge.requestFor(t, "tools/call")
+		if call.Tool != "exec_job_status" {
+			t.Fatalf("the environment was asked for %q, want exec_job_status", call.Tool)
+		}
+		if !call.IdleProbe {
+			t.Errorf("expected job_status to carry the idle-probe header so polling it does not reset the environment's idle timer")
+		}
+	})
+
 	// A genuinely unresolved target (the edge's own runtime image predates the
 	// tenant/environment plumbing fix, or the pod was started with no bound
 	// context of its own) must still error -- and the message an operator

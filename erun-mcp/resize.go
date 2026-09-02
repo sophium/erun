@@ -35,7 +35,7 @@ type ResizeInput struct {
 	Orchestrator  string `json:"orchestrator,omitempty" jsonschema:"the calling orchestrator's own id (its $ERUN_ORCHESTRATOR_ID), recorded on the resize's own lease and on the override if one was needed"`
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and trace the planned resize (current -> target per resource, held leases, whether an override was needed) without changing anything"`
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait          *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func resizeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ResizeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -81,7 +81,7 @@ func resizeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			})
 			return err
 		})
-		envelope, err := runJobEnvelope(runtime, "resize", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "resize", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

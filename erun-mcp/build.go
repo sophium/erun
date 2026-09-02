@@ -3,6 +3,7 @@ package erunmcp
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,7 +19,7 @@ type BuildInput struct {
 	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Jobs          int      `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
 	Verbosity     int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait          *bool    `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 type PushInput struct {
@@ -26,16 +27,16 @@ type PushInput struct {
 	Version   string `json:"version" jsonschema:"required version to publish (produced by the build tool); push publishes this version's images and chart and never mints one"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait      *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 var errMissingPushVersion = fmt.Errorf("push requires a version: it publishes a built version's images and chart (capture the version from the build tool's result) and never mints one — set the version input")
 
 func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
-		execute := func(preview bool) (CommandOutput, error) {
+		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var result *eruncommon.BuildResult
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
 				runCtx.BuildJobs = input.Jobs
 				component := strings.TrimSpace(input.Component)
 				version := strings.TrimSpace(input.Version)
@@ -57,7 +58,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			}
 			return output, err
 		}
-		envelope, err := runJobEnvelope(runtime, "build", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "build", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
@@ -76,7 +77,7 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})
-		envelope, err := runJobEnvelope(runtime, "push", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

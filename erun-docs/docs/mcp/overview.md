@@ -232,6 +232,13 @@ Two things follow with no change to any other tool's contract:
 
 `build`, `push`, `deploy`, `publish`, `release`, `upgrade`, `terraform`, `pin`, `init`, `delete`, `expose`, `unexpose`, `doctor`, `exec_write`, `exec_commit`, and `contribute_clone` each take a `wait` input alongside their own fields. `wait: true` (the default this release) runs synchronously and returns the full typed result inline, exactly as before this input existed. `wait: false` starts the same call as a background job and returns `{jobId, state: "running"}` immediately instead — poll `exec_job_status`/`exec_job_await`/`exec_job_output` for the outcome, whose `result` field carries the tool's own typed result verbatim (the same shape it would have returned synchronously) rather than a log to re-parse. This default flips to `false` in a future release, with `wait: true` kept callable for one more release as the compatibility switch — watch the release notes.
 
+Two more inputs come with `wait: false`, and both are ignored when `wait` is true:
+
+- **`startedByJobId`** links the background job to the job the call is being made on behalf of, so that job's own finish check finds it (see [Gate-incomplete](/agent-reference/cli-flags#job-states)). These tools run their work *inside the MCP server's own long-lived process*, which was never itself started as anyone's job, so there is no `ERUN_JOB_ID` here to inherit however deep the nesting is on the calling side — a caller that is itself running as a job and wants this work covered by its own finish check passes its job id explicitly. Nothing is inferred when it is omitted: an unlinked job is recorded as having no parent rather than being attributed to whichever job happens to be running in the environment.
+- **`handoff`** marks work deliberately meant to outlive whatever started it (a release, a long deploy), excluding it from that finish check entirely — the same field `exec_raw`/`exec_agent` already take.
+
+A backgrounded action tool also writes a log, so `exec_job_output` serves the work's own trace and output while it runs and after it fails — the record is not just an exit code. `command` stays empty for one of these jobs: the work is a Go call inside this server, not a subprocess, so there is no argv to record; `name`, the log, and `result` are what describe it.
+
 ### Cloud — provider aliases {#cloud-tools}
 
 Registers and manages the root-level cloud provider aliases an environment attaches to (`erun cloud set`) for build/push registries, DNS, and docs publishing. See [`erun cloud`](/cli/cloud).

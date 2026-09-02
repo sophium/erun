@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +22,7 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "test-task",
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			defer close(done)
 			return taskResult{Value: "ok"}, nil
 		},
@@ -61,7 +64,7 @@ func TestStartTaskEnvironmentJobRecordsAFailure(t *testing.T) {
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "failing-task",
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			return nil, errors.New("boom")
 		},
 	})
@@ -93,7 +96,7 @@ func TestStartTaskEnvironmentJobRecoversAPanic(t *testing.T) {
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "panicking-task",
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			panic("kaboom")
 		},
 	})
@@ -125,7 +128,7 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Environment: environment,
 		Name:        "blocking-task",
 		ID:          "same-id",
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
 			return nil, nil
@@ -142,7 +145,7 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Environment: environment,
 		Name:        "blocking-task-again",
 		ID:          job.ID,
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			return nil, nil
 		},
 	}); err == nil {
@@ -181,7 +184,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "cancel-me",
-		Run: func() (any, error) {
+		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
 			return nil, nil
@@ -199,5 +202,159 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 		ID:          job.ID,
 	}); err == nil {
 		t.Fatal("cancelling a task job must be refused: its PID is this process's own, not a subprocess to signal")
+	}
+}
+
+// A task job is Go work in this process, so nothing captures its stdio the way
+// a command job's supervisor does. Without the log it is handed, a failed one
+// leaves an exit code and an error string and nothing else -- no argv, no
+// output -- which is how a real build failure became indistinguishable from
+// any other after the fact.
+func TestStartTaskEnvironmentJobServesWhatTheWorkWrote(t *testing.T) {
+	tenant, environment := "acme", "dev"
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
+		Tenant:      tenant,
+		Environment: environment,
+		Name:        "logging-task",
+		Run: func(log io.Writer) (any, error) {
+			_, _ = io.WriteString(log, "docker build failed: no space left on device\n")
+			return nil, errors.New("exit status 1")
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskEnvironmentJob: %v", err)
+	}
+	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
+
+	output, err := ReadEnvironmentJobOutput(ReadEnvironmentJobOutputParams{Tenant: tenant, Environment: environment, ID: job.ID})
+	if err != nil {
+		t.Fatalf("ReadEnvironmentJobOutput: %v", err)
+	}
+	if !strings.Contains(output.Output, "no space left on device") {
+		t.Fatalf("job output = %q, want the work's own output; a failed task with no log is undiagnosable", output.Output)
+	}
+	if output.Job.OutputBytes == 0 {
+		t.Fatalf("outputBytes = 0 with a non-empty log; a reader is told there is nothing to read")
+	}
+	if _, err := os.Stat(output.Job.LogPath); err != nil {
+		t.Fatalf("stat log path %q: %v", output.Job.LogPath, err)
+	}
+}
+
+// The log honours the same cap a command job's does, so a chatty task cannot
+// fill the environment's home volume, and says so rather than letting a short
+// log read as a quiet run.
+func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
+	tenant, environment := "acme", "dev"
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
+		Tenant:         tenant,
+		Environment:    environment,
+		Name:           "chatty-task",
+		MaxOutputBytes: 16,
+		Run: func(log io.Writer) (any, error) {
+			_, _ = io.WriteString(log, strings.Repeat("x", 1024))
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskEnvironmentJob: %v", err)
+	}
+	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
+
+	finished, err := LoadEnvironmentJob(tenant, environment, job.ID, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+	if finished.OutputBytes != 16 {
+		t.Fatalf("outputBytes = %d, want the 16-byte cap", finished.OutputBytes)
+	}
+	if !finished.OutputTruncated {
+		t.Fatalf("finished job = %+v, want outputTruncated: a capped log must never read as the whole story", finished)
+	}
+}
+
+// The whole point of the linkage: a job that starts a task and then ends its
+// own process must not report its own clean exit as the answer while the task
+// is still going. Before task jobs carried StartedByJobID at all, the parent's
+// child scan could never find one no matter what started it.
+func TestATaskJobIsFoundByTheJobThatStartedIt(t *testing.T) {
+	tenant, environment := "acme", "dev"
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	child, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
+		Tenant:         tenant,
+		Environment:    environment,
+		Name:           "build",
+		StartedByJobID: "parent-job",
+		Run: func(io.Writer) (any, error) {
+			close(started)
+			<-release
+			return nil, errors.New("exit status 1")
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskEnvironmentJob: %v", err)
+	}
+	<-started
+
+	if child.StartedByJobID != "parent-job" {
+		t.Fatalf("startedByJobId = %q, want parent-job", child.StartedByJobID)
+	}
+	running := environmentJobRunningChildren(dir, "parent-job", time.Now())
+	if len(running) != 1 || running[0].ID != child.ID {
+		t.Fatalf("running children = %+v, want the task job %q", running, child.ID)
+	}
+
+	close(release)
+	waitForEnvironmentJobFinished(t, tenant, environment, child.ID)
+
+	failed := environmentJobFailedChildren(dir, "parent-job", time.Now())
+	if len(failed) != 1 || failed[0].ID != child.ID {
+		t.Fatalf("failed children = %+v, want the failed task job %q", failed, child.ID)
+	}
+}
+
+// Handoff is the escape hatch the linkage needs to be safe: work an agent
+// starts and deliberately leaves running past its own turn (a release, a long
+// deploy) must not be what makes its parent wait.
+func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
+	tenant, environment := "acme", "dev"
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+	if _, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
+		Tenant:         tenant,
+		Environment:    environment,
+		Name:           "release",
+		StartedByJobID: "parent-job",
+		Handoff:        true,
+		Run: func(io.Writer) (any, error) {
+			close(started)
+			<-release
+			return nil, nil
+		},
+	}); err != nil {
+		t.Fatalf("StartTaskEnvironmentJob: %v", err)
+	}
+	<-started
+	defer close(release)
+
+	if running := environmentJobRunningChildren(dir, "parent-job", time.Now()); len(running) != 0 {
+		t.Fatalf("running children = %+v, want none: a handoff task must never hold its parent's finish check", running)
 	}
 }

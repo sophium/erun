@@ -25,10 +25,12 @@ const (
 	// tool's event stream and its progress is normalized from it.
 	EnvironmentJobKindAgent = "agent"
 	// EnvironmentJobKindTask is Go work run asynchronously in this process
-	// rather than a subprocess a supervisor waits on. There is no log: the
-	// work's typed return value is captured directly onto Result once it
-	// finishes, and liveness is decided by this process's own pid rather than a
-	// supervisor's.
+	// rather than a subprocess a supervisor waits on. Its typed return value is
+	// captured directly onto Result once it finishes, and liveness is decided
+	// by this process's own pid rather than a supervisor's. Its log is whatever
+	// the work wrote to the writer it was handed — there is no subprocess whose
+	// stdio could be captured instead, and a failed task with no log at all was
+	// undiagnosable after the fact.
 	EnvironmentJobKindTask = "task"
 
 	agentToolClaude = "claude"

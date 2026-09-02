@@ -3,6 +3,7 @@ package erunmcp
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -41,7 +42,7 @@ type InitInput struct {
 	Components               *[]string `json:"components,omitempty" jsonschema:"optional saved default deploy component selection for this environment — what the deploy tool rolls out with no components override of its own. Omit to leave a saved selection untouched; pass an empty array to clear one and return the environment to its repo k8s.deployments plan"`
 	Preview                  bool      `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity                int       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait                     *bool     `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, InitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -50,7 +51,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		if err != nil {
 			return nil, JobEnvelopeOutput{}, err
 		}
-		envelope, err := runJobEnvelope(runtime, "init", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "init", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }
@@ -59,7 +60,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 // of the work to job-ify) and returns the closure that does the actual work,
 // so an async init still resolves tenant/environment before the call returns
 // rather than only discovering a bad input once the background job finishes.
-func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool) (CommandOutput, error), error) {
+func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writer) (CommandOutput, error), error) {
 	workDir, err := runtimeRepoPath(runtime.Context)
 	if err != nil {
 		return nil, err
@@ -69,9 +70,10 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool) (Comman
 		return nil, err
 	}
 
-	return func(preview bool) (CommandOutput, error) {
+	return func(preview bool, log io.Writer) (CommandOutput, error) {
 		traceOutput := new(bytes.Buffer)
-		ctx := runtimeCallContext(preview, input.Verbosity, nil, traceOutput, traceOutput)
+		traceSink := mirrorToJobLog(traceOutput, log)
+		ctx := runtimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
 		ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 
 		params := eruncommon.BootstrapInitParams{

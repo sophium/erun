@@ -23,7 +23,7 @@ type ExecGateMergeInput struct {
 func execGateMergeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecGateMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var merged *eruncommon.GateMergeWorkingTreeResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, workDir string) error {
 			result, err := eruncommon.GateMergeWorkingTree(runCtx, workDir, eruncommon.GateMergeWorkingTreeParams{
 				SourceBranch: input.SourceBranch,
 				TargetBranch: input.TargetBranch,
