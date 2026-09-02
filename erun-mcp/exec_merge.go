@@ -19,7 +19,7 @@ type ExecMergeInput struct {
 func execMergeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var merged *eruncommon.MergeWorkingTreeBranchResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, workDir string) error {
 			result, err := eruncommon.MergeWorkingTreeBranch(runCtx, workDir, eruncommon.MergeWorkingTreeBranchParams{
 				TargetBranch: input.TargetBranch,
 				Remote:       input.Remote,

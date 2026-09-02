@@ -31,7 +31,7 @@ type DeployInput struct {
 	MaxCPU     string `json:"max_cpu,omitempty" jsonschema:"Kubernetes CPU quantity (e.g. 4) capping the environment's namespace via a ResourceQuota+LimitRange; requires max_memory and max_storage too. Omit all three to use the env's saved namespace quota, if any"`
 	MaxMemory  string `json:"max_memory,omitempty" jsonschema:"Kubernetes memory quantity (e.g. 8Gi) capping the environment's namespace; requires max_cpu and max_storage too"`
 	MaxStorage string `json:"max_storage,omitempty" jsonschema:"Kubernetes storage quantity (e.g. 80Gi) capping the environment's namespace; requires max_cpu and max_memory too"`
-	Wait       *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeployInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -90,7 +90,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			}
 			return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
 		})
-		envelope, err := runJobEnvelope(runtime, "deploy", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

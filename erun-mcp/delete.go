@@ -15,7 +15,7 @@ type DeleteInput struct {
 	Confirmation string `json:"confirmation,omitempty" jsonschema:"must exactly match tenant-environment when preview is false"`
 	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity    int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait         *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -50,7 +50,7 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			}
 			return nil
 		})
-		envelope, err := runJobEnvelope(runtime, "delete", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "delete", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

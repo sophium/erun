@@ -69,7 +69,7 @@ func execRawForeground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		return JobEnvelopeOutput{}, err
 	}
 
-	output, err := runCommandOutput(ctx, workDir, traceOutput, func(runCtx eruncommon.Context) error {
+	output, err := runCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx eruncommon.Context) error {
 		return eruncommon.RunRawCommand(runCtx, eruncommon.RawCommandSpec{
 			Dir:  workDir,
 			Args: input.Command,
@@ -109,6 +109,7 @@ func execRawBackground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		MaxOutputBytes: input.MaxOutputBytes,
 		LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
 		Handoff:        input.Handoff,
+		StartedByJobID: input.StartedByJobID,
 		SupervisorPath: supervisor,
 	})
 	if err != nil {

@@ -117,11 +117,23 @@ func runtimeRepoPath(runtime RuntimeContext) (string, error) {
 	return os.Getwd()
 }
 
-func captureCommandOutput(work func(stdout, stderr io.Writer) error) (string, string, error) {
+func captureCommandOutput(log io.Writer, work func(stdout, stderr io.Writer) error) (string, string, error) {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
-	err := work(stdout, stderr)
+	err := work(mirrorToJobLog(stdout, log), mirrorToJobLog(stderr, log))
 	return stdout.String(), stderr.String(), err
+}
+
+// mirrorToJobLog sends what the work writes to both the buffer this call
+// returns inline and, for a backgrounded call, the job's own log as it is
+// produced. A caller polling exec_job_output would otherwise see nothing until
+// the work finished, and a failed background job would leave nothing but an
+// exit code behind. A synchronous call passes io.Discard and pays a no-op.
+func mirrorToJobLog(capture, log io.Writer) io.Writer {
+	if log == nil || log == io.Discard {
+		return capture
+	}
+	return io.MultiWriter(capture, log)
 }
 
 func runtimePushFunc(runtime RuntimeConfig) eruncommon.DockerPushFunc {
@@ -130,7 +142,7 @@ func runtimePushFunc(runtime RuntimeConfig) eruncommon.DockerPushFunc {
 	}
 }
 
-func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes.Buffer, run func(eruncommon.Context) error) (CommandOutput, error) {
+func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes.Buffer, log io.Writer, run func(eruncommon.Context) error) (CommandOutput, error) {
 	if ctx.DryRun {
 		if err := run(ctx); err != nil {
 			return CommandOutput{}, err
@@ -142,7 +154,7 @@ func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes
 		}, nil
 	}
 
-	stdout, stderr, err := captureCommandOutput(func(stdout, stderr io.Writer) error {
+	stdout, stderr, err := captureCommandOutput(log, func(stdout, stderr io.Writer) error {
 		runCtx := ctx
 		runCtx.Stdout = stdout
 		runCtx.Stderr = stderr
@@ -166,9 +178,15 @@ func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes
 	}, nil
 }
 
-func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run func(eruncommon.Context, string) error) (CommandOutput, error) {
+// runRuntimeCommand runs one tool's work and captures it. log is the
+// background job's own log for a call started through runJobEnvelope with wait
+// false, and nil (or io.Discard) for a synchronous call that returns
+// everything inline; the trace and the work's own stdout/stderr are mirrored
+// into it as they are produced.
+func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log io.Writer, run func(eruncommon.Context, string) error) (CommandOutput, error) {
 	traceOutput := new(bytes.Buffer)
-	ctx := runtimeCallContext(preview, verbosity, nil, traceOutput, traceOutput)
+	traceSink := mirrorToJobLog(traceOutput, log)
+	ctx := runtimeCallContext(preview, verbosity, nil, traceSink, traceSink)
 	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 	// Surfaces agent-driven operations in the desktop's Diagnostics console,
 	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
@@ -182,7 +200,7 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run f
 		return CommandOutput{}, err
 	}
 
-	output, err := runCommandOutput(ctx, workDir, traceOutput, func(runCtx eruncommon.Context) error {
+	output, err := runCommandOutput(ctx, workDir, traceOutput, log, func(runCtx eruncommon.Context) error {
 		return run(runCtx, workDir)
 	})
 	return output, err

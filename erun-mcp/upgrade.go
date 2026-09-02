@@ -14,7 +14,7 @@ type UpgradeInput struct {
 	Force     bool   `json:"force,omitempty" jsonschema:"when true, bypass the fingerprint cache and re-run helm upgrade even when no source change is detected"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the upgrade plan (channel, current -> target) without deploying"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	Wait      *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 // upgradeTool redeploys the runtime's environment only when it is opted into
@@ -71,7 +71,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 			}
 			return nil
 		})
-		envelope, err := runJobEnvelope(runtime, "upgrade", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "upgrade", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

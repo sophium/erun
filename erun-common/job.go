@@ -306,7 +306,10 @@ type EnvironmentJob struct {
 	// event stream by the supervisor. It is nil for a command job and for an
 	// agent run that has not emitted yet — never a made-up zero state.
 	Progress *AgentJobProgress `json:"progress,omitempty"`
-	// Command is the argv the supervisor ran, empty for an attached job.
+	// Command is the argv the supervisor ran. Empty for an attached job, and
+	// for a task job — that one is a Go call in this process, not a subprocess,
+	// so there is no argv to record and synthesising one would assert a command
+	// nobody ran. What it did is in Name, LogPath, and Result instead.
 	Command []string `json:"command,omitempty"`
 	Dir     string   `json:"dir,omitempty"`
 	// PID is the supervisor for a started job, and the caller's own process for
@@ -344,7 +347,11 @@ type EnvironmentJob struct {
 	// was started (the parent's ERUN_JOB_ID, inherited down whatever it
 	// spawned), empty when this job was started from outside any other job.
 	// It is what lets the parent's own finish check tell "a job I started" from
-	// "an unrelated job that happens to share this environment".
+	// "an unrelated job that happens to share this environment". Work reaching
+	// this environment through its MCP edge has nothing to inherit from — that
+	// server was never started as anyone's job — so the caller supplies the
+	// value explicitly there; an absent one stays absent rather than being
+	// guessed from whichever job happens to be running here.
 	StartedByJobID string `json:"startedByJobId,omitempty"`
 	// Handoff marks this job as deliberately meant to outlive whatever started
 	// it, set by `job start --handoff`. Without it, a parent whose own process

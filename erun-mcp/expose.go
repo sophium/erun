@@ -42,7 +42,7 @@ type ExposeInput struct {
 	ACMEEmail             string `json:"acmeEmail,omitempty" jsonschema:"ACME account contact email for the provisioned per-env certificate (requires dns01TokenFile and dns01BrokerUrl)"`
 	ACMEServer            string `json:"acmeServer,omitempty" jsonschema:"ACME directory URL for the provisioned per-env certificate (default Let's Encrypt production)"`
 	DNS01WebhookGroupName string `json:"dns01WebhookGroupName,omitempty" jsonschema:"API group the cluster's cert-manager DNS-01 webhook shim registers under (default acme.erun.io)"`
-	Wait                  *bool  `json:"wait,omitempty" jsonschema:"when true (the default this release), run synchronously and return the full result inline, exactly as before this input existed. Set false to start the work as a background job and get back {jobId, state: running} immediately instead -- poll exec_job_status/exec_job_await/exec_job_output for the outcome. This default flips to false in a future release, with true kept callable for one more release as the compatibility switch"`
+	JobEnvelopeInput
 }
 
 func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExposeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -82,7 +82,7 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			}, exposeStore, nil, nil)
 			return err
 		})
-		envelope, err := runJobEnvelope(runtime, "expose", input.Wait, input.Preview, execute)
+		envelope, err := runJobEnvelope(runtime, "expose", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err
 	}
 }

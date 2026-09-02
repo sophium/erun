@@ -563,6 +563,25 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("status_names_why_a_failed_job_failed_instead_of_only_its_exit_code", func(t *testing.T) {
+		// Every other terminal status line already rendered the recorded reason;
+		// exited did not, so a job that never even started reported a bare
+		// "exited -1" and left the one field that says what went wrong readable
+		// only in JSON. The work here is an absolute path that does not exist, so
+		// the supervisor's own start fails and the reason is the whole answer.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := inEnvironment(setup.Env())
+
+		start := startJob(t, setup, envVars, "cannot-start", "--", "/erun-integration/no-such-work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "cannot-start", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "cannot-start"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "job/status_names_why_a_failed_job_failed", normalize.Apply(await.Combined+status.Combined))
+	})
+
 	t.Run("output_is_readable_while_the_job_runs", func(t *testing.T) {
 		// Progress must be visible before the work exits, not buffered to the end,
 		// and the next offset must let a poll continue rather than repeat. The stub
