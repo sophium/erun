@@ -1641,4 +1641,123 @@ func TestExec(t *testing.T) {
 		}
 		golden.Equal(t, "exec/close_pr_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
 	})
+
+	t.Run("gate_run_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "gate-run", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_start_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "gate-run", "start", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_start_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "start",
+			"--source-branch", "feature/add-widget", "--target-branch", "main",
+			"--source-commit", "sourcesha0000000000000000000000000000000",
+			"--merge-commit", "mergesha00000000000000000000000000000000",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_start_dry_run_immediate_failure_no_merge_commit", func(t *testing.T) {
+		// A squash conflict before any build starts has no trackable running
+		// phase at all: --status failed is set directly, with no --merge-commit.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "start",
+			"--source-branch", "feature/add-widget", "--target-branch", "main",
+			"--source-commit", "sourcesha0000000000000000000000000000000",
+			"--status", "failed", "--failing-step", "git merge --squash",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_dry_run_immediate_failure_no_merge_commit", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_start_dry_run_with_review_id_and_log_ref", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "start",
+			"--source-branch", "feature/add-widget", "--target-branch", "main",
+			"--source-commit", "sourcesha0000000000000000000000000000000",
+			"--merge-commit", "mergesha00000000000000000000000000000000",
+			"--review-id", "review-1", "--log-ref", "/tmp/build.json",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_dry_run_with_review_id_and_log_ref", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "gate-run", "report", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_dry_run_passed", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "gate-run-1", "--status", "passed", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_dry_run_passed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_dry_run_failed_with_failing_step_and_log_ref", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "gate-run-1",
+			"--status", "failed", "--failing-step", "erun build", "--log-ref", "/tmp/build.json",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_dry_run_failed_with_failing_step_and_log_ref", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_dry_run_missing_gate_run_id_traces_then_refuses", func(t *testing.T) {
+		// GATE_RUN_ID is a positional arg an empty string can still satisfy
+		// cobra.ExactArgs(1), so the shared validation is what actually catches
+		// this, not command-tree wiring.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "", "--status", "inconclusive", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing gate run id, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_dry_run_missing_gate_run_id_traces_then_refuses", normalize.Apply(result.Combined))
+	})
 }

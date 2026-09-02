@@ -34,6 +34,7 @@ Available Commands:
   doctor       Diagnose and repair an environment's runtime and config
   exec         Repository execution utilities
   expose       Expose an environment's Service at a public HTTPS hostname
+  gate         See what is being gated, and what recent gates decided
   help         Help about any command
   idle         Show environment idle stop status
   init         Initialize configuration for the current project

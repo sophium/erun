@@ -83,12 +83,16 @@ gate_merge_status=$?
 ```
 
 **On failure** (a fetch error, or a real squash conflict), record a failed
-`GATE` build against the source commit and stop:
+`GATE` build against the source commit, report a `gate-run` with no
+trackable running phase at all (no build ever started), and stop:
 
 ```sh
 if [ "${gate_merge_status}" -ne 0 ]; then
   erun review record-build "${review_id}" --commit "${source_commit}" --gate --failed \
     --failure-detail "erun exec gate-merge failed building the prospective merge onto ${target}: see the gate log"
+  erun exec gate-run start --source-branch "${source}" --target-branch "${target}" \
+    --source-commit "${source_commit}" --review-id "${review_id}" \
+    --status failed --failing-step "git merge --squash"
   echo "Gate-merge failed; recorded a failed GATE build against ${source_commit}. The review should now be FAILED, removed from the queue's front — report the failure to whoever owns ${source} rather than retrying blindly. See erun-docs/docs/collaboration/merge-queue.md if it stays wedged at MERGE instead."
   exit 1
 fi
@@ -99,9 +103,20 @@ A conflicted squash leaves the working tree mid-conflict — do not resolve it
 yourself; the failed-build report above is what unwedges the queue, and the
 worktree is cleaned up by whoever re-drives this review after a fix.
 
+This skill always drives an already-promoted review, so `--review-id` is
+always set above. A branch gated with no erun review at all (e.g. one
+gated by a plain GitHub pull request) calls the same `erun exec gate-run
+start`/`report` commands directly, at the same points in the flow, just
+omitting `--review-id` and skipping every `erun review ...` call in this
+skill entirely — the two report calls are independent of the review-build
+reporting beside them.
+
 ### 4. Gate it with a real `erun build` — never `--release`
 
 ```sh
+gate_run_id=$(erun exec gate-run start --source-branch "${source}" --target-branch "${target}" \
+  --source-commit "${source_commit}" --merge-commit "${merge_commit}" --review-id "${review_id}" \
+  --output json | jq -r .gateRunId)
 if erun build --output json > /tmp/erun-merge-queue-drive-build.json; then
   build_ok=0
 else
@@ -114,23 +129,42 @@ nothing, and releasing is a separate step triggered off the merge commit only
 after `MERGED` is actually reached (see `erun-backend-api/AGENTS.md` § "Merge
 Queue" — "The gate is `erun build`, never `erun release`").
 
-**On failure**, record a failed `GATE` build against the merge commit and
-stop, the same shape as rung 3's failure path:
+`gate-run start` is what makes this attempt visible on `erun gate list`
+*while it is still running* — before this step existed, a merge queue gate
+had no observable state at all between promotion and its terminal outcome.
+
+**On failure**, record a failed `GATE` build against the merge commit,
+report the `gate-run` `FAILED` naming the failing step, and stop, the same
+shape as rung 3's failure path:
 
 ```sh
 if [ "${build_ok}" -ne 0 ]; then
   erun review record-build "${review_id}" --commit "${merge_commit}" --gate --failed \
     --failure-detail "erun build failed against the prospective merge; see the build log"
+  erun exec gate-run report "${gate_run_id}" --status failed --failing-step "erun build" \
+    --log-ref /tmp/erun-merge-queue-drive-build.json
   echo "Build failed; recorded a failed GATE build against ${merge_commit}. The review should now be FAILED. The worktree still holds the built-but-rejected merge on a local branch named ${target} — do not push it."
   exit 1
 fi
 ```
 
+**If the build's own outcome is genuinely unknown** — this process was
+interrupted by an environment fault, or a wrapper around it hit its own
+timeout cap before the build reported anything — report `--status
+inconclusive` instead of guessing at `failed` or `passed`; see erun#1931 for
+why a non-verdict must never be reported as a red one.
+
 ### 5. Record the successful GATE build
 
 ```sh
 build_id=$(erun review record-build "${review_id}" --commit "${merge_commit}" --gate --output json | jq -r .buildId)
+erun exec gate-run report "${gate_run_id}" --status passed
 ```
+
+The `gate-run` outcome is reported here, immediately once the build itself
+is known green — independent of whether the push in rung 6 or the report in
+rung 7 below later succeeds. A push or report failure past this point is a
+separate anomaly (see rung 6), not something that unmakes this verdict.
 
 No `--version`: a `GATE` build carries none, since the gate publishes
 nothing. Recording it is what makes rung 7's `report-merged` verifiable —
@@ -224,7 +258,11 @@ case that needs a human decision rather than a plain re-run: the `GATE` build
 already recorded successful is still valid, so re-running rungs 6–7 by hand
 against that `build_id` is the right fix once the anomaly rung 6 named is
 understood — not re-running the whole skill, which would gate-build and
-record a second, redundant `GATE` build. Rung 8 is safe to re-run on its own
+record a second, redundant `GATE` build. Each re-run of rungs 3–4 starts a
+new `gate-run` too, which is correct rather than redundant: a retry after
+fixing the underlying problem is genuinely a new attempt, and `erun gate
+list` should show both the earlier `FAILED` run and this one rather than
+silently discarding the history. Rung 8 is safe to re-run on its own
 after rung 7 already reported `MERGED`: closing an already-closed pull
 request is a no-op (its state is no longer `open`, so the lookup finds
 nothing), and closing one still open just repeats the same close-and-comment

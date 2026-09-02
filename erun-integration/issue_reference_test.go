@@ -293,7 +293,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/kubernetes_resource_quota_test.go":       1,
 	"erun-common/mcp_capabilities.go":                     1,
 	"erun-common/mcp_reachability.go":                     1,
-	"erun-common/mcp_tools.go":                            5,
 	"erun-common/mcp_tools_test.go":                       1,
 	"erun-common/observe_drift.go":                        1,
 	"erun-common/platform_client.go":                      2,

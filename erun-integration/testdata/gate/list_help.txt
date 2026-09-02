@@ -1,0 +1,23 @@
+List gate runs, most recent first, narrowed by any combination of the filters below. Each entry names the branch, the prospective merge commit actually tested, the target, and the verdict -- and, for a failed one, which gate step failed and where to read it.
+
+A RUNNING entry is being gated right now. INCONCLUSIVE means the gate never reached a real verdict (a wrapper timeout, an environment fault) -- read it as unresolved, not as a failure.
+
+Usage:
+  erun gate list [flags]
+
+Examples:
+  erun gate list --target-branch main
+  erun gate list --status FAILED
+
+Flags:
+      --dry-run                Resolve and trace mutating actions without executing them.
+  -h, --help                   help for list
+      --source-branch string   Filter by source branch
+      --status string          Filter by status: RUNNING, PASSED, FAILED, or INCONCLUSIVE
+      --target-branch string   Filter by target branch
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.

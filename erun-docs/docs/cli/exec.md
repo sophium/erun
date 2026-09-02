@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Nine subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), and `close-pr` (close the GitHub pull request a merge queue gate actually shipped).
+Repository helpers that run from the project root. Eleven subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), and `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change).
 
 ## Synopsis
 
@@ -18,6 +18,8 @@ erun exec merge TARGET_BRANCH [flags]
 erun exec gate-merge SOURCE_BRANCH --target TARGET_BRANCH [flags]
 erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --remote-url URL [flags]
 erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
+erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-commit SHA [flags]
+erun exec gate-run report GATE_RUN_ID --status STATUS [flags]
 ```
 
 ## Subcommands
@@ -96,6 +98,24 @@ Refuses, loudly, when the pull request's current head does not match `--gated-co
 
 `--dry-run` traces the lookup without closing or commenting on anything.
 
+### `exec gate-run start` {#exec-gate-run-start}
+
+Records the beginning of one attempt to gate a prospective merge — `--source-branch`, `--target-branch`, `--source-commit`, and the prospective squash-merge commit `--merge-commit` — so [`erun gate list`](/cli/gate#gate-list) can show it as currently gating, independent of whether an erun review exists for the change. Prints the new gate run's id; pass it to `exec gate-run report` once the gate finishes.
+
+A run with no trackable running phase at all — a squash conflict before any build ever starts — may set `--status` directly to `failed` or `inconclusive` and omit `--merge-commit`. `--review-id` links the run to an erun review, when one exists.
+
+`--dry-run` traces the request without sending it.
+
+### `exec gate-run report` {#exec-gate-run-report}
+
+Moves GATE_RUN_ID from `running` to a terminal verdict: `--status passed`, `failed`, or `inconclusive`.
+
+A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report `inconclusive` — never `failed`, which asserts a real gate step actually produced a red verdict. `--failing-step` is required when `--status` is `failed`; `--log-ref` points at where to read the run's own output.
+
+Reporting against a gate run that already has an outcome is refused: a verdict is immutable once reached.
+
+`--dry-run` traces the request without sending it.
+
 ## Examples
 
 ```bash
@@ -113,6 +133,10 @@ erun exec report-commit-status $(git rev-parse HEAD) --state success \
 erun exec close-pr feature/add-widget --target main \
   --remote-url https://github.com/org/repo.git \
   --gated-commit $(git rev-parse origin/feature/add-widget) --landing-commit $(git rev-parse HEAD)
+erun exec gate-run start --source-branch feature/add-widget --target-branch main \
+  --source-commit $(git rev-parse feature/add-widget) --merge-commit $(git rev-parse HEAD)
+erun exec gate-run report abc123 --status passed
+erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json
 ```
 
 ## Error behaviour
@@ -146,3 +170,7 @@ erun exec close-pr feature/add-widget --target main \
 | The pull request's current head does not match `--gated-commit` (`close-pr`). | Refuses with `refusing to close pull request #N for BRANCH: its head is X, not Y — the commit the gate actually tested. ...`; nothing is commented or closed. |
 | No GitHub token is available (`close-pr`). | Refuses with `no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
 | GitHub rejects a request (`close-pr`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
+| `--source-branch`, `--target-branch`, or `--source-commit` is missing (`gate-run start`). | Refuses naming the missing field before the network call. |
+| `--merge-commit` is missing and `--status` is not `failed`/`inconclusive` (`gate-run start`). | Refuses with `mergeCommit: is required unless status is FAILED or INCONCLUSIVE`. |
+| `--status failed` with no `--failing-step` (`gate-run start` or `gate-run report`). | Refuses with `failingStep: is required when status is FAILED`. |
+| GATE_RUN_ID already has an outcome (`gate-run report`). | Refuses with `409` and `gate run ... already reached ...; a verdict cannot be re-reported`. |

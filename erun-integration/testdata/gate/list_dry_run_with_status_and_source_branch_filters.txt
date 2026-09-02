@@ -1,0 +1,3 @@
+Dry run: erun gate list planned.
+audit: erun gate list --dry-run --source-branch feature/add-widget --status FAILED --target-branch main
+platform: GET https://api.example.test/v1/gate-runs (targetBranch=main, sourceBranch=feature/add-widget, status=FAILED)

@@ -103,6 +103,13 @@ var Routes = map[string]Class{
 	"POST /v1/reviews/{review_id}/builds":           TenantUserClass,
 	"GET /v1/reviews/{review_id}/builds/{build_id}": TenantUserClass,
 
+	// gate_runs.go — reading and driving gate runs is part of the same
+	// merge-queue workflow TenantUser already drives for reviews and builds.
+	"GET /v1/gate-runs":                 TenantUserClass,
+	"POST /v1/gate-runs":                TenantUserClass,
+	"GET /v1/gate-runs/{gate_run_id}":   TenantUserClass,
+	"PATCH /v1/gate-runs/{gate_run_id}": TenantUserClass,
+
 	// comments.go — driving review comments.
 	"GET /v1/reviews/{review_id}/comments":                       TenantUserClass,
 	"POST /v1/reviews/{review_id}/comments":                      TenantUserClass,

@@ -582,6 +582,14 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "List a target branch's merge queue on the erun platform, in queue order. Supports preview.",
 	}, reviewMergeQueueListTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "gate_list",
+		Description: "List gate runs on the erun platform, most recent first — the first-class record of one attempt to gate a prospective merge, independent of whether an erun review exists for the change. Each entry names the branch, the prospective merge commit actually tested, the target, and the verdict (RUNNING/PASSED/FAILED/INCONCLUSIVE), and for a FAILED one, which gate step failed and where to read it. INCONCLUSIVE means the gate never reached a real verdict (a wrapper timeout, an environment fault) — read it as unresolved, not as a failure. Supports preview.",
+	}, gateListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "gate_show",
+		Description: "Show one gate run in full on the erun platform. Supports preview.",
+	}, gateShowTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
 		Description: "Advance a target branch's merge queue head to MERGE on the erun platform, which starts that review's merge-gate build. Refuses with the unresolved comment thread count when the queue head still has open threads — resolve them (review_resolve) or use review_queue_override_advance. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
 	}, reviewMergeQueueAdvanceTool(runtime))
@@ -690,6 +698,14 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_report-commit-status",
 		Description: "Report a commit status on GitHub for commit — the last step in the merge queue gate (exec_gate-merge, build, review_record-build with gate set): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in description. A required status check on the remote's branch protection has nothing to require until this reports it. commit should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit exec_gate-merge produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed. Set preview to trace the request without sending it.",
 	}, execReportCommitStatusTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_gate-run_start",
+		Description: "Record the beginning of one attempt to gate a prospective merge — the branch, the prospective squash-merge commit, and the target — so gate_list can show it as currently gating, independent of whether an erun review exists for the change. Returns the new gate run's id; pass it to exec_gate-run_report once the gate finishes. A run with no trackable running phase at all — a squash conflict before any build ever starts — may set status directly to FAILED or INCONCLUSIVE and omit mergeCommit. A real, immediate write, not a preview, unless preview is set.",
+	}, execGateRunStartTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_gate-run_report",
+		Description: "Move a gate run from RUNNING to a terminal verdict: PASSED, FAILED, or INCONCLUSIVE. A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report INCONCLUSIVE — never FAILED, which asserts a real gate step actually produced a red verdict. failingStep is required when status is FAILED. Reporting against a gate run that already has an outcome is refused: a verdict is immutable once reached. A real, immediate write, not a preview, unless preview is set.",
+	}, execGateRunReportTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_close-pr",
 		Description: "Close branch's open pull request on GitHub, once review_report-merged has already succeeded, and record landingCommit on it. GitHub never reconciles a queued merge with its pull request on its own, since exec_gate-merge's squash commit is never the branch head GitHub tracks — the commit that actually shipped exists nowhere the pull request can see until this reports it. Safe when branch has no open pull request against targetBranch: this is a no-op, not an error, since queueing a plain branch with no review is legitimate. Refuses, loudly, when the pull request's current head does not match gatedCommit — something pushed to branch after the gate fetched it, so the gated content is not what closing would discard. Set preview to trace the lookup without closing or commenting on anything.",
