@@ -1,0 +1,29 @@
+Move GATE_RUN_ID from running to a terminal verdict: passed, failed, or inconclusive.
+
+A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report inconclusive -- never failed, which asserts a real gate step actually produced a red verdict. --failing-step is required when --status is failed.
+
+Reporting against a gate run that already has an outcome is refused: a verdict is immutable once reached.
+
+--dry-run traces the request without sending it.
+
+Usage:
+  erun exec gate-run report GATE_RUN_ID [flags]
+
+Examples:
+  erun exec gate-run report abc123 --status passed
+  erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref <TMP>
+  erun exec gate-run report abc123 --status inconclusive --log-ref 'wrapper hit its own 8m cap'
+
+Flags:
+      --dry-run               Resolve and trace mutating actions without executing them.
+      --failing-step string   Which gate step failed (required when --status is failed)
+  -h, --help                  help for report
+      --log-ref string        Where to read this run's own output (a job id, URL, or path)
+      --merge-commit string   Prospective squash-merge commit, if not already set when the run started
+      --status string         Outcome: passed, failed, or inconclusive (required)
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.

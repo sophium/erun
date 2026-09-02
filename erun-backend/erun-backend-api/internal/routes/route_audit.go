@@ -25,6 +25,19 @@ var InternalAPIRoutes = map[string]bool{
 	// flow (advancing the queue, closing a review) already has a real
 	// desktop surface, which is what actually needs one.
 	"POST /v1/reviews/{review_id}/builds": true,
+	// Starts (POST) or reports the outcome of (PATCH) a gate run -- the
+	// environment driving the gate reports its own attempt, never something
+	// an operator clicks, the same self-report shape as the build-result
+	// route above.
+	"POST /v1/gate-runs":                true,
+	"PATCH /v1/gate-runs/{gate_run_id}": true,
+	// Listing gate runs has no console or desktop surface yet. Unlike the
+	// two self-reported routes above, this one genuinely needs an operator
+	// surface -- it is deliberately scoped out of this change (a follow-up
+	// issue tracks adding one to erun-console/erun-ui) rather than declared
+	// permanently internal. Remove this entry once that surface exists.
+	"GET /v1/gate-runs":               true,
+	"GET /v1/gate-runs/{gate_run_id}": true,
 	// The environment's own AI-tool hooks report their turn-boundary status
 	// (busy/idle/awaiting-input) here -- never something an operator clicks,
 	// the same self-report shape as the build-result route above. The

@@ -11,11 +11,12 @@ import (
 // because the SDK models the latter two as *bool and treats nil as true. So
 // `version` and `list` were advertised as destructive open-world tools and
 // `exec_raw` was indistinguishable from them, which means a client wanting to
-// gate on destructiveHint had to gate everything or nothing (#1186).
+// gate on destructiveHint had to gate everything or nothing.
 //
 // This lives in erun-common for the same reason mcpReadOnlyTools does: the edge
 // and every other transport must read one mapping rather than each keeping its
-// own, which is the drift that produced #1148 and #1161.
+// own, which is the drift that has caused tool metadata to disagree across
+// transports before.
 
 // MCPToolDescriptor is the wire-visible metadata for one tool.
 type MCPToolDescriptor struct {
@@ -63,7 +64,7 @@ type MCPToolDescriptor struct {
 // mcpToolDescriptors covers every registered tool. A tool absent from this map
 // is a programming error, and the transport refuses to register it rather than
 // letting it ship on the spec defaults -- which is exactly how the surface
-// reached the state #1186 describes.
+// used to drift out of sync with its own metadata.
 var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// The whole exec_* family is an agent's hands inside its own working tree
 	// (raw commands, file writes, git commit/push, job control) -- a human
@@ -83,6 +84,14 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"exec_close-pr": {
 		Family: "exec", CLIPath: []string{"exec", "close-pr"}, Title: "Close the GitHub pull request a merge queue gate actually shipped",
 		ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true, AgentFacing: true,
+	},
+	"exec_gate-run_start": {
+		Family: "exec", CLIPath: []string{"exec", "gate-run", "start"}, Title: "Record the beginning of one gate attempt",
+		ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true,
+	},
+	"exec_gate-run_report": {
+		Family: "exec", CLIPath: []string{"exec", "gate-run", "report"}, Title: "Report a gate run's outcome",
+		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
 	// exec_agent has no CLI path: the CLI already offers this exact
 	// capability as `erun exec job start --agent`, one command covering both
@@ -151,7 +160,15 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"review_queue_list":             {Family: "review", CLIPath: []string{"review", "queue", "list"}, Title: "List a merge queue", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_queue_advance":          {Family: "review", CLIPath: []string{"review", "queue", "advance"}, Title: "Advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_queue_override-advance": {Family: "review", CLIPath: []string{"review", "queue", "override-advance"}, Title: "Override the unresolved-thread gate and advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"idle":                          {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// gate_list/gate_show are genuinely human-facing reads (an operator or an
+	// agent wants "what is gating now"), unlike the exec_gate-run-* pair
+	// below. AgentFacing here is a deliberate, temporary scope decision for
+	// this feature's CLI/MCP-first delivery, not a claim that no human ever
+	// calls these directly — a follow-up issue tracks adding a
+	// console/desktop surface; remove AgentFacing once it exists.
+	"gate_list": {Family: "gate", CLIPath: []string{"gate", "list"}, Title: "List gate runs: what is gating now, and what recent gates decided", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"gate_show": {Family: "gate", CLIPath: []string{"gate", "show"}, Title: "Show one gate run in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"idle":      {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	// The idle_stop_* primitives record and query the auto-stop supervisor's
 	// own decisions; a human reads that history through the already-covered
 	// `idle` report, never by calling these directly.
@@ -249,8 +266,8 @@ func MCPToolNames() []string {
 // The first five broke it because `erun exec` was the only command group
 // whose members dropped their prefix, and it is the group whose members
 // differ most in blast radius -- exec_diff only reads while exec_raw runs
-// arbitrary argv. The job_* five are #1246's rename of the same shape:
-// `job` becomes a sub-family of `exec` (#1186), so its CLI path moves from
+// arbitrary argv. The job_* five are a later rename of the same shape:
+// `job` becomes a sub-family of `exec`, so its CLI path moves from
 // `erun job <verb>` to `erun exec job <verb>` and the tool names move with
 // it. The old names stay callable for one release so an upgrade does not
 // break a pinned client, then go.

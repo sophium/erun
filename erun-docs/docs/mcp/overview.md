@@ -362,6 +362,19 @@ Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`
 
 Same commands as [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) / [`erun exec close-pr`](/cli/exec#exec-close-pr). Unlike the working-tree tools above, neither touches the runtime repo's git state — both only call GitHub's REST API — so this is its own section rather than a row in the working-tree table.
 
+### Gate runs — what is being gated now, and what recent gates decided {#gate-runs}
+
+A gate run is the first-class record of one attempt to gate a prospective merge, independent of whether an erun review exists for the change it gates — a repository whose changes arrive as GitHub pull requests, with no erun review at all, is exactly the case this exists for. See [merge queue](/collaboration/merge-queue) for how a review-driven gate fits alongside this.
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `exec_gate-run_start` | Work | Record the beginning of one gate attempt: `sourceBranch`, `targetBranch`, `sourceCommit`, and the prospective squash-merge commit `mergeCommit`. Returns the new gate run's id. A run with no trackable running phase at all — a squash conflict before any build ever starts — may set `status` directly to `FAILED` or `INCONCLUSIVE` and omit `mergeCommit`. `reviewId` links the run to an erun review, when one exists. Set `preview` to trace the request without sending it. |
+| `exec_gate-run_report` | Work | Move `gateRunId` from `RUNNING` to a terminal verdict: `PASSED`, `FAILED`, or `INCONCLUSIVE`. A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report `INCONCLUSIVE` — never `FAILED`, which asserts a real gate step actually produced a red verdict. `failingStep` is required when `status` is `FAILED`. Reporting against a gate run that already has an outcome is refused (409): a verdict is immutable once reached. Set `preview` to trace the request without sending it. |
+| `gate_list` | Read | List gate runs, most recent first, narrowed by any combination of `targetBranch`, `sourceBranch`, and `status`. Each entry names the branch, the prospective merge commit actually tested, the target, and the verdict, and for a `FAILED` one, `failingStep` and `logRef` (where to read it). `RUNNING` means gating right now; `INCONCLUSIVE` means unresolved, not failed. |
+| `gate_show` | Read | Fetch one gate run by `gateRunId`. |
+
+Same commands as [`erun exec gate-run start`](/cli/exec#exec-gate-run-start) / [`erun exec gate-run report`](/cli/exec#exec-gate-run-report) / [`erun gate list`](/cli/gate#gate-list) / [`erun gate show`](/cli/gate#gate-show). All four support `preview`; `gate_list` and `gate_show` are read-only. `exec_gate-run_start`/`exec_gate-run_report` are agent-callable only — the environment driving the gate reports its own attempt, never something an operator clicks. `gate_list`/`gate_show` are agent-callable too as this feature's first cut; a console/desktop surface is planned as a follow-up.
+
 ### Escape hatch
 
 | Tool | Purpose |
@@ -415,6 +428,8 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_gate-merge` | `erun exec gate-merge` | Work |
 | exec | `exec_report-commit-status` | `erun exec report-commit-status` | Work |
 | exec | `exec_close-pr` | `erun exec close-pr` | Work (idempotent) |
+| exec | `exec_gate-run_start` | `erun exec gate-run start` | Work |
+| exec | `exec_gate-run_report` | `erun exec gate-run report` | Work |
 | exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
 | exec | `exec_job_attach` | `erun exec job attach` | Work |
 | exec | `exec_job_status` | `erun exec job status` | Read |
@@ -465,6 +480,8 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_queue_list` | `erun review queue list` | Read |
 | review | `review_queue_advance` | `erun review queue advance` | Work |
 | review | `review_queue_override-advance` | `erun review queue override-advance` | Work |
+| gate | `gate_list` | `erun gate list` | Read |
+| gate | `gate_show` | `erun gate show` | Read |
 | idle | `idle` | `erun idle` | Read |
 | idle | `idle_stop_history` | *(MCP-only)* | Read |
 | idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |

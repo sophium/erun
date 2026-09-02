@@ -152,6 +152,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - A successful build moves an `OPEN` or `FAILED` review into the target branch merge queue as `READY`; if there is no active `MERGE` review for that target branch, the next queued review may be promoted to `MERGE`.
 - A failed build for a queued or merging review moves it to `FAILED` and removes it from the merge queue.
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
+- The `gate_runs` table stores the first-class record of one attempt to gate a prospective merge — independent of whether an erun review exists for the change. Reviews are one producer (a review-driven merge reports a gate run alongside its GATE build); a repository whose changes arrive as GitHub pull requests, with no erun review at all, is the other. `status` is one of `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE` — a wrapper timing out or a run interrupted by an environment fault must report `INCONCLUSIVE`, never `FAILED`, since `FAILED` asserts a real verdict was reached. A `FAILED` row must carry `failing_step` (which gate step produced the red verdict); `log_ref` is an optional pointer to where to read it. `merge_commit` is NULL only when the run failed before that commit existed at all (a squash conflict). `review_id` is nullable and, when set, foreign-keys `(tenant_id, review_id)` to `reviews`.
 - Audit events are stored in PostgreSQL.
 - Every tenant-owned PostgreSQL OLTP table must include `tenant_id`, enforce tenant-scoped uniqueness with composite unique indexes, and have PostgreSQL RLS.
 - API request handling must resolve tenant from the bearer token issuer before running tenant-owned queries.
@@ -174,6 +175,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - `review_reviewers` stores reviewer assignments for reviews.
 - `builds` stores tenant-owned build records linked to reviews, including `successful`, `commit_id`, `kind` (`RECORDED` or `GATE`), `version` (required for `RECORDED`, NULL for `GATE`), and `failure_detail` (required for a failed `GATE` build).
 - `comments` stores tenant-owned review comments. Root comments own one review/commit/line discussion, and child comments must reference that root.
+- `gate_runs` stores the first-class record of one gate attempt: `source_branch`, `target_branch`, `source_commit`, `merge_commit` (nullable), an optional `review_id`, `status` (`RUNNING`/`PASSED`/`FAILED`/`INCONCLUSIVE`), and `failing_step`/`log_ref` for a red verdict.
 - `audit_events` stores append-only API, MCP, and CLI activity with tenant, ERun user, external identity, source-specific action fields, and event time.
 - Future environment, deployment, activity, and runtime state tables should hang from `tenants(tenant_id)` and use tenant-scoped indexes.
 

@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw common.RawCommandRunnerFunc, resolveOpen OpenResolver) *cobra.Command {
+func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw common.RawCommandRunnerFunc, resolveOpen OpenResolver, store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
 	// job's supervise leaf is mounted only here, under exec, since
 	// environmentJobSupervisorArgs always re-execs `exec job supervise`
 	// regardless of which entry point (this one, or the deprecated top-level
@@ -30,8 +30,116 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecGateMergeCmd(findProjectRoot),
 		newExecReportCommitStatusCmd(),
 		newExecClosePRCmd(),
+		newExecGateRunCmd(store, deps),
 		jobCmd,
 	)
+}
+
+// newExecGateRunCmd builds `erun exec gate-run`, the pair of self-report
+// calls the environment driving a gate uses to make its own attempt visible
+// on the erun platform — start/report, never a human-facing
+// listing (that is `erun gate list`/`show`).
+func newExecGateRunCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+	var alias string
+	cmd := newCommandGroup(
+		"gate-run",
+		"Report a gate run's start and outcome to the erun platform",
+		newExecGateRunStartCmd(store, &alias, deps),
+		newExecGateRunReportCmd(store, &alias, deps),
+	)
+	cmd.PersistentFlags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
+	return cmd
+}
+
+func newExecGateRunStartCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var params common.GateRunStartParams
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Record the beginning of one gate attempt",
+		Long: "Record the beginning of one attempt to gate a prospective merge -- the branch, the prospective " +
+			"squash-merge commit, and the target -- so `erun gate list` can show it as currently gating, " +
+			"independent of whether an erun review exists for the change. Prints the new gate run's id; pass it " +
+			"to `erun exec gate-run report` once the gate finishes.\n\n" +
+			"A run with no trackable running phase at all -- a squash conflict before any build ever starts -- " +
+			"may set --status directly to failed or inconclusive and omit --merge-commit.\n\n" +
+			"--dry-run traces the request without sending it.",
+		Example: "  erun exec gate-run start --source-branch feature/x --target-branch main \\\n" +
+			"    --source-commit $(git rev-parse feature/x) --merge-commit $(git rev-parse HEAD)",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			run, err := common.RunGateRunStart(ctx, store, *alias, params, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec gate-run start planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "Started gate run %s (%s -> %s, status=%s).\n",
+					run.GateRunID, run.SourceBranch, run.TargetBranch, run.Status); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(run)
+		},
+	}
+	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch being gated (required)")
+	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch the prospective merge lands onto (required)")
+	cmd.Flags().StringVar(&params.SourceCommit, "source-commit", "", "Source branch tip commit this run tested (required)")
+	cmd.Flags().StringVar(&params.MergeCommit, "merge-commit", "", "Prospective squash-merge commit this run tested (required unless --status is failed or inconclusive)")
+	cmd.Flags().StringVar(&params.ReviewID, "review-id", "", "erun review this run gates, if one exists")
+	cmd.Flags().StringVar(&params.Status, "status", "", "Status to start at: running (default), failed, or inconclusive")
+	cmd.Flags().StringVar(&params.FailingStep, "failing-step", "", "Which gate step failed (required when --status is failed)")
+	cmd.Flags().StringVar(&params.LogRef, "log-ref", "", "Where to read this run's own output (a job id, URL, or path)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newExecGateRunReportCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var params common.GateRunReportParams
+	cmd := &cobra.Command{
+		Use:   "report GATE_RUN_ID",
+		Short: "Report a gate run's outcome",
+		Long: "Move GATE_RUN_ID from running to a terminal verdict: passed, failed, or inconclusive.\n\n" +
+			"A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must " +
+			"report inconclusive -- never failed, which asserts a real gate step actually produced a red " +
+			"verdict. --failing-step is required when --status is failed.\n\n" +
+			"Reporting against a gate run that already has an outcome is refused: a verdict is immutable once " +
+			"reached.\n\n" +
+			"--dry-run traces the request without sending it.",
+		Example: "  erun exec gate-run report abc123 --status passed\n" +
+			"  erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json\n" +
+			"  erun exec gate-run report abc123 --status inconclusive --log-ref 'wrapper hit its own 8m cap'",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			params.GateRunID = args[0]
+			run, err := common.RunGateRunReport(ctx, store, *alias, params, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec gate-run report planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "Reported gate run %s as %s.\n", run.GateRunID, run.Status); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(run)
+		},
+	}
+	cmd.Flags().StringVar(&params.Status, "status", "", "Outcome: passed, failed, or inconclusive (required)")
+	cmd.Flags().StringVar(&params.FailingStep, "failing-step", "", "Which gate step failed (required when --status is failed)")
+	cmd.Flags().StringVar(&params.LogRef, "log-ref", "", "Where to read this run's own output (a job id, URL, or path)")
+	cmd.Flags().StringVar(&params.MergeCommit, "merge-commit", "", "Prospective squash-merge commit, if not already set when the run started")
+	addDryRunFlag(cmd)
+	return cmd
 }
 
 func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) *cobra.Command {

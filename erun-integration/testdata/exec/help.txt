@@ -8,6 +8,7 @@ Available Commands:
   commit               Commit every change, or only the declared paths, in the project working tree
   diff                 Show the current git diff
   gate-merge           Build the prospective squash merge a merge queue promotion gates
+  gate-run             Report a gate run's start and outcome to the erun platform
   job                  Start long work in the environment and observe it by handle
   merge                Merge a branch into the project working tree's current branch
   push                 Push the project working tree's current branch to a remote

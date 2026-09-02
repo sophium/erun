@@ -36,6 +36,14 @@ A queued merge lands a squash commit whose SHA is never the source branch's head
 
 A repository merged through a plain GitHub pull request instead of an erun review — never calling `MERGE`/`MERGED` at all — can still require this same gate build via GitHub's own branch protection: [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) turns the gate build's outcome into a GitHub commit status on the pull request's head commit, which a required-status-checks rule can then require before GitHub allows the merge. This is a separate mechanism from the `MERGE`/`MERGED` verification above — it never touches an erun review at all — but reuses the same gate build a `gate-merge` + real build already produced.
 
+## Watching the gate {#watching-the-gate}
+
+Everything above happens somewhere with no name of its own by default: a gate build is just a job in whichever environment ran it, and a repository merged through a plain pull request (the previous paragraph) has no review at all to look at. [`erun gate list`](/cli/gate#gate-list) is the queue view that answers "what is being gated right now, what is waiting, and what did the last gates decide" without knowing any job id, whether or not an erun review exists for the change: each entry names the branch, the prospective merge commit actually tested, the target, and the verdict — `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE`.
+
+`INCONCLUSIVE` is not a failure — it means the gate never reached a real verdict at all: a wrapper that hit its own timeout cap, or a run an environment-specific fault (a network blip, a pod eviction) interrupted mid-flight. Treat it as unresolved and worth re-driving, not as a red gate. A `FAILED` entry always names `failingStep` (which gate step actually produced the red verdict) and, when available, `logRef` (where to read it).
+
+A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. This is CLI/MCP-first today; a console/desktop view is planned as a follow-up. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
+
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
 Before promoting the head review, the queue checks its comment threads. If any thread is still `OPEN` (its root comment unresolved), advancing refuses with `409 Conflict` and a structured body — the one place on this API that uses its own bespoke shape instead of the standard `{code, message, details}` envelope, naming the count and the review so a caller can act on it instead of parsing a sentence:
@@ -122,6 +130,8 @@ The first two rows both 404, but are distinguishable now: [Reviews · Machine er
 - [Reviews](/collaboration/reviews) — the review resource, its status lifecycle, and the merge-queue endpoints' wire contract.
 - [Comments](/collaboration/comments) — thread status and the root-author-only close rule the unresolved-thread check depends on.
 - [Builds](/collaboration/builds) — the `GATE` build kind the gate writes.
+- [`erun gate`](/cli/gate) — the CLI client for gate-run visibility.
+- [MCP overview § Gate runs](/mcp/overview#gate-runs) — the `gate_list`/`gate_show`/`exec_gate-run-*` tool spec.
 - [`erun review`](/cli/review) — the CLI client.
 - [Desktop reviews](/desktop/reviews) — the desktop client.
 - [Review loop topology](/collaboration/review-loop-topology) — the builder/reviewer roles that drive a review through this queue.

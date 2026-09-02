@@ -1,0 +1,19 @@
+See what is being gated, and what recent gates decided
+
+Usage:
+  erun gate [command]
+
+Available Commands:
+  list        List gate runs: what is gating now, and what recent gates decided
+  show        Show one gate run in full
+
+Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for gate
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun gate [command] --help" for more information about a command.

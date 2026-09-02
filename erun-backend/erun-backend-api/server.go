@@ -285,6 +285,7 @@ type databaseRepositories struct {
 	auditEvents     *repository.AuditEventRepository
 	releases        *repository.ReleaseRepository
 	rateLimits      *repository.PlatformRateLimitRepository
+	gateRuns        *repository.GateRunRepository
 }
 
 func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
@@ -303,6 +304,7 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 		auditEvents:     repository.NewAuditEventRepository(txManager),
 		releases:        repository.NewReleaseRepository(txManager),
 		rateLimits:      repository.NewPlatformRateLimitRepository(txManager),
+		gateRuns:        repository.NewGateRunRepository(txManager),
 	}
 }
 
@@ -341,6 +343,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
 	routes.RegisterBuildRoutes(register, repos.builds, buildService)
 	routes.RegisterCommentRoutes(register, repos.comments, commentService)
+	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
 	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
 	environmentAdmin := service.NewEnvironmentAdminService(repos.environments, repos.auditEvents)
 	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter, environmentAdmin)

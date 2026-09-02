@@ -1,0 +1,3 @@
+Dry run: erun exec gate-run start planned.
+audit: erun exec gate-run start --dry-run --failing-step git merge --squash --source-branch feature/add-widget --source-commit sourcesha0000000000000000000000000000000 --status failed --target-branch main
+platform: POST https://api.example.test/v1/gate-runs (sourceBranch=feature/add-widget, targetBranch=main, sourceCommit=sourcesha0000000000000000000000000000000, status=failed, failingStep=git merge --squash)
