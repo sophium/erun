@@ -1549,4 +1549,96 @@ func TestExec(t *testing.T) {
 		}
 		golden.Equal(t, "exec/report_commit_status_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
 	})
+
+	t.Run("close_pr_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "close-pr", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_dry_run_traces_lookup", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_dry_run_traces_lookup", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_dry_run_missing_required_flags_traces_then_refuses", func(t *testing.T) {
+		// branch, target, gated-commit, and landing-commit are all validated
+		// together as one refusal, so omitting any subset produces the same
+		// message -- one scenario (omitting every flag) covers the branch.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "close-pr", "feature/add-widget", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for missing required flags, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_dry_run_missing_required_flags_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_dry_run_empty_branch_traces_then_refuses", func(t *testing.T) {
+		// BRANCH is a positional arg an empty string can still satisfy
+		// cobra.ExactArgs(1), so the shared validation (and its trace) is what
+		// actually catches this, not command-tree wiring.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty branch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_dry_run_empty_branch_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_dry_run_malformed_remote_url_traces_then_refuses", func(t *testing.T) {
+		// A non-github.com remote reaches parseGitHubOwnerRepo's rejection
+		// branch, distinct from the missing-remote-url case above.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://gitlab.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a non-github remote, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_dry_run_malformed_remote_url_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_real_run_fails_cleanly_without_a_token", func(t *testing.T) {
+		// No --dry-run, no gh on the scrubbed PATH, and no GITHUB_TOKEN/GH_TOKEN
+		// in the environment: the real-run token resolution must refuse before
+		// ever reaching the network, naming the fix rather than a raw HTTP error.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
 }

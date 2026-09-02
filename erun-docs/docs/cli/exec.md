@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Eight subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), and `report-commit-status` (report a GitHub commit status for a merge queue gate result).
+Repository helpers that run from the project root. Nine subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), and `close-pr` (close the GitHub pull request a merge queue gate actually shipped).
 
 ## Synopsis
 
@@ -17,6 +17,7 @@ erun exec push BRANCH [flags]
 erun exec merge TARGET_BRANCH [flags]
 erun exec gate-merge SOURCE_BRANCH --target TARGET_BRANCH [flags]
 erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --remote-url URL [flags]
+erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
 ```
 
 ## Subcommands
@@ -83,6 +84,18 @@ COMMIT should be the review's source branch tip — the pull request's own head 
 
 `--dry-run` traces the request without sending it.
 
+### `exec close-pr` {#exec-close-pr}
+
+Closes BRANCH's open pull request on GitHub and records `--landing-commit` on it. This runs after [`erun review report-merged`](/cli/review#review-report-merged) has already succeeded: `gate-merge`'s squash commit is never the branch head GitHub tracks, so GitHub never reconciles a queued merge with its pull request on its own, and the commit that actually shipped exists nowhere the pull request can see.
+
+Safe when BRANCH has no open pull request against `--target`: this is a no-op, not an error, since queueing a plain branch with no review is legitimate.
+
+Refuses, loudly, when the pull request's current head does not match `--gated-commit` — something pushed to BRANCH after the gate fetched it, so the gated content is not what closing would discard.
+
+`--remote-url` names the github.com remote the pull request lives on. `--gated-commit` is BRANCH's tip at the moment `gate-merge` fetched and tested it (its own reported `sourceCommit`). `--landing-commit` is the commit that actually landed on `--target` — recorded in a comment on the pull request before it is closed. Closing needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+
+`--dry-run` traces the lookup without closing or commenting on anything.
+
 ## Examples
 
 ```bash
@@ -97,6 +110,9 @@ erun exec merge main
 echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
 erun exec report-commit-status $(git rev-parse HEAD) --state success \
   --description 'gate build passed' --remote-url https://github.com/org/repo.git
+erun exec close-pr feature/add-widget --target main \
+  --remote-url https://github.com/org/repo.git \
+  --gated-commit $(git rev-parse origin/feature/add-widget) --landing-commit $(git rev-parse HEAD)
 ```
 
 ## Error behaviour
@@ -124,3 +140,9 @@ erun exec report-commit-status $(git rev-parse HEAD) --state success \
 | `--remote-url` is not a recognized github.com remote (`report-commit-status`). | Refuses with `remote-url "..." is not a recognized github.com remote`. |
 | No GitHub token is available (`report-commit-status`). | Refuses with `no GitHub token available to report a commit status; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
 | GitHub rejects the request (`report-commit-status`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
+| `--target`, `--remote-url`, `--gated-commit`, or `--landing-commit` is missing (`close-pr`). | Refuses with a message naming that branch, target branch, gated commit, and landing commit are all required; nothing is looked up, even under `--dry-run`. |
+| `--remote-url` is not a recognized github.com remote (`close-pr`). | Refuses with `remote-url "..." is not a recognized github.com remote`. |
+| BRANCH has no open pull request against `--target` (`close-pr`). | Not an error: reports nothing found and stops: a queued plain branch with no review is legitimate. |
+| The pull request's current head does not match `--gated-commit` (`close-pr`). | Refuses with `refusing to close pull request #N for BRANCH: its head is X, not Y — the commit the gate actually tested. ...`; nothing is commented or closed. |
+| No GitHub token is available (`close-pr`). | Refuses with `no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
+| GitHub rejects a request (`close-pr`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |

@@ -29,6 +29,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecMergeCmd(findProjectRoot),
 		newExecGateMergeCmd(findProjectRoot),
 		newExecReportCommitStatusCmd(),
+		newExecClosePRCmd(),
 		jobCmd,
 	)
 }
@@ -442,6 +443,64 @@ func runExecReportCommitStatusCommand(ctx common.Context, commit, state, statusC
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Reported %s status %q on %s/%s@%s.", result.State, result.Context, result.Owner, result.Repo, result.Commit))
+	return ctx.WriteResult(result)
+}
+
+func newExecClosePRCmd() *cobra.Command {
+	var (
+		target        string
+		remoteURL     string
+		gatedCommit   string
+		landingCommit string
+	)
+	cmd := &cobra.Command{
+		Use:   "close-pr BRANCH",
+		Short: "Close the GitHub pull request a merge queue gate actually shipped",
+		Long: "Close BRANCH's open pull request on GitHub and record LANDING_COMMIT on it. This runs after `erun " +
+			"review report-merged` has already succeeded: gate-merge's squash commit is never the branch head GitHub " +
+			"tracks, so GitHub never reconciles a queued merge with its pull request on its own, and the commit that " +
+			"actually shipped exists nowhere the pull request can see.\n\n" +
+			"Safe when BRANCH has no open pull request against --target: this is a no-op, not an error, since " +
+			"queueing a plain branch with no review is legitimate.\n\n" +
+			"Refuses, loudly, when the pull request's current head does not match --gated-commit — something " +
+			"pushed to BRANCH after the gate fetched it, so the gated content is not what closing would discard.\n\n" +
+			"--dry-run traces the lookup without closing or commenting on anything.",
+		Example: "  erun exec close-pr feature/add-widget --target main \\\n" +
+			"    --remote-url https://github.com/org/repo.git \\\n" +
+			"    --gated-commit $(git rev-parse origin/feature/add-widget) --landing-commit $(git rev-parse HEAD)",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runExecClosePRCommand(commandContext(cmd), args[0], target, remoteURL, gatedCommit, landingCommit)
+		},
+	}
+	cmd.Flags().StringVar(&target, "target", "", "The pull request's base branch (required)")
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote the pull request lives on (required)")
+	cmd.Flags().StringVar(&gatedCommit, "gated-commit", "", "BRANCH's tip when the gate actually fetched and tested it (required)")
+	cmd.Flags().StringVar(&landingCommit, "landing-commit", "", "The commit that actually landed on --target, recorded in a comment on the pull request (required)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecClosePRCommand(ctx common.Context, branch, target, remoteURL, gatedCommit, landingCommit string) error {
+	result, err := common.ClosePullRequest(ctx, common.ClosePullRequestParams{
+		RemoteURL:     remoteURL,
+		Branch:        branch,
+		TargetBranch:  target,
+		GatedCommit:   gatedCommit,
+		LandingCommit: landingCommit,
+	}, common.ClosePullRequestDependencies{})
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	if !result.Found {
+		ctx.Info(fmt.Sprintf("No open pull request for %s -> %s; nothing to close.", result.Branch, target))
+		return ctx.WriteResult(result)
+	}
+	ctx.Info(fmt.Sprintf("Closed pull request #%d for %s/%s.", result.Number, result.Owner, result.Repo))
 	return ctx.WriteResult(result)
 }
 

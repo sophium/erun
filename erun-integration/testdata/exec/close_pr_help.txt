@@ -1,0 +1,28 @@
+Close BRANCH's open pull request on GitHub and record LANDING_COMMIT on it. This runs after `erun review report-merged` has already succeeded: gate-merge's squash commit is never the branch head GitHub tracks, so GitHub never reconciles a queued merge with its pull request on its own, and the commit that actually shipped exists nowhere the pull request can see.
+
+Safe when BRANCH has no open pull request against --target: this is a no-op, not an error, since queueing a plain branch with no review is legitimate.
+
+Refuses, loudly, when the pull request's current head does not match --gated-commit — something pushed to BRANCH after the gate fetched it, so the gated content is not what closing would discard.
+
+--dry-run traces the lookup without closing or commenting on anything.
+
+Usage:
+  erun exec close-pr BRANCH [flags]
+
+Examples:
+  erun exec close-pr feature/add-widget --target main \
+    --remote-url https://github.com/org/repo.git \
+    --gated-commit $(git rev-parse origin/feature/add-widget) --landing-commit $(git rev-parse HEAD)
+
+Flags:
+      --dry-run                 Resolve and trace mutating actions without executing them.
+      --gated-commit string     BRANCH's tip when the gate actually fetched and tested it (required)
+  -h, --help                    help for close-pr
+      --landing-commit string   The commit that actually landed on --target, recorded in a comment on the pull request (required)
+      --remote-url string       The github.com remote the pull request lives on (required)
+      --target string           The pull request's base branch (required)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

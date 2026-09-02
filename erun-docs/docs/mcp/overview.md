@@ -351,8 +351,9 @@ Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`
 | Tool | Purpose |
 |---|---|
 | `exec_report-commit-status` | Report a commit status on GitHub for `commit` — the last step in the merge queue gate (`exec_gate-merge`, `build`, `review_record-build` with `gate` set): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in `description`. A required status check on the remote's branch protection has nothing to require until this reports it. `commit` should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `exec_gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed. `context` defaults to `erun/merge-gate` when omitted. Reporting needs a GitHub token (`gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN`); a missing token refuses before any network call. Set `preview` to trace the request without sending it. |
+| `exec_close-pr` | Close `branch`'s open pull request on GitHub, once `review_report-merged` has already succeeded, and record `landingCommit` on it — `exec_gate-merge`'s squash commit is never the branch head GitHub tracks, so GitHub never reconciles a queued merge with its pull request on its own; the commit that actually shipped exists nowhere the pull request can see until this reports it. Safe when `branch` has no open pull request against `targetBranch`: this is a no-op, not an error, since queueing a plain branch with no review is legitimate. Refuses, loudly, when the pull request's current head does not match `gatedCommit` — something pushed to `branch` after the gate fetched it, so the gated content is not what closing would discard. Set `preview` to trace the lookup without closing or commenting on anything. |
 
-Same command as [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status). Unlike the working-tree tools above, this never touches the runtime repo's git state — it only calls GitHub's REST API — so it is its own section rather than a row in the working-tree table.
+Same commands as [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) / [`erun exec close-pr`](/cli/exec#exec-close-pr). Unlike the working-tree tools above, neither touches the runtime repo's git state — both only call GitHub's REST API — so this is its own section rather than a row in the working-tree table.
 
 ### Escape hatch
 
@@ -406,6 +407,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_merge` | `erun exec merge` | Work |
 | exec | `exec_gate-merge` | `erun exec gate-merge` | Work |
 | exec | `exec_report-commit-status` | `erun exec report-commit-status` | Work |
+| exec | `exec_close-pr` | `erun exec close-pr` | Work (idempotent) |
 | exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
 | exec | `exec_job_attach` | `erun exec job attach` | Work |
 | exec | `exec_job_status` | `erun exec job status` | Read |
