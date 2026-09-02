@@ -120,7 +120,7 @@ export function EnvHoverCard({
         }}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
-        className="w-72 p-0"
+        className="w-80 p-0"
         role="dialog"
         aria-label={`${tenantName} / ${environmentName} details`}
       >
@@ -141,6 +141,7 @@ export function EnvHoverCard({
           activityLabel={activityLabel}
           indicator={indicator}
           usage={usage}
+          buildCapable={isLocal && !isHost}
           node={node}
           nodeIndicator={nodeIndicator}
         />
@@ -160,6 +161,7 @@ function EnvHoverCardFields({
   activityLabel,
   indicator,
   usage,
+  buildCapable,
   node,
   nodeIndicator,
 }: {
@@ -171,6 +173,7 @@ function EnvHoverCardFields({
   activityLabel: string;
   indicator: EnvironmentIndicator;
   usage: UIEnvironmentUsageSnapshot | undefined;
+  buildCapable: boolean;
   node: UIEnvironmentNodeSnapshot | undefined;
   nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
@@ -204,7 +207,7 @@ function EnvHoverCardFields({
           <ActivityState activityLabel={activityLabel} indicator={indicator} />
         </HoverCardRow>
         <HoverCardRow label="Usage">
-          <UsageState usage={usage} />
+          <UsageState usage={usage} buildCapable={buildCapable} />
         </HoverCardRow>
         <HoverCardRow label="Cloud node">
           <NodeState node={node} nodeIndicator={nodeIndicator} />
@@ -365,16 +368,22 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // A stale or unmeasurable reading is rendered as degraded, never as an amber
 // warning: nothing the operator did caused either state and no action follows
 // from it, so it should recede rather than alarm (see the TYPE note in
-// Sidebar.HoverCardRow.tsx). This also matters beyond this card's own type
-// rules -- the percentage this row shows is not authoritative for a
-// build-capable environment: BuildKit runs as a sibling cgroup with no
-// enforced ceiling, so the limit shown does not bound what the environment
-// actually uses. A quiet, receded treatment does not overstate confidence in
-// a figure that can already be misleading; an alert-coloured one would.
+// Sidebar.HoverCardRow.tsx).
+//
+// A fresh reading gets its own caveat instead (`buildCapable`): for an
+// environment that runs `erun build` in its own pod, BuildKit runs as a
+// sibling cgroup with no enforced ceiling, so "Mem 72% of 6.0 GiB" is an
+// accurate cgroup reading but not a real ceiling on what the environment can
+// actually use (#1805) -- a plain figure with no caveat reads as a hard
+// limit it is not. The figure itself stays full-confidence (it is a real
+// measurement); only the "of <limit>" framing needs the caveat, so it is
+// named rather than muted away.
 function UsageState({
   usage,
+  buildCapable,
 }: {
   usage: UIEnvironmentUsageSnapshot | undefined;
+  buildCapable: boolean;
 }): React.ReactElement {
   const summary = summarizeEnvironmentUsage(usage, Date.now());
   if (!summary.hasReading || !summary.headline) {
@@ -383,16 +392,39 @@ function UsageState({
   if (summary.stale) {
     return (
       <span className={HOVER_CARD_VALUE_STACK_CLASS}>
-        <Muted>{summary.headline}</Muted>
+        <Muted>
+          <UsageHeadline headline={summary.headline} />
+        </Muted>
         <Muted>Stale — as of {summary.ageLabel} ago</Muted>
       </span>
     );
   }
   return (
     <span className={HOVER_CARD_VALUE_STACK_CLASS}>
-      <span>{summary.headline}</span>
+      <span>
+        <UsageHeadline headline={summary.headline} />
+      </span>
       <span className={HOVER_CARD_CAPTION_CLASS}>As of {summary.ageLabel} ago</span>
+      {buildCapable && <span className={HOVER_CARD_CAPTION_CLASS}>Doesn't cap build usage</span>}
     </span>
+  );
+}
+
+// UsageHeadline renders each `·`-joined figure ("CPU 0.1%", "Mem 72% of 6.0
+// GiB") as its own non-wrapping run, joined by an ordinary breakable space --
+// so the narrow value column, if it wraps this line at all, only ever breaks
+// between figures, never mid-figure ("Mem 72%" stranded from "of 6.0 GiB").
+function UsageHeadline({ headline }: { headline: string }): React.ReactElement {
+  const parts = headline.split(' · ');
+  return (
+    <>
+      {parts.map((part, index) => (
+        <React.Fragment key={part}>
+          {index > 0 && ' · '}
+          <span className="whitespace-nowrap">{part}</span>
+        </React.Fragment>
+      ))}
+    </>
   );
 }
 
