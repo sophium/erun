@@ -82,17 +82,24 @@ type attachOutcomeMessage struct {
 // refused with a plain 403 and no subprocess starts -- refused, not merely
 // "not offered the endpoint".
 func registerAttachHandler(mux *http.ServeMux, path string, authCfg mcpAuthConfig, runtime RuntimeConfig) {
-	mux.Handle("GET "+path, authHTTPMiddleware(authCfg, attachHTTPHandler(runtime)))
+	mux.Handle("GET "+path, wsAttachAuthHTTPMiddleware(authCfg, attachHTTPHandler(runtime)))
 }
 
 var attachUpgrader = websocket.Upgrader{
-	// The real gate is the bearer token authHTTPMiddleware already verified
-	// before this handler runs, not the WebSocket handshake's Origin header --
-	// a native mobile client has no browser Origin to check in the first
-	// place. Accepting every origin here does not widen access: a request
-	// that reaches Upgrade has already cleared the same capability check
-	// every MCP tool call goes through.
+	// The real gate is the bearer token wsAttachAuthHTTPMiddleware already
+	// verified before this handler runs, not the WebSocket handshake's Origin
+	// header -- a native mobile client has no browser Origin to check in the
+	// first place. Accepting every origin here does not widen access: a
+	// request that reaches Upgrade has already cleared the same capability
+	// check every MCP tool call goes through.
 	CheckOrigin: func(*http.Request) bool { return true },
+	// Subprotocols declares the one scheme this edge understands, so a client
+	// that offered [attachAuthSubprotocol, token] (auth.go's browser fallback)
+	// gets that scheme echoed back per RFC 6455 -- never the token itself. A
+	// client that authenticated via a plain Authorization header offers no
+	// subprotocol at all, and this negotiates to nothing for it, exactly as
+	// before this field existed.
+	Subprotocols: []string{attachAuthSubprotocol},
 }
 
 // attachHTTPHandler bridges one WebSocket connection to this environment's

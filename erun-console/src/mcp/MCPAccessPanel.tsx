@@ -14,8 +14,12 @@ import {
 import { KeyRound } from 'lucide-react';
 import * as React from 'react';
 
-import type { McpTokenState, McpToolCallState } from './controller';
-import { useMcpTokenController, useMcpToolCallController } from './controller';
+import type { AttachSessionState, McpTokenState, McpToolCallState } from './controller';
+import {
+  useAttachSessionController,
+  useMcpTokenController,
+  useMcpToolCallController,
+} from './controller';
 
 // DriveToolForm is the console's first caller of an environment's live MCP
 // edge, not just the token-minting half of it. The hostname is operator-
@@ -89,7 +93,142 @@ function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactEle
   return null;
 }
 
-function TokenResult({ state }: { state: McpTokenState }): React.ReactElement | null {
+// AttachSessionForm mints its own erun:attach-scoped token (never the
+// erun:admin one DriveToolForm above uses) and opens a live WebSocket to an
+// existing dtach session in the environment's pod -- the session id an
+// operator already knows from `erun open --ai` or a linked orchestrator, not
+// something this panel can discover on its own yet. This is a minimal,
+// line-based view, not a full terminal: see useAttachSessionController's
+// comment for why.
+function AttachSessionForm({
+  consoleToken,
+  environmentId,
+}: {
+  consoleToken: string;
+  environmentId: string;
+}): React.ReactElement {
+  const [hostname, setHostname] = React.useState('');
+  const [session, setSession] = React.useState('');
+  const [line, setLine] = React.useState('');
+  const { state, scrollback, connect, sendLine, disconnect } =
+    useAttachSessionController(consoleToken);
+
+  const busy = state.status === 'minting' || state.status === 'connecting';
+  const connected = state.status === 'connected';
+
+  const submit = (event: React.SyntheticEvent): void => {
+    event.preventDefault();
+    if (hostname.trim() !== '' && session.trim() !== '') {
+      connect(environmentId, hostname, session);
+    }
+  };
+
+  const submitLine = (event: React.SyntheticEvent): void => {
+    event.preventDefault();
+    if (line !== '') {
+      sendLine(line);
+      setLine('');
+    }
+  };
+
+  return (
+    <div className="grid gap-2 border-t border-border pt-3">
+      <h3 className="text-sm font-semibold text-foreground">Attach to a live session</h3>
+      <form className="grid gap-2" onSubmit={submit}>
+        <FieldLabel htmlFor="attach-hostname" required>
+          Environment edge hostname
+        </FieldLabel>
+        <Input
+          id="attach-hostname"
+          value={hostname}
+          onChange={(e) => {
+            setHostname(e.target.value);
+          }}
+          placeholder="mcp.acme-prod.services.example.com"
+          disabled={connected}
+          required
+        />
+        <FieldLabel htmlFor="attach-session" required>
+          Session id (from `erun open --ai` or a linked orchestrator)
+        </FieldLabel>
+        <Input
+          id="attach-session"
+          value={session}
+          onChange={(e) => {
+            setSession(e.target.value);
+          }}
+          disabled={connected}
+          required
+        />
+        {connected ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={disconnect}
+            className="justify-self-start"
+          >
+            Disconnect
+          </Button>
+        ) : (
+          <Button type="submit" disabled={busy} className="justify-self-start">
+            {busy ? 'Connecting…' : 'Attach'}
+          </Button>
+        )}
+      </form>
+      <AttachSessionStatus state={state} />
+      {scrollback !== '' && (
+        <pre
+          role="log"
+          aria-label="Attach session output"
+          className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-muted p-2 font-mono text-xs text-foreground"
+        >
+          {scrollback}
+        </pre>
+      )}
+      {connected && (
+        <form className="flex gap-2" onSubmit={submitLine}>
+          <Input
+            aria-label="Send a line to the session"
+            value={line}
+            onChange={(e) => {
+              setLine(e.target.value);
+            }}
+            placeholder="Type a line and press Enter"
+          />
+          <Button type="submit">Send</Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function AttachSessionStatus({ state }: { state: AttachSessionState }): React.ReactElement | null {
+  if (state.status === 'ended') {
+    return (
+      <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+        Session ended: {state.outcome}
+      </p>
+    );
+  }
+  if (state.status === 'error') {
+    return (
+      <p className="text-sm text-destructive" role="alert">
+        Could not attach: {state.message}
+      </p>
+    );
+  }
+  return null;
+}
+
+function TokenResult({
+  state,
+  consoleToken,
+  environmentId,
+}: {
+  state: McpTokenState;
+  consoleToken: string;
+  environmentId: string;
+}): React.ReactElement | null {
   if (state.status === 'ready') {
     return (
       <div className="grid gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
@@ -105,6 +244,7 @@ function TokenResult({ state }: { state: McpTokenState }): React.ReactElement | 
           readOnly
         />
         <DriveToolForm mcpToken={state.token.token} />
+        <AttachSessionForm consoleToken={consoleToken} environmentId={environmentId} />
       </div>
     );
   }
@@ -179,7 +319,7 @@ export function MCPAccessPanel({
           </Button>
         </form>
         <div className="mt-4 grid max-w-md gap-3">
-          <TokenResult state={state} />
+          <TokenResult state={state} consoleToken={token} environmentId={selected} />
         </div>
       </CardContent>
     </Card>

@@ -124,7 +124,11 @@ An edge can trust **multiple issuers at once**, of two kinds, dispatched by the 
 
 The `file://` anchor is **sticky across redeploys**: the deploy that injects the key records its path on the env ([`mcpauthpublickeypath`](/reference/configuration#envconfig)) as it injects it — not after the rollout, so a rollout that fails leaves the anchor named rather than nameless — and every later deploy of the runtime chart rethreads it, so a plain version bump cannot leave the edge unauthenticated. Turning the anchor off takes the explicit `erun deploy --no-mcp-auth`, and a deploy that would drop authentication the live release still has is refused with the trusted key named — see [`erun deploy` · MCP-auth stickiness](/agent-reference/cli-flags#deploy-mcp-auth).
 
-When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop or hosted deploy always configures one. Capability/scope-gated authorization of *individual* tools (e.g. restricting the RCE-capable `raw` to admin-scoped tokens, while a read-only token sees only the read tools) is `(Planned.)` — it rides on the hosted role source (issue #606).
+When no trust anchor is configured the edge stays loopback-only (legacy, unauthenticated) — a desktop or hosted deploy always configures one.
+
+**Capability tiers gate individual tools.** A verified token's `scope` claim (space-delimited) resolves to one or more of three tiers: `erun:read` (observation only — `version`, `list`, `idle`, `doctor`-style reads, `ai_sessions`, `activity_lease_list`, `context_list`, `cloud_list`, `exec_diff`, `observe`, `usage`, `outputs_list`/`outputs_download`, `exec_job_status`/`exec_job_output`/`exec_job_await`, `review_list`/`review_show`/`review_queue_list`), `erun:admin` (every tool, including the RCE-capable `raw` and every mutation), and `erun:attach` (drives the [WebSocket attach edge](#mcp-attach-endpoint) and nothing else — it grants neither read nor admin, and neither of those grants it back). A token carrying no `scope` claim resolves to `erun:admin` — the desktop's own single-operator compatibility default, since a token minted before capabilities existed must keep working. A tool not in the read-only list defaults to requiring `erun:admin`: the table is an allow-list, so a newly added tool is unreachable to a read-only caller until someone decides otherwise. Any tier can be combined (e.g. `erun:read erun:attach`), and `erun:admin` alone already satisfies every tier.
+
+**Minting a scoped token is real; per-caller entitlement to a tier is not (issue #1877).** [`POST /v1/environments/{id}/mcp-token`](#mcp-token-endpoint) lets a caller request any of the three tiers, validated only against the fixed vocabulary above — not against whether *this* caller should be trusted with it. Any tenant member (the mint route's `TenantUserClass`, not just `TenantAdmin`) can today request `erun:admin` for any environment their tenant owns. Treat this as the same trust boundary a hosted console operator already sits inside (they can already reach the environment through other admin-tier routes), not as a control that narrows what an already-authenticated tenant member can do — a caller building an unattended or autonomous consumer of a minted token (rather than a human clicking "mint" once per session) should not assume a request for a narrower tier is enforced against who is asking.
 
 ### Endpoints
 
@@ -486,13 +490,23 @@ Poll `GET /v1/environments/{id}` (or the `GET /v1/config` read model) to follow 
 
 Mints a per-env MCP bearer token the caller presents to that environment's `erun-mcp` edge (at `mcp.<tenant>-<env>.services.<base-domain>`). The **backend** signs the token — the hosted twin of the desktop signing locally — so a browser console needs no signing key. The environment is resolved from `{environment_id}` under row-level security, so a token can only mint for its own tenant's environments. The minted token's `sub` is the caller's ERun user, `aud` is the per-env `erun-mcp:<tenant>/<environment>`, and `iss` is the fixed in-pod `file://` path the deploy injects the backend's public key at, so the edge verifies it (see [Per-env MCP edge authentication](#mcp-edge)). It is short-lived (~1 hour); mint a fresh one when it lapses.
 
-The endpoint takes **no body**. On success it returns HTTP `200`:
+The body is optional:
+
+```jsonc
+// request body (optional)
+{
+  "scope": "erun:admin" // space-delimited; one or more of erun:read, erun:admin, erun:attach
+}
+```
+
+An absent or empty `scope` mints `erun:read` — the least capability a token can carry and still be useful, never the desktop's admin-by-default compatibility case (that default is for a token carrying no `scope` claim *at all*, which this route never produces). A `scope` naming anything outside the fixed vocabulary is rejected outright (`400`) rather than silently dropped or widened — see [Capability tiers](#mcp-edge) above for what each tier grants. On success, HTTP `200`:
 
 ```jsonc
 // 200 response
 {
   "token": "<eddsa-jwt>",
-  "audience": "erun-mcp:acme/prod"
+  "audience": "erun-mcp:acme/prod",
+  "scope": "erun:admin"
 }
 ```
 
@@ -504,10 +518,36 @@ The endpoint takes **no body**. On success it returns HTTP `200`:
 
 | Status | Condition | Recovery |
 |---|---|---|
+| `400` | `scope` names something outside `erun:read`/`erun:admin`/`erun:attach`, or the request body is malformed JSON. | Request one of the three known tiers, or send no body for the `erun:read` default. |
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). The `WriteAll` permission covers this write. | Send a valid token whose roles permit the write. |
 | `404` | No environment with `{environment_id}` in the caller's tenant (row-level security returns not-found for another tenant's env, never leaking its existence). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend MCP signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend, or use the desktop `file://` path. |
 | `500` | The tenant read or the signing failed (e.g. missing request-scoped security context — an internal wiring error, never a client fault). | Retry; if it persists, it is a server bug. |
+
+### `GET <mcpPath>/attach/{session}` (WebSocket) {#mcp-attach-endpoint}
+
+Not a REST endpoint and not JSON-RPC — a second HTTP surface on the same per-env `erun-mcp` edge (`mcp.<tenant>-<env>.services.<base-domain>`), upgraded to a WebSocket. It bridges the caller directly to a live `dtach` session already running in the environment's own pod (the same session `erun open --ai` or a linked desktop orchestrator attaches to), one binary/text frame at a time. See [erun-mcp/AGENTS.md's "The WebSocket Attach Edge Is Not An MCP Tool"](https://github.com/sophium/erun/blob/main/erun-mcp/AGENTS.md) for the implementation rationale; this section specs the wire contract a caller needs.
+
+**Authentication — two channels, same token.** A caller that can set arbitrary HTTP headers (a CLI, a mobile app) authenticates exactly like the JSON-RPC path: `Authorization: Bearer <jwt>`, requiring the `erun:attach` capability (see [Capability tiers](#mcp-edge) above). A **browser** cannot set that header on a WebSocket handshake at all — its `WebSocket` constructor exposes only the subprotocol list — so a browser caller instead offers `new WebSocket(url, ["erun.bearer.v1", "<jwt>"])`, joined by the handshake into one `Sec-WebSocket-Protocol` header. The edge tries the `Authorization` header first, then this fallback; a successful handshake echoes back `Sec-WebSocket-Protocol: erun.bearer.v1` (never the token) per RFC 6455. Either channel is checked for the `erun:attach` capability **before** the WebSocket upgrade — a caller without it gets a plain HTTP `403` and no session is touched.
+
+**Wire protocol** once the socket is open:
+
+| Direction | Frame type | Payload |
+|---|---|---|
+| Client → server | Binary | Raw bytes written to the PTY (keystrokes). |
+| Client → server | Text | `{"type":"resize","cols":<int>,"rows":<int>}` — resizes the far end's PTY. |
+| Server → client | Binary | Raw PTY output bytes. |
+| Server → client | Text | `{"type":"outcome","outcome":"<value>"}` — sent **exactly once**, immediately before the server closes the socket. |
+
+`outcome` is one of `taken-over` (a second attach to the same session id evicted this one — the session itself keeps running), `deploy-reattach` (the session ended because the environment's runtime redeployed), `ended` (the underlying process exited on its own), or `unknown` (the process could not be reaped, e.g. a signal kill — never guessed as `ended`). A client that observes the socket close with **no** prior `outcome` frame (a network drop) should treat the result as `unknown` itself — the server's own guarantee is only that it sends the frame before *its* close, not that every close carries one.
+
+**Error behaviour:**
+
+| Status | Condition | Recovery |
+|---|---|---|
+| `401` | No bearer token resolved from either channel, or the token fails verification (see [Per-env MCP edge authentication](#mcp-edge)). | Send a valid token via the header or the subprotocol offer. |
+| `403` | The resolved capability set does not include `erun:attach` (an `erun:read`-only or unscoped-but-narrower token). | Mint a token whose scope includes `erun:attach`. |
+| `400` | The `{session}` path segment is empty. | Name the session id to attach to. |
 
 ### `POST /v1/environments/{environment_id}/dns01-token` {#dns01-token-endpoint}
 

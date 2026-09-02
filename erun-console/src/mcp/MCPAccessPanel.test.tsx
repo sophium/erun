@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import type { Environment } from 'erun-kit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -171,5 +171,108 @@ describe('MCPAccessPanel driving a tool over the live edge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Call the version tool' }));
 
     expect(await screen.findByText(/Could not call the tool: could not reach/)).toBeInTheDocument();
+  });
+});
+
+// FakeWebSocket backs the attach-session tests below -- see
+// attachClient.test.ts for the fuller wire-protocol coverage; this only needs
+// enough to prove the panel wires mint -> connect -> render correctly.
+class FakeWebSocket {
+  static instances: FakeWebSocket[] = [];
+  binaryType = 'blob';
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: ArrayBuffer | string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(
+    readonly url: string,
+    readonly protocols: string[],
+  ) {
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(): void {
+    // Not asserted here -- see attachClient.test.ts for send/resize coverage.
+  }
+
+  close(): void {
+    this.onclose?.();
+  }
+}
+
+describe('MCPAccessPanel attaching to a live session', () => {
+  it('mints an erun:attach-scoped token and opens the attach WebSocket with it', async () => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const calls = mockFetch(() =>
+      jsonResponse({
+        token: 'attach.jwt.value',
+        audience: 'erun-mcp:acme/prod',
+        scope: 'erun:attach',
+      }),
+    );
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    fireEvent.change(screen.getByLabelText(/Environment edge hostname/), {
+      target: { value: 'mcp.acme-prod.services.example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/Session id/), {
+      target: { value: 'sess-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }));
+
+    await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+    const socket = FakeWebSocket.instances[0];
+    socket?.onopen?.();
+    await screen.findByRole('button', { name: 'Disconnect' });
+
+    const attachMint = calls.find((c) => c.body === JSON.stringify({ scope: 'erun:attach' }));
+    expect(attachMint?.url).toBe('/v1/environments/env-1/mcp-token');
+    expect(socket?.url).toBe('wss://mcp.acme-prod.services.example.com/mcp/attach/sess-1');
+    expect(socket?.protocols).toEqual(['erun.bearer.v1', 'attach.jwt.value']);
+  });
+
+  it('renders session output and the ended outcome, then returns to idle on disconnect', async () => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    mockFetch(() =>
+      jsonResponse({
+        token: 'attach.jwt.value',
+        audience: 'erun-mcp:acme/prod',
+        scope: 'erun:attach',
+      }),
+    );
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    fireEvent.change(screen.getByLabelText(/Environment edge hostname/), {
+      target: { value: 'mcp.acme-prod.services.example.com' },
+    });
+    fireEvent.change(screen.getByLabelText(/Session id/), {
+      target: { value: 'sess-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }));
+    await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+    const socket = FakeWebSocket.instances[0];
+    socket?.onopen?.();
+    await screen.findByRole('button', { name: 'Disconnect' });
+
+    socket?.onmessage?.({ data: new TextEncoder().encode('hello from the pod').buffer });
+    expect(await screen.findByText('hello from the pod')).toBeInTheDocument();
+
+    socket?.onmessage?.({ data: JSON.stringify({ type: 'outcome', outcome: 'ended' }) });
+    socket?.onclose?.();
+    expect(await screen.findByText('Session ended: ended')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attach' }));
+    expect(screen.queryByText('Session ended: ended')).toBeNull();
   });
 });

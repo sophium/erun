@@ -17,19 +17,30 @@ export interface McpToken {
 // client for their own environment, the one case erun#1877 calls out as
 // defensible to keep at full capability -- an unspecified request now mints
 // the safer `erun:read` instead.
-const MCP_ADMIN_SCOPE = 'erun:admin';
+export const MCP_ADMIN_SCOPE = 'erun:admin';
+
+// MCP_ATTACH_SCOPE mirrors erun-common's `erun:attach` capability tier: it
+// drives the attach WebSocket's byte stream and nothing else, deliberately
+// narrower than MCP_ADMIN_SCOPE -- a console session attaching to a live
+// terminal has no reason to also hold `raw`/`build`/`deploy`/`delete`.
+export const MCP_ATTACH_SCOPE = 'erun:attach';
 
 export const mcpApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
     // requestMcpToken mints a per-env MCP bearer token the console presents
     // to the env's erun-mcp edge. The backend signs it, so the caller needs
     // no key. A 501 surfaces when the backend has no MCP signing key
-    // configured.
-    requestMcpToken: builder.mutation<McpToken, { token: string; environmentId: string }>({
-      query: ({ token, environmentId }) => ({
+    // configured. scope defaults to MCP_ADMIN_SCOPE, the console's existing
+    // "drive this environment" behaviour; a narrower caller (e.g. the attach
+    // panel) passes its own scope explicitly.
+    requestMcpToken: builder.mutation<
+      McpToken,
+      { token: string; environmentId: string; scope?: string }
+    >({
+      query: ({ token, environmentId, scope }) => ({
         url: `/v1/environments/${encodeURIComponent(environmentId)}/mcp-token`,
         method: 'POST',
-        body: { scope: MCP_ADMIN_SCOPE },
+        body: { scope: scope ?? MCP_ADMIN_SCOPE },
         token,
         label: 'mcp token request',
       }),

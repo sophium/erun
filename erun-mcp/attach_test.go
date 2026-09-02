@@ -68,6 +68,15 @@ func dialAttach(baseURL, session, token string) (*websocket.Conn, *http.Response
 	return websocket.DefaultDialer.Dial(attachWSURL(baseURL, session), header)
 }
 
+// dialAttachViaSubprotocol authenticates with no Authorization header at all --
+// only the Sec-WebSocket-Protocol offer -- the one credential channel a real
+// browser WebSocket client has (see auth.go's attachAuthSubprotocol).
+func dialAttachViaSubprotocol(baseURL, session, token string) (*websocket.Conn, *http.Response, error) {
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{attachAuthSubprotocol, token}
+	return dialer.Dial(attachWSURL(baseURL, session), nil)
+}
+
 func writeBinary(t *testing.T, conn *websocket.Conn, s string) {
 	t.Helper()
 	if err := conn.WriteMessage(websocket.BinaryMessage, []byte(s)); err != nil {
@@ -234,6 +243,32 @@ func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	writeControl(t, conn, attachControlMessage{Type: "resize", Cols: 100, Rows: 42})
 	writeBinary(t, conn, "stty size\n")
 	waitForBinaryContaining(t, conn, "42 100")
+
+	writeBinary(t, conn, "exit\n")
+	_ = readOutcomeMessage(t, conn)
+}
+
+// TestAttachAuthenticatesViaSubprotocolForBrowserCallers is the golden path
+// for a browser client: no Authorization header at all, only the
+// Sec-WebSocket-Protocol offer, and the server must echo back the negotiated
+// scheme (never the token) per RFC 6455.
+func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
+	runtime := newAttachTestRuntime(t)
+	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	server := newAuthedAttachServer(t, runtime, issuer, "acme")
+
+	conn, resp, err := dialAttachViaSubprotocol(server.URL, "browser", token)
+	if err != nil {
+		t.Fatalf("dial: %v (response %+v)", err, resp)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != attachAuthSubprotocol {
+		t.Fatalf("negotiated subprotocol = %q, want %q (must never echo the token)", got, attachAuthSubprotocol)
+	}
+
+	writeBinary(t, conn, "echo SUBPROTOCOL_MARKER\n")
+	waitForBinaryContaining(t, conn, "SUBPROTOCOL_MARKER")
 
 	writeBinary(t, conn, "exit\n")
 	_ = readOutcomeMessage(t, conn)

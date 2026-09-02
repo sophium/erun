@@ -288,3 +288,57 @@ func serveAuth(t *testing.T, cfg mcpAuthConfig, authHeader string) *httptest.Res
 	authHTTPMiddleware(cfg, tenantEchoHandler()).ServeHTTP(rec, req)
 	return rec
 }
+
+// TestWSAttachAuthAcceptsSubprotocolToken proves the attach route's own
+// resolver authenticates a request carrying no Authorization header at all --
+// only the Sec-WebSocket-Protocol offer a browser's WebSocket constructor
+// actually lets a caller set -- while an equivalent request through the
+// ordinary JSON-RPC resolver (authHTTPMiddleware) still rejects it, so this
+// wider acceptance never leaks into the route every other MCP call goes
+// through.
+func TestWSAttachAuthAcceptsSubprotocolToken(t *testing.T) {
+	issuer, token := identityWithToken(t)
+	cfg := mcpAuthConfig{trustedIssuers: map[string]string{issuer: "acme"}, audience: "erun-mcp"}
+
+	req := httptest.NewRequest(http.MethodGet, "/mcp/attach/session-1", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", attachAuthSubprotocol+", "+token)
+	rec := httptest.NewRecorder()
+	wsAttachAuthHTTPMiddleware(cfg, tenantEchoHandler()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "acme" {
+		t.Fatalf("status=%d tenant=%q, want 200 / acme", rec.Code, rec.Body.String())
+	}
+
+	reqOtherRoute := httptest.NewRequest(http.MethodGet, "/mcp/attach/session-1", nil)
+	reqOtherRoute.Header.Set("Sec-WebSocket-Protocol", attachAuthSubprotocol+", "+token)
+	recOtherRoute := httptest.NewRecorder()
+	authHTTPMiddleware(cfg, tenantEchoHandler()).ServeHTTP(recOtherRoute, reqOtherRoute)
+	if recOtherRoute.Code != http.StatusUnauthorized {
+		t.Fatalf("ordinary resolver status = %d, want 401 (subprotocol fallback must not apply here)", recOtherRoute.Code)
+	}
+}
+
+// TestAttachSubprotocolBearerTokenMalformedOffers locks the exact shapes that
+// must NOT resolve to a token: a caller offering the auth scheme name with no
+// token is refused the ordinary way, not treated as an empty-but-valid token.
+func TestAttachSubprotocolBearerTokenMalformedOffers(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+	}{
+		{"no header", ""},
+		{"wrong scheme", "some-other-protocol, abc123"},
+		{"scheme with no token", attachAuthSubprotocol},
+		{"three entries", attachAuthSubprotocol + ", abc, def"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/mcp/attach/session-1", nil)
+			if tc.header != "" {
+				req.Header.Set("Sec-WebSocket-Protocol", tc.header)
+			}
+			if got := attachSubprotocolBearerToken(req); got != "" {
+				t.Fatalf("token = %q, want empty", got)
+			}
+		})
+	}
+}
