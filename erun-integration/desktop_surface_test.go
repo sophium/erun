@@ -267,6 +267,19 @@ var apiRouteWailsBindings = map[string]string{
 	"POST /v1/reviews/merge-queue/override-advance":              "OverrideAdvanceMergeQueue",
 	"POST /v1/provision":                                         "PreviewPlatformProvision",
 	"POST /v1/environments/{environment_id}/stop":                "StopPlatformEnvironment",
+	// ExposeEnvironmentService -> eruncommon.RunExposeService ->
+	// resolveExposeDNSUpserter -> (only when an erun platform alias is
+	// configured, never for the direct-pdnsutil path) client.
+	// SetEnvironmentHostname -> "PUT /v1/environments/{environment_id}/hostname"
+	// (erun-common/expose_platform_dns.go); UnexposeEnvironment
+	// is the same chain through RunUnexposeService/DeleteEnvironmentHostname
+	// for the DELETE. Called from
+	// erun-ui/frontend/src/components/app/ManageDialogPortsExposures.tsx via
+	// app/manageExposureThunks.ts -- the Ports tab's existing expose/unexpose
+	// controls, which need no new UI for this: the platform-route decision is
+	// automatic on the shared eruncommon path both transports already call.
+	"PUT /v1/environments/{environment_id}/hostname":    "ExposeEnvironmentService",
+	"DELETE /v1/environments/{environment_id}/hostname": "UnexposeEnvironment",
 	// GetMyTenantInviteRequest -> client.MyInviteRequest -> "GET
 	// /v1/invite-requests/mine" in erun-common/platform_client.go, called
 	// from erun-ui/frontend/src/app/api/tenantInviteRequestApi.ts (which

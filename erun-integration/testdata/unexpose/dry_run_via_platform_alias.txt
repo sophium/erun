@@ -1,0 +1,4 @@
+audit: erun unexpose --dry-run team dev
+unexpose: per-env wildcard *.team-dev.services.erunpaas.com (zone services.erunpaas.com)
+platform: GET https://api.example.test/v1/environments (resolve environment id for dev)
+platform: DELETE https://api.example.test/v1/environments/{environment_id}/hostname

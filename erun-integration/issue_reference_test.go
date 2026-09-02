@@ -218,7 +218,6 @@ func findIssueReferenceHits(t testing.TB, root string) []issueReferenceHit {
 // relative to the repo root; the value is the exact count of matching hits
 // still in that file.
 var issueReferenceBaseline = map[string]int{
-	"erun-backend/erun-backend-api/cmd/eapi/main.go":                                1,
 	"erun-backend/erun-backend-api/comments_e2e_test.go":                            1,
 	"erun-backend/erun-backend-api/env_deploy_e2e_test.go":                          2,
 	"erun-backend/erun-backend-api/environment_delete_e2e_test.go":                  3,
@@ -270,7 +269,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-backend/erun-backend-api/internal/zitadel/policies_test.go":               1,
 	"erun-backend/erun-backend-api/internal/zitadel/smtp.go":                        2,
 	"erun-backend/erun-backend-api/registry_token_route_test.go":                    1,
-	"erun-backend/erun-backend-api/server.go":                                       8,
+	"erun-backend/erun-backend-api/server.go":                                       7,
 	"erun-cli/cmd/doctor_host_credentials.go":                                       1,
 	"erun-cli/cmd/job.go":                                 1,
 	"erun-cli/cmd/mcp_proxy.go":                           2,

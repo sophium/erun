@@ -142,6 +142,34 @@ func seedERunCloudProviderAlias(t testing.TB, setup env.Setup, alias, issuer, cl
 	}
 }
 
+// seedTwoERunCloudProviderAliases writes two erun-type aliases in one
+// config.yaml, for scenarios asserting the ambiguous-alias refusal
+// (ResolveERunPlatformAlias refuses to guess between them without an
+// explicit --erun-alias).
+func seedTwoERunCloudProviderAliases(t testing.TB, setup env.Setup) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	body := "cloudproviders:\n" +
+		"  - alias: erun+one@erun\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: https://api.example.test\n" +
+		"    erun:\n" +
+		"      apiurl: https://api.example.test\n" +
+		"      clientid: cli-test-client\n" +
+		"  - alias: erun+two@erun\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: https://api2.example.test\n" +
+		"    erun:\n" +
+		"      apiurl: https://api2.example.test\n" +
+		"      clientid: cli-test-client\n"
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
 // eraseCachedERunAccessToken deletes the cached access token file for alias
 // (ref "erun/access/<alias>", hashed the same way erun-common's file-backed
 // CloudSecretStore names it) without touching the refresh token, forcing the

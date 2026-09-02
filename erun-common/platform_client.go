@@ -414,6 +414,43 @@ func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID st
 	return environment, err
 }
 
+// PlatformSetEnvironmentHostnameParams is PUT
+// /v1/environments/{environment_id}/hostname's input: the IP
+// the environment's own wildcard hostname should resolve to. A private or
+// loopback address (e.g. 127.0.0.1, for a local cluster) is accepted on
+// purpose.
+type PlatformSetEnvironmentHostnameParams struct {
+	TargetIP string `json:"targetIp"`
+}
+
+// PlatformEnvironmentHostname mirrors the hostname route's response: the
+// wildcard hostname the write applied to, and the IP it now resolves to.
+type PlatformEnvironmentHostname struct {
+	Hostname string `json:"hostname"`
+	TargetIP string `json:"targetIp,omitempty"`
+}
+
+// SetEnvironmentHostname points the caller's own environment's wildcard
+// hostname at targetIP, performing the platform's own PowerDNS write on the
+// caller's behalf. This is the write path a caller with no direct PowerDNS
+// access to the platform cluster uses instead of `pdnsutil` (see
+// erun-common's RunExposeService) — the same DNS record `erun expose`
+// writes directly for a caller that does have that access (the hosted
+// deploy Job). Errors ErrPlatformNotImplemented when the platform has no
+// PowerDNS write path configured.
+func (c *PlatformClient) SetEnvironmentHostname(ctx context.Context, environmentID string, params PlatformSetEnvironmentHostnameParams) (PlatformEnvironmentHostname, error) {
+	var result PlatformEnvironmentHostname
+	err := c.do(ctx, http.MethodPut, "/v1/environments/"+url.PathEscape(environmentID)+"/hostname", params, true, &result)
+	return result, err
+}
+
+// DeleteEnvironmentHostname removes the caller's own environment's wildcard
+// hostname record, symmetric with SetEnvironmentHostname — the platform-route
+// counterpart to `erun unexpose`'s direct pdnsutil delete.
+func (c *PlatformClient) DeleteEnvironmentHostname(ctx context.Context, environmentID string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID)+"/hostname", nil, true, nil)
+}
+
 // ListContexts lists the caller's tenant's cloud contexts (managed clusters).
 func (c *PlatformClient) ListContexts(ctx context.Context) ([]PlatformContext, error) {
 	var contexts []PlatformContext

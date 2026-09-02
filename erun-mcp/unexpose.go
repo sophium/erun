@@ -25,6 +25,9 @@ type UnexposeInput struct {
 	// project to resolve.
 	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
 	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
+	// ErunAlias mirrors ExposeInput.ErunAlias for the delete-side platform
+	// route.
+	ErunAlias string `json:"erunAlias,omitempty" jsonschema:"erun platform cloud alias to route the DNS delete through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias)"`
 	JobEnvelopeInput
 }
 
@@ -49,7 +52,8 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 				SkipIfUnconfigured: input.SkipIfUnconfigured,
 				ServicesZone:       strings.TrimSpace(input.ServicesZone),
 				PlatformNamespace:  strings.TrimSpace(input.PlatformNamespace),
-			}, exposeStore, nil)
+				ErunAlias:          strings.TrimSpace(input.ErunAlias),
+			}, exposeStore, runtime.Store, cloudDependencies(), nil)
 			return err
 		})
 		envelope, err := runJobEnvelope(runtime, "unexpose", input.JobEnvelopeInput, input.Preview, execute)

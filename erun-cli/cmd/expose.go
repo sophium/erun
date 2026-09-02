@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var servicePort int
 	var noTLS bool
@@ -22,6 +22,7 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	var acmeEmail string
 	var acmeServer string
 	var dns01WebhookGroupName string
+	var erunAlias string
 	cmd := &cobra.Command{
 		Use:   "expose TENANT ENVIRONMENT SERVICE",
 		Short: "Expose an environment's Service at a public HTTPS hostname",
@@ -37,21 +38,25 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 			"Omitting any of the three resolves to the same http-only Ingress --no-tls asks for explicitly, since " +
 			"nothing would ever populate that Secret otherwise. Pass --no-tls for http. Requires a platform block in .erun/config.yaml " +
 			"unless --services-zone and --platform-namespace are both set; it mutates the platform DNS zone and " +
-			"applies to the env's cluster. Use --dry-run to preview the actions.",
+			"applies to the env's cluster. The DNS write goes straight to the platform cluster's pdnsutil when this " +
+			"caller has that access; otherwise, with an erun platform alias configured (`erun cloud init erun`), it " +
+			"goes through the platform's API instead — the path a developer's local cluster needs. Use --dry-run to " +
+			"preview the actions.",
 		Example: "  erun expose team dev api --ip 127.0.0.1\n" +
 			"  erun expose team prod api --ip 203.0.113.10 --port 8080\n" +
 			"  erun expose team dev api --ip 127.0.0.1 --no-tls\n" +
 			"  erun expose team dev api --ip 127.0.0.1 --services-zone services.example.com --platform-namespace frs-prod\n" +
-			"  erun expose team dev api --ip 127.0.0.1 --dns01-token-file token.txt --dns01-broker-url https://api.example.com/v1/dns01 --acme-email admin@example.com",
+			"  erun expose team dev api --ip 127.0.0.1 --dns01-token-file token.txt --dns01-broker-url https://api.example.com/v1/dns01 --acme-email admin@example.com\n" +
+			"  erun expose team dev api --ip 127.0.0.1 --erun-alias prod",
 		Args:         cobra.ExactArgs(3),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, findProjectRoot, exposeCommandArgs{
+			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
 				tenant: args[0], environment: args[1], service: args[2],
 				targetIP: targetIP, servicePort: servicePort, noTLS: noTLS, ingressClass: ingressClass, tlsSecret: tlsSecret,
 				skipIfUnconfigured: skipIfUnconfigured, servicesZone: servicesZone, platformNamespace: platformNamespace,
 				dns01TokenFile: dns01TokenFile, dns01BrokerURL: dns01BrokerURL, acmeEmail: acmeEmail, acmeServer: acmeServer,
-				dns01WebhookGroupName: dns01WebhookGroupName,
+				dns01WebhookGroupName: dns01WebhookGroupName, erunAlias: erunAlias,
 			})
 		},
 	}
@@ -69,6 +74,7 @@ func newExposeCmd(store common.ExposeStore, findProjectRoot common.ProjectFinder
 	cmd.Flags().StringVar(&acmeEmail, "acme-email", "", "ACME account contact email for the provisioned per-env certificate (requires --dns01-token-file and --dns01-broker-url)")
 	cmd.Flags().StringVar(&acmeServer, "acme-server", "", "ACME directory URL for the provisioned per-env certificate (default Let's Encrypt production)")
 	cmd.Flags().StringVar(&dns01WebhookGroupName, "dns01-webhook-group-name", "", "API group the cluster's cert-manager DNS-01 webhook shim registers under (default acme.erun.io)")
+	cmd.Flags().StringVar(&erunAlias, "erun-alias", "", "erun platform cloud alias to route the DNS write through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias; only needed to disambiguate when more than one is configured)")
 	return cmd
 }
 
@@ -84,9 +90,10 @@ type exposeCommandArgs struct {
 	skipIfUnconfigured                                                           bool
 	servicesZone, platformNamespace                                              string
 	dns01TokenFile, dns01BrokerURL, acmeEmail, acmeServer, dns01WebhookGroupName string
+	erunAlias                                                                    string
 }
 
-func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx common.Context, store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
@@ -134,7 +141,8 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, findProjectR
 			ACMEEmail:             strings.TrimSpace(a.acmeEmail),
 			ACMEServer:            strings.TrimSpace(a.acmeServer),
 		},
-	}, store, nil, nil)
+		ErunAlias: strings.TrimSpace(a.erunAlias),
+	}, store, cloudStore, deps, nil, nil)
 	if err != nil {
 		return err
 	}

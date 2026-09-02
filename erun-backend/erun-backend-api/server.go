@@ -55,6 +55,16 @@ type HandlerOptions struct {
 	// when the PowerDNS write path is not configured; the endpoints are then not
 	// registered (a cluster with no brokered DNS-01 solver never calls them).
 	DNS01Broker *dns01broker.Broker
+	// EnvironmentHostnameWriter backs PUT/DELETE
+	// /v1/environments/{environment_id}/hostname: the same
+	// PowerDNS write path DNS01Broker uses, reused so a tenant with no direct
+	// PowerDNS access to the platform cluster can still point its own
+	// environment's wildcard hostname at an IP. Nil when unconfigured; the
+	// route then reports 501 rather than claiming a write it cannot perform.
+	EnvironmentHostnameWriter routes.EnvironmentHostnameWriter
+	// EnvironmentHostnameServicesZone is the zone the hostname route resolves
+	// a caller's environment name into, matching DNS01Broker's own zone.
+	EnvironmentHostnameServicesZone string
 	// KubeClient runs the server-side env-deploy Jobs. Nil (the default outside a
 	// cluster) leaves env provisioning off: POST /v1/environments only registers
 	// the row. Set together with EnvDeploy and DBOSContext to enable live deploys.
@@ -340,6 +350,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
 	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner, authorizer)
 	routes.RegisterDNS01TokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
+	routes.RegisterEnvironmentHostnameRoutes(register, repos.environments, repos.tenants, options.EnvironmentHostnameWriter, options.EnvironmentHostnameServicesZone)
 	var contextProvisioner routes.ContextProvisioner
 	if options.Cipher != nil {
 		aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
@@ -495,7 +506,7 @@ func newEnvironmentDeleter(options HandlerOptions, environments *repository.Envi
 }
 
 // newEnvironmentDeleteReconciler schedules the periodic re-attempt of every
-// environment mid-teardown (#1140), so a namespace that finishes terminating
+// environment mid-teardown, so a namespace that finishes terminating
 // — or a solver that starts answering again — converges the row without an
 // operator noticing and re-issuing the delete. Registered only when delete
 // itself is wired: with no live executor there is nothing for a reconciled

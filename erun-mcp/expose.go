@@ -42,6 +42,12 @@ type ExposeInput struct {
 	ACMEEmail             string `json:"acmeEmail,omitempty" jsonschema:"ACME account contact email for the provisioned per-env certificate (requires dns01TokenFile and dns01BrokerUrl)"`
 	ACMEServer            string `json:"acmeServer,omitempty" jsonschema:"ACME directory URL for the provisioned per-env certificate (default Let's Encrypt production)"`
 	DNS01WebhookGroupName string `json:"dns01WebhookGroupName,omitempty" jsonschema:"API group the cluster's cert-manager DNS-01 webhook shim registers under (default acme.erun.io)"`
+	// ErunAlias mirrors the CLI's --erun-alias: which configured erun-type
+	// cloud alias routes the DNS write through the platform's API instead of
+	// a direct pdnsutil exec, for a caller with no PowerDNS access to the
+	// platform cluster. Empty resolves the sole configured
+	// erun-type alias; only needed to disambiguate when more than one exists.
+	ErunAlias string `json:"erunAlias,omitempty" jsonschema:"erun platform cloud alias to route the DNS write through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias)"`
 	JobEnvelopeInput
 }
 
@@ -79,7 +85,8 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 					ACMEEmail:             strings.TrimSpace(input.ACMEEmail),
 					ACMEServer:            strings.TrimSpace(input.ACMEServer),
 				},
-			}, exposeStore, nil, nil)
+				ErunAlias: strings.TrimSpace(input.ErunAlias),
+			}, exposeStore, runtime.Store, cloudDependencies(), nil, nil)
 			return err
 		})
 		envelope, err := runJobEnvelope(runtime, "expose", input.JobEnvelopeInput, input.Preview, execute)

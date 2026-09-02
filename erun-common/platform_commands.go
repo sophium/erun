@@ -45,7 +45,7 @@ func ResolveERunPlatformAlias(store CloudReadStore, alias string) (CloudProvider
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return CloudProviderConfig{}, fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --alias to choose one")
+		return CloudProviderConfig{}, fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one")
 	}
 }
 

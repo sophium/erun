@@ -130,6 +130,15 @@ var Routes = map[string]Class{
 	"POST /v1/environments/{environment_id}/dns01-token": TenantUserClass,
 	"POST /v1/environments/{environment_id}/mcp-token":   TenantUserClass,
 
+	// environment_hostname.go — pointing an already-existing environment's
+	// own wildcard hostname at an IP is the same class as the
+	// dns01-token mint above: operating an environment that already exists,
+	// never administering the tenant, and never any other tenant's
+	// environment (the route resolves the wildcard name from the caller's
+	// own environment row, never from caller-supplied input).
+	"PUT /v1/environments/{environment_id}/hostname":    TenantUserClass,
+	"DELETE /v1/environments/{environment_id}/hostname": TenantUserClass,
+
 	// ai_sessions.go — an environment self-reporting its own AI-session status
 	// is the same class as reporting a build result: operating an environment
 	// that already exists, not administering the tenant. Reading it back is

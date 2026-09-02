@@ -24,6 +24,10 @@ type UnexposeParams struct {
 	// directly since it has no git checkout to resolve a project from.
 	ServicesZone      string
 	PlatformNamespace string
+	// ErunAlias mirrors ExposeServiceParams.ErunAlias: which configured
+	// erun-type cloud alias to route the DNS delete through when the
+	// platform route is used.
+	ErunAlias string
 }
 
 // UnexposeResult is the resolved teardown plan: the per-env wildcard record
@@ -43,12 +47,13 @@ type UnexposeResult struct {
 // environments that no longer exist and a later environment reusing the same
 // name doesn't inherit a stale one. Every action and decision is
 // traced before execution so a dry-run is a complete, side-effect-free plan.
-func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+//
+// The DNS delete uses the same two-path decision RunExposeService's upsert
+// does — see resolveUnexposeDNSDeleter. deleteDNSRecord, when
+// non-nil, overrides the decision outright (tests).
+func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
 		store = ConfigStore{}
-	}
-	if deleteDNSRecord == nil {
-		deleteDNSRecord = deletePowerDNSRecord
 	}
 
 	if params.SkipIfUnconfigured && !unexposePlatformConfigured(params) {
@@ -60,6 +65,13 @@ func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, d
 	if err != nil {
 		return UnexposeResult{}, err
 	}
+
+	hasDirectOverride := strings.TrimSpace(params.ServicesZone) != "" || strings.TrimSpace(params.PlatformNamespace) != ""
+	deleteDNSRecord, dnsProvider, err := resolveUnexposeDNSDeleter(ctx, result.Environment, params.ErunAlias, cloudStore, deps, hasDirectOverride, deleteDNSRecord)
+	if err != nil {
+		return UnexposeResult{}, err
+	}
+
 	deleteParams := DNSRecordDeleteParams{
 		Zone:               result.ServicesZone,
 		Name:               result.WildcardName,
@@ -70,8 +82,13 @@ func RunUnexposeService(ctx Context, params UnexposeParams, store ExposeStore, d
 	}
 
 	ctx.Trace(fmt.Sprintf("unexpose: per-env wildcard %s (zone %s)", result.WildcardName, result.ServicesZone))
-	ctx.Trace(fmt.Sprintf("unexpose: platform powerdns namespace %s", result.PlatformNamespace))
-	ctx.TraceCommand("", "kubectl", powerDNSDeleteArgs(deleteParams)...)
+	if dnsProvider.Alias == "" {
+		ctx.Trace(fmt.Sprintf("unexpose: platform powerdns namespace %s", result.PlatformNamespace))
+		ctx.TraceCommand("", "kubectl", powerDNSDeleteArgs(deleteParams)...)
+	} else {
+		tracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+		tracePlatformCall(ctx, dnsProvider, "DELETE", "/v1/environments/{environment_id}/hostname")
+	}
 	if ctx.DryRun {
 		return result, nil
 	}
