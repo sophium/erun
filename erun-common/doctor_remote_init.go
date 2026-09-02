@@ -679,12 +679,12 @@ func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath string, re
 	if strings.TrimSpace(repository.URL) == "" {
 		return errors.New("repository URL is required to finish git checkout")
 	}
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil && !ctx.DryRun {
-		return err
-	}
 	ctx.TraceCommand(projectRoot, "git", "clone", repository.URL, ".")
 	if ctx.DryRun {
 		return nil
+	}
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		return err
 	}
 	capture := ctx.ToolCapture()
 	cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath), "clone", repository.URL, ".")

@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/adrg/xdg"
 )
 
 const (
@@ -475,11 +473,7 @@ func EnvironmentActivityDir(tenant, environment string) (string, error) {
 	if err := errMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
 		return "", err
 	}
-	dir, err := xdg.CacheFile(filepath.Join("erun", "activity", tenant, environment))
-	if err != nil {
-		return "", err
-	}
-	return dir, nil
+	return resolveCacheFilePath(filepath.Join("erun", "activity", tenant, environment))
 }
 
 func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, policy EnvironmentIdlePolicy, now time.Time) EnvironmentIdleMarker {

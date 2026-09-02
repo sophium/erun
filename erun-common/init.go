@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -354,7 +353,7 @@ type tracedBootstrapStore struct {
 }
 
 func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -368,7 +367,7 @@ func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", config.Name, "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -382,7 +381,7 @@ func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", tenant, config.Name, "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}

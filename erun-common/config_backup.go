@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -261,7 +260,7 @@ func RestoreEnvConfigFromBackup(backupPath, tenant, environment string) error {
 
 // EnvConfigPath resolves the on-disk path of one environment's config file.
 func EnvConfigPath(tenant, environment string) (string, error) {
-	path, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, environment, configFile))
+	path, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, environment, configFile))
 	if err != nil {
 		return "", ErrNoUserDataFolder
 	}

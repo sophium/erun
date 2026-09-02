@@ -1,6 +1,8 @@
 package eruncommon
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +161,21 @@ func TestRunLocalEnvironmentWhipNotAliveWhenNoMaster(t *testing.T) {
 	}
 	if result.Decision != WhipDecisionNone || result.Reason != WhipReasonNotAlive {
 		t.Fatalf("expected none/not-alive, got %v/%v", result.Decision, result.Reason)
+	}
+}
+
+// TestWhipEnvironmentStatePathDoesNotCreateDirectory pins the same dry-run
+// purity contract erun#1907 fixed for the config tree: resolving where the
+// whip nudge bookkeeping lives is a pure read (loadWhipEnvironmentState calls
+// it before RunLocalEnvironmentWhip's own dry-run check) and must not create
+// ~/.cache/erun/whip/<tenant>/<environment>/ as a side effect.
+func TestWhipEnvironmentStatePathDoesNotCreateDirectory(t *testing.T) {
+	isolateActivityCache(t)
+	path, err := whipEnvironmentStatePath("acme", "dev")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
+		t.Fatalf("resolving the whip state path must not create its directory, got err=%v", statErr)
 	}
 }

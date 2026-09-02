@@ -28,7 +28,7 @@ type sshdPortForwardState struct {
 
 func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common.SSHConnectionInfo, error) {
 	info := common.SSHConnectionInfoForResult(result)
-	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment)
+	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
@@ -190,8 +190,8 @@ func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
 	return args
 }
 
-func sshdPortForwardStatePath(tenant, environment string) (string, error) {
-	return portForwardStatePath("sshd", tenant, environment)
+func sshdPortForwardStatePath(tenant, environment string, dryRun bool) (string, error) {
+	return portForwardStatePath("sshd", tenant, environment, dryRun)
 }
 
 func sshdPortForwardLogPath(statePath string) string {

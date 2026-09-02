@@ -1,6 +1,24 @@
 package eruncommon
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory pins the same
+// dry-run purity contract erun#1907 fixed for init's config directory: tracing
+// the git clone must not create the project root it would clone into.
+func TestFinishRemoteInitGitCheckoutDryRunCreatesNoDirectory(t *testing.T) {
+	projectRoot := filepath.Join(t.TempDir(), "unborn-checkout")
+	err := finishRemoteInitGitCheckout(Context{DryRun: true}, projectRoot, "", remoteRepositorySpec{URL: "git@example.test:acme/repo.git"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(projectRoot); !os.IsNotExist(statErr) {
+		t.Fatalf("dry-run must not create the project root, got stat err=%v", statErr)
+	}
+}
 
 // TestIsInRuntimeEnvironment pins the fix for the bug where a local-agent
 // pod's hostPath-mounted worktree (ERUN_REPO_REMOTE=false) made this function

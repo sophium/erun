@@ -786,6 +786,33 @@ func ERunConfigDir() (string, error) {
 	return filepath.Join(configHome, configRoot), nil
 }
 
+// resolveConfigFilePath resolves the on-disk path of a config file under
+// configHome without creating anything. xdg.ConfigFile's own path resolution
+// creates the parent directory as a side effect of resolving the path, which
+// runs even for a read or a dry-run trace and before any caller has decided
+// the write should actually happen. Callers that are about to write still
+// need os.MkdirAll immediately before the write.
+func resolveConfigFilePath(relPath string) (string, error) {
+	configHome := strings.TrimSpace(xdg.ConfigHome)
+	if configHome == "" {
+		return "", ErrNoUserDataFolder
+	}
+	return filepath.Join(configHome, relPath), nil
+}
+
+// resolveCacheFilePath is resolveConfigFilePath's cache-directory
+// counterpart: xdg.CacheFile has the same create-the-parent-directory side
+// effect on resolution as xdg.ConfigFile, which a mere read or a dry-run
+// trace must not trigger. Callers that are about to write still need
+// os.MkdirAll immediately before the write.
+func resolveCacheFilePath(relPath string) (string, error) {
+	cacheHome := strings.TrimSpace(xdg.CacheHome)
+	if cacheHome == "" {
+		return "", ErrNoUserDataFolder
+	}
+	return filepath.Join(cacheHome, relPath), nil
+}
+
 type ConfigStore struct{}
 
 func (ConfigStore) LoadERunConfig() (ERunConfig, string, error) {
@@ -845,7 +872,7 @@ func (ConfigStore) SaveProjectConfig(projectRoot string, config ProjectConfig) e
 }
 
 func SaveERunConfig(config ERunConfig) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -875,7 +902,7 @@ func SaveERunConfig(config ERunConfig) error {
 
 func LoadERunConfig() (ERunConfig, string, error) {
 	config := ERunConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
@@ -896,7 +923,7 @@ func LoadERunConfig() (ERunConfig, string, error) {
 
 func SaveTenantConfig(config TenantConfig) error {
 	config = NormalizeTenantConfig(config)
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.Name, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -927,7 +954,7 @@ func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 }
 
 func DeleteTenantConfig(tenant string) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -940,7 +967,7 @@ func DeleteTenantConfig(tenant string) error {
 
 func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	config := TenantConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
@@ -953,7 +980,7 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 }
 
 func ListTenantConfigs() ([]TenantConfig, error) {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return nil, ErrNoUserDataFolder
 	}
@@ -993,7 +1020,7 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 }
 
 func SaveEnvConfig(tenant string, config EnvConfig) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, config.Name, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -1024,7 +1051,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 }
 
 func DeleteEnvConfig(tenant, envName string) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -1037,7 +1064,7 @@ func DeleteEnvConfig(tenant, envName string) error {
 
 func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	config := EnvConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
@@ -1050,7 +1077,7 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 }
 
 func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return nil, ErrNoUserDataFolder
 	}

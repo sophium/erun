@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -626,11 +627,48 @@ func TestInit(t *testing.T) {
 			"--type", "invalid",
 			"--dry-run",
 		}
+		before := snapshotConfigTree(t, setup.ConfigHome)
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "init/type_rejects_invalid_value", normalize.Apply(result.Combined))
+		// A validation failure before tenant/environment resolution must leave
+		// no directory behind, dry-run or not.
+		after := snapshotConfigTree(t, setup.ConfigHome)
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("invalid --type mutated the config directory\nbefore: %v\nafter:  %v", before, after)
+		}
+	})
+
+	t.Run("dry_run_creates_no_stray_config_directory", func(t *testing.T) {
+		// `erun init --dry-run` created the environment's (and its tenant's)
+		// config directory on disk even though the write-yaml the directory
+		// exists for was correctly traced only. Reproduces the exact repro
+		// shape — a brand-new tenant and a brand-new host environment — and
+		// asserts the config root is byte-identical afterwards, not merely
+		// that the command exited 0 and printed traces.
+		setup := env.New(t)
+		args := []string{
+			"init", "erun", "ios-host",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		before := snapshotConfigTree(t, setup.ConfigHome)
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		after := snapshotConfigTree(t, setup.ConfigHome)
+		if len(after) != 0 {
+			t.Fatalf("dry-run init left stray entries under the config directory: %v\noutput:\n%s", after, result.Combined)
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("dry-run init mutated the config directory\nbefore: %v\nafter:  %v", before, after)
+		}
 	})
 
 	t.Run("rejects_hyphenated_tenant", func(t *testing.T) {
