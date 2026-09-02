@@ -468,6 +468,18 @@ execution:
   | `kubectl-pod-watch` | `kubectl get pods -o json`, the poll `erun deploy` runs alongside every real helm rollout (`watchReleasePods`) to catch an early container failure — a bad image reference, a crash loop, an unschedulable pod — before helm's own timeout would. The name is "watch" only by convention: it has always been a ticker-driven re-`get`, not a real Kubernetes watch, so the library path is the same shape as `kubectl-deployment-wait` above — a typed `List` re-run on an interval — rather than a new mechanism. It has its own key rather than reusing `kubectl-deployment-wait`'s: a different resource kind (Pod, not Deployment), a List instead of a single Get, and its own classification logic entirely. | Every other `kubectl` call site (the non-Secret `apply`s). |
   | `kubectl-context-configure` | `kubectl config set-cluster`/`set-credentials`/`set-context`, the three calls `erun cloud context init`/`start` issue to point a cloud context's kubeconfig entry at its own k3s API server, once the instance has a public IP and an admin token. Unlike every operation above, this never contacts the cluster at all — it only reads and writes the local kubeconfig file, the same one `kubectl` itself resolves via `KUBECONFIG`/`~/.kube/config`. The library path writes through the same `k8s.io/client-go/tools/clientcmd` functions `kubectl config set-*` is built on, so it also closes a real gap the subprocess path has: `set-credentials --token <adminToken>` puts a cluster-admin bearer token in the subprocess's own argv, readable by any co-resident process for the life of the exec; the library path keeps the token in memory only. | Every other `kubectl` call site (the non-Secret `apply`s). |
 
+### What will never get a library mode {#execution-modes-never}
+
+Most of what still shells out simply has not been promoted yet. These five are different — they are permanently subprocess-only, so no future release will add a mode for them:
+
+| Operation | Why it stays a subprocess |
+|---|---|
+| `git merge --squash` and conflict handling | The merge queue's gate decides what lands on `main` from this. A library merge resolves strategies, renames, and conflicts differently from `git` — being *almost* the same is the failure mode, not an acceptable approximation. |
+| `dtach` | No library exists. The detachable terminal sessions `erun open` reattaches to would have to be reimplemented from scratch, takeover contract included. |
+| `aws sso login`, `aws configure set` | Neither is an AWS API call — one opens a real browser SSO flow, the other writes your shared `~/.aws/config` ini file. There is no SDK equivalent to switch to. |
+| The `helm upgrade` rollout | `erun deploy` does not merely wait on helm: it watches the release's pods alongside it and **interrupts helm** the moment a container fails, so a bad image reference fails in seconds instead of waiting out the full timeout. Driving helm as a library gives up that mid-flight interrupt. |
+| `docker build` | The build fingerprint, the BuildKit cache behaviour, and the failure reason erun records for a detached build are all read out of the real `docker build`. |
+
 ---
 
 ## How to inspect your effective config
