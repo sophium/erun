@@ -35,6 +35,17 @@ kubectl logs -n <tenant>-<env> <pod> -c erun-devops --tail=200
 2. For GHCR, the token needs `write:packages`. `erun push` tries to widen it automatically with `gh auth refresh -s write:packages,read:packages`, but that needs an interactive browser login — so it's skipped in CI, over MCP, and inside a runtime pod (the desktop terminal is a pod shell with no browser). When it's skipped, the push fails with the exact recovery commands. Run them from a host shell with a browser: `gh auth refresh -h github.com -u <owner> -s write:packages,read:packages` then `gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --password-stdin`.
 3. For ECR, the token expires after 12 hours. `aws ecr get-login-password --region <r> | docker login --username AWS --password-stdin <account>.dkr.ecr.<r>.amazonaws.com`.
 
+## `erun build` fails at a download, minutes in, on a healthy network {#build-network-mtu}
+
+**Symptoms:** a build step that fetches something over HTTPS stalls and then fails — `curl: (35) Recv failure: Connection reset by peer`, `curl: (28) Connection timed out`, an `apt`/`apk` fetch failure — while the same URL fetches fine from a shell in the same environment. It often looks architecture-specific, because the failure lands on whichever platform iteration happened to be in flight.
+
+**Cause:** the environment's docker daemon is bridging build containers at a larger MTU than the pod network can carry. A cluster CNI that encapsulates gives the pod less than docker's 1500 default (a VXLAN overlay leaves 1450), so the oversized replies are dropped and nothing signals it back. Small packets pass, which is why the connection opens and a TLS handshake gets partway through before stopping dead.
+
+**Fix path:**
+
+1. Confirm it: `erun build` prints a `warning:` naming both MTUs at the start of a build when they disagree, and a build that then fails on the network says so in the error and in its `~/.erun/timing/build-*.json` record.
+2. `erun deploy <tenant> <environment>` — the runtime chart derives the daemon's MTU from the pod network, so redeploying is the fix. An environment deployed before that behaviour existed keeps the old sidecar until it is redeployed.
+
 ## "kubernetes context not found"
 
 **Symptoms:** any command that touches the cluster aborts with this message.
