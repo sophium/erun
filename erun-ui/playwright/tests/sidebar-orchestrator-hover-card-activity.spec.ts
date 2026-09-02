@@ -55,6 +55,19 @@ function card(page: Page) {
   return page.getByRole('dialog', { name: `${SEED_ORCHESTRATOR} details` });
 }
 
+// Radix's PopoverContent (erun-kit/components/ui/popover.tsx) runs a ~150ms
+// zoom-in-95 + slide-in entrance transform on every open. `toBeVisible()`
+// resolves the instant the element is visible, not once that transform
+// settles, so a `boundingBox()` read taken right after can land mid-transition
+// and report a smaller-than-rest size. Mirrors the same workaround in
+// sidebar-hovercard-layout.spec.ts.
+async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content:
+      '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
+  });
+}
+
 test.describe('orchestrator hover card environment and pacing state', () => {
   test('a linked environment names what it is doing, not just its name (red-then-green)', async ({
     app,
@@ -380,6 +393,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       }),
     );
     await app.reboot();
+    await disablePopoverEntranceAnimation(page);
 
     await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
 
