@@ -31,13 +31,11 @@ var InternalAPIRoutes = map[string]bool{
 	// route above.
 	"POST /v1/gate-runs":                true,
 	"PATCH /v1/gate-runs/{gate_run_id}": true,
-	// Listing gate runs has no console or desktop surface yet. Unlike the
-	// two self-reported routes above, this one genuinely needs an operator
-	// surface -- it is deliberately scoped out of this change (a follow-up
-	// issue tracks adding one to erun-console/erun-ui) rather than declared
-	// permanently internal. Remove this entry once that surface exists.
-	"GET /v1/gate-runs":               true,
-	"GET /v1/gate-runs/{gate_run_id}": true,
+	// GET /v1/gate-runs and GET /v1/gate-runs/{gate_run_id} used to be listed
+	// here too, as a deliberate, temporary scope decision for the CLI-first
+	// delivery of gate-run visibility. They are classified normally now that
+	// a real operator surface exists in both erun-console (src/gateRuns/)
+	// and erun-ui/frontend (the tenant dashboard's Gates tab).
 	// The environment's own AI-tool hooks report their turn-boundary status
 	// (busy/idle/awaiting-input) here -- never something an operator clicks,
 	// the same self-report shape as the build-result route above. The

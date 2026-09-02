@@ -1882,9 +1882,26 @@ func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T)
 	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
+// erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
+// body for every path, keyed by path rather than a switch — a switch here
+// once tripped golangci-lint's cyclomatic-complexity cap the moment a gate-run
+// case joined the rest.
+func erunPlatformDashboardFixtures() map[string]string {
+	return map[string]string{
+		"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`,
+		"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+		"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
+		"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
+		"/v1/audit-events":            `{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`,
+		"/v1/users":                   `[]`,
+	}
+}
+
 func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.HandlerFunc {
 	t.Helper()
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
+	fixtures := erunPlatformDashboardFixtures()
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer "+jwt {
@@ -1895,36 +1912,26 @@ func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.Handler
 		}
 		*requests = append(*requests, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		switch req.URL.Path {
-		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`))
-		case "/v1/reviews":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/merge-queue":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/review-1/builds":
-			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
-		case "/v1/audit-events":
-			_, _ = w.Write([]byte(`{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`))
-		case "/v1/users":
-			_, _ = w.Write([]byte(`[]`))
-		default:
+		body, ok := fixtures[req.URL.Path]
+		if !ok {
 			http.NotFound(w, req)
+			return
 		}
+		_, _ = w.Write([]byte(body))
 	}
 }
 
 func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
 	t.Helper()
 
-	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.GateRuns) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	if dashboard.PlatformAlias != testERunAlias {
 		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
 	}
 	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}

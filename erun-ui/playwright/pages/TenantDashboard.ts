@@ -4,6 +4,7 @@ export type TenantDashboardTab =
   | 'Users'
   | 'Reviews'
   | 'Merge queue'
+  | 'Gates'
   | 'Builds'
   | 'Audit log'
   | 'Registration'
@@ -60,6 +61,18 @@ export class TenantDashboard {
 
   auditEmptyState(): Locator {
     return this.activePanel().getByText('No audit events', { exact: true });
+  }
+
+  gatesTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  gatesRows(): Locator {
+    return this.gatesTable().locator('tbody tr');
+  }
+
+  gatesEmptyState(): Locator {
+    return this.activePanel().getByText('No gate runs yet', { exact: true });
   }
 
   reviewsTable(): Locator {

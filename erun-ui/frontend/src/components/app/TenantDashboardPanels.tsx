@@ -15,6 +15,7 @@ import {
   RelativeTime,
   type TenantDashboardData,
 } from './TenantDashboardMessage';
+import { GatesPanel } from './TenantDashboardPanels.Gates';
 import { RegistrationPanel } from './TenantDashboardPanels.Registration';
 import { RequestsPanel } from './TenantDashboardPanels.Requests';
 import { MergeQueuePanel, ReviewsPanel } from './TenantDashboardPanels.Reviews';
@@ -25,6 +26,7 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
       <UsersPanel data={data} />
       <ReviewsPanel data={data} />
       <MergeQueuePanel data={data} />
+      <GatesPanel data={data} />
       <BuildsPanel data={data} />
       <AuditPanel data={data} />
       <RegistrationPanel data={data} />

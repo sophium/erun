@@ -42,7 +42,7 @@ Everything above happens somewhere with no name of its own by default: a gate bu
 
 `INCONCLUSIVE` is not a failure — it means the gate never reached a real verdict at all: a wrapper that hit its own timeout cap, or a run an environment-specific fault (a network blip, a pod eviction) interrupted mid-flight. Treat it as unresolved and worth re-driving, not as a red gate. A `FAILED` entry always names `failingStep` (which gate step actually produced the red verdict) and, when available, `logRef` (where to read it).
 
-A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. This is CLI/MCP-first today; a console/desktop view is planned as a follow-up. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
+A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. `erun gate list`/`erun gate show` are the CLI view; the desktop's tenant dashboard (see [Reviews § Gates tab](/desktop/reviews#gates-tab)) and the hosted console's own Gate runs section show the identical queue. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
 
 ### The desktop coverage gap {#desktop-coverage-gap}
 

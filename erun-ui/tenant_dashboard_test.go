@@ -26,30 +26,37 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 	}))
 }
 
+// tenantDashboardAPIFixtures is tenantDashboardAPIResponse's fixture body for
+// every path except /v1/whoami (handled separately, since its body carries
+// the caller-supplied capabilities), keyed by path rather than a switch — a
+// switch here once tripped golangci-lint's cyclomatic-complexity cap the
+// moment a gate-run case joined the rest.
+var tenantDashboardAPIFixtures = map[string]string{
+	"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+	"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+	"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
+	"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
+	"/v1/audit-events":            `{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`,
+	"/v1/users":                   `[]`,
+	"/v1/contexts":                `[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`,
+	"/v1/environments":            `[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`,
+	"/v1/invite-requests":         `[]`,
+}
+
 // tenantDashboardAPIResponse is tenantDashboardAPI's fixture body for every
 // path its forbidden/default handling did not already short-circuit — split
 // out to keep tenantDashboardAPI itself under the module's complexity cap.
 func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabilities string) {
-	switch req.URL.Path {
-	case "/v1/whoami":
+	if req.URL.Path == "/v1/whoami" {
 		_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","roles":["Auditor"],"issuer":"https://sts.aws.example","subject":"subject-1","capabilities":` + capabilities + `}`))
-	case "/v1/reviews", "/v1/reviews/merge-queue":
-		_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-	case "/v1/reviews/review-1/builds":
-		_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
-	case "/v1/audit-events":
-		_, _ = w.Write([]byte(`{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`))
-	case "/v1/users":
-		_, _ = w.Write([]byte(`[]`))
-	case "/v1/contexts":
-		_, _ = w.Write([]byte(`[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`))
-	case "/v1/environments":
-		_, _ = w.Write([]byte(`[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`))
-	case "/v1/invite-requests":
-		_, _ = w.Write([]byte(`[]`))
-	default:
-		http.NotFound(w, req)
+		return
 	}
+	body, ok := tenantDashboardAPIFixtures[req.URL.Path]
+	if !ok {
+		http.NotFound(w, req)
+		return
+	}
+	_, _ = w.Write([]byte(body))
 }
 
 // testERunPlatformAliasApp builds an App with one signed-in erun-type cloud
@@ -165,6 +172,9 @@ func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	if len(dashboard.MergeQueue) != 1 {
 		t.Fatalf("expected the merge queue panel to still resolve, got %+v", dashboard.MergeQueue)
 	}
+	if len(dashboard.GateRuns) != 1 {
+		t.Fatalf("expected the gate runs panel to still resolve, got %+v", dashboard.GateRuns)
+	}
 	if builds := panelFor(t, dashboard, tenantDashboardTabBuilds); !strings.Contains(builds.Error, "403") {
 		t.Fatalf("expected the builds panel to carry its own failure, got %+v", builds)
 	}
@@ -191,6 +201,10 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 	if queue.Restricted != tenantDashboardReadMergeQueue {
 		t.Fatalf("expected the merge queue panel to name the missing read, got %+v", queue)
 	}
+	gates := panelFor(t, dashboard, tenantDashboardTabGates)
+	if gates.Restricted != tenantDashboardReadGateRuns {
+		t.Fatalf("expected the gates panel to name the missing read, got %+v", gates)
+	}
 	builds := panelFor(t, dashboard, tenantDashboardTabBuilds)
 	if builds.Restricted != tenantDashboardReadReviews {
 		t.Fatalf("expected the builds panel to name the missing read, got %+v", builds)
@@ -216,7 +230,7 @@ func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T
 	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/invite-requests/mine,/v1/config" {
 		t.Fatalf("expected no read beyond identity (plus the identity-scoped invite-request/config reads, which need no capability), got %q", got)
 	}
-	for _, tab := range []string{tenantDashboardTabQueue, tenantDashboardTabBuilds, tenantDashboardTabAudit} {
+	for _, tab := range []string{tenantDashboardTabQueue, tenantDashboardTabGates, tenantDashboardTabBuilds, tenantDashboardTabAudit} {
 		if panel := panelFor(t, dashboard, tab); panel.Restricted == "" {
 			t.Fatalf("expected the %s panel to be reported as restricted, got %+v", tab, panel)
 		}
@@ -233,7 +247,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/reviews/review-1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if got := strings.Join(requests, ","); got != want {
 		t.Fatalf("expected every read to be attempted, got %q, want %q", got, want)
 	}

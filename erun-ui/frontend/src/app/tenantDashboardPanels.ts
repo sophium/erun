@@ -41,6 +41,7 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'users', label: 'Users' },
   { tab: 'reviews', label: 'Reviews' },
   { tab: 'queue', label: 'Merge queue' },
+  { tab: 'gates', label: 'Gates' },
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
   { tab: 'registration', label: 'Registration' },
@@ -109,6 +110,24 @@ const reviewStatusTones: Record<string, StatusBadgeTone> = {
 
 export function reviewStatusTone(status: string): StatusBadgeTone {
   return reviewStatusTones[status.trim().toUpperCase()] ?? 'warning';
+}
+
+// gateRunStatusTones maps a gate run's verdict vocabulary to a StatusBadge
+// tone. The one thing this must get right (erun#1932): INCONCLUSIVE is not a
+// failure -- it exists precisely because a wrapper hitting its own timeout,
+// or an environment fault, is not a verdict on the change. It renders with
+// its own `warning` tone, visibly distinct from FAILED's `destructive` tone,
+// never folded into the same red state (see erun-backend-api/AGENTS.md's
+// "Gate Runs"). WCAG 1.4.1: every tone still shows the status word.
+const gateRunStatusTones: Record<string, StatusBadgeTone> = {
+  RUNNING: 'in-progress',
+  PASSED: 'success',
+  FAILED: 'destructive',
+  INCONCLUSIVE: 'warning',
+};
+
+export function gateRunStatusTone(status: string): StatusBadgeTone {
+  return gateRunStatusTones[status.trim().toUpperCase()] ?? 'warning';
 }
 
 // registrationStatusTones maps the Registration tab's two status vocabularies
