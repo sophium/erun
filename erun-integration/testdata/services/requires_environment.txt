@@ -1,0 +1,2 @@
+audit: erun services --dry-run team dev
+not initialized

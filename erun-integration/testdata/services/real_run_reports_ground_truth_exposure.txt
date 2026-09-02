@@ -1,0 +1,8 @@
+Services (3):
+  team-api: ports http:80/TCP
+    exposed at http://api.team-dev.services.test
+  team-worker: ports 8080
+    not exposed (erun expose <tenant> <environment> worker routes here)
+  validation-agent-backend-api: ports 3000
+    not exposed, and not exposable yet: this Service's name doesn't carry the tenant's resource prefix, so erun expose has no Service to route to
+audit: erun services team dev

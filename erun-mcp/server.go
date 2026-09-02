@@ -645,6 +645,10 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Remove an environment's per-env wildcard DNS record — the DNS-side counterpart to expose, run at environment teardown so records don't accumulate for environments that no longer exist. Touches only the platform DNS zone; the Ingress that referenced the record lives in the environment's own namespace and is torn down with it. Requires a platform block in .erun/config.yaml unless servicesZone and platformNamespace are both set. Supports preview.",
 	}, unexposeTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "services",
+		Description: "List every Service running in the resolved environment's namespace, noting which are already reachable at a public hostname (ground truth from a real expose-* Ingress backend, not a name guess). A Service not yet exposed reports the logical label expose would use to route back to it, or nothing when its name doesn't carry the tenant's resource prefix -- expose has no way to route to it correctly yet. Read-only: two kubectl get calls, never a mutation.",
+	}, servicesTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name: "pin",
 		Description: "Re-pin every erun version reference for tenant/environment (defaulting to the MCP runtime context) in one motion: the Terraform module ?ref, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun chart dependencies, the build-env image tag, and the environment's own runtime version. " +
 			"Rewrites projectRoot (or, when unset, the runtime repo path); refuses rather than scan a wider directory when neither resolves, since a caller here has no working directory to fall back to the way a shell user does. " +

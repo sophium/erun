@@ -24,7 +24,9 @@ export {
 } from './manageDialogThunks';
 export {
   cancelUnexposeConfirm,
+  refreshExposePreview,
   refreshManageExposures,
+  selectExposeService,
   startUnexposeConfirm,
   submitExposeService,
   submitUnexposeEnvironment,

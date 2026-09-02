@@ -193,6 +193,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"pin":         {Family: "", CLIPath: []string{"pin"}, Title: "Pin an environment to a version", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"expose":      {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"unexpose":    {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	"services":    {Family: "", CLIPath: []string{"services"}, Title: "List an environment's Services", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"terraform":   {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
 	// job_start has no working handler: it is a removed-tool stub (see
 	// mcpRemovedTools) whose only behavior is to name the tool that took over

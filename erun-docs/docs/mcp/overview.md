@@ -171,6 +171,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. Resolves the checkout to rewrite from `projectRoot`, then the server's own runtime repo path; refuses rather than scan a wider directory when neither is set — there is no cwd to fall back to the way a shell user has. `preview` returns the plan without writing. |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
 | `unexpose` | `erun unexpose` | Removes an environment's per-env wildcard DNS record — the DNS-side counterpart to `expose`, run at teardown. Supports preview. |
+| `services` | `erun services` | Lists every Service running in the environment's namespace, noting which already resolve at a public hostname (read from a real `expose-*` Ingress's backend, not guessed from a name) and, for the rest, the logical label `expose` would need to route to it. Read-only. |
 | `terraform` | `erun terraform` | Runs a hosted platform's per-environment Terraform (`apply`/`plan`/`destroy`). `apply`/`destroy` mutate real cloud and cluster state and require `confirm` to equal the environment name. `preview` returns the resolved commands without executing them. |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
@@ -393,6 +394,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `pin` | `erun pin` | Work |
 | *(top-level)* | `expose` | `erun expose` | Work |
 | *(top-level)* | `unexpose` | `erun unexpose` | Work |
+| *(top-level)* | `services` | `erun services` | Read |
 | *(top-level)* | `terraform` | `erun terraform` | Work |
 | *(top-level)* | `doctor` | `erun doctor` | Work |
 | *(top-level)* | `observe` | `erun observe` | Read |

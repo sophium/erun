@@ -11,6 +11,12 @@ type ObservedIngress struct {
 	Name  string               `json:"name"`
 	Hosts []string             `json:"hosts,omitempty"`
 	TLS   []ObservedIngressTLS `json:"tls,omitempty"`
+	// Backends names every in-namespace Service this Ingress's rules route to
+	// (`spec.rules[].http.paths[].backend.service.name`), deduplicated. This
+	// is the ground truth for "does a real Ingress already route to Service
+	// X" -- reading it directly avoids assuming the Ingress name or its public
+	// host label matches the backend Service's real name.
+	Backends []string `json:"backends,omitempty"`
 }
 
 type ObservedIngressTLS struct {
@@ -31,6 +37,15 @@ type ingressItem struct {
 	Spec struct {
 		Rules []struct {
 			Host string `json:"host"`
+			HTTP struct {
+				Paths []struct {
+					Backend struct {
+						Service struct {
+							Name string `json:"name"`
+						} `json:"service"`
+					} `json:"backend"`
+				} `json:"paths"`
+			} `json:"http"`
 		} `json:"rules"`
 		TLS []struct {
 			Hosts      []string `json:"hosts"`
@@ -51,9 +66,18 @@ func fetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 	ingresses := make([]ObservedIngress, 0, len(list.Items))
 	for _, item := range list.Items {
 		ing := ObservedIngress{Name: item.Metadata.Name}
+		seenBackend := make(map[string]bool)
 		for _, rule := range item.Spec.Rules {
 			if rule.Host != "" {
 				ing.Hosts = append(ing.Hosts, rule.Host)
+			}
+			for _, path := range rule.HTTP.Paths {
+				name := path.Backend.Service.Name
+				if name == "" || seenBackend[name] {
+					continue
+				}
+				seenBackend[name] = true
+				ing.Backends = append(ing.Backends, name)
 			}
 		}
 		for _, tls := range item.Spec.TLS {

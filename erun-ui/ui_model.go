@@ -782,23 +782,30 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
-// uiExposureList is the Ports tab's read model for an environment's public
-// exposures. Configured is false when exposure cannot apply here at all,
-// which the tab renders as "not applicable" rather than an empty list —
-// distinct from Restricted (the caller cannot see the answer) and from a
-// genuinely empty Services list (configured, nothing exposed yet). Error
-// carries a listing failure that is neither of those two named cases.
+// uiExposureList is the Ports tab's read model for an environment's actually
+// running Services (issue #1906), not just the ones already exposed.
+// Configured is false when exposure cannot apply here at all, which the tab
+// renders as "not applicable" rather than an empty list — distinct from
+// Restricted (the caller cannot see the answer) and from a genuinely empty
+// Services list (configured, no Services in the namespace). Error carries a
+// listing failure that is neither of those two named cases.
 // NotConfiguredReason names which of two distinct causes made Configured
 // false, since they call for different copy and different recovery: a host
 // environment has no cluster and can never be exposed, while a cluster-backed
 // environment whose project simply hasn't declared a platform: block yet is
 // the fixable case.
 type uiExposureList struct {
-	Configured          bool               `json:"configured"`
-	Restricted          bool               `json:"restricted"`
-	Error               string             `json:"error,omitempty"`
-	Services            []uiExposedService `json:"services"`
-	NotConfiguredReason string             `json:"notConfiguredReason,omitempty"`
+	Configured          bool                   `json:"configured"`
+	Restricted          bool                   `json:"restricted"`
+	Error               string                 `json:"error,omitempty"`
+	Services            []uiEnvironmentService `json:"services"`
+	NotConfiguredReason string                 `json:"notConfiguredReason,omitempty"`
+	// DefaultTargetIP prefills the expose form's Target IP field for a local
+	// cluster (this env's kubernetes context matches no registered cloud
+	// context) -- 127.0.0.1, the VM-backed local case erun expose's own docs
+	// name. Empty for a remote/cloud env, where there is no safe default to
+	// guess and the operator must supply the real ingress IP.
+	DefaultTargetIP string `json:"defaultTargetIP,omitempty"`
 }
 
 // uiExposureNotConfiguredReason enumerates uiExposureList.NotConfiguredReason values.
@@ -807,18 +814,57 @@ const (
 	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
 )
 
-// uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
-type uiExposedService struct {
-	Service  string `json:"service"`
-	Hostname string `json:"hostname"`
-	Scheme   string `json:"scheme"`
+// uiEnvironmentService mirrors eruncommon.EnvironmentService for the Ports
+// tab's service picker. Exposed is ground truth read back from the
+// namespace's own Ingresses, never guessed from Name -- see
+// eruncommon.EnvironmentService's own doc comment. ExposableLabel is set only
+// when Exposed is false and Name follows the tenant's naming convention;
+// empty in every other case, including when Exposed is true, so the picker
+// can tell "already reachable", "can be exposed as this label", and "erun
+// expose cannot route to this Service" apart without inferring one from the
+// others.
+type uiEnvironmentService struct {
+	Name           string                     `json:"name"`
+	Ports          []uiEnvironmentServicePort `json:"ports"`
+	Exposed        bool                       `json:"exposed"`
+	Hostname       string                     `json:"hostname,omitempty"`
+	Scheme         string                     `json:"scheme,omitempty"`
+	ExposableLabel string                     `json:"exposableLabel,omitempty"`
 }
 
-// uiExposeServiceInput is the Ports tab's "Expose a service" form.
+type uiEnvironmentServicePort struct {
+	Name     string `json:"name,omitempty"`
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
+}
+
+// uiExposeServiceInput is the Ports tab's "Expose a service" form. Service is
+// a chosen uiEnvironmentService.ExposableLabel, not free text (issue #1906) --
+// the picker rules out any Service erun expose could not route to correctly
+// before this ever gets submitted.
 type uiExposeServiceInput struct {
 	Service  string `json:"service"`
 	TargetIP string `json:"targetIP"`
 	Port     int    `json:"port,omitempty"`
+}
+
+// uiExposePreview is the resolved plan for uiExposeServiceInput before it
+// commits anything -- the hostname/scheme a real ExposeEnvironmentService
+// call would produce, resolved read-only via a dry-run of the same primitive
+// (issue #1906's "see the hostname it will get before committing").
+type uiExposePreview struct {
+	Hostname          string `json:"hostname"`
+	Scheme            string `json:"scheme"`
+	TLSEnabled        bool   `json:"tlsEnabled"`
+	TLSDisabledReason string `json:"tlsDisabledReason,omitempty"`
+}
+
+// uiExposeServiceResult confirms what a real ExposeEnvironmentService call
+// actually produced -- the service name is already known by the caller (it
+// submitted it), so only the resolved address rides back.
+type uiExposeServiceResult struct {
+	Hostname string `json:"hostname"`
+	Scheme   string `json:"scheme"`
 }
 
 // uiUnexposeResult confirms which DNS record un-exposing removed, so the

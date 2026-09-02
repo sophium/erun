@@ -1,0 +1,3 @@
+audit: erun services --dry-run team dev
+kubectl --context test-context --namespace team-dev get service -o json
+kubectl --context test-context --namespace team-dev get ingress -o json

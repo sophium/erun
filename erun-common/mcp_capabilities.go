@@ -54,6 +54,7 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"exec_diff":           {},
 	"observe":             {},
 	"usage":               {},
+	"services":            {},
 	"outputs_list":        {},
 	"outputs_download":    {},
 	"exec_job_status":     {},

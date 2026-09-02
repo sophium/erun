@@ -25,13 +25,23 @@ The DNS write targets the **platform** environment's cluster (where PowerDNS run
 
 HTTPS is requested by default, but it only takes effect when something will actually populate the env's per-env wildcard cert Secret (`<tenant>-<env>-wildcard-tls`): the Ingress carries a `tls:` block referencing it and sets `ingressClassName` only once `--dns01-token-file`, `--dns01-broker-url`, and `--acme-email` are all set, provisioning that Secret through erun's DNS-01 broker — see [Networking spec · Platform service exposure](/agent-reference/networking-spec#platform-service-exposure) for the exact mechanism. On a hosted platform these three flags are supplied automatically as part of the environment's server-side deploy; running `expose` by hand for it needs nothing extra. Without them, `expose` resolves to the same plain `http://` Ingress `--no-tls` asks for explicitly, rather than referencing a Secret nothing will ever populate. Pass `--ingress-class` / `--tls-secret` to override the defaults.
 
+## Listing services
+
+`<service>` above has to already be known — the DNS label *and* the naming convention (`<tenant>-<service>`) it routes to. `erun services <tenant> <env>` answers "what Services does this environment actually have?" instead: it lists every Service in the env's namespace, its ports, and — read straight from the namespace's own Ingresses, never guessed from a name — whether it's already reachable at a public hostname.
+
+```bash
+erun services team dev
+```
+
+A Service already exposed reports its real `scheme://hostname`. One that isn't reports the logical label `expose` would need to route back to it (its name with `team-` stripped) — pass that as `<service>` to `erun expose team dev <label>`. A Service whose name doesn't carry that prefix (common for a repo that brought its own chart, e.g. `validation-agent-backend-api`) reports as not exposable yet: `expose`'s `<tenant>-<service>` convention has no way to route to it correctly, so this command deliberately does not suggest a label that would 503.
+
 ## Removing exposure
 
 [`erun unexpose <tenant> <env>`](/agent-reference/networking-spec#unexposing) removes the per-env wildcard DNS record `expose` created. A hosted platform's environment deletion already runs this for you — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). Run it by hand only if you exposed an environment manually and are tearing it down outside the normal delete flow.
 
 ## From the desktop
 
-The desktop app covers the same ground without a terminal: an environment's settings → **Ports** tab has a **Public access** section that lists every exposed service's hostname, exposes a new one, and removes public access for the whole environment (the same scope as `erun unexpose` above). See [Desktop app · Settings and ports](/desktop/settings-and-ports).
+The desktop app covers the same ground without a terminal: an environment's settings → **Ports** tab has a **Public access** section that lists the environment's Services (pick one instead of typing a name), shows the hostname it would get before you commit, exposes it, and removes public access for the whole environment (the same scope as `erun unexpose` above). See [Desktop app · Settings and ports](/desktop/settings-and-ports).
 
 ## Flags
 

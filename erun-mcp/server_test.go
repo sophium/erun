@@ -174,7 +174,7 @@ var wantRegisteredTools = []string{
 	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build",
 	"review_report-merged", "review_resolve",
 	"review_reviewers_add", "review_reviewers_list", "review_reviewers_remove", "review_show",
-	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
+	"review_unresolve", "services", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
 
 // connectTestMCPSession clears the ambient auth anchors (set when this test

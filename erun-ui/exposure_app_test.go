@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -45,13 +46,37 @@ func exposableProjectRoot(t *testing.T) string {
 }
 
 // stubKubectlOutput replaces kubectl on PATH for this test's duration with a
-// script that writes stdout/stderr and exits with the given code.
+// script that writes stdout/stderr and exits with the given code for every
+// call -- for scenarios where ListEnvironmentServices' two kubectl calls
+// (get service, get ingress) can share one response, e.g. a failure that
+// happens on the first call either way.
 func stubKubectlOutput(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
 	script := fmt.Sprintf("#!/bin/sh\nprintf %s\nprintf %s 1>&2\nexit %d\n",
 		shellQuote(stdout), shellQuote(stderr), exitCode)
 	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// stubKubectlGetJSON replaces kubectl on PATH with a script that dispatches
+// on the resource named right after "get" (e.g. "service", "ingress") to
+// return canned JSON, mirroring erun-integration's StubKubectlGetJSON --
+// ListEnvironmentServices issues one `get service` and one `get ingress`
+// call per run, and a scenario needs to answer them differently.
+func stubKubectlGetJSON(t *testing.T, responses map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+	var body strings.Builder
+	body.WriteString("#!/bin/sh\nargs=\"$*\"\ncase \"$args\" in\n")
+	for resource, stdout := range responses {
+		fmt.Fprintf(&body, "  *%s*)\n    cat <<'ERUN_STUB_KUBECTL_JSON'\n%s\nERUN_STUB_KUBECTL_JSON\n    ;;\n",
+			shellQuote("get "+resource), strings.TrimRight(stdout, "\n"))
+	}
+	body.WriteString("  *) echo \"unstubbed kubectl call: $args\" 1>&2; exit 1 ;;\nesac\n")
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(body.String()), 0o755); err != nil {
 		t.Fatalf("write stub kubectl: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -141,7 +166,10 @@ func TestListEnvironmentExposuresErrorOnOtherFailure(t *testing.T) {
 
 func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
-	stubKubectlOutput(t, `{"items":[{"metadata":{"name":"expose-api"},"spec":{"rules":[{"host":"api.frs-prod.services.test"}]}}]}`, "", 0)
+	stubKubectlGetJSON(t, map[string]string{
+		"service": `{"items":[{"metadata":{"name":"team-api"},"spec":{"ports":[{"port":80}]}}]}`,
+		"ingress": `{"items":[{"metadata":{"name":"expose-api"},"spec":{"rules":[{"host":"api.frs-prod.services.test","http":{"paths":[{"backend":{"service":{"name":"team-api"}}}]}}]}}]}`,
+	})
 
 	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "dev"})
 	if err != nil {
@@ -150,8 +178,39 @@ func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
 	if !result.Configured || result.Restricted || result.Error != "" {
 		t.Fatalf("unexpected result shape: %+v", result)
 	}
-	if len(result.Services) != 1 || result.Services[0].Hostname != "api.frs-prod.services.test" {
+	if len(result.Services) != 1 || !result.Services[0].Exposed || result.Services[0].Hostname != "api.frs-prod.services.test" {
 		t.Fatalf("expected one exposed service, got %+v", result.Services)
+	}
+}
+
+// TestListEnvironmentExposuresReturnsExposableAndBlockedServices locks the
+// three-way state a picker needs to distinguish (issue #1906): a Service
+// following the tenant naming convention but not yet exposed reports the
+// label erun expose would need, and one that doesn't follow it reports
+// neither Exposed nor an ExposableLabel -- never a guessed one.
+func TestListEnvironmentExposuresReturnsExposableAndBlockedServices(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	stubKubectlGetJSON(t, map[string]string{
+		"service": `{"items":[
+			{"metadata":{"name":"team-worker"},"spec":{"ports":[{"port":8080}]}},
+			{"metadata":{"name":"validation-agent-backend-api"},"spec":{"ports":[{"port":3000}]}}
+		]}`,
+		"ingress": `{"items":[]}`,
+	})
+
+	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Services) != 2 {
+		t.Fatalf("expected two services, got %+v", result.Services)
+	}
+	worker, other := result.Services[0], result.Services[1]
+	if worker.Exposed || worker.ExposableLabel != "worker" {
+		t.Fatalf("expected team-worker exposable as %q, got %+v", "worker", worker)
+	}
+	if other.Exposed || other.ExposableLabel != "" {
+		t.Fatalf("expected validation-agent-backend-api to be neither exposed nor exposable, got %+v", other)
 	}
 }
 
@@ -172,5 +231,51 @@ func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error exposing a service with no platform block configured")
+	}
+}
+
+// TestPreviewExposeEnvironmentServiceResolvesWithoutApplying locks that the
+// preview resolves the same hostname/scheme a real expose would, without
+// ever shelling out to kubectl -- if it applied anything, the unstubbed
+// kubectl on PATH would fail the test.
+func TestPreviewExposeEnvironmentServiceResolvesWithoutApplying(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	preview, err := app.PreviewExposeEnvironmentService(uiSelection{Tenant: "team", Environment: "dev"}, uiExposeServiceInput{
+		Service: "api", TargetIP: "127.0.0.1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if preview.Hostname != "api.team-dev.services.erunpaas.test" {
+		t.Fatalf("expected the resolved hostname, got %+v", preview)
+	}
+	if preview.TLSEnabled {
+		t.Fatalf("expected TLS disabled with no DNS-01 broker configured, got %+v", preview)
+	}
+	if preview.TLSDisabledReason == "" {
+		t.Fatal("expected a TLSDisabledReason when TLS is disabled")
+	}
+}
+
+// TestExposeDefaultTargetIPLocalVsCloud locks the two states the Ports tab's
+// Target IP field needs: 127.0.0.1 for a kubernetes context no registered
+// cloud context claims (issue #1906's local-cluster default), empty for one
+// a registered cloud context does claim, where guessing would be wrong.
+func TestExposeDefaultTargetIPLocalVsCloud(t *testing.T) {
+	app := &App{deps: erunUIDeps{store: stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{
+				{Name: "cloud-ctx", KubernetesContext: "cloud-ctx"},
+			},
+		},
+	}}}
+	if got := app.exposeDefaultTargetIP("local-context"); got != "127.0.0.1" {
+		t.Fatalf("expected 127.0.0.1 for a local cluster, got %q", got)
+	}
+	if got := app.exposeDefaultTargetIP("cloud-ctx"); got != "" {
+		t.Fatalf("expected no default for a registered cloud context, got %q", got)
+	}
+	if got := app.exposeDefaultTargetIP(""); got != "" {
+		t.Fatalf("expected no default with no kubernetes context, got %q", got)
 	}
 }

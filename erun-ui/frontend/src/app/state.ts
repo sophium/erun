@@ -23,6 +23,7 @@ import type {
   UIEnvironmentHealth,
   UIHostedRegistryStatus,
 } from '@/uiDiagnosticsTypes';
+import { defaultExposeServiceFormState } from '@/uiExposureTypes';
 import type { UIRuntimeChartPlan } from '@/uiRuntimeChartTypes';
 
 import type { AppNotificationAction } from './model/appNotificationAction';
@@ -233,11 +234,9 @@ export interface ManageDialogState {
   // operator runs it. healthLoading gates the in-flight indicator.
   health: UIEnvironmentHealth | null;
   healthLoading: boolean;
-  // The Ports tab's public-exposure surface (issue #1351). Exposures is loaded
-  // automatically alongside the rest of the dialog's read models, matching
-  // deployComponents; exposeForm/exposeBusy/exposeError track the "Expose a
-  // service" form, and unexposeConfirming/unexposeBusy/unexposeError track the
-  // two-step "Remove public access" confirm below the list.
+  // The Ports tab's public-exposure surface (issue #1351; the picker-based
+  // redesign is issue #1906). exposeForm also carries its own
+  // resolved-hostname preview (see ExposeServiceFormState).
   exposures: UIExposureList;
   exposuresLoading: boolean;
   exposeForm: ExposeServiceFormState;
@@ -493,7 +492,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   healthLoading: false,
   exposures: { configured: false, restricted: false, services: [] },
   exposuresLoading: false,
-  exposeForm: { service: '', targetIP: '', port: '' },
+  exposeForm: defaultExposeServiceFormState(),
   exposeBusy: false,
   exposeError: '',
   unexposeConfirming: false,

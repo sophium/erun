@@ -1,7 +1,8 @@
 import type {
   UIEnvironmentConfig,
-  UIExposedService,
+  UIExposePreview,
   UIExposeServiceInput,
+  UIExposeServiceResult,
   UIExposureList,
   UIRuntimeResourceStatus,
   UISelection,
@@ -37,6 +38,7 @@ import {
   LoadRuntimeSizing,
   LoadRuntimeUsage,
   LoadVersionSuggestions,
+  PreviewExposeEnvironmentService,
   ReclaimRuntimeResources,
   ResizeRuntimeToRecommendation,
   SaveEnvironmentConfig,
@@ -211,9 +213,17 @@ export const environmentApi = wailsApi.injectEndpoints({
         ListEnvironmentExposures(selection),
       ),
     }),
-    exposeEnvironmentService: builder.mutation<UIExposedService, ExposeServiceArgs>({
-      queryFn: wailsQueryFn<ExposeServiceArgs, UIExposedService>(({ selection, input }) =>
+    exposeEnvironmentService: builder.mutation<UIExposeServiceResult, ExposeServiceArgs>({
+      queryFn: wailsQueryFn<ExposeServiceArgs, UIExposeServiceResult>(({ selection, input }) =>
         ExposeEnvironmentService(selection, input),
+      ),
+    }),
+    // Resolves the hostname/scheme a real exposeEnvironmentService call would
+    // produce, without applying anything -- lets the form show it before the
+    // operator commits (issue #1906).
+    previewExposeEnvironmentService: builder.mutation<UIExposePreview, ExposeServiceArgs>({
+      queryFn: wailsQueryFn<ExposeServiceArgs, UIExposePreview>(({ selection, input }) =>
+        PreviewExposeEnvironmentService(selection, input),
       ),
     }),
     unexposeEnvironment: builder.mutation<UIUnexposeResult, UISelection>({

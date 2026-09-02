@@ -14,13 +14,16 @@ import (
 // composes the shared expose/unexpose primitives in erun-common; it holds no
 // expose/unexpose planning of its own.
 
-// ListEnvironmentExposures powers the Ports tab's exposure list. Configured
-// is false for either of two distinct reasons, named in NotConfiguredReason
-// so the tab's empty state can tell them apart: a host environment has no
-// pod and no cluster at all, so exposure can never apply; a cluster-backed
-// environment whose project carries no platform block simply hasn't been set
-// up for it yet. A listing the caller's Kubernetes credentials cannot make
-// reports Restricted instead of a bare empty list.
+// ListEnvironmentExposures powers the Ports tab's Public access section: every
+// Service the environment is actually running, not just the ones already
+// exposed (issue #1906) -- so the picker below has a real Service to offer
+// instead of a name the operator has to already know. Configured is false for
+// either of two distinct reasons, named in NotConfiguredReason so the tab's
+// empty state can tell them apart: a host environment has no pod and no
+// cluster at all, so exposure can never apply; a cluster-backed environment
+// whose project carries no platform block simply hasn't been set up for it
+// yet. A listing the caller's Kubernetes credentials cannot make reports
+// Restricted instead of a bare empty list.
 func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list environment exposures", selection.Tenant, selection.Environment); err != nil {
@@ -31,37 +34,72 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 		return uiExposureList{}, err
 	}
 	if !configured {
-		return uiExposureList{Services: []uiExposedService{}, NotConfiguredReason: notConfiguredReason}, nil
+		return uiExposureList{Services: []uiEnvironmentService{}, NotConfiguredReason: notConfiguredReason}, nil
 	}
-	services, err := eruncommon.ListExposedServices(req)
+	defaultTargetIP := a.exposeDefaultTargetIP(req.KubernetesContext)
+	services, err := eruncommon.ListEnvironmentServices(eruncommon.Context{}, req, selection.Tenant)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrListExposedServicesForbidden) {
-			return uiExposureList{Configured: true, Restricted: true, Services: []uiExposedService{}}, nil
+		if errors.Is(err, eruncommon.ErrListEnvironmentServicesForbidden) {
+			return uiExposureList{Configured: true, Restricted: true, Services: []uiEnvironmentService{}, DefaultTargetIP: defaultTargetIP}, nil
 		}
-		return uiExposureList{Configured: true, Error: err.Error(), Services: []uiExposedService{}}, nil
+		return uiExposureList{Configured: true, Error: err.Error(), Services: []uiEnvironmentService{}, DefaultTargetIP: defaultTargetIP}, nil
 	}
-	return uiExposureList{Configured: true, Services: toUIExposedServices(services)}, nil
+	return uiExposureList{Configured: true, Services: toUIEnvironmentServices(services), DefaultTargetIP: defaultTargetIP}, nil
+}
+
+// PreviewExposeEnvironmentService resolves the hostname/scheme
+// ExposeEnvironmentService would produce for input, without applying
+// anything -- issue #1906's "see the hostname it will get before committing".
+// It runs the exact same primitive forced into dry-run, so the preview can
+// never drift from what a real expose would actually do.
+func (a *App) PreviewExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposePreview, error) {
+	selection = normalizeSelection(selection)
+	if err := errMissingTenantOrEnvironment("preview expose environment service", selection.Tenant, selection.Environment); err != nil {
+		return uiExposePreview{}, err
+	}
+	result, err := a.runExposeEnvironmentService(eruncommon.Context{DryRun: true}, selection, input)
+	if err != nil {
+		return uiExposePreview{}, err
+	}
+	return uiExposePreview{
+		Hostname:          result.Hostname,
+		Scheme:            result.Scheme,
+		TLSEnabled:        result.TLSEnabled,
+		TLSDisabledReason: result.TLSDisabledReason,
+	}, nil
 }
 
 // ExposeEnvironmentService exposes one Service at a public hostname under the
 // platform's services zone. See eruncommon.RunExposeService for the resolved
 // plan; it is applied here directly (no dry-run switch -- the Ports tab form
 // commits on submit, matching every other Manage dialog save action).
-func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposedService, error) {
+func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposeServiceResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
-		return uiExposedService{}, err
+		return uiExposeServiceResult{}, err
 	}
+	result, err := a.runExposeEnvironmentService(eruncommon.Context{}, selection, input)
+	if err != nil {
+		return uiExposeServiceResult{}, err
+	}
+	return uiExposeServiceResult{Hostname: result.Hostname, Scheme: result.Scheme}, nil
+}
+
+// runExposeEnvironmentService is the shared resolution behind
+// ExposeEnvironmentService and its dry-run preview -- one place validating
+// the form, so the preview can never resolve a plan the real call would
+// reject.
+func (a *App) runExposeEnvironmentService(ctx eruncommon.Context, selection uiSelection, input uiExposeServiceInput) (eruncommon.ExposeServiceResult, error) {
 	service := strings.TrimSpace(input.Service)
 	targetIP := strings.TrimSpace(input.TargetIP)
 	if service == "" || targetIP == "" {
-		return uiExposedService{}, fmt.Errorf("a service name and a target IP are required")
+		return eruncommon.ExposeServiceResult{}, fmt.Errorf("a service name and a target IP are required")
 	}
 	projectRoot := a.exposeProjectRoot()
 	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {
-		return uiExposedService{}, fmt.Errorf("this environment's project has no platform block configured, so it cannot be exposed at a public hostname")
+		return eruncommon.ExposeServiceResult{}, fmt.Errorf("this environment's project has no platform block configured, so it cannot be exposed at a public hostname")
 	}
-	result, err := eruncommon.RunExposeService(eruncommon.Context{}, eruncommon.ExposeServiceParams{
+	return eruncommon.RunExposeService(ctx, eruncommon.ExposeServiceParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Service:     service,
@@ -69,10 +107,31 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 		TargetIP:    targetIP,
 		ServicePort: input.Port,
 	}, a.deps.store, nil, nil)
-	if err != nil {
-		return uiExposedService{}, err
+}
+
+// exposeDefaultTargetIP prefills the Target IP field for a local cluster --
+// one whose kubernetes context matches no registered cloud context, the same
+// signal deploy's own cloud-metadata resolution uses (see
+// applyCloudProviderDeployMetadata's "a local cluster, say" case in
+// erun-common/deploy.go). Best-effort: an unreadable cloud-context list
+// leaves the field empty rather than failing the whole listing over a
+// convenience default.
+func (a *App) exposeDefaultTargetIP(kubernetesContext string) string {
+	kubernetesContext = strings.TrimSpace(kubernetesContext)
+	if kubernetesContext == "" {
+		return ""
 	}
-	return uiExposedService{Service: result.Service, Hostname: result.Hostname, Scheme: result.Scheme}, nil
+	contexts, err := eruncommon.ListCloudContexts(a.deps.store)
+	if err != nil {
+		return ""
+	}
+	for _, context := range contexts {
+		context = eruncommon.NormalizeCloudContextConfig(context)
+		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
+			return ""
+		}
+	}
+	return "127.0.0.1"
 }
 
 // UnexposeEnvironment removes the environment's per-env wildcard DNS record --
@@ -141,10 +200,21 @@ func (a *App) exposeProjectRoot() string {
 	return root
 }
 
-func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedService {
-	result := make([]uiExposedService, 0, len(services))
+func toUIEnvironmentServices(services []eruncommon.EnvironmentService) []uiEnvironmentService {
+	result := make([]uiEnvironmentService, 0, len(services))
 	for _, service := range services {
-		result = append(result, uiExposedService{Service: service.Service, Hostname: service.Hostname, Scheme: service.Scheme})
+		ports := make([]uiEnvironmentServicePort, 0, len(service.Ports))
+		for _, port := range service.Ports {
+			ports = append(ports, uiEnvironmentServicePort{Name: port.Name, Port: port.Port, Protocol: port.Protocol})
+		}
+		result = append(result, uiEnvironmentService{
+			Name:           service.Name,
+			Ports:          ports,
+			Exposed:        service.Exposed,
+			Hostname:       service.Hostname,
+			Scheme:         service.Scheme,
+			ExposableLabel: service.ExposableLabel,
+		})
 	}
 	return result
 }

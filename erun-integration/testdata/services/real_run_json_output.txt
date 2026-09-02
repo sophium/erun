@@ -1,0 +1,15 @@
+[
+  {
+    "name": "team-api",
+    "ports": [
+      {
+        "name": "http",
+        "port": 80,
+        "protocol": "TCP"
+      }
+    ],
+    "exposed": false,
+    "exposableLabel": "api"
+  }
+]
+audit: erun services --output json team dev

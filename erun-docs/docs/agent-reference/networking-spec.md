@@ -160,6 +160,25 @@ Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-
 
 **Idempotency / errors.** `replace-rrset` and `apply` are both idempotent; re-running converges. The wildcard record is written before the Ingress, so a failure applying the Ingress can leave the DNS record in place — re-run after resolving the cluster issue. Pre-flight validation (missing/malformed `platform:` block, missing `--ip`, non-DNS-1035 service name) fails before any write; see [`erun expose` · Error behaviour](/cli/expose#error-behaviour).
 
+## Listing services
+
+`erun services <tenant> <env>` (CLI and the `services` MCP tool) discovers what `erun expose` otherwise needs an operator to already know: every Service in the env's namespace, its ports, and whether it is already reachable at a public hostname. Read-only; no `platform:` block required.
+
+**Inputs.** `tenant`, `env` (positional); `--dry-run`.
+
+**Execution.** Two calls, in order, both traced before either runs:
+
+1. `kubectl [--context <env-ctx>] -n <tenant>-<env> get service -o json`
+2. `kubectl [--context <env-ctx>] -n <tenant>-<env> get ingress -o json`
+
+**Resolution.** For each real Service:
+
+1. Build a map from backend Service name → `{hostname, scheme}` by walking every Ingress named `expose-<label>` (the name `erun expose` gives every Ingress it applies): for each such Ingress, every Service named in `spec.rules[].http.paths[].backend.service.name` maps to that Ingress's first `spec.rules[].host` and to `https` if that host also appears in `spec.tls[].hosts`, else `http`. This is the cross-reference `erun expose` itself never had to make (it always writes its own Ingress against the Service name it just resolved) — reading the Ingress's own backend reference back out is what lets a caller trust "already exposed" without assuming the naming convention below held when the Ingress was created.
+2. A Service present in that map reports `exposed: true` with the mapped `hostname`/`scheme` — ground truth, not derived.
+3. A Service absent from that map is checked against the naming convention `erun expose`'s `<tenant>-<service>` backend derivation depends on: if its name has the `<tenant>-` prefix, `exposableLabel` is the remainder (the value to pass as `erun expose`'s `<service>` argument). If it doesn't — e.g. a Service a repo's own chart named without that convention — `exposableLabel` is empty: `expose` has no way to route to it correctly (see [Platform service exposure](#platform-service-exposure) above), so a caller must not offer to expose it.
+
+**Errors.** A `kubectl` `Forbidden` response on either call is reported distinctly (wrapping a sentinel error) so a caller can render "you may not see this" rather than an empty list.
+
 ## Unexposing
 
 `erun unexpose <tenant> <env>` (CLI and the `unexpose` MCP tool) removes the per-env wildcard DNS record `expose` created — the counterpart `expose` never had until #1094. It touches only the platform DNS zone: the Ingress that referenced the record lives in the env's own namespace and is torn down with the namespace, so there is nothing else for `unexpose` to remove.

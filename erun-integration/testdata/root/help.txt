@@ -50,6 +50,7 @@ Available Commands:
   release      Cut a release: publish the version's images and charts, then tag and announce it
   resize       Change the runtime pod's or erun-dind sidecar's CPU/memory limits and roll it out
   review       Review code changes on the erun platform
+  services     List an environment's Kubernetes Services, noting which are already exposed
   sshd         Remote SSH utilities
   stop         Stop an environment's runtime and return its capacity to the node
   terraform    Run a platform's per-env Terraform from the right folder automatically

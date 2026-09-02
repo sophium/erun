@@ -1,0 +1,17 @@
+Lists every Service running in the environment's namespace, so `erun expose` has a real Service to point at instead of a name the operator has to already know. A Service already reachable at a public hostname (a real `expose-*` Ingress routes to it) is reported with that hostname; otherwise this names the logical label `erun expose` would use to route back to it (the Service's name with the tenant's resource prefix stripped), or nothing when the Service's name doesn't carry that prefix -- expose has no way to route to it correctly yet. Read-only: two `kubectl get` calls, never a mutation.
+
+Usage:
+  erun services TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun services team dev
+  erun services team dev --output json
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for services
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

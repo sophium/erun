@@ -77,7 +77,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 		"exec_job_await", "exec_job_output", "exec_job_status",
 		"idle", "idle_stop_history",
 		"job_await", "job_output", "job_status", "list", "observe",
-		"outputs_download", "outputs_list", "review_list", "review_queue_list", "review_show", "usage", "version",
+		"outputs_download", "outputs_list", "review_list", "review_queue_list", "review_show", "services", "usage", "version",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("read capability exposed %v, want %v", got, want)

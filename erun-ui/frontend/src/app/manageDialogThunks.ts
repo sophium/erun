@@ -5,6 +5,7 @@ import type {
   UIVersionSuggestion,
   UIVersionSuggestions,
 } from '@/types';
+import { defaultExposeServiceFormState } from '@/uiExposureTypes';
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
@@ -72,7 +73,7 @@ export const openManageDialog =
         healthLoading: false,
         exposures: { configured: false, restricted: false, services: [] },
         exposuresLoading: true,
-        exposeForm: { service: '', targetIP: '', port: '' },
+        exposeForm: defaultExposeServiceFormState(),
         exposeBusy: false,
         exposeError: '',
         unexposeConfirming: false,
