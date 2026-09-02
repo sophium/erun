@@ -89,10 +89,16 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	// healthy workload, so a DNS/Ingress problem downstream of it must not read
 	// as a failed provision. ExposeError names that failure distinctly instead,
 	// leaving Status/ProvisionError to mean exactly "did the deploy land".
+	exposeError := deployexec.ExposeFailureFromOutput(result.Output)
+	var exposedHostname string
+	if exposeError == "" {
+		exposedHostname = deployexec.ExposeHostnameFromParams(params)
+	}
 	if err := p.write(ctx, environmentID, repository.EnvironmentStatusUpdate{
 		Status:          string(model.EnvironmentStatusRunning),
 		DeployedVersion: params.Version,
-		ExposeError:     deployexec.ExposeFailureFromOutput(result.Output),
+		ExposeError:     exposeError,
+		ExposedHostname: exposedHostname,
 	}); err != nil {
 		return fmt.Errorf("mark running: %w", err)
 	}

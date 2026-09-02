@@ -211,6 +211,36 @@ func TestExposeFailureFromOutput(t *testing.T) {
 	}
 }
 
+// TestExposeHostnameFromParams: the reported hostname must match exactly what
+// buildDeployCommand actually threads onto the chained `erun expose` call —
+// same tenant/environment namespace formula, same services zone — and stay
+// empty whenever the chain would not have run with resolved platform
+// coordinates (mirroring TestBuildDeployJobSpecWithExposePlatformCoordinates's
+// "half the pair configured is the same as neither" case).
+func TestExposeHostnameFromParams(t *testing.T) {
+	params := testParams()
+	params.ExposeTargetIP = "203.0.113.10"
+	params.ExposeServicesZone = "services.erunpaas.com"
+	params.ExposePlatformNamespace = "frs-prod"
+	if got, want := ExposeHostnameFromParams(params), "mcp.acme-prod.services.erunpaas.com"; got != want {
+		t.Fatalf("ExposeHostnameFromParams = %q, want %q", got, want)
+	}
+
+	noIP := testParams()
+	noIP.ExposeServicesZone = "services.erunpaas.com"
+	noIP.ExposePlatformNamespace = "frs-prod"
+	if got := ExposeHostnameFromParams(noIP); got != "" {
+		t.Fatalf("ExposeHostnameFromParams = %q, want empty with no ExposeTargetIP", got)
+	}
+
+	partial := testParams()
+	partial.ExposeTargetIP = "203.0.113.10"
+	partial.ExposeServicesZone = "services.erunpaas.com"
+	if got := ExposeHostnameFromParams(partial); got != "" {
+		t.Fatalf("ExposeHostnameFromParams = %q, want empty with only a partial platform-coordinates override", got)
+	}
+}
+
 // TestBuildDeployCommandWithMCPAuthPublicKey: the backend's own MCP-signing
 // public key is written to a fixed path via heredoc (never argv) and threaded
 // to `erun deploy` as --mcp-auth-public-key, so the runtime's MCP edge trusts

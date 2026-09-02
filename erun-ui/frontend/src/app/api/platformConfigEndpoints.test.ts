@@ -52,6 +52,7 @@ const EXPECTED = {
       provisionError: undefined,
       deployedVersion: undefined,
       deleteError: undefined,
+      exposedHostname: undefined,
     },
   ],
   contexts: [],

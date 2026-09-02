@@ -65,6 +65,12 @@ export interface Environment {
   // is the whole point of showing the teardown state — it names the finalizer
   // actually holding the namespace, which is what an operator needs.
   deleteError?: string;
+  // The environment's MCP edge hostname, present only once the deploy's own
+  // chained `erun expose mcp` call has actually succeeded at least once.
+  // Absent means not exposed — never attempted (no platform ingress IP
+  // configured) or every attempt so far has failed — never a separate
+  // "exposed, hostname unknown" state a caller has to guess at.
+  exposedHostname?: string;
 }
 
 // The provisioning lifecycle a context moves through: `provisioning` → `running`
@@ -156,6 +162,7 @@ export function parseEnvironment(raw: Record<string, unknown>): Environment {
     provisionError: asOptionalString(raw.provisionError),
     deployedVersion: asOptionalString(raw.deployedVersion),
     deleteError: asOptionalString(raw.deleteError),
+    exposedHostname: asOptionalString(raw.exposedHostname),
   };
 }
 

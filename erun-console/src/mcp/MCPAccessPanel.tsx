@@ -21,13 +21,29 @@ import {
   useMcpToolCallController,
 } from './controller';
 
+// hostnameFieldLabel says whether a hostname field is prefilled from a known,
+// discovered edge (still editable, to override) or falls back to plain
+// manual entry because the environment has never been successfully exposed.
+function hostnameFieldLabel(prefix: string, exposedHostname: string | undefined): string {
+  return exposedHostname !== undefined
+    ? `${prefix} (discovered — edit to override)`
+    : `${prefix} (not yet exposed — enter one)`;
+}
+
 // DriveToolForm is the console's first caller of an environment's live MCP
-// edge, not just the token-minting half of it. The hostname is operator-
-// supplied rather than looked up: exposing `mcp` is a manual `erun expose
-// <tenant> <env> mcp` step today (not every environment type is exposed
-// automatically), so the console has no reliable way to resolve it itself yet.
-function DriveToolForm({ mcpToken }: { mcpToken: string }): React.ReactElement {
-  const [hostname, setHostname] = React.useState('');
+// edge, not just the token-minting half of it. The hostname prefills from the
+// environment's own ExposedHostname once the platform has actually exposed
+// it; the field stays editable and falls back to plain manual entry for an
+// environment that isn't exposed yet, or if the operator wants to point at a
+// different hostname.
+function DriveToolForm({
+  mcpToken,
+  exposedHostname,
+}: {
+  mcpToken: string;
+  exposedHostname?: string;
+}): React.ReactElement {
+  const [hostname, setHostname] = React.useState(exposedHostname ?? '');
   const { state, callTool } = useMcpToolCallController();
   const calling = state.status === 'loading';
 
@@ -48,7 +64,7 @@ function DriveToolForm({ mcpToken }: { mcpToken: string }): React.ReactElement {
         Drive this environment
       </h3>
       <FieldLabel htmlFor="mcp-hostname" required>
-        MCP hostname (from erun expose &lt;tenant&gt; &lt;env&gt; mcp)
+        {hostnameFieldLabel('MCP hostname', exposedHostname)}
       </FieldLabel>
       <Input
         id="mcp-hostname"
@@ -103,11 +119,13 @@ function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactEle
 function AttachSessionForm({
   consoleToken,
   environmentId,
+  exposedHostname,
 }: {
   consoleToken: string;
   environmentId: string;
+  exposedHostname?: string;
 }): React.ReactElement {
-  const [hostname, setHostname] = React.useState('');
+  const [hostname, setHostname] = React.useState(exposedHostname ?? '');
   const [session, setSession] = React.useState('');
   const [line, setLine] = React.useState('');
   const { state, scrollback, connect, sendLine, disconnect } =
@@ -136,7 +154,7 @@ function AttachSessionForm({
       <h3 className="text-sm font-semibold text-foreground">Attach to a live session</h3>
       <form className="grid gap-2" onSubmit={submit}>
         <FieldLabel htmlFor="attach-hostname" required>
-          Environment edge hostname
+          {hostnameFieldLabel('Environment edge hostname', exposedHostname)}
         </FieldLabel>
         <Input
           id="attach-hostname"
@@ -224,14 +242,21 @@ function TokenResult({
   state,
   consoleToken,
   environmentId,
+  exposedHostname,
 }: {
   state: McpTokenState;
   consoleToken: string;
   environmentId: string;
+  exposedHostname?: string;
 }): React.ReactElement | null {
   if (state.status === 'ready') {
     return (
-      <div className="grid gap-2 text-sm text-muted-foreground" role="status" aria-live="polite">
+      <div
+        key={environmentId}
+        className="grid gap-2 text-sm text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
         <p>
           Bearer token for <code>{state.token.audience}</code>. Present it to the environment&apos;s
           MCP edge; it expires within the hour, so mint a fresh one when it lapses.
@@ -243,8 +268,12 @@ function TokenResult({
           rows={4}
           readOnly
         />
-        <DriveToolForm mcpToken={state.token.token} />
-        <AttachSessionForm consoleToken={consoleToken} environmentId={environmentId} />
+        <DriveToolForm mcpToken={state.token.token} exposedHostname={exposedHostname} />
+        <AttachSessionForm
+          consoleToken={consoleToken}
+          environmentId={environmentId}
+          exposedHostname={exposedHostname}
+        />
       </div>
     );
   }
@@ -288,6 +317,8 @@ export function MCPAccessPanel({
     return <EmptyPanel />;
   }
 
+  const selectedEnvironment = environments.find((env) => env.environmentId === selected);
+
   const loading = state.status === 'loading';
   const submit = (event: React.SyntheticEvent): void => {
     event.preventDefault();
@@ -319,7 +350,12 @@ export function MCPAccessPanel({
           </Button>
         </form>
         <div className="mt-4 grid max-w-md gap-3">
-          <TokenResult state={state} consoleToken={token} environmentId={selected} />
+          <TokenResult
+            state={state}
+            consoleToken={token}
+            environmentId={selected}
+            exposedHostname={selectedEnvironment?.exposedHostname}
+          />
         </div>
       </CardContent>
     </Card>

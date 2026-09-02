@@ -57,6 +57,7 @@ const EXPECTED: TenantConfigView = {
       provisionError: undefined,
       deployedVersion: undefined,
       deleteError: undefined,
+      exposedHostname: undefined,
     },
   ],
   contexts: [
