@@ -13,10 +13,12 @@ import * as React from 'react';
 
 import {
   loginGlobalCloudProvider,
+  logoutGlobalCloudProvider,
   refreshCloudProviders,
   startAWSCloudInit,
   startCloudflareCloudInit,
   startERunCloudInit,
+  switchGlobalCloudProviderIdentity,
   updateGlobalConfigDialog,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
@@ -292,11 +294,20 @@ function CloudAliasRow({
         loading={
           dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias
         }
+        logoutLoading={
+          dialog.busyAction === 'cloud-provider-logout' && dialog.busyTarget === provider.alias
+        }
+        switchLoading={
+          dialog.busyAction === 'cloud-provider-switch' && dialog.busyTarget === provider.alias
+        }
+        canSwitchIdentity={!isCloudflare}
         // Cloudflare has no browser SSO — its "login" re-verifies the stored
         // token — so the action reads "Verify token" rather than "Login".
         loginLabel={isCloudflare ? 'Verify token' : undefined}
         loadingLabel={isCloudflare ? 'Verifying...' : undefined}
         onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}
+        onLogout={() => void dispatch(logoutGlobalCloudProvider(provider.alias))}
+        onSwitch={() => void dispatch(switchGlobalCloudProviderIdentity(provider.alias))}
       />
     </div>
   );

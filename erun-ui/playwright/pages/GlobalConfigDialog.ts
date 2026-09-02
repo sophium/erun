@@ -50,6 +50,24 @@ export class GlobalConfigDialog {
     return this.locator().locator(`[data-cloud-alias-group="${providerType}"]`);
   }
 
+  cloudAliasLogoutButton(alias: string): Locator {
+    return this.cloudAliasRow(alias).getByRole('button', { name: /Log out|Logging out/ });
+  }
+
+  cloudAliasSwitchIdentityButton(alias: string): Locator {
+    return this.cloudAliasRow(alias).getByRole('button', {
+      name: /Sign in as someone else|Switching/,
+    });
+  }
+
+  async logoutCloudAlias(alias: string): Promise<void> {
+    await this.cloudAliasLogoutButton(alias).click();
+  }
+
+  async switchCloudAliasIdentity(alias: string): Promise<void> {
+    await this.cloudAliasSwitchIdentityButton(alias).click();
+  }
+
   // --- Add-provider actions ---
   //
   // AWS and Cloudflare delegate to the CLI's guided `erun cloud init` flow, not
