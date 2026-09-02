@@ -22,7 +22,7 @@ func newAPIForwarder() APIForwarder {
 
 func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, error) {
 	localPort := common.APIPortForResult(result)
-	statePath, err := apiPortForwardStatePath(result.Tenant, result.Environment)
+	statePath, err := apiPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
 	}
@@ -187,8 +187,8 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	return args
 }
 
-func apiPortForwardStatePath(tenant, environment string) (string, error) {
-	return portForwardStatePath("api", tenant, environment)
+func apiPortForwardStatePath(tenant, environment string, dryRun bool) (string, error) {
+	return portForwardStatePath("api", tenant, environment, dryRun)
 }
 
 func canReachLocalAPIEndpoint(port int) bool {

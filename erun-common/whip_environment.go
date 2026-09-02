@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/adrg/xdg"
 )
 
 // The environment half of the whip pass runs where its target
@@ -97,7 +95,7 @@ type whipEnvironmentState struct {
 }
 
 func whipEnvironmentStatePath(tenant, environment string) (string, error) {
-	return xdg.CacheFile(filepath.Join("erun", "whip", sanitizeForFilename(tenant), sanitizeForFilename(environment), "state.json"))
+	return resolveCacheFilePath(filepath.Join("erun", "whip", sanitizeForFilename(tenant), sanitizeForFilename(environment), "state.json"))
 }
 
 func loadWhipEnvironmentState(tenant, environment string) (whipEnvironmentState, bool) {

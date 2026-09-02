@@ -34,7 +34,7 @@ func noticeStaleRuntimePortForwards(ctx common.Context, specs []common.DeploySpe
 // port-forward that no longer answers. An env with no tracked forward was never
 // opened on this host, so there is nothing to repair.
 func runtimeMCPPortForwardIsStale(tenant, environment string) bool {
-	statePath, err := mcpPortForwardStatePath(tenant, environment)
+	statePath, err := mcpPortForwardStatePath(tenant, environment, false)
 	if err != nil {
 		return false
 	}

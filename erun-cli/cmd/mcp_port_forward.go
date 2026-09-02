@@ -29,7 +29,7 @@ func newMCPForwarder() MCPForwarder {
 
 func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, error) {
 	localPort := common.MCPPortForResult(result)
-	statePath, err := mcpPortForwardStatePath(result.Tenant, result.Environment)
+	statePath, err := mcpPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
 	}
@@ -208,8 +208,8 @@ func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string
 	return args
 }
 
-func mcpPortForwardStatePath(tenant, environment string) (string, error) {
-	return portForwardStatePath("mcp", tenant, environment)
+func mcpPortForwardStatePath(tenant, environment string, dryRun bool) (string, error) {
+	return portForwardStatePath("mcp", tenant, environment, dryRun)
 }
 
 func mcpPortForwardLogPath(statePath string) string {

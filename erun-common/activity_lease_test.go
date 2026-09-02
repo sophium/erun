@@ -28,6 +28,23 @@ func isolateActivityCache(t *testing.T) {
 func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
+// TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run
+// purity contract erun#1907 fixed for the config tree: resolving the
+// activity directory is a pure read (job_supervisor.go's environmentJobDir
+// and RunLocalEnvironmentWhip both resolve it ahead of their own dry-run
+// checks) and must not create ~/.cache/erun/activity/<tenant>/<environment>/
+// as a side effect.
+func TestEnvironmentActivityDirDoesNotCreateDirectory(t *testing.T) {
+	isolateActivityCache(t)
+	dir, err := EnvironmentActivityDir("acme", "dev")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("resolving the activity directory must not create it, got err=%v", statErr)
+	}
+}
+
 func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
