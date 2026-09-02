@@ -710,6 +710,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "exec_close-pr",
 		Description: "Close branch's open pull request on GitHub, once review_report-merged has already succeeded, and record landingCommit on it. GitHub never reconciles a queued merge with its pull request on its own, since exec_gate-merge's squash commit is never the branch head GitHub tracks — the commit that actually shipped exists nowhere the pull request can see until this reports it. Safe when branch has no open pull request against targetBranch: this is a no-op, not an error, since queueing a plain branch with no review is legitimate. Refuses, loudly, when the pull request's current head does not match gatedCommit — something pushed to branch after the gate fetched it, so the gated content is not what closing would discard. Set preview to trace the lookup without closing or commenting on anything.",
 	}, execClosePRTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "exec_reconcile-bypass",
+		Description: "Cross-reference GitHub's own bypass ledger for rulesetId on targetBranch against erun's gate runs: every push that bypassed rulesetId is reported next to whether a PASSED gate run's merge commit exactly matches what actually landed. The reconciliation half of erun#1912's recorded decision -- narrowing who may hold the bypass grant is a separate, ops-side change; this makes every bypass accountable after the fact regardless of who holds it. The result's unreconciled count and each push's reconciled flag are the loud signal: a caller must not treat a non-zero unreconciled count as routine. Set preview to trace the GitHub and platform lookups without sending them.",
+	}, execReconcileBypassTool(runtime))
 
 	// Deprecated aliases for the four exec tools, kept callable for one release
 	// (#1186). `erun exec` was the only command group on the surface whose tools
