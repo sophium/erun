@@ -31,17 +31,7 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		args := dockerBuildArgs(buildInput, platform)
-		err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
-		if err == nil {
-			err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
-		}
-		if err == nil {
-			err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
-		}
-		if err == nil {
-			err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
-		}
+		err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
 			buildInput.PlatformObserver(platform, time.Since(started), err)
 		}
@@ -55,20 +45,34 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
+// buildPlatformImageFromSource runs one platform's real docker build, tags
+// its fingerprint and stable-base aliases, and pushes it. It is also the
+// fallback promotePlatformImage reaches for when the registry rejects a
+// promoted tag, so a cache-hit decision that turns out to be wrong at push
+// time still ends in a real, correctly-tagged image rather than a failure.
+func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	args := dockerBuildArgs(buildInput, platform)
+	err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
+	if err == nil {
+		err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
+	}
+	if err == nil {
+		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
+	}
+	if err == nil {
+		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
+	}
+	return err
+}
+
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
-		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		err := runDockerTag(fpTag, platformTag, stdout, stderr)
-		if err == nil {
-			err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
-		}
-		if err == nil {
-			err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
-		}
+		err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
 			buildInput.PlatformObserver(platform, time.Since(started), err)
 		}
@@ -80,6 +84,40 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		return nil
 	}
 	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
+}
+
+// promotePlatformImage re-tags one platform's cached fingerprint image and
+// pushes it under the real version tag. The fingerprint check that chose this
+// path only proves the image exists in the local daemon; it says nothing
+// about whether the registry still holds every blob that image references.
+// A push the registry rejects for a blob it doesn't have — surfacing as
+// "unknown blob" — means the cache hit cannot be trusted for this run, so
+// promotion is only ever an optimization over building from source: a
+// rejection here falls back to building and pushing this platform for real,
+// rather than failing the whole release over a check that was wrong.
+//
+// Any other failure (a real auth or network error, for instance) is not
+// retried, since rebuilding could not change its outcome; it is returned with
+// the promoted tag and its cached source named, so the failure says which
+// image and which operation it belongs to instead of a bare daemon message.
+func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	err := runDockerTag(fpTag, platformTag, stdout, stderr)
+	if err == nil {
+		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
+	}
+	if err == nil {
+		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
+	}
+	if err == nil {
+		return nil
+	}
+	if !IsDockerUnknownBlobError(err.Error()) {
+		return fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
+	}
+	fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
+	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }
 
 // pushPlatformImage publishes one platform the moment it is built, instead of
@@ -528,7 +566,29 @@ func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) erro
 			Err:      err,
 		}
 	}
-	return err
+	return dockerPushError{tag: tag, err: err, message: message}
+}
+
+// dockerPushError names the tag a push was attempting when the daemon or
+// registry rejected it, so a bare registry response like "unknown blob" does
+// not surface with nothing to say which image, or which command, it belongs
+// to.
+type dockerPushError struct {
+	tag     string
+	err     error
+	message string
+}
+
+func (e dockerPushError) Error() string {
+	msg := strings.TrimSpace(e.message)
+	if msg == "" {
+		return fmt.Sprintf("docker push %s: %s", e.tag, e.err.Error())
+	}
+	return fmt.Sprintf("docker push %s: %s: %s", e.tag, e.err.Error(), msg)
+}
+
+func (e dockerPushError) Unwrap() error {
+	return e.err
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
