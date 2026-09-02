@@ -58,6 +58,22 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_unaffected_by_kubectl_pod_watch_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-pod-watch: the plan must
+		// stay byte-identical to the subprocess-mode golden
+		// (dry_run_from_devops_cwd), including the "kubectl ... get pods -o
+		// json" trace line, even with execution.modes.kubectl-pod-watch=library,
+		// since tracePodWatchAction only ever renders the trace and the watcher
+		// itself (watchReleasePods -> runKubectlGetPods) never runs until a real
+		// helm upgrade actually starts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-pod-watch", "library")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
 	t.Run("refuses_host_environment", func(t *testing.T) {
 		// A host env has no pod and no cluster at all, so deploy must refuse it
 		// by name instead of resolving a helm plan that cannot run anywhere.
@@ -3372,6 +3388,86 @@ esac
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_pod_watch_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (a clean rollout logs the same summary line and lets
+		// helm finish) via a real client-go List against a fake API server
+		// instead of shelling out to kubectl. The kubectl stub fails loudly and
+		// distinctively only for the "get pods -o json" argv shape (the
+		// namespace-existence check deploy also runs still succeeds), so a
+		// fallback to the subprocess path for the watch surfaces as a
+		// recognizable failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-pod-watch", "library")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pods -o json"*) printf '%s\n' "fell through to the kubectl subprocess for the pod watch" >&2; exit 1 ;;`,
+			`  *"get namespace "*) printf 'namespace/team-dev\n' ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		fixture.StubBinaryWithScript(t, stubs, "helm", "sleep 0.5\nexit 0\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/pods" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, cleanRolloutPodJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if strings.Contains(out, "fell through to the kubectl subprocess") {
+			t.Fatalf("pod watch used the kubectl subprocess despite library execution mode:\n%s", out)
+		}
+		if !strings.Contains(out, "    pod team-devops-aaaaaa: erun-devops Running (Ready), erun-dind Running (Ready)") {
+			t.Fatalf("missing pod-watch summary line in output:\n%s", out)
+		}
+		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
+			t.Fatalf("expected clean deploy completion in output:\n%s", out)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
 	})
 
 	t.Run("real_run_pod_watch_logs_clean_rollout", func(t *testing.T) {

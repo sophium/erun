@@ -10,6 +10,7 @@ kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
 
 Running: Clear pending helm release
 No cleanup actions selected.

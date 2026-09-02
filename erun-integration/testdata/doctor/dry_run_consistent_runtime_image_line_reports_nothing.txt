@@ -10,6 +10,7 @@ kubectl-pod-get: subprocess
 kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
 
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev
