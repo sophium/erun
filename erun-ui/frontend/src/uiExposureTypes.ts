@@ -23,10 +23,45 @@ export interface UIExposedService {
   service: string;
   hostname: string;
   scheme: string;
+  // The in-namespace Service the Ingress routes to, read from the Ingress
+  // rather than derived from `service`: the two differ whenever the chart that
+  // rendered the Service is the repo's own.
+  backendService?: string;
+}
+
+// UIEnvironmentServiceList is what the environment is actually running — the
+// list the picker offers. Same three empty states as UIExposureList, on
+// purpose: both reads fail for the same reasons and the tab renders them the
+// same way.
+export interface UIEnvironmentServiceList {
+  configured: boolean;
+  restricted: boolean;
+  error?: string;
+  services: UIEnvironmentService[];
+  notConfiguredReason?: string;
+}
+
+export interface UIEnvironmentService {
+  name: string;
+  type?: string;
+  ports?: UIEnvironmentServicePort[];
+  // Set when this Service already has a public hostname. exposedAs is the
+  // label in that hostname, which is not necessarily the Service's own name.
+  hostname?: string;
+  scheme?: string;
+  exposedAs?: string;
+}
+
+export interface UIEnvironmentServicePort {
+  name?: string;
+  port: number;
 }
 
 export interface UIExposeServiceInput {
   service: string;
+  // The Service in the namespace to route to. The picker fills it in from the
+  // operator's choice; empty keeps the <tenant>-<service> derivation.
+  backendService?: string;
   targetIP: string;
   port?: number;
 }
@@ -39,6 +74,10 @@ export interface UIUnexposeResult {
 // owned like the rest of ManageDialogState.
 export interface ExposeServiceFormState {
   service: string;
+  // backendService is the Service picked from the environment; the public
+  // label defaults to it (trimmed of the tenant prefix) but stays editable,
+  // since the label is what appears in the hostname.
+  backendService: string;
   targetIP: string;
   // Free-text so the field can be empty (falls back to the default port
   // server-side) without fighting a number input's own coercion; parsed to a

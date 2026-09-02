@@ -14,7 +14,9 @@ erun observe [--tenant <t>] [--environment <e>] [--secret <name>=<key>]... [flag
 
 ## What it shows
 
-Pods (phase, readiness, restart count, and why a pod isn't ready), the namespace's `ResourceQuota`/`LimitRange` and what's currently consumed against them, `Ingress` hosts and their TLS secret names, and every `Certificate`'s readiness.
+Pods (phase, readiness, restart count, and why a pod isn't ready), the namespace's `ResourceQuota`/`LimitRange` and what's currently consumed against them, the `Service`s the environment runs with their ports and type, `Ingress` hosts with the Service each one routes to and their TLS secret names, and every `Certificate`'s readiness.
+
+The Service list is what makes "what is this environment running, and on what port would I reach it" answerable without composing `kubectl` — the question that precedes [`erun expose`](/cli/expose), and the same list the desktop's Ports tab offers as a picker.
 
 When a `Certificate` is not Ready, `observe` walks its `CertificateRequest` → `Order` → `Challenge` chain automatically and reports the `Challenge`'s reason — the field that actually explains a stuck issuance (for example a webhook solver's RBAC denial) — instead of leaving you to run three more `kubectl` commands to find it.
 

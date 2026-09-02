@@ -809,16 +809,53 @@ const (
 
 // uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
 type uiExposedService struct {
-	Service  string `json:"service"`
-	Hostname string `json:"hostname"`
-	Scheme   string `json:"scheme"`
+	Service        string `json:"service"`
+	Hostname       string `json:"hostname"`
+	Scheme         string `json:"scheme"`
+	BackendService string `json:"backendService,omitempty"`
 }
 
-// uiExposeServiceInput is the Ports tab's "Expose a service" form.
+// uiEnvironmentServiceList is the Ports tab's read model for what the
+// environment is actually running — the list the operator picks from. It
+// mirrors uiExposureList's shape (Configured / Restricted / Error) so the tab
+// renders the same three states for both reads rather than inventing a second
+// vocabulary for the same conditions.
+type uiEnvironmentServiceList struct {
+	Configured          bool                   `json:"configured"`
+	Restricted          bool                   `json:"restricted"`
+	Error               string                 `json:"error,omitempty"`
+	Services            []uiEnvironmentService `json:"services"`
+	NotConfiguredReason string                 `json:"notConfiguredReason,omitempty"`
+}
+
+// uiEnvironmentService is one Service in the environment, with the exposure it
+// already has. Ports is what makes the picker able to offer a port instead of
+// asking the operator to remember one.
+type uiEnvironmentService struct {
+	Name     string                     `json:"name"`
+	Type     string                     `json:"type,omitempty"`
+	Ports    []uiEnvironmentServicePort `json:"ports,omitempty"`
+	Hostname string                     `json:"hostname,omitempty"`
+	Scheme   string                     `json:"scheme,omitempty"`
+	// ExposedAs is the logical label in the hostname, which is not necessarily
+	// the Service's own name.
+	ExposedAs string `json:"exposedAs,omitempty"`
+}
+
+type uiEnvironmentServicePort struct {
+	Name string `json:"name,omitempty"`
+	Port int    `json:"port"`
+}
+
+// uiExposeServiceInput is the Ports tab's "Expose a service" form. Service is
+// the public label; BackendService is the Service in the namespace to route
+// to, which the picker fills in from the operator's choice. Empty keeps the
+// <tenant>-<service> derivation for a caller that only knows a label.
 type uiExposeServiceInput struct {
-	Service  string `json:"service"`
-	TargetIP string `json:"targetIP"`
-	Port     int    `json:"port,omitempty"`
+	Service        string `json:"service"`
+	BackendService string `json:"backendService,omitempty"`
+	TargetIP       string `json:"targetIP"`
+	Port           int    `json:"port,omitempty"`
 }
 
 // uiUnexposeResult confirms which DNS record un-exposing removed, so the

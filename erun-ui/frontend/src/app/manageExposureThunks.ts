@@ -17,13 +17,24 @@ export const refreshManageExposures = (): AppThunk<Promise<void>> => async (disp
   }
   dispatch(patchManageDialog({ exposuresLoading: true }));
   try {
-    const result = await dispatch(
-      environmentApi.endpoints.listEnvironmentExposures.initiate(selection),
-    ).unwrap();
+    // Both reads in flight together: they answer halves of one question
+    // ("what is published" and "what could be"), and serializing them would
+    // show the tab half-loaded for no reason. Promise.all rather than two
+    // awaits so a failure in either lands in the one catch below.
+    const [result, services] = await Promise.all([
+      dispatch(environmentApi.endpoints.listEnvironmentExposures.initiate(selection)).unwrap(),
+      dispatch(environmentApi.endpoints.listEnvironmentServices.initiate(selection)).unwrap(),
+    ]);
     if (!getState().manageDialog.open) {
       return;
     }
-    dispatch(patchManageDialog({ exposures: result, exposuresLoading: false }));
+    dispatch(
+      patchManageDialog({
+        exposures: result,
+        environmentServices: services,
+        exposuresLoading: false,
+      }),
+    );
   } catch (error) {
     if (!getState().manageDialog.open) {
       return;
@@ -36,6 +47,12 @@ export const refreshManageExposures = (): AppThunk<Promise<void>> => async (disp
       patchManageDialog({
         exposuresLoading: false,
         exposures: { configured: true, restricted: false, error: readError(error), services: [] },
+        environmentServices: {
+          configured: true,
+          restricted: false,
+          error: readError(error),
+          services: [],
+        },
       }),
     );
   }
@@ -69,9 +86,14 @@ export const submitExposeService = (): AppThunk<Promise<void>> => async (dispatc
     return;
   }
   const port = dialog.exposeForm.port.trim();
+  const backendService = dialog.exposeForm.backendService.trim();
   const input: UIExposeServiceInput = {
     service,
     targetIP,
+    // Only sent when a Service was picked. Left out, the backend keeps the
+    // <tenant>-<service> derivation, so a form filled in by hand behaves
+    // exactly as it did before the picker existed.
+    ...(backendService ? { backendService } : {}),
     ...(port ? { port: Number(port) } : {}),
   };
   dispatch(patchManageDialog({ exposeBusy: true, exposeError: '' }));
@@ -83,7 +105,10 @@ export const submitExposeService = (): AppThunk<Promise<void>> => async (dispatc
       return;
     }
     dispatch(
-      patchManageDialog({ exposeBusy: false, exposeForm: { service: '', targetIP: '', port: '' } }),
+      patchManageDialog({
+        exposeBusy: false,
+        exposeForm: { service: '', backendService: '', targetIP: '', port: '' },
+      }),
     );
     void dispatch(refreshManageExposures());
   } catch (error) {

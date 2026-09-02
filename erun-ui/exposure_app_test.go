@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -172,5 +173,96 @@ func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error exposing a service with no platform block configured")
+	}
+}
+
+// stubKubectlByResource replaces kubectl with a script that answers per
+// resource, which the service listing needs: it reads Services and Ingresses
+// in one call, and a single canned stdout would make one of the two parse as
+// an empty list and hide exactly what this test is about.
+func stubKubectlByResource(t *testing.T, serviceJSON, ingressJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n  *ingress*) printf %s ;;\n  *service*) printf %s ;;\n  *) printf '{\"items\":[]}' ;;\nesac\n",
+		shellQuote(ingressJSON), shellQuote(serviceJSON))
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub kubectl: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestListEnvironmentServicesReportsPortsAndExistingExposure is the picker's
+// contract: every Service the environment runs, its ports, and -- for the ones
+// already published -- the hostname they answer at. The exposure is matched
+// through the Ingress backend, so a Service whose name does not follow the
+// <tenant>-<service> convention is still recognised as exposed rather than
+// offered for exposing a second time.
+func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	stubKubectlByResource(t,
+		`{"items":[
+			{"metadata":{"name":"validation-agent-backend-api"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":8000,"protocol":"TCP"}]}},
+			{"metadata":{"name":"team-mcp"},"spec":{"type":"ClusterIP","ports":[{"port":80}]}}
+		]}`,
+		`{"items":[{"metadata":{"name":"expose-validator"},"spec":{
+			"rules":[{"host":"validator.team-dev.services.test","http":{"paths":[{"backend":{"service":{"name":"validation-agent-backend-api","port":{"number":8000}}}}]}}],
+			"tls":[{"hosts":["validator.team-dev.services.test"],"secretName":"team-dev-wildcard-tls"}]
+		}}]}`,
+	)
+
+	result, err := app.ListEnvironmentServices(uiSelection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured || result.Restricted {
+		t.Fatalf("unexpected result shape: %+v", result)
+	}
+	// Compared whole rather than field by field: the exposure has to be
+	// matched through the Ingress backend, so a Service whose name does not
+	// follow the <tenant>-<service> convention is still recognised as exposed
+	// rather than offered for exposing a second time -- and team-mcp, which
+	// nothing routes to, must come back with no exposure at all.
+	want := []uiEnvironmentService{
+		{Name: "team-mcp", Type: "ClusterIP", Ports: []uiEnvironmentServicePort{{Port: 80}}},
+		{
+			Name:      "validation-agent-backend-api",
+			Type:      "ClusterIP",
+			Ports:     []uiEnvironmentServicePort{{Name: "http", Port: 8000}},
+			Hostname:  "validator.team-dev.services.test",
+			Scheme:    "https",
+			ExposedAs: "validator",
+		},
+	}
+	if !reflect.DeepEqual(result.Services, want) {
+		t.Fatalf("services = %+v, want %+v", result.Services, want)
+	}
+}
+
+func TestListEnvironmentServicesRestrictedOnForbidden(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	stubKubectlOutput(t, "", `Error from server (Forbidden): services is forbidden: User "x" cannot list resource "services"`, 1)
+
+	result, err := app.ListEnvironmentServices(uiSelection{Tenant: "team", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Configured || !result.Restricted {
+		t.Fatalf("expected a restricted listing, got %+v", result)
+	}
+	if len(result.Services) != 0 {
+		t.Fatalf("a restricted listing must not also claim services: %+v", result.Services)
+	}
+}
+
+// A host environment has no cluster, so the picker reports the same
+// not-applicable reason the exposure list does rather than an empty namespace.
+func TestListEnvironmentServicesNotConfiguredForHostEnvironment(t *testing.T) {
+	app := exposureTestApp(t, exposableProjectRoot(t))
+	result, err := app.ListEnvironmentServices(uiSelection{Tenant: "team", Environment: "host"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Configured || result.NotConfiguredReason != uiExposureNotConfiguredHostEnvironment {
+		t.Fatalf("expected the host-environment reason, got %+v", result)
 	}
 }

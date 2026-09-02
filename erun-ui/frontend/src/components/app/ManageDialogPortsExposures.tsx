@@ -27,6 +27,7 @@ import {
 } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
 import { TextField } from '@/components/app/ManageDialog.fields';
+import { ExposeServicePicker } from '@/components/app/ManageDialogPortsServicePicker';
 
 import { BrowserOpenURL, ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
@@ -234,10 +235,11 @@ function ExposeServiceForm({ dialog }: { dialog: ManageDialog }): React.ReactEle
   const busy = dialog.exposeBusy;
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-dashed border-border p-3">
+      <ExposeServicePicker dialog={dialog} />
       <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_88px] gap-2">
         <TextField
           id="expose-service-name"
-          label="Service name"
+          label="Public label"
           value={form.service}
           disabled={busy}
           placeholder="api"

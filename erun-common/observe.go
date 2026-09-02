@@ -31,8 +31,11 @@ type ObserveResult struct {
 	ResourceQuotas []ObservedResourceQuota `json:"resourceQuotas"`
 	LimitRanges    []ObservedLimitRange    `json:"limitRanges"`
 	Ingresses      []ObservedIngress       `json:"ingresses"`
-	Certificates   []ObservedCertificate   `json:"certificates"`
-	Secrets        []ObservedSecretCheck   `json:"secrets,omitempty"`
+	// Services is what the namespace actually runs, which is the list a
+	// developer picks from when choosing something to expose.
+	Services     []ObservedService     `json:"services"`
+	Certificates []ObservedCertificate `json:"certificates"`
+	Secrets      []ObservedSecretCheck `json:"secrets,omitempty"`
 	// HelmRelease is the runtime release's own record of what should be
 	// running. Nil in dry-run, where nothing was read yet.
 	HelmRelease *ObservedHelmRelease `json:"helmRelease,omitempty"`
@@ -57,6 +60,7 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	quotaArgs := observeGetArgs(req, "resourcequota")
 	limitArgs := observeGetArgs(req, "limitrange")
 	ingressArgs := observeGetArgs(req, "ingress")
+	serviceArgs := observeGetArgs(req, "service")
 	certArgs := observeGetArgs(req, "certificates.cert-manager.io")
 	releaseName := RuntimeReleaseName(req.Tenant)
 	helmArgs := observeHelmStatusArgs(req)
@@ -66,6 +70,7 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	ctx.TraceCommand("", "kubectl", quotaArgs...)
 	ctx.TraceCommand("", "kubectl", limitArgs...)
 	ctx.TraceCommand("", "kubectl", ingressArgs...)
+	ctx.TraceCommand("", "kubectl", serviceArgs...)
 	ctx.TraceCommand("", "kubectl", certArgs...)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	ctx.TraceCommand("", "helm", helmListArgs...)
@@ -92,6 +97,9 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 		return ObserveResult{}, err
 	}
 	if result.Ingresses, err = fetchObservedIngresses(ingressArgs); err != nil {
+		return ObserveResult{}, err
+	}
+	if result.Services, err = fetchObservedServices(serviceArgs); err != nil {
 		return ObserveResult{}, err
 	}
 	if result.Certificates, err = fetchObservedCertificates(ctx, req, certArgs); err != nil {

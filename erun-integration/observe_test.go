@@ -15,7 +15,9 @@ import (
 // shared by the observe real-run scenarios: one pod running the runtime
 // container (named and imaged the way the real erun-devops chart names it,
 // so the release-vs-pod image drift check has a real name to match on), one
-// quota, one limit range, one ingress, and a Certificate that is not Ready.
+// quota, one limit range, one ingress (routing to the Service below, so the
+// two reads agree the way they do in a real namespace), two Services, and a
+// Certificate that is not Ready.
 // The CertificateRequest -> Order -> Challenge chain resolves to a Challenge
 // whose reason is an RBAC denial on the webhook solver — the exact failure
 // class #1138 exists to surface without three more hand-built kubectl calls.
@@ -24,7 +26,8 @@ func observeStubResponses() map[string]string {
 		"pods":                                `{"items":[{"metadata":{"name":"team-devops-abc123"},"spec":{"containers":[{"name":"erun-devops","resources":{"limits":{"cpu":"4","memory":"8916Mi"}}}]},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}],"containerStatuses":[{"name":"erun-devops","image":"registry.example/test/erun-devops:1.0.0","restartCount":0,"ready":true,"state":{"running":{"startedAt":"2024-01-01T00:00:00Z"}}}]}}]}`,
 		"resourcequota":                       `{"items":[{"metadata":{"name":"erun-quota"},"status":{"hard":{"limits.cpu":"4"},"used":{"limits.cpu":"1"}}}]}`,
 		"limitrange":                          `{"items":[{"metadata":{"name":"erun-limits"},"spec":{"limits":[{"type":"Container","default":{"cpu":"1"},"defaultRequest":{"cpu":"100m"}}]}}]}`,
-		"ingress":                             `{"items":[{"metadata":{"name":"web"},"spec":{"rules":[{"host":"dev.example.test"}],"tls":[{"hosts":["dev.example.test"],"secretName":"web-tls"}]}}]}`,
+		"ingress":                             `{"items":[{"metadata":{"name":"web"},"spec":{"rules":[{"host":"dev.example.test","http":{"paths":[{"backend":{"service":{"name":"team-web","port":{"number":80}}}}]}}],"tls":[{"hosts":["dev.example.test"],"secretName":"web-tls"}]}}]}`,
+		"service":                             `{"items":[{"metadata":{"name":"team-web"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":80,"protocol":"TCP"}]}},{"metadata":{"name":"team-mcp"},"spec":{"type":"ClusterIP","ports":[{"port":8080}]}}]}`,
 		"certificates.cert-manager.io":        `{"items":[{"metadata":{"name":"wildcard"},"spec":{"secretName":"wildcard-tls","dnsNames":["*.dev.example.test"]},"status":{"conditions":[{"type":"Ready","status":"False","reason":"Issuing","message":"waiting for order to complete"}]}}]}`,
 		"certificaterequests.cert-manager.io": `{"items":[{"metadata":{"name":"wildcard-abc","creationTimestamp":"2024-01-01T00:00:00Z","labels":{"cert-manager.io/certificate-name":"wildcard"}}}]}`,
 		"orders.acme.cert-manager.io":         `{"items":[{"metadata":{"name":"wildcard-order-1","ownerReferences":[{"kind":"CertificateRequest","name":"wildcard-abc"}]},"status":{"state":"pending"}}]}`,
