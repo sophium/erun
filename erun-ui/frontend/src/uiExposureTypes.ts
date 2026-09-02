@@ -32,7 +32,7 @@ export interface UIExposedService {
 // UIEnvironmentServiceList is what the environment is actually running — the
 // list the picker offers. Same three empty states as UIExposureList, on
 // purpose: both reads fail for the same reasons and the tab renders them the
-// same way (issue #1906).
+// same way.
 export interface UIEnvironmentServiceList {
   configured: boolean;
   restricted: boolean;

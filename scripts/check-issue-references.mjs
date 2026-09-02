@@ -199,7 +199,7 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/app/slices/reviewSlice.errorKind.test.ts': 2,
   'erun-ui/frontend/src/app/slices/reviewSlice.test.ts': 3,
   'erun-ui/frontend/src/app/slices/reviewSlice.ts': 3,
-  'erun-ui/frontend/src/app/state.ts': 3,
+  'erun-ui/frontend/src/app/state.ts': 2,
   'erun-ui/frontend/src/app/tenantDashboardPanels.ts': 2,
   'erun-ui/frontend/src/app/terminalFocus.test.ts': 2,
   'erun-ui/frontend/src/app/terminalFocus.ts': 2,

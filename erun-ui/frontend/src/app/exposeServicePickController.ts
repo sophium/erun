@@ -2,7 +2,7 @@ import type { ExposeServiceFormState, UIEnvironmentService } from '@/uiExposureT
 
 // exposeServicePickController turns "the operator picked this Service" into the
 // form patch that follows from it. Pure and separate from the component so the
-// derivation is testable without rendering the Ports tab (issue #1906).
+// derivation is testable without rendering the Ports tab.
 //
 // Two fields are derived rather than typed, because typing either is how the
 // current form goes wrong:
