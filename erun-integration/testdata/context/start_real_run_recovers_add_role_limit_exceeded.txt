@@ -20,5 +20,5 @@ aws ec2 start-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --
 aws ec2 wait instance-running --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
 aws ec2 describe-instances --instance-ids i-0123456789abcdef0 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region us-east-1 --profile dev
 kubectl config set-cluster edge --server https://<VERSION>.10:6443 --insecure-skip-tls-verify=true
-kubectl config set-credentials edge --token dummy-admin-token
+kubectl config set-credentials edge --token '<redacted>'
 kubectl config set-context edge --cluster edge --user edge

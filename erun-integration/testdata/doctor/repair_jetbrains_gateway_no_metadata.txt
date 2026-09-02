@@ -11,6 +11,7 @@ kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 No cached JetBrains Gateway backend metadata found for this environment.

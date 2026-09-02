@@ -11,6 +11,7 @@ kubectl-deployment-get: subprocess
 kubectl-deployment-wait: subprocess
 kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
 
 Running: Roll back to the last successful revision
 No cleanup actions selected.

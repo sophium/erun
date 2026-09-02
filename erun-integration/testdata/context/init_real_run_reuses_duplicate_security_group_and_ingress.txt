@@ -19,5 +19,5 @@ aws ec2 run-instances --image-id ami-0aabbccddeeff0011 --instance-type c8gd.2xla
 aws ec2 wait instance-running --instance-ids i-0aaaabbbbcccc1111 --region eu-west-2 --profile dev
 aws ec2 describe-instances --instance-ids i-0aaaabbbbcccc1111 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region eu-west-2 --profile dev
 kubectl config set-cluster fresh --server https://<VERSION>.10:6443 --insecure-skip-tls-verify=true
-kubectl config set-credentials fresh --token <TOKEN>
+kubectl config set-credentials fresh --token '<redacted>'
 kubectl config set-context fresh --cluster fresh --user fresh

@@ -238,6 +238,48 @@ func TestContext(t *testing.T) {
 		}
 	})
 
+	t.Run("start_real_run_kubectl_context_configure_library_execution_mode_writes_kubeconfig_directly", func(t *testing.T) {
+		// Proves the library path genuinely never shells out: no kubectl stub
+		// is declared at all (the scrubbed PATH holds nothing named kubectl),
+		// so a fallback to the subprocess path would fail with "executable
+		// file not found" instead of silently passing. The three kubeconfig
+		// entries land via k8s.io/client-go/tools/clientcmd against a real
+		// KUBECONFIG file this scenario points at, matching what the
+		// subprocess-mode goldens above assert via persisted config instead.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		seedExecutionMode(t, setup, "kubectl-context-configure", "library")
+		kubeconfigPath := filepath.Join(setup.Cwd, "kubeconfig")
+		stubs := setup.Cwd + "/stubs"
+		profileARN := "arn:aws:iam::123456789012:instance-profile/erun-edge-host-stop"
+		envVars := append(setup.Env(), fixture.StubAWSCloudContext(t, stubs, fixture.AWSCloudContextStubSpec{
+			RoleName:             "erun-edge-host-stop",
+			InstanceProfileARN:   profileARN,
+			ProfileRoleName:      "erun-edge-host-stop",
+			ActiveAssociationID:  "iip-assoc-0aa11bb22cc33dd44",
+			ActiveAssociationARN: profileARN,
+		})...)
+		envVars = append(envVars, "KUBECONFIG="+kubeconfigPath)
+		result := erun.Run(t, []string{"context", "start", "edge", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		raw, err := os.ReadFile(kubeconfigPath)
+		if err != nil {
+			t.Fatalf("read kubeconfig: %v", err)
+		}
+		for _, want := range []string{
+			"server: https://203.0.113.10:6443",
+			"insecure-skip-tls-verify: true",
+			"token: dummy-admin-token",
+			"name: edge",
+		} {
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("expected kubeconfig to contain %q, got:\n%s", want, raw)
+			}
+		}
+	})
+
 	t.Run("start_real_run_recovers_add_role_limit_exceeded", func(t *testing.T) {
 		// Locks the AddRoleToInstanceProfile LimitExceeded recovery: the
 		// profile is created fresh (get-role/get-instance-profile answer
@@ -853,6 +895,34 @@ func TestContext(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "erun-001-ops-eu-west-2") {
 			t.Errorf("expected generated context name erun-001-ops-eu-west-2, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "context/init_dry_run_generates_name_from_username", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_dry_run_unaffected_by_kubectl_context_configure_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract: configureCloudKubeContext only
+		// ever traces the three kubectl config lines and returns before
+		// checking the execution mode, so flipping
+		// execution.modes.kubectl-context-configure to library must not
+		// change dry-run output at all -- reuses
+		// init_dry_run_generates_name_from_username's golden byte-for-byte.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", root, err)
+		}
+		body := "cloudproviders:\n" +
+			"  - alias: dev\n" +
+			"    provider: aws\n" +
+			"    username: ops\n" +
+			"    profile: dev\n"
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatalf("write cloud config: %v", err)
+		}
+		seedExecutionMode(t, setup, "kubectl-context-configure", "library")
+		result := erun.Run(t, []string{"context", "init", "--alias", "dev", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "context/init_dry_run_generates_name_from_username", normalize.Apply(result.Combined))
 	})
