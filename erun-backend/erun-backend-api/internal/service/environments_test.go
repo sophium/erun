@@ -204,6 +204,76 @@ func TestProvisionLeavesExposeErrorEmptyOnCleanSuccess(t *testing.T) {
 	}
 }
 
+// TestProvisionRecordsExposedHostnameOnSuccessfulExpose: once the chained
+// expose step actually runs (all three platform coordinates present) and
+// leaves no failure marker, the environment records the same hostname `erun
+// expose` itself resolves — computed, not scraped from the Job's output.
+func TestProvisionRecordsExposedHostnameOnSuccessfulExpose(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{
+		Tenant:                  "acme",
+		Environment:             "prod",
+		Version:                 "1.2.3",
+		ExposeTargetIP:          "203.0.113.10",
+		ExposeServicesZone:      "services.example.com",
+		ExposePlatformNamespace: "acme-platform",
+	}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if want := "mcp.acme-prod.services.example.com"; last.ExposedHostname != want {
+		t.Fatalf("exposedHostname = %q, want %q", last.ExposedHostname, want)
+	}
+}
+
+// TestProvisionLeavesExposedHostnameEmptyOnExposeFailure: a failed chained
+// expose has no hostname to report, distinct from ExposeError naming why.
+func TestProvisionLeavesExposedHostnameEmptyOnExposeFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
+		"ERUN_EXPOSE_FAILED: ingress controller unavailable\n"
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: output}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{
+		Tenant:                  "acme",
+		Environment:             "prod",
+		Version:                 "1.2.3",
+		ExposeTargetIP:          "203.0.113.10",
+		ExposeServicesZone:      "services.example.com",
+		ExposePlatformNamespace: "acme-platform",
+	}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposedHostname != "" {
+		t.Fatalf("exposedHostname = %q, want empty when the chained expose failed", last.ExposedHostname)
+	}
+	if last.ExposeError != "ingress controller unavailable" {
+		t.Fatalf("exposeError = %q, want the chained expose step's own failure", last.ExposeError)
+	}
+}
+
+// TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured: no platform
+// ingress IP means the deploy Job never chains an expose at all, so there is
+// no hostname to report and none should be invented.
+func TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposedHostname != "" {
+		t.Fatalf("exposedHostname = %q, want empty when exposure was never configured", last.ExposedHostname)
+	}
+}
+
 // TestProvisionRetriesTransientStatusWrite: a lost lifecycle write strands the
 // env in provisioning under an already-terminal workflow, so the write retries.
 func TestProvisionRetriesTransientStatusWrite(t *testing.T) {

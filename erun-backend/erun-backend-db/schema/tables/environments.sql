@@ -10,6 +10,7 @@ CREATE TABLE environments (
   provision_error TEXT,
   deployed_version TEXT,
   expose_error TEXT,
+  exposed_hostname TEXT,
   delete_error TEXT,
   delete_attempts INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ,

@@ -13,7 +13,7 @@ type EnvironmentRepository struct {
 	txs *TxManager
 }
 
-const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, delete_error, delete_attempts, created_at, updated_at`
+const environmentColumns = `environment_id, tenant_id, name, type, kubernetes_context, context_id, runtime_version, status, provision_error, deployed_version, expose_error, exposed_hostname, delete_error, delete_attempts, created_at, updated_at`
 
 // environmentsMidTeardownStatuses are the statuses Count excludes: a delete
 // has been requested for these rows, so they must not lock a tenant out of
@@ -155,12 +155,19 @@ func (r *EnvironmentRepository) CountByType(ctx context.Context, envType model.E
 // best-effort chained exposure did not succeed, without moving Status away
 // from `running` — the deploy itself landed a healthy workload (#1086).
 // Cleared (like ProvisionError) whenever a write carries no expose failure, so
-// a later successful expose overwrites a stale one.
+// a later successful expose overwrites a stale one. ExposedHostname is the
+// hostname that same chained exposure produced when it succeeded; like
+// DeployedVersion (not like ExposeError), an empty ExposedHostname leaves the
+// recorded one alone, so a write unrelated to exposure (a synchronous
+// precondition failure that never ran a deploy Job, a deploy whose own chain
+// never reached the expose step) does not erase discovery of a hostname the
+// cluster is still actually serving.
 type EnvironmentStatusUpdate struct {
 	Status          string
 	ProvisionError  string
 	DeployedVersion string
 	ExposeError     string
+	ExposedHostname string
 }
 
 // UpdateProvisioningStatus persists an environment's provisioning-lifecycle
@@ -173,9 +180,10 @@ func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, en
 			   SET status = ?,
 			       provision_error = NULLIF(?, ''),
 			       deployed_version = COALESCE(NULLIF(?, ''), deployed_version),
-			       expose_error = NULLIF(?, '')
+			       expose_error = NULLIF(?, ''),
+			       exposed_hostname = COALESCE(NULLIF(?, ''), exposed_hostname)
 			 WHERE environment_id = ?
-		`, update.Status, update.ProvisionError, update.DeployedVersion, update.ExposeError, environmentID).Exec(ctx)
+		`, update.Status, update.ProvisionError, update.DeployedVersion, update.ExposeError, update.ExposedHostname, environmentID).Exec(ctx)
 		return err
 	})
 }

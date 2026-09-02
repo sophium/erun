@@ -90,6 +90,47 @@ describe('MCPAccessPanel', () => {
   });
 });
 
+const EXPOSED_ENVIRONMENTS: Environment[] = [
+  {
+    environmentId: 'env-1',
+    name: 'prod',
+    type: 'runtime',
+    exposedHostname: 'mcp.acme-prod.services.example.com',
+  },
+];
+
+describe('MCPAccessPanel hostname discovery', () => {
+  it('prefills both hostname fields from the environment once exposed, still editable', async () => {
+    mockFetch(() => jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }));
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={EXPOSED_ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    const driveHostname = screen.getByLabelText<HTMLInputElement>(/MCP hostname/);
+    expect(driveHostname.value).toBe('mcp.acme-prod.services.example.com');
+    expect(screen.getByText(/MCP hostname \(discovered/)).toBeInTheDocument();
+
+    const attachHostname = screen.getByLabelText<HTMLInputElement>(/Environment edge hostname/);
+    expect(attachHostname.value).toBe('mcp.acme-prod.services.example.com');
+    expect(screen.getByText(/Environment edge hostname \(discovered/)).toBeInTheDocument();
+
+    fireEvent.change(driveHostname, { target: { value: 'mcp.override.example.com' } });
+    expect(driveHostname.value).toBe('mcp.override.example.com');
+  });
+
+  it('leaves both hostname fields blank for an environment that is not exposed', async () => {
+    mockFetch(() => jsonResponse({ token: 'signed.jwt.value', audience: 'erun-mcp:acme/prod' }));
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    expect(screen.getByLabelText<HTMLInputElement>(/MCP hostname/).value).toBe('');
+    expect(screen.getByText(/MCP hostname \(not yet exposed/)).toBeInTheDocument();
+    expect(screen.getByLabelText<HTMLInputElement>(/Environment edge hostname/).value).toBe('');
+    expect(screen.getByText(/Environment edge hostname \(not yet exposed/)).toBeInTheDocument();
+  });
+});
+
 // jsonResponseWithHeaders backs the "drive this environment" flow below: it
 // needs response headers (Mcp-Session-Id) that the plain jsonResponse() above
 // never has to carry.

@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/jobexec"
 )
 
@@ -297,6 +299,27 @@ func ExposeFailureFromOutput(output string) string {
 		return ""
 	}
 	return strings.TrimSpace(output[idx+len(marker):])
+}
+
+// ExposeHostnameFromParams reports the MCP edge hostname the chained `erun
+// expose mcp` call produces when it actually runs — the same deterministic
+// formula `erun expose` itself resolves, computed here rather than scraped
+// back out of the Job's output because nothing about it is uncertain once the
+// inputs below are known. Gated on the exact same condition buildExposeChain
+// uses to pass --services-zone/--platform-namespace: if either is
+// blank the chain falls back to project-based resolution, which fails
+// outright for this git-checkout-less Job (see DeployJobParams'
+// ExposeServicesZone doc), so there is no real value to compute. Callers must
+// still gate this on ExposeFailureFromOutput returning "" — a real failure
+// with all three inputs present must not be reported as a working hostname.
+func ExposeHostnameFromParams(params DeployJobParams) string {
+	ip := strings.TrimSpace(params.ExposeTargetIP)
+	zone := strings.TrimSpace(params.ExposeServicesZone)
+	namespace := strings.TrimSpace(params.ExposePlatformNamespace)
+	if ip == "" || zone == "" || namespace == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s.%s.%s", mcpExposeService, eruncommon.KubernetesNamespaceName(params.Tenant, params.Environment), zone)
 }
 
 // namespaceQuotaFlags appends --max-cpu/--max-memory/--max-storage when all

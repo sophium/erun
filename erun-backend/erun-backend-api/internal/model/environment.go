@@ -64,6 +64,18 @@ type Environment struct {
 	// so scan-only; empty means exposure succeeded, was never attempted, or the
 	// environment predates chaining an expose at all.
 	ExposeError string `json:"exposeError,omitempty" bun:"expose_error,scanonly,nullzero"`
+	// ExposedHostname is the MCP edge hostname
+	// (mcp.<tenant>-<env>.<services-zone>) the deploy Job's chained
+	// `erun expose mcp` call actually produced. Owned by the deploy executor,
+	// so scan-only; empty means "not exposed" and always definitely so — the
+	// chain has never once succeeded for this environment, whether because no
+	// platform ingress IP is configured for this deployment (never attempted)
+	// or every attempt so far has failed (see ExposeError) — never a separate
+	// "exposed, hostname unknown" state. Once set it is preserved across
+	// unrelated writes (see EnvironmentStatusUpdate), so a later failed
+	// re-expose does not erase discovery of a hostname the cluster is still
+	// actually serving.
+	ExposedHostname string `json:"exposedHostname,omitempty" bun:"exposed_hostname,scanonly,nullzero"`
 	// DeleteError carries why a delete attempt did not tear the namespace down
 	// (the namespace's own conditions, verbatim, when it's stuck on an
 	// unsatisfiable finalizer) when Status is `deletion-blocked`. Owned by the
