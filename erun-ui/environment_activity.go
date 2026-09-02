@@ -116,6 +116,22 @@ func (a *App) TriggerEnvironmentActivitySweep() {
 	a.reconcileEnvironmentActivityOnce()
 }
 
+// ResetEnvironmentActivityObservations discards every cached observation so
+// the next sweep or read model treats every environment as never yet
+// observed. Exported for the headless Playwright harness only: the shared
+// seeded baseline rows (SEED_ENV_ALPHA/SEED_ENV_BETA,
+// erun-ui/playwright/fixtures/seedRoot.ts) live for a whole worker process's
+// lifetime, not one spec file, so without this a genuine observation sampled
+// during one spec (even a never-deployed env's routine "not reachable"
+// reading) renders on the next spec's hover card as if it had already been
+// checked — the mechanism behind #1901's zone-2 race. There is no on-disk
+// persistence to clear here, unlike ResetEnvironmentUsageObservations.
+func (a *App) ResetEnvironmentActivityObservations() {
+	a.mu.Lock()
+	a.envActivity = nil
+	a.mu.Unlock()
+}
+
 // configuredSelections lists every environment in the config store, not only the
 // ones with desktop tabs — an environment nobody opened here is exactly the case
 // this poller exists to make visible.

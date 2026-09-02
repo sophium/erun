@@ -111,6 +111,19 @@ func (a *App) envUsageSnapshot() map[string]environmentUsageReading {
 	return out
 }
 
+// ResetEnvironmentUsageObservations is
+// ResetEnvironmentActivityObservations's usage-cache counterpart — see that
+// method's comment for why the headless Playwright harness needs it. Clears
+// only the in-memory cache: a.envUsage is read from
+// environment_usage_history.go's persisted file once, at App construction,
+// never again during the process lifetime, so a stale on-disk file left by an
+// earlier test cannot resurrect what this clears.
+func (a *App) ResetEnvironmentUsageObservations() {
+	a.mu.Lock()
+	a.envUsage = nil
+	a.mu.Unlock()
+}
+
 // seedEnvironmentUsageSnapshots attaches each environment's last cached
 // reading, if any, to the initial-state read model — the same reason
 // seedEnvironmentActivitySnapshots exists: a Redux reset that does not restart
