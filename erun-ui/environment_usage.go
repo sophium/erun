@@ -91,6 +91,7 @@ func (a *App) sampleEnvironmentUsageOnce(selection uiSelection, reachability map
 	}
 	a.envUsage[key] = reading
 	a.mu.Unlock()
+	a.persistEnvironmentUsage(selection, reading)
 	a.emitEnvUsage(selection, reading)
 }
 
@@ -114,7 +115,11 @@ func (a *App) envUsageSnapshot() map[string]environmentUsageReading {
 // reading, if any, to the initial-state read model — the same reason
 // seedEnvironmentActivitySnapshots exists: a Redux reset that does not restart
 // the Go process must not wait out a full sweep interval before a hover card
-// has anything to show.
+// has anything to show. a.envUsage itself is now seeded from
+// environment_usage_history.go's persisted file at App construction, so this
+// also covers a genuine process restart, not only a Redux reset: the reading
+// it attaches renders stale with its true age rather than as "Not yet
+// observed" for an environment this desktop measured moments before exiting.
 func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
