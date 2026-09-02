@@ -37,7 +37,7 @@ Zitadel scopes a Management API call by an `x-zitadel-orgid` header, so the same
 
 **A caller composing `orgId` from a tenant, rather than a raw org id, resolves it via [`GET /v1/tenant-issuers?tenantId=<tenant_id>`](/agent-reference/api-protocol#get-v1tenant-issuers)** (operations-only for a tenant other than the caller's own) and reads `orgFieldValue` off the returned mapping — the console's Enroll form does exactly this rather than asking the operator for a raw org id. A target tenant with no `orgFieldValue` on any mapping (a single-tenant issuer, or no issuer trusted at all) has no org to enroll into yet; that is a real, distinguishable state, not a failed lookup, and the caller should not fall back to omitting `orgId` — doing so silently reproduces the platform's-own-org defect this endpoint exists to avoid.
 
-**A user created in the wrong organization cannot be moved.** Zitadel has no "move user to another org" operation — an organization is a hard identity boundary, not a reassignable attribute. Recovering from a wrong-org enrollment means deactivating (or deleting) the misplaced identity and recreating it with the correct `orgId`; there is no in-place repair.
+**A user created in the wrong organization cannot be moved.** Zitadel has no "move user to another org" operation — an organization is a hard identity boundary, not a reassignable attribute. Recovering from a wrong-org enrollment means deactivating the misplaced identity and recreating it with the correct `orgId`; there is no in-place repair. Both listing and deactivating a cross-org identity need the same `orgId` passed again — see the `?orgId=` notes on [`GET /v1/identity/users`](#get-v1identityusers) and the deactivate/reactivate endpoint below.
 
 ## `POST /v1/identity/orgs`
 
@@ -65,7 +65,9 @@ It creates the org and stops there. It does **not** register an erun tenant, mov
 
 ## `GET /v1/identity/users`
 
-Lists every identity (human and machine) the platform's IdP knows about, cross-referenced against erun's own `users` table for the caller's tenant so the response distinguishes an enrolled tenant member from an identity that merely exists in the IdP — the fix for a self-registered account (when `allowRegister` was left open, or an account created before it was closed) rendering identically to an actual member.
+Lists every identity (human and machine) of the platform's own organization by default, cross-referenced against erun's own `users` table for the caller's tenant so the response distinguishes an enrolled tenant member from an identity that merely exists in the IdP — the fix for a self-registered account (when `allowRegister` was left open, or an account created before it was closed) rendering identically to an actual member.
+
+**`?orgId=` lists another organization instead** — the same org [enrolling into another organization](#enrolling-into-another-organization) above can target. Without it, an identity created with `orgId` is invisible here: before this parameter existed, this endpoint could only ever see the credential's own org, so a cross-org enrollment (the one a fresh tenant's first admin depends on) had no way to be listed again, let alone deactivated (issue #1916). `enrolled`/`erunUserId` still cross-reference the caller's own tenant regardless of which org is listed — an identity in another tenant's org is correctly reported `enrolled: false` here, since it is not a member of the caller's (`OPERATIONS`) tenant.
 
 ```jsonc
 // 200 response
@@ -157,12 +159,14 @@ The IdP half is created first, since the erun mapping needs the subject the IdP 
 
 `external_id` is the IdP's own user id (the `id` field from the list/enroll responses above — the same value a token from this issuer presents as `sub`). Deactivating blocks the identity's next sign-in immediately; reactivating reverses it. Both return `204` with an empty body on success.
 
+**`?orgId=` addresses the identity's own organization**, the same parameter as `GET /v1/identity/users` above. Zitadel resolves a user id within one org; a cross-org identity's `external_id` does not exist in the credential's own org, so omitting `orgId` here 404s rather than resolving to (or silently acting on) anything in the credential's default org (issue #1916) — there is no same-id user to mistakenly act on instead, only a lookup key that doesn't resolve without the org that actually holds it.
+
 **Error behaviour.** A Zitadel error is forwarded verbatim with its own status and message — the identity-state text is actionable on its own, for example:
 
 | Status | Body (from Zitadel) | Condition | Recovery |
 |---|---|---|---|
 | `404` | `User with state initial can only be deleted not deactivated` | The identity has not completed its invite yet (`USER_STATE_INITIAL`). | Wait for the invite to complete, or delete the identity in Zitadel directly — this surface does not delete. |
-| `404` | (Zitadel's not-found message) | `external_id` does not name a known identity. | Re-check the id from `GET /v1/identity/users`. |
+| `404` | (Zitadel's not-found message) | `external_id` does not name a known identity **in the addressed org** (the credential's own when `orgId` is omitted). | Re-check the id from `GET /v1/identity/users?orgId=<the org it was created in>`, and pass the same `orgId` here. |
 | `403` | — | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
 
 ## `GET /v1/identity/org-settings` {#org-settings}

@@ -70,7 +70,7 @@ func TestNewClientFromFileLoadsThePAT(t *testing.T) {
 	if err != nil || client == nil {
 		t.Fatalf("client=%v err=%v", client, err)
 	}
-	if err := client.DeactivateUser(context.Background(), "u1"); err != nil {
+	if err := client.DeactivateUser(context.Background(), "", "u1"); err != nil {
 		t.Fatalf("DeactivateUser: %v", err)
 	}
 	if gotAuth != "Bearer secret-pat" {
@@ -85,7 +85,7 @@ func TestCallSetsHostHeaderAndNeverLeaksPATOnError(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"message":"permission denied"}`))
 	})
-	err := client.DeactivateUser(context.Background(), "u1")
+	err := client.DeactivateUser(context.Background(), "", "u1")
 	if err == nil {
 		t.Fatal("want an error for a 403 response")
 	}
@@ -138,7 +138,7 @@ func TestListUsers(t *testing.T) {
 			},
 		})
 	})
-	users, err := client.ListUsers(context.Background())
+	users, err := client.ListUsers(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
@@ -233,10 +233,10 @@ func TestDeactivateAndReactivateUser(t *testing.T) {
 		gotPaths = append(gotPaths, r.Method+" "+r.URL.Path)
 		w.WriteHeader(http.StatusOK)
 	})
-	if err := client.DeactivateUser(context.Background(), "u1"); err != nil {
+	if err := client.DeactivateUser(context.Background(), "", "u1"); err != nil {
 		t.Fatalf("DeactivateUser: %v", err)
 	}
-	if err := client.ReactivateUser(context.Background(), "u1"); err != nil {
+	if err := client.ReactivateUser(context.Background(), "", "u1"); err != nil {
 		t.Fatalf("ReactivateUser: %v", err)
 	}
 	want := []string{
@@ -252,9 +252,64 @@ func TestDeactivateUserPropagatesNotFound(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	err := client.DeactivateUser(context.Background(), "missing")
+	err := client.DeactivateUser(context.Background(), "", "missing")
 	apiErr, ok := err.(*APIError)
 	if !ok || !apiErr.NotFound() {
 		t.Fatalf("err = %v, want a not-found *APIError", err)
+	}
+}
+
+// TestListUsersOrgIDSetsHeaderOnlyWhenGiven locks the org-targeting fix
+// itself: a non-empty orgID must reach Zitadel as x-zitadel-orgid (the
+// header Zitadel scopes a Management API call by), and an empty one must
+// send no override at all -- not an empty header value -- so existing
+// callers keep resolving to the credential's own org exactly as before.
+func TestListUsersOrgIDSetsHeaderOnlyWhenGiven(t *testing.T) {
+	var sawHeader bool
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, sawHeader = r.Header["X-Zitadel-Orgid"]
+		if sawHeader && r.Header.Get("x-zitadel-orgid") != "org-tenant-x" {
+			t.Fatalf("x-zitadel-orgid header = %q, want org-tenant-x", r.Header.Get("x-zitadel-orgid"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	})
+	if _, err := client.ListUsers(context.Background(), "org-tenant-x"); err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if !sawHeader {
+		t.Fatal("want the x-zitadel-orgid header set when orgID is given")
+	}
+
+	client, _ = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, sawHeader = r.Header["X-Zitadel-Orgid"]
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	})
+	if _, err := client.ListUsers(context.Background(), ""); err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if sawHeader {
+		t.Fatal("want no x-zitadel-orgid header when orgID is empty")
+	}
+}
+
+// TestDeactivateAndReactivateUserSetOrgHeader is the same proof as
+// TestListUsersOrgIDSetsHeaderOnlyWhenGiven for the other two Zitadel calls
+// this issue's reproduction named directly: deactivate/reactivate must
+// reach the org the identity actually lives in, not only the credential's
+// own.
+func TestDeactivateAndReactivateUserSetOrgHeader(t *testing.T) {
+	var gotHeaders []string
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = append(gotHeaders, r.Header.Get("x-zitadel-orgid"))
+		w.WriteHeader(http.StatusOK)
+	})
+	if err := client.DeactivateUser(context.Background(), "org-tenant-x", "u1"); err != nil {
+		t.Fatalf("DeactivateUser: %v", err)
+	}
+	if err := client.ReactivateUser(context.Background(), "org-tenant-x", "u1"); err != nil {
+		t.Fatalf("ReactivateUser: %v", err)
+	}
+	if len(gotHeaders) != 2 || gotHeaders[0] != "org-tenant-x" || gotHeaders[1] != "org-tenant-x" {
+		t.Fatalf("x-zitadel-orgid headers = %v, want both requests scoped to org-tenant-x", gotHeaders)
 	}
 }
