@@ -1,4 +1,9 @@
-import type { ExposeServiceFormState, UIExposeServiceInput } from '@/types';
+import type {
+  ExposeServiceFormState,
+  UIEnvironmentServiceList,
+  UIExposeServiceInput,
+  UIExposureList,
+} from '@/types';
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
@@ -16,46 +21,48 @@ export const refreshManageExposures = (): AppThunk<Promise<void>> => async (disp
     return;
   }
   dispatch(patchManageDialog({ exposuresLoading: true }));
-  try {
-    // Both reads in flight together: they answer halves of one question
-    // ("what is published" and "what could be"), and serializing them would
-    // show the tab half-loaded for no reason. Promise.all rather than two
-    // awaits so a failure in either lands in the one catch below.
-    const [result, services] = await Promise.all([
-      dispatch(environmentApi.endpoints.listEnvironmentExposures.initiate(selection)).unwrap(),
-      dispatch(environmentApi.endpoints.listEnvironmentServices.initiate(selection)).unwrap(),
-    ]);
-    if (!getState().manageDialog.open) {
-      return;
-    }
-    dispatch(
-      patchManageDialog({
-        exposures: result,
-        environmentServices: services,
-        exposuresLoading: false,
-      }),
-    );
-  } catch (error) {
-    if (!getState().manageDialog.open) {
-      return;
-    }
-    // A round-trip failure (not a computed restricted/unconfigured result) is
-    // reported the same way a genuine listing failure is, so it renders with
-    // the same "failed to load" affordance rather than reading as "nothing
-    // exposed here".
-    dispatch(
-      patchManageDialog({
-        exposuresLoading: false,
-        exposures: { configured: true, restricted: false, error: readError(error), services: [] },
-        environmentServices: {
+  // Both reads in flight together: they answer halves of one question ("what
+  // is published" and "what could be"), and serializing them would show the
+  // tab half-loaded for no reason. allSettled rather than all so one read
+  // failing does not blank the other's already-resolved panel -- the same
+  // "partial access degrades partially" rule the two panels already each
+  // follow individually (erun-ui/AGENTS.md "Degrade by permission").
+  const [exposuresResult, servicesResult] = await Promise.allSettled([
+    dispatch(environmentApi.endpoints.listEnvironmentExposures.initiate(selection)).unwrap(),
+    dispatch(environmentApi.endpoints.listEnvironmentServices.initiate(selection)).unwrap(),
+  ]);
+  if (!getState().manageDialog.open) {
+    return;
+  }
+  // A round-trip failure (not a computed restricted/unconfigured result) is
+  // reported the same way a genuine listing failure is, so it renders with
+  // the same "failed to load" affordance rather than reading as "nothing
+  // exposed here".
+  const exposures: UIExposureList =
+    exposuresResult.status === 'fulfilled'
+      ? exposuresResult.value
+      : {
           configured: true,
           restricted: false,
-          error: readError(error),
+          error: readError(exposuresResult.reason),
           services: [],
-        },
-      }),
-    );
-  }
+        };
+  const environmentServices: UIEnvironmentServiceList =
+    servicesResult.status === 'fulfilled'
+      ? servicesResult.value
+      : {
+          configured: true,
+          restricted: false,
+          error: readError(servicesResult.reason),
+          services: [],
+        };
+  dispatch(
+    patchManageDialog({
+      exposures,
+      environmentServices,
+      exposuresLoading: false,
+    }),
+  );
 };
 
 export const updateExposeForm =
