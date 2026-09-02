@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/erunApp.js';
-import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
+import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../fixtures/seedRoot.js';
 
 // #1260: the desktop re-states the orchestrator pacing contract into a live
 // session every 10 minutes, and relaunches a session that died from a crash
@@ -48,15 +48,19 @@ test.describe('orchestrator pacing/respawn has no surface without a live session
   }) => {
     const name = 'pacing-nudge-test';
 
-    await app.sidebar.newOrchestratorButton().click();
-    await app.orchestratorDialog.waitForOpen();
-    await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
-    await app.orchestratorDialog.create(name);
-    await app.orchestratorDialog.waitForClosed();
+    try {
+      await app.sidebar.newOrchestratorButton().click();
+      await app.orchestratorDialog.waitForOpen();
+      await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
+      await app.orchestratorDialog.create(name);
+      await app.orchestratorDialog.waitForClosed();
 
-    await expect(app.sidebar.orchestratorStatusDot(name, 'stopped')).toBeVisible();
-    await expect(app.sidebar.orchestratorBusySpinner(name)).toHaveCount(0);
-    await expect(app.sidebar.orchestratorShellSpinner(name)).toHaveCount(0);
-    await expect(app.sidebar.orchestratorsAlert()).toHaveCount(0);
+      await expect(app.sidebar.orchestratorStatusDot(name, 'stopped')).toBeVisible();
+      await expect(app.sidebar.orchestratorBusySpinner(name)).toHaveCount(0);
+      await expect(app.sidebar.orchestratorShellSpinner(name)).toHaveCount(0);
+      await expect(app.sidebar.orchestratorsAlert()).toHaveCount(0);
+    } finally {
+      removeOrchestrator(name);
+    }
   });
 });

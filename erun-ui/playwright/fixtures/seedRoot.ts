@@ -739,6 +739,56 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
   };
 }
 
+// removeOrchestrator deletes one entry from the root config.yaml's
+// `orchestrators:` sequence by id. There is no dialog affordance for this
+// (the orchestrator dialog only creates/edits/cancels), and a spec that
+// drives a real Create/UpdateOrchestrator round trip through the UI leaves
+// that entry in the shared root config for every later spec in the same
+// worker to see, indefinitely -- the same worker-persistent-backend leak the
+// suite already guards against for env rows via removeEnvironment. Finds the
+// entry's own indentation the same way withOrchestrators does (the desktop's
+// YAML marshaller and this suite's hand-written seed disagree on it) rather
+// than assuming a fixed one, and removes the whole entry through whichever
+// line starts the next sibling item or leaves the block.
+export function removeOrchestrator(id: string): void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const lines = fs.readFileSync(configPath, 'utf8').split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);
+  if (keyIndex < 0) {
+    return;
+  }
+  let blockEnd = keyIndex + 1;
+  while (blockEnd < lines.length && /^\s+\S/.test(lines[blockEnd] ?? '')) {
+    blockEnd += 1;
+  }
+  let itemStart = -1;
+  let itemIndent = 0;
+  for (let i = keyIndex + 1; i < blockEnd; i += 1) {
+    const line = lines[i] ?? '';
+    const trimmed = line.trimStart();
+    if (trimmed === `- id: ${id}`) {
+      itemStart = i;
+      itemIndent = line.length - trimmed.length;
+      break;
+    }
+  }
+  if (itemStart < 0) {
+    return;
+  }
+  let itemEnd = itemStart + 1;
+  while (itemEnd < blockEnd) {
+    const line = lines[itemEnd] ?? '';
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+    if (trimmed.startsWith('- ') && indent <= itemIndent) {
+      break;
+    }
+    itemEnd += 1;
+  }
+  lines.splice(itemStart, itemEnd - itemStart);
+  writeConfigFile(configPath, lines.join('\n'));
+}
+
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the
 // suite recognizably created are removed, so a caller-provided custom path
 // is never destroyed by accident.
