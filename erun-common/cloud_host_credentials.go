@@ -181,14 +181,22 @@ func renderHostAWSCredentialsProfile(credentials CloudProviderCredentials, regio
 // shared credentials file with the block arriving on stdin. Dropping the old
 // section first is what keeps a repeated refresh an overwrite rather than a
 // second copy of the profile, and every other profile in the file survives.
+// The temp file is unique per invocation (mktemp, not a fixed name) so two
+// refreshes racing against the same pod — `erun open` firing one while an
+// explicit `erun cloud refresh` is still in flight, say — never share the
+// intermediate file: each writes its own copy of the new section exactly
+// once, and whichever atomic mv lands last is the profile that survives.
+// A shared fixed name let both writers' appends land in the same file,
+// which is how the profile ended up written twice (erun#1923).
 func hostAWSCredentialsWriteScript() string {
 	return strings.Join([]string{
 		"set -eu",
 		"umask 077",
 		`dir="$HOME/.aws"`,
 		`file="$dir/credentials"`,
-		`tmp="$file.erun-refresh"`,
 		`mkdir -p "$dir"`,
+		`tmp="$(mktemp "$dir/credentials.erun-refresh.XXXXXX")"`,
+		`trap 'rm -f "$tmp"' EXIT`,
 		`if [ -f "$file" ]; then`,
 		`  awk -v profile='` + HostAWSCredentialsProfile + `' '`,
 		`    /^[[:space:]]*\[/ { drop = ($0 ~ "^[[:space:]]*\\[" profile "\\][[:space:]]*$") }`,

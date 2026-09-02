@@ -10,8 +10,9 @@ host-credentials-write-script:
   umask 077
   dir="$HOME/.aws"
   file="$dir/credentials"
-  tmp="$file.erun-refresh"
   mkdir -p "$dir"
+  tmp="$(mktemp "$dir/credentials.erun-refresh.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
   if [ -f "$file" ]; then
     awk -v profile='erun-host' '
       /^[[:space:]]*\[/ { drop = ($0 ~ "^[[:space:]]*\\[" profile "\\][[:space:]]*$") }
