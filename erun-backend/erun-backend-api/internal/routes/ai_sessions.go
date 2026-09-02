@@ -12,9 +12,11 @@ import (
 )
 
 // AISessionRepository is the persistence access AISessionRoutes needs:
-// upserting the environment's own self-reported event.
+// upserting the environment's own self-reported event, and listing every
+// session last reported for one environment.
 type AISessionRepository interface {
 	Record(ctx context.Context, event model.AISessionEvent) (model.AISessionEvent, error)
+	List(ctx context.Context, environmentID string) ([]model.AISessionEvent, error)
 }
 
 // EnvironmentGetter is the narrow read access AISessionRoutes needs to
@@ -30,16 +32,16 @@ type AISessionRoutes struct {
 	environments EnvironmentGetter
 }
 
-// RegisterAISessionRoutes wires the environment's own AI-session self-report:
-// the structured busy/idle/awaiting-input status model erun-common already
-// resolves locally for the desktop and per-env MCP (see
-// erun-common/ai_session_status.go), now reportable over the authenticated
-// edge so a caller with no local kubeconfig/port-forward can eventually read
-// it. Only the write side ships here — see route_audit.go's InternalAPIRoutes
-// entry for why there is deliberately no read route yet.
+// RegisterAISessionRoutes wires the environment's own AI-session self-report
+// and its read-back: the structured busy/idle/awaiting-input status model
+// erun-common already resolves locally for the desktop and per-env MCP (see
+// erun-common/ai_session_status.go), now reportable and readable over the
+// authenticated edge so a caller with no local kubeconfig/port-forward can
+// see it too.
 func RegisterAISessionRoutes(register ProtectedRouteRegistrar, sessions AISessionRepository, environments EnvironmentGetter) {
 	routes := AISessionRoutes{sessions: sessions, environments: environments}
 	register(http.MethodPost, "/v1/environments/{environment_id}/ai-sessions", http.HandlerFunc(routes.reportAISessionEvent))
+	register(http.MethodGet, "/v1/environments/{environment_id}/ai-sessions", http.HandlerFunc(routes.listAISessions))
 }
 
 // reportAISessionEventRequest carries only what the tool's own hook actually
@@ -104,6 +106,29 @@ func (r AISessionRoutes) reportAISessionEvent(w http.ResponseWriter, req *http.R
 		return
 	}
 	writeJSON(w, http.StatusCreated, resolveAISessionStatus(recorded))
+}
+
+// listAISessions returns the resolved status of every session last reported
+// for this environment, sorted by session id (AISessionRepository.List's own
+// order) — the read-back half of reportAISessionEvent, for a caller with no
+// local kubeconfig/port-forward to poll instead.
+func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request) {
+	environmentID := req.PathValue("environment_id")
+	if _, err := r.environments.Get(req.Context(), environmentID); err != nil {
+		writeRepositoryError(w, req, err)
+		return
+	}
+
+	events, err := r.sessions.List(req.Context(), environmentID)
+	if err != nil {
+		writeRepositoryError(w, req, err)
+		return
+	}
+	statuses := make([]eruncommon.AISessionStatus, len(events))
+	for i, event := range events {
+		statuses[i] = resolveAISessionStatus(event)
+	}
+	writeJSON(w, http.StatusOK, statuses)
 }
 
 // resolveAISessionStatus converts the persisted row to the same

@@ -378,14 +378,21 @@ describe('AppShell scope selector', () => {
 
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
     fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
-    expect(screen.getByText('acme-env')).toBeInTheDocument();
+    // Both the deploy list and the AI-sessions panel render the environment
+    // name, so this asserts presence rather than a single match.
+    expect(screen.getAllByText('acme-env').length).toBeGreaterThan(0);
 
     const scopeSelect = await screen.findByRole('combobox', { name: 'Administering' });
     fireEvent.click(scopeSelect);
     fireEvent.click(await screen.findByRole('option', { name: 'Beta' }));
 
-    const betaRow = (await screen.findByText('beta-env')).closest('li');
-    expect(betaRow).not.toBeNull();
+    const betaRows = await screen.findAllByText('beta-env');
+    // Only the deploy list's row carries the owning-tenant badge; the
+    // AI-sessions panel's row does not, so this picks that one out.
+    const betaRow = betaRows
+      .map((el) => el.closest('li'))
+      .find((li) => li !== null && within(li).queryByText('Beta') !== null);
+    expect(betaRow).not.toBeUndefined();
     expect(within(betaRow as HTMLElement).getByText('Beta')).toBeInTheDocument();
     expect(screen.queryByText('acme-env')).not.toBeInTheDocument();
     expect(beginLogin).not.toHaveBeenCalled();
