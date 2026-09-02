@@ -63,6 +63,21 @@ const PENDING_CERTIFICATE = {
   },
 };
 
+// ListEnvironmentServices powers the picker rendered inside the same form
+// (#1911) -- it shares UIExposureList's {configured, restricted, services}
+// shape by design, so NO_SERVICES doubles as its "nothing running" stub.
+// Every test below stubs it explicitly rather than falling through to the
+// real backend call: that fallthrough is exactly what let #1911 ship the
+// picker with these specs never actually exercising the paired read.
+const NO_SERVICES = { data: { configured: true, restricted: false, services: [] } };
+const SERVICES_POPULATED = {
+  data: {
+    configured: true,
+    restricted: false,
+    services: [{ name: 'pw-web', type: 'ClusterIP', ports: [{ name: 'http', port: 8080 }] }],
+  },
+};
+
 test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   test('a cluster-backed environment with no platform block names the fix and links to it', async ({
     app,
@@ -122,7 +137,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   });
 
   test('a restricted listing is distinct from an empty one', async ({ app, page }) => {
-    await stubExposureRpcs(page, { ListEnvironmentExposures: () => RESTRICTED });
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => RESTRICTED,
+      ListEnvironmentServices: () => NO_SERVICES,
+    });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Ports');
@@ -147,6 +165,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
         calls++;
         return calls === 1 ? LOAD_FAILURE : CONFIGURED_EMPTY;
       },
+      ListEnvironmentServices: () => NO_SERVICES,
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -183,6 +202,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
         listCalls++;
         return PENDING_CERTIFICATE;
       },
+      ListEnvironmentServices: () => NO_SERVICES,
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -229,6 +249,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
           data: { service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https' },
         };
       },
+      ListEnvironmentServices: () => NO_SERVICES,
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -290,7 +311,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     app,
     page,
   }) => {
-    await stubExposureRpcs(page, { ListEnvironmentExposures: () => CONFIGURED_EMPTY });
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => CONFIGURED_EMPTY,
+      ListEnvironmentServices: () => NO_SERVICES,
+    });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Ports');
@@ -302,6 +326,54 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await dialog.locator('#expose-service-name').fill('api');
     await expect(submit).toBeDisabled();
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // The picker (#1911) turns "type a Service name you already know" into
+  // "pick one of what's actually running", filling in the label (tenant
+  // prefix stripped) and the sole port, and threading the real Service name
+  // through as the Ingress backend rather than the <tenant>-<label>
+  // derivation -- see ManageDialogPortsServicePicker.tsx and
+  // exposeServicePickController.ts.
+  test('picking a service fills the form and routes the expose call to its backend', async ({
+    app,
+    page,
+  }) => {
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => CONFIGURED_EMPTY,
+      ListEnvironmentServices: () => SERVICES_POPULATED,
+      ExposeEnvironmentService: () => ({
+        data: { service: 'web', hostname: 'web.pw-alpha.services.test', scheme: 'https' },
+      }),
+    });
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Ports');
+    const dialog = app.manageDialog.locator();
+
+    await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
+    const picker = dialog.getByRole('combobox', { name: 'Service' });
+    await expect(picker).toBeVisible();
+    await picker.click();
+    await page.getByRole('option', { name: /pw-web/ }).click();
+
+    // The tenant prefix ('pw-') is stripped for the label but kept for the
+    // backend Service name -- that split is the whole point of the picker.
+    await expect(dialog.locator('#expose-service-name')).toHaveValue('web');
+    await expect(dialog.locator('#expose-port')).toHaveValue('8080');
+
+    const exposeRequest = page.waitForRequest(
+      (req) =>
+        req.method() === 'POST' &&
+        req.url().endsWith('/__erun_invoke') &&
+        (req.postData() ?? '').includes('"method":"ExposeEnvironmentService"'),
+    );
+    await dialog.locator('#expose-target-ip').fill('203.0.113.10');
+    await dialog.getByRole('button', { name: /Expose a service/ }).click();
+    const req = await exposeRequest;
+    expect(req.postData() ?? '').toContain('"backendService":"pw-web"');
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -323,6 +395,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
         await new Promise((resolve) => setTimeout(resolve, 300));
         return { data: { wildcardName: '*.pw-alpha.services.test' } };
       },
+      ListEnvironmentServices: () => NO_SERVICES,
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
