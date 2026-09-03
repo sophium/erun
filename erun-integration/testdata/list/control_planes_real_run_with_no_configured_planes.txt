@@ -1,0 +1,6 @@
+  published version: <VERSION>
+Control planes:
+  none
+audit: erun list --control-planes
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>

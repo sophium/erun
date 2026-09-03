@@ -2,6 +2,8 @@ List every configured tenant and environment, including each environment's erun 
 
 Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.
 
+Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.
+
 Usage:
   erun list [flags]
 
@@ -10,8 +12,12 @@ Examples:
   erun list --tenant erun
   erun list --tenant erun --gate-environment build
   erun list --tenant erun --gate-environment build --output json
+  erun list --control-planes
+  erun list --control-planes --dry-run
 
 Flags:
+      --control-planes            Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing
+      --dry-run                   Resolve and trace mutating actions without executing them.
       --gate-environment string   With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates
   -h, --help                      help for list
       --tenant string             Report erun-version drift across this tenant's environments instead of the full listing

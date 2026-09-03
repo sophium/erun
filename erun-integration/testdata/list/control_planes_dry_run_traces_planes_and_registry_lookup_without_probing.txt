@@ -1,0 +1,5 @@
+Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.
+audit: erun list --control-planes --dry-run
+erun list
+list: would resolve the published version from erun's own registry
+list: would GET <PLANE_API>/v1/platform for control plane erun+test@erun

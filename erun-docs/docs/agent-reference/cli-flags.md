@@ -641,12 +641,34 @@ Version drift for tenant erun:
 
 `max version` is the newest version observed among the tenant's *own* environments, not the newest erun has ever published — that's `erun version`'s/`erun upgrade`'s registry-latest concern. `[behind max]` marks an environment whose version parses lower than the max; an unparseable or missing version is shown bare (never guessed at) and excluded from the max computation. The `gate:` block only prints when `--gate-environment` is given, and `behind:` has three readings: `no` (the gate carries the max, or ties it), `yes -- outdated relative to <envs>` (naming every environment running a newer version), and `unknown (gate's own erun version could not be resolved from config)` when the gate's own version can't be read — reported explicitly rather than folded into a silent `no`, since a gate older than the code it gates can pass a change that would fail on current code.
 
+### Control plane versions {#control-plane-versions}
+
+Pass `--control-planes` to switch the command into a third distinct read: every configured erun-hosted control plane's deployed version, compared against the newest version erun's own registry has actually published — deployed-vs-published, not deployed-vs-main. Cannot be combined with `--tenant`/`--gate-environment`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--control-planes` | bool | `false` | Switches the command to a control-plane version report instead of the full listing. Errors `--control-planes cannot be combined with --tenant/--gate-environment` if either is also set. |
+| `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes and which registry lookup would be checked, without making either network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
+
+The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone.
+
+Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
+
+```
+$ erun list --control-planes
+published version: 1.0.247
+Control planes:
+  - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+`behind` is set only when both the plane's deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the plane simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the plane is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live plane some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Full listing, or version-drift report resolved. |
-| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`. |
+| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane is unreachable or behind/ahead — those are findings in the report, not command failures). |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`. |
 
 ---
 

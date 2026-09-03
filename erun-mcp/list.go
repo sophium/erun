@@ -20,6 +20,14 @@ type ListInput struct {
 	// stored concept of which environment gates a tenant's merges (see root
 	// AGENTS.md's release-cadence policy), so the caller states it.
 	GateEnvironment string `json:"gateEnvironment,omitempty" jsonschema:"requires versionDriftTenant; the environment driving that tenant's merge-queue gate -- flags whether it runs an older erun version than any environment it gates, since a stale gate can pass a change that would fail on current code"`
+	// ControlPlanes, when set, additionally reports every configured
+	// erun-hosted control plane's deployed version (GET /v1/platform)
+	// against the newest version erun's own registry has actually
+	// published -- deployed-vs-published, not deployed-vs-main. Requires
+	// network access to each plane and to erun's registry; Preview traces
+	// what would be checked instead of making either call.
+	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
+	Preview       bool `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
 }
 
 // ListToolResult is eruncommon.ListResult plus the optional version-drift
@@ -27,19 +35,20 @@ type ListInput struct {
 // fields directly still find them at the top level.
 type ListToolResult struct {
 	eruncommon.ListResult
-	VersionDrift *eruncommon.TenantVersionDrift `json:"versionDrift,omitempty"`
+	VersionDrift             *eruncommon.TenantVersionDrift       `json:"versionDrift,omitempty"`
+	ControlPlaneVersionDrift *eruncommon.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
 }
 
 func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ListInput) (*mcp.CallToolResult, ListToolResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ListInput) (*mcp.CallToolResult, ListToolResult, error) {
 		traceOutput := strings.Builder{}
-		ctx := runtimeCallContext(false, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.TraceCommand("", "erun", "list")
 
 		tenant := strings.TrimSpace(input.VersionDriftTenant)
 		gateEnvironment := strings.TrimSpace(input.GateEnvironment)
-		if gateEnvironment != "" && tenant == "" {
-			return nil, ListToolResult{}, fmt.Errorf("gateEnvironment requires versionDriftTenant")
+		if err := validateListInput(input.ControlPlanes, tenant, gateEnvironment); err != nil {
+			return nil, ListToolResult{}, err
 		}
 
 		workDir, err := runtimeRepoPath(runtime.Context)
@@ -54,17 +63,34 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			return nil, ListToolResult{}, err
 		}
 
-		toolResult := ListToolResult{ListResult: result}
-		if tenant != "" {
-			drift, err := eruncommon.ResolveTenantVersionDrift(result, tenant, gateEnvironment)
-			if err != nil {
-				return nil, ListToolResult{}, err
-			}
-			toolResult.VersionDrift = &drift
-		}
-
-		return nil, toolResult, nil
+		return buildListToolResult(ctx, result, input.ControlPlanes, tenant, gateEnvironment)
 	}
+}
+
+func validateListInput(controlPlanes bool, tenant, gateEnvironment string) error {
+	if gateEnvironment != "" && tenant == "" {
+		return fmt.Errorf("gateEnvironment requires versionDriftTenant")
+	}
+	if controlPlanes && (tenant != "" || gateEnvironment != "") {
+		return fmt.Errorf("controlPlanes cannot be combined with versionDriftTenant/gateEnvironment")
+	}
+	return nil
+}
+
+func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment string) (*mcp.CallToolResult, ListToolResult, error) {
+	toolResult := ListToolResult{ListResult: result}
+	if controlPlanes {
+		drift := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		toolResult.ControlPlaneVersionDrift = &drift
+	}
+	if tenant != "" {
+		drift, err := eruncommon.ResolveTenantVersionDrift(result, tenant, gateEnvironment)
+		if err != nil {
+			return nil, ListToolResult{}, err
+		}
+		toolResult.VersionDrift = &drift
+	}
+	return nil, toolResult, nil
 }
 
 func runtimeOpenParams(runtime RuntimeContext) eruncommon.OpenParams {
