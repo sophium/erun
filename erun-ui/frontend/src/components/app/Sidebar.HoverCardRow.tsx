@@ -63,13 +63,16 @@ import * as React from 'react';
 //      zone (`OrchestratorHoverCard`) skips it rather than inventing a
 //      one-zone version of it.
 //
-// HOVER_CARD_GRID_CLASS's `13ch` label column is fixed width, sized for the
-// longest label across both cards ("Line mismatch", "Environments"), so every
-// row shares one left edge regardless of which conditional rows are present.
-// A label longer than that widens this one constant; it does not grow its own
-// column.
+// HOVER_CARD_GRID_CLASS's `10ch` label column is fixed width, so every row
+// shares one left edge regardless of which conditional rows are present. It
+// is no longer sized to the longest label across both cards -- reviewed at
+// 13/10/8ch, 10ch returns space from the label column to the value column
+// while still keeping every current label on one line (longest rendered is
+// "Erun version"); 8ch tested better still but needs label renames this pass
+// doesn't make. A label that would wrap below 10ch widens this one constant;
+// it does not grow its own column.
 export const HOVER_CARD_GRID_CLASS =
-  'grid grid-cols-[13ch_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2';
+  'grid grid-cols-[10ch_minmax(0,1fr)] items-baseline gap-x-3 gap-y-2';
 
 // HOVER_CARD_VALUE_STACK_CLASS is spacing level 1 (see above): a value and its
 // own caption or warning line, read as one fact.

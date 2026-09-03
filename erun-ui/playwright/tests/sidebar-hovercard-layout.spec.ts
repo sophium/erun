@@ -1,8 +1,9 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_ENV_ALPHA,
+  SEED_ORCHESTRATOR,
   SEED_TENANT,
   removeEnvironment,
   seedEnvironment,
@@ -32,6 +33,31 @@ async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
   await page.addStyleTag({
     content:
       '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
+  });
+}
+
+// measureLabelColumnWidth reads a label `dt`'s own rendered width -- which,
+// since HOVER_CARD_GRID_CLASS's grid items stretch to fill their column by
+// default, equals the resolved width of the fixed label column itself -- and
+// pairs it with a same-font, same-document `10ch` probe rather than a
+// hard-coded pixel constant, since `ch` resolves against the element's own
+// font metrics. Unlike a rendered-size read, this is unaffected by the
+// popover's entrance transform (`transform` never changes a grid track's
+// resolved size), but callers still disable it for consistency with the
+// other bounding-rect reads in this file.
+async function measureLabelColumnWidth(label: Locator): Promise<{ actual: number; tenCh: number }> {
+  return label.evaluate((el) => {
+    const font = window.getComputedStyle(el).font;
+    const probe = document.createElement('span');
+    probe.style.position = 'fixed';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'nowrap';
+    probe.style.font = font;
+    probe.style.width = '10ch';
+    document.body.appendChild(probe);
+    const tenCh = probe.getBoundingClientRect().width;
+    probe.remove();
+    return { actual: el.getBoundingClientRect().width, tenCh };
   });
 }
 
@@ -216,5 +242,28 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     // combining them into one boolean) keeps this test free of a conditional.
     expect(r - b, `expected a desaturated colour, got ${color}`).toBeLessThanOrEqual(40);
     expect(g - b, `expected a desaturated colour, got ${color}`).toBeLessThanOrEqual(10);
+  });
+});
+
+// #1958 narrowed HOVER_CARD_GRID_CLASS's shared label column from 13ch to
+// 10ch. Both cards render through the one shared constant (Sidebar.HoverCardRow.tsx),
+// so both are asserted here rather than just the env card.
+test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => {
+  test('the env card label column resolves to 10ch, not the old 13ch', async ({ app, page }) => {
+    await disablePopoverEntranceAnimation(page);
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(card).toBeVisible();
+    const { actual, tenCh } = await measureLabelColumnWidth(card.locator('dt:text-is("Version")'));
+    expect(actual).toBeCloseTo(tenCh, 0);
+  });
+
+  test('the orchestrator card shares the same 10ch label column', async ({ app, page }) => {
+    await disablePopoverEntranceAnimation(page);
+    const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
+    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
+    await expect(card).toBeVisible();
+    const { actual, tenCh } = await measureLabelColumnWidth(card.locator('dt:text-is("Status")'));
+    expect(actual).toBeCloseTo(tenCh, 0);
   });
 });
