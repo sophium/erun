@@ -5,6 +5,7 @@ import type { AppNotification } from '../state';
 import reducer, {
   dismissNotification,
   dismissNotificationForEnv,
+  dismissNotifications,
   showNotification,
 } from './notificationSlice';
 
@@ -34,6 +35,35 @@ test('dismissNotification is a no-op for an unknown id', () => {
   const next = reducer(state, dismissNotification('does-not-exist'));
 
   assert.equal(next.notifications[0]?.dismissed, false);
+});
+
+test('dismissNotifications scoped to a kind marks only that kind read, leaving others untouched', () => {
+  let state = reducer(undefined, showNotification(notification({ id: 'a', kind: 'error' })));
+  state = reducer(state, showNotification(notification({ id: 'b', kind: 'warning' })));
+  state = reducer(state, showNotification(notification({ id: 'c', kind: 'error' })));
+
+  const next = reducer(state, dismissNotifications('error'));
+
+  assert.deepEqual(
+    next.notifications.map((n) => [n.id, n.dismissed]),
+    [
+      ['a', true],
+      ['b', false],
+      ['c', true],
+    ],
+  );
+});
+
+test('dismissNotifications with "all" marks every kind read, including debug', () => {
+  let state = reducer(undefined, showNotification(notification({ id: 'a', kind: 'error' })));
+  state = reducer(state, showNotification(notification({ id: 'b', kind: 'debug' })));
+
+  const next = reducer(state, dismissNotifications('all'));
+
+  assert.deepEqual(
+    next.notifications.map((n) => n.dismissed),
+    [true, true],
+  );
 });
 
 test('dismissNotificationForEnv marks every matching entry read, wildcard source included', () => {

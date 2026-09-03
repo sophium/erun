@@ -2,9 +2,11 @@ import type { UISelection } from '@/types';
 
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import { readError } from './errors';
+import type { NotificationFilter } from './notificationCenter';
 import { openSelection } from './sessionThunks';
 import {
   dismissNotification as dismissNotificationAction,
+  dismissNotifications as dismissNotificationsAction,
   showNotification as showNotificationAction,
 } from './slices/notificationSlice';
 import {
@@ -159,6 +161,15 @@ export const dismissNotification =
   (id: string): AppThunk =>
   (dispatch) => {
     dispatch(dismissNotificationAction(id));
+  };
+
+// markAllNotificationsRead is dismissNotification's bulk counterpart, scoped
+// by filter -- 'all' marks every class, a specific kind marks only that
+// class. Same semantics: marks read, never removes.
+export const markAllNotificationsRead =
+  (filter: NotificationFilter): AppThunk =>
+  (dispatch) => {
+    dispatch(dismissNotificationsAction(filter));
   };
 
 export const waitLongerForTerminalStatus =

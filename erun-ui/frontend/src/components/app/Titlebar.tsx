@@ -4,6 +4,7 @@ import { useAppDispatch } from '@/app/hooks';
 import { titlebarDoubleClick } from '@/app/layoutThunks';
 import { TitlebarLeftControls, TitlebarRightControls } from '@/components/app/Titlebar.Controls';
 import { IdleStatusWidget } from '@/components/app/Titlebar.IdleStatusWidget';
+import { TitlebarMessageCenter } from '@/components/app/Titlebar.MessageCenter';
 import { TitlebarStatus } from '@/components/app/Titlebar.Status';
 import { ThemeToggle } from '@/components/app/Titlebar.ThemeToggle';
 import { TitlebarWhipAction } from '@/components/app/Titlebar.WhipAction';
@@ -28,6 +29,11 @@ export function Titlebar(): React.ReactElement {
       </div>
       <div className="relative z-[1] flex items-center gap-2 [--wails-draggable:no-drag]">
         <IdleStatusWidget />
+        {/* Outboard of IdleStatusWidget: this group's right edge is pinned to
+            the header's right edge, so anything after the idle widget here
+            keeps a constant offset from that edge even as the widget's own
+            label width changes -- anything before it would shift instead. */}
+        <TitlebarMessageCenter />
         <TitlebarRightControls />
         <TitlebarWhipAction />
         <ThemeToggle />

@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
+import type { NotificationFilter } from '../notificationCenter';
 import type { AppNotification } from '../state';
 
 // This used to be a single `notification: AppNotification | null` slot, so a
@@ -53,6 +54,19 @@ export const notificationSlice = createSlice({
         entry.dismissed = true;
       }
     },
+    // dismissNotifications is the bulk form of dismissNotification: the
+    // message centre dialog's per-class and all-classes "Mark read" actions
+    // both go through this one reducer, scoped by filter ('all' marks every
+    // kind). Semantics stay identical to the single-message path -- marks
+    // read, never removes.
+    dismissNotifications(state, action: PayloadAction<NotificationFilter>) {
+      const filter = action.payload;
+      for (const n of state.notifications) {
+        if (filter === 'all' || n.kind === filter) {
+          n.dismissed = true;
+        }
+      }
+    },
     // Lets the deploy lifecycle retire the warning it raised without clobbering
     // an unrelated toast. Empty `source` is a wildcard so a deploy start can
     // retire both the runtime-unreachable warning and a prior deploy-failed
@@ -71,6 +85,10 @@ export const notificationSlice = createSlice({
   },
 });
 
-export const { showNotification, dismissNotification, dismissNotificationForEnv } =
-  notificationSlice.actions;
+export const {
+  showNotification,
+  dismissNotification,
+  dismissNotifications,
+  dismissNotificationForEnv,
+} = notificationSlice.actions;
 export default notificationSlice.reducer;

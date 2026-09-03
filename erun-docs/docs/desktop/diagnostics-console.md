@@ -22,6 +22,8 @@ Every message in the dialog carries the same reporting action the console's own 
 
 Some messages are tagged with the environment or orchestrator they describe, and the dialog shows that alongside the message. A handful of diagnostic messages that don't matter for day-to-day use are filed under a separate debug class, hidden by default — reveal them with the toggle at the top of the dialog if you're digging into something deeper.
 
+Each class icon carries its own count, and the dialog offers **Mark read** for the class you're currently viewing plus **Mark all read** for every class at once — the same "clear" a single message's own dismiss action already performs, just applied in bulk. Clearing only marks messages read; it never deletes them. Their icons drop out of the titlebar once their count reaches zero, and once every class is quiet the titlebar still shows a plain history icon so the dialog stays reachable — the message list underneath is scoped to the current session, but nothing in it disappears until you close the app.
+
 On a busy environment the erun trace can be a wall of scrollback. **Clear** baselines the view — it hides the lines shown so far so whatever happens next stands out — without deleting anything: the persistent log stays intact, **Show all** brings the earlier lines back, and Copy and Copy report always include the full log. The baseline is per-environment, so switching environments starts fresh.
 
 ## Where next
