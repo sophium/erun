@@ -94,6 +94,16 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
+      // A card that closes mid-read (the pointer never left, so nothing
+      // reopens it -- see hoverEnvironmentRow) can leave title/weight reads
+      // resolving against a detached element, whose computed style comes
+      // back as an unparseable empty string (NaN here) rather than
+      // throwing. Guarding only the two Sets above let a NaN escape this
+      // retry and fail the assertions below unconditionally on the first
+      // bad read, with no further retry.
+      expect(Number.isFinite(titleSize)).toBe(true);
+      expect(Number.isFinite(titleWeight)).toBe(true);
+      expect(Number.isFinite(valueWeight)).toBe(true);
     }).toPass({ timeout: 20_000 });
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);
@@ -161,6 +171,11 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
+      // See the preceding test for why: guard against a NaN escaping this
+      // retry from a card that closed mid-read.
+      expect(Number.isFinite(titleSize)).toBe(true);
+      expect(Number.isFinite(titleWeight)).toBe(true);
+      expect(Number.isFinite(valueWeight)).toBe(true);
     }).toPass({ timeout: 20_000 });
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);

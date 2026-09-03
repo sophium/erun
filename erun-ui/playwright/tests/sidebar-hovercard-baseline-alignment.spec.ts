@@ -121,6 +121,18 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     app,
   }) => {
     await app.reboot();
+    // reboot() returns before the tenant's default-landing env (this one)
+    // finishes its own auto-open (StartLocalSession/StartSession/StartAISession),
+    // and that flow's own re-renders of this row can drop a freshly-converged
+    // hover card as fast as the retry below opens it, exhausting its budget
+    // without ever measuring anything. Wait for the real completion signal --
+    // TerminalBusyOverlay's "Opening ..." status for this exact env -- first.
+    // A no-op if it already cleared or never showed; if it genuinely never
+    // clears, this fails with that fact stated directly instead of masking
+    // it behind an unrelated geometry mismatch.
+    await app.page
+      .getByRole('button', { name: `Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}...` })
+      .waitFor({ state: 'hidden', timeout: 25_000 });
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // Hover and measure inside ONE re-drivable block. The card's open state is
     // the hovered row's own React state, so any re-render of that row drops it
@@ -147,6 +159,11 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     app,
   }) => {
     await app.reboot();
+    // See the preceding test for why: wait for the default-landing env's
+    // own boot-time auto-open to finish before hovering.
+    await app.page
+      .getByRole('button', { name: `Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}...` })
+      .waitFor({ state: 'hidden', timeout: 25_000 });
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // Hover and measure inside ONE re-drivable block; see the comment on the
     // preceding test for why.
