@@ -108,10 +108,11 @@ func platformTenantListTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 
 type PlatformUserEnrollInput struct {
 	platformAliasInput
-	Username string `json:"username" jsonschema:"username to enroll"`
-	Issuer   string `json:"issuer,omitempty" jsonschema:"OIDC issuer of the external identity to link"`
-	Subject  string `json:"subject,omitempty" jsonschema:"OIDC subject of the external identity to link"`
-	TenantID string `json:"tenantId,omitempty" jsonschema:"target tenant id (operations-tenant callers only); defaults to the caller's own tenant"`
+	Username string   `json:"username" jsonschema:"username to enroll"`
+	Issuer   string   `json:"issuer,omitempty" jsonschema:"OIDC issuer of the external identity to link"`
+	Subject  string   `json:"subject,omitempty" jsonschema:"OIDC subject of the external identity to link"`
+	TenantID string   `json:"tenantId,omitempty" jsonschema:"target tenant id (operations-tenant callers only); defaults to the caller's own tenant"`
+	RoleIDs  []string `json:"roleIds,omitempty" jsonschema:"role ids to grant instead of the platform's default role for this enrollment"`
 }
 
 type PlatformUserResult struct {
@@ -129,6 +130,7 @@ func platformUserEnrollTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		user, err := eruncommon.RunPlatformCreateUser(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateUserParams{
 			Username: input.Username, Issuer: input.Issuer, Subject: input.Subject, TenantID: input.TenantID,
+			RoleIDs: input.RoleIDs,
 		}, cloudDependencies())
 		if err != nil {
 			return nil, PlatformUserResult{}, err

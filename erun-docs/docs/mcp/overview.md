@@ -280,7 +280,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | `platform_tenant_list` | Read | List tenants visible to the caller — every tenant for an operations-tenant caller, otherwise just the caller's own. |
 | `platform_tenant_create` | Work | Register a new tenant. Requires an operations-tenant caller. |
 | `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
-| `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`. |
+| `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`; `roleIds` names the roles to grant instead of the platform's default. |
 | `platform_env_list` | Read | List the caller's tenant's hosted environments. |
 | `platform_env_get` | Read | Fetch one hosted environment by id. |
 | `platform_env_register` | Work | Register a hosted environment. For a runtime environment with `runtimeVersion` and a deploy executor configured, this also starts a server-side deploy — poll `platform_env_get` to watch it converge. |

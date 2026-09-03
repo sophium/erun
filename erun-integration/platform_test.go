@@ -327,6 +327,25 @@ func TestPlatform(t *testing.T) {
 		golden.Equal(t, "platform/user_enroll_dry_run", normalize.Apply(result.Combined))
 	})
 
+	// The cross-tenant recovery shape: an operations caller enrolls another
+	// tenant's administrator directly. Both flags have to reach the request,
+	// since an enrollment that lands as an ordinary member can only be elevated
+	// from inside a tenant that may have nobody able to do it.
+	t.Run("user_enroll_with_roles_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "user", "enroll", "--username", "jane",
+			"--tenant-id", "tenant-b", "--role-id", "role-admin", "--role-id", "role-reader",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/user_enroll_with_roles_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("user_enroll_and_list_real_run", func(t *testing.T) {
 		setup := env.New(t)
 		server := platformAPIStubServer(t)

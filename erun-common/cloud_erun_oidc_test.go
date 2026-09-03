@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -561,6 +562,37 @@ func TestExchangeERunAuthorizationCodeAndCallbackHandler(t *testing.T) {
 	}
 	if tokens.AccessToken != "access-1" {
 		t.Fatalf("tokens = %+v", tokens)
+	}
+}
+
+// TestAwaitERunOIDCCallbackTimesOutNamingTheListener locks the failure a
+// too-short wait produces. The symptom shows up on the browser's side - the
+// sign-in completes, the redirect hits a closed port, and it reads as a broken
+// redirect URI - so the error has to name the listener and say to re-run,
+// otherwise the operator debugs the wrong thing.
+func TestAwaitERunOIDCCallbackTimesOutNamingTheListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	code, err := awaitERunOIDCCallback(Context{}, listener, "state-1", "https://issuer.test/authorize", time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected a timeout error, got code %q", code)
+	}
+	for _, want := range []string{"timed out after 1ms", "loopback listener", "Re-run the login"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not mention %q", err.Error(), want)
+		}
+	}
+}
+
+// The default has to stay long enough for a person who is handed the URL and
+// opens it later; five minutes expired routinely in exactly that case.
+func TestERunLoginCallbackTimeoutLeavesRoomForAHumanSignIn(t *testing.T) {
+	if erunLoginCallbackTimeout < 10*time.Minute {
+		t.Fatalf("erunLoginCallbackTimeout = %s, want at least 10m for an asynchronous sign-in", erunLoginCallbackTimeout)
 	}
 }
 
