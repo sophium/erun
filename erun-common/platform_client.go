@@ -41,11 +41,19 @@ var (
 	ErrPlatformRateLimited    = errors.New("platform api: rate limited")
 )
 
+// MCPToolAuditHeader carries the calling MCP tool's name on a platform
+// request, so erun-backend-api's audit middleware can record the call as an
+// MCP-driven action (type MCP, mcp_tool set) instead of its default API
+// classification. erun-backend-api reads the same constant so the header name
+// cannot drift between the two sides.
+const MCPToolAuditHeader = "X-Erun-Mcp-Tool"
+
 // PlatformClient talks to one erun-backend-api instance.
 type PlatformClient struct {
 	baseURL      string
 	mint         PlatformTokenMinter
 	usernameHint string
+	mcpTool      string
 	http         *http.Client
 }
 
@@ -70,6 +78,15 @@ func (c *PlatformClient) WithUsernameHint(username string) *PlatformClient {
 	hinted := *c
 	hinted.usernameHint = strings.TrimSpace(username)
 	return &hinted
+}
+
+// WithMCPTool returns a copy of c that sends tool as the MCPToolAuditHeader,
+// so erun-backend-api's audit trail attributes this call to the MCP tool
+// invocation that made it rather than recording it as a plain API request.
+func (c *PlatformClient) WithMCPTool(tool string) *PlatformClient {
+	tagged := *c
+	tagged.mcpTool = strings.TrimSpace(tool)
+	return &tagged
 }
 
 // PlatformInfo mirrors GET /v1/platform's response. Duplicated here (rather
@@ -675,6 +692,9 @@ func (c *PlatformClient) buildRequest(ctx context.Context, method string, path s
 	req.Header.Set("Accept", "application/json")
 	if c.usernameHint != "" {
 		req.Header.Set("X-ERun-Username", c.usernameHint)
+	}
+	if c.mcpTool != "" {
+		req.Header.Set(MCPToolAuditHeader, c.mcpTool)
 	}
 	if !authenticate {
 		return req, nil

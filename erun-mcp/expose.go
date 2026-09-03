@@ -65,6 +65,7 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+			runCtx.MCPTool = "expose"
 			_, err := eruncommon.RunExposeService(runCtx, eruncommon.ExposeServiceParams{
 				Tenant:             tenant,
 				Environment:        environment,

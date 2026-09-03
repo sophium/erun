@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
@@ -796,6 +799,58 @@ func TestAuthMiddlewareLogsAuditEventForAuthorizedRequest(t *testing.T) {
 	}
 	if event.CreatedAt.IsZero() {
 		t.Fatal("expected created_at to be populated")
+	}
+}
+
+// TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall pins the fix for the
+// dead AuditEventTypeMCP gap (erun#763): an MCP tool call authenticates with
+// the same bearer token as any other caller, so PlatformClient.WithMCPTool's
+// header is the only thing that tells this request apart from a plain API
+// call. If erun-mcp ever stopped setting eruncommon.MCPToolAuditHeader, this
+// test would start seeing the request logged as type API with no tool name,
+// exactly the silent regression the gap left in place before this fix.
+func TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall(t *testing.T) {
+	var event AuditEvent
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
+		}),
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
+			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, nil
+		}),
+		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
+			return User{UserID: "019a7fa5-c2c0-7c55-bc70-714873a71f11"}, nil
+		}),
+		AuditLogger: AuditLoggerFunc(func(ctx context.Context, auditEvent AuditEvent) error {
+			event = auditEvent
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/019abc", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set(eruncommon.MCPToolAuditHeader, "review_show")
+	rec := httptest.NewRecorder()
+	withAPIPath("/v1/reviews/{review_id}", middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))).ServeHTTP(rec, req)
+
+	if event.Type != model.AuditEventTypeMCP {
+		t.Fatalf("type = %q, want %q", event.Type, model.AuditEventTypeMCP)
+	}
+	if event.MCPTool != "review_show" {
+		t.Fatalf("mcpTool = %q, want %q", event.MCPTool, "review_show")
+	}
+	// The same fields a plain API call would carry must still be populated --
+	// this only changes classification, not the rest of the record.
+	if event.TenantID != "019a7fa5-c2c0-7c55-bc70-714873a71f10" {
+		t.Fatalf("unexpected tenant id: %q", event.TenantID)
+	}
+	if event.APIMethod != http.MethodGet || event.APIPath != "/v1/reviews/{review_id}" {
+		t.Fatalf("unexpected method/path: %q %q", event.APIMethod, event.APIPath)
 	}
 }
 
