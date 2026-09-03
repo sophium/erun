@@ -190,7 +190,7 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/app/reconnectCopy.ts': 2,
   'erun-ui/frontend/src/app/reviewDetailThunks.ts': 4,
   'erun-ui/frontend/src/app/reviewEnvTargets.test.ts': 1,
-  'erun-ui/frontend/src/app/reviewThunks.ts': 3,
+  'erun-ui/frontend/src/app/reviewThunks.ts': 2,
   'erun-ui/frontend/src/app/selectors.ts': 4,
   'erun-ui/frontend/src/app/sessionThunks.ts': 1,
   'erun-ui/frontend/src/app/sidebarFocus.test.ts': 1,
