@@ -77,6 +77,11 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
 - **Do not ask questions.** For any ambiguity, take the option you would recommend and proceed. Surface a genuine external blocker; before an irreversible or cross-env action, give a heads-up — a notification issued as you proceed, never a gate you stop on.
 - **The operator does nothing.** Never end by asking them to run, click, or check something. A surface observable only in a GUI is still yours: drive the same code path the closest way you can, restarting erun's own tooling if that is what it takes.
 - **Test end-to-end.** Roll the change into the real target and reproduce the original flow against it. "Unit tests pass" is not verification.
+- **Verify a candidate fix by a before/after measurement, not by the argument for why it should
+  work.** When the failure is a count — failing tests, error occurrences, a latency figure —
+  record that count under the change and compare it to the same count without it, same
+  conditions. A plausible mechanism whose count does not move fixed nothing; reject it on that
+  number and move to the next hypothesis rather than arguing yourself into keeping it.
 - **"Cannot verify" is a hypothesis to test, not a conclusion to report.** Before
   recording a gap, name the mechanism that would close it and try that one. A
   surface only a GUI shows is reached by rebuilding the tool and restarting it. A
@@ -90,6 +95,12 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
 - **Never attribute a failure without a baseline.** Whether a red is yours or was
   already there is measurable, and that answer decides whether you fix it or ship
   it. Guessing is wrong often enough to be worthless.
+- **Matching failure counts across independent runs rules out one cause, not in the direction
+  you'd expect.** A flaky test's count should move between runs; an unchanged count says the
+  cause is deterministic, not that it is real — a broken environment fails the same way, every
+  time, just as reliably as a genuine bug does. Treat a repeated identical count as evidence
+  against flakiness only, and go find the deterministic mechanism, product or environment, before
+  calling it either one.
 - **A negative claim needs the same proof as a positive one.** "The tool is
   missing", "the harness cannot drive this" is a finding, not an aside — a broken
   probe looks exactly like an absent capability.
@@ -117,6 +128,13 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
   tells it to carry on — but that is the recovery for a session that already stopped keeping the
   contract, not a reason to lean on it instead of pacing yourself.
   Short repeated checks also keep the operator informed, which a single silent block does not.
+- **A fixed sweep interval is a ceiling for the slowest lane, not a floor for all of them.**
+  Driving several lanes at once on one shared cadence lets a lane that finishes well inside that
+  window sit done-but-unnoticed until the next sweep comes around — and it compounds: with enough
+  lanes, one is finishing almost continuously, so the operator watching casually notices a
+  completion before the orchestrator's own sweep does. Size the interval to the fastest lane in
+  flight, or check a lane against its own completion signal instead of a timer shared with slower
+  ones.
 - **On completion, list the assumptions you took** in place of asking. This is what keeps "don't ask" accountable.
 - **Waiting is not working.** Pacing yourself is the floor, not the job. While delegated work is in
   flight there is almost always work that needs no worktree at all — reading the artifacts it has
@@ -169,6 +187,20 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
   `grep`, or a `tail` reports success over a failed build. End such a wrapper with
   `rc=$?; …; exit $rc`, and still read the log for the tool's own verdict — a released version, a
   pushed tag, a published image — before believing it.
+- **A `tail` or `grep` at the end of a pipeline reports its own exit status, not the command it's
+  filtering.** `build | tail -40` puts `tail`'s exit code in `$?` — a failed build behind a
+  working `tail` still reads as zero. Capture `${PIPESTATUS[0]}` right after the pipe (bash), or
+  set `pipefail` before trusting `$?` at all; don't rely on the last stage's own code to speak for
+  the stages before it.
+- **A launcher's own timeout code is not the gate's verdict, and it can be disguised further by
+  whatever ran the launcher.** A gate-running wrapper that detaches long work to survive a
+  foreground window (this repo's `agent-gate.sh` is one) reports its *own* bounded-wait timeout —
+  "still running", not "failed" — with a code such as 124, and a still-running gate can just as
+  easily finish green a moment later. A caller one layer further out can relabel that code again:
+  GNU Make turns any non-zero recipe exit, timeout included, into its own generic exit 2, so a
+  `make`-wrapped gate loses even the 124 that would have named the real cause. Trace back to the
+  job the wrapper detached and read *that* job's own status/output before treating any of these
+  codes as pass or fail.
 - **Check that the issue actually closed.** A `Closes #N` reference in a PR body does not reliably
   close the issue on every merge strategy — it can fire across several merges in a row and then
   silently miss one, and a tracker that stays open looks identical to work nobody did. Read the
@@ -248,6 +280,12 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
   capture and return the wrapped tool's output on failure, because an operator cannot act on a bare
   exit code. This is the counterpart to judging a tool by its artifacts — an artifact you cannot
   read is not an artifact.
+- **Never discard stderr on a dispatch or job-start call.** A launch call's stderr is where it
+  says why it refused, and suppressing that stream to quiet routine noise removes the one place a
+  silent, repeated launch failure would ever surface — it can then fail the same way on every
+  subsequent call and report nothing wrong until something downstream finally notices the work
+  never happened. Capture stderr with the rest of the output on every such call, and read it,
+  every time, not only when something else looks wrong.
 - **The same rule applies to waiting.** A hand-written poll loop around a job is a shell
   reimplementation of a bounded wait that already exists, and it will be worse: it re-derives
   "finished" from whatever it can scrape, so it reads a dropped channel as an outcome and a
