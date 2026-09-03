@@ -85,6 +85,13 @@ export function unreadNotificationCounts(notifications: AppNotification[]): Noti
   return counts;
 }
 
+// totalUnreadCount sums every class's unread count, for the message centre
+// dialog's all-classes "Mark all read" action (enabled/shown only while
+// something is actually unread).
+export function totalUnreadCount(counts: NotificationCounts): number {
+  return Object.values(counts).reduce((sum, count) => sum + count, 0);
+}
+
 // notificationHistoryNewestFirst is the message centre dialog's own order --
 // most recent first, since that is what an operator checking back on a
 // session's messages wants to see at the top.

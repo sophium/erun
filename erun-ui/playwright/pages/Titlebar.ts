@@ -228,6 +228,13 @@ export class Titlebar {
     return this.page.getByRole('button', { name: new RegExp(`^${label}: \\d+ unread$`) });
   }
 
+  // The unread-count pill nested inside a class icon button -- its own
+  // background is asserted to differ from the icon's currentColor (the
+  // red-on-red/amber-on-amber separation fix), never assumed from markup.
+  messageCenterIconBadge(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
+    return this.messageCenterIcon(kind).locator('span');
+  }
+
   async openMessageCenter(kind: 'error' | 'warning' | 'info' | 'success'): Promise<void> {
     await this.messageCenterIcon(kind).click();
   }
@@ -248,6 +255,19 @@ export class Titlebar {
 
   messageCenterShowDebugToggle(): Locator {
     return this.messageCenterDialog().getByRole('checkbox', { name: 'Show debug messages' });
+  }
+
+  // Bulk clear: "Mark <kind> read" is scoped to whichever tab is active
+  // (hidden once that class has nothing unread); "Mark all read" always
+  // targets every class (hidden once nothing anywhere is unread).
+  messageCenterMarkClassReadButton(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
+    return this.messageCenterDialog().getByRole('button', {
+      name: new RegExp(`^Mark ${kind} read$`),
+    });
+  }
+
+  messageCenterMarkAllReadButton(): Locator {
+    return this.messageCenterDialog().getByRole('button', { name: 'Mark all read', exact: true });
   }
 
   // Rows are the dialog's own <li> entries -- role="listitem" is implicit, no

@@ -108,7 +108,12 @@ function MessageCenterIconButton({
         onClick={onClick}
       >
         <Icon aria-hidden="true" />
-        <span className="absolute -top-1 -right-1 inline-flex size-4 items-center justify-center rounded-full bg-current text-[10px] font-medium text-background">
+        {/* A badge tinted with the icon's own currentColor (e.g. red-on-red
+            for an error icon) has almost no visual separation from the glyph
+            it overlaps -- bg-foreground/text-background is fixed regardless
+            of kind, so the badge always contrasts against the icon beneath
+            it. The digit is the signal; this is only its container. */}
+        <span className="absolute -top-1.5 -right-1.5 inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-foreground px-1 text-[11px] font-semibold leading-none text-background">
           {count > 9 ? '9+' : count}
         </span>
       </Button>

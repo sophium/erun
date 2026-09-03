@@ -9,6 +9,7 @@ import {
   notificationKindLabel,
   notificationKindTone,
   TITLEBAR_ICON_KINDS,
+  totalUnreadCount,
   unreadNotificationCounts,
 } from './notificationCenter';
 import type { AppNotification } from './state';
@@ -33,6 +34,16 @@ test('unreadNotificationCounts counts only not-yet-dismissed entries per kind', 
     notification({ id: '5', kind: 'debug', dismissed: false }),
   ]);
   assert.deepEqual(counts, { error: 1, warning: 2, info: 0, success: 0, debug: 1 });
+});
+
+test('totalUnreadCount sums every class, including debug', () => {
+  const counts = unreadNotificationCounts([
+    notification({ id: '1', kind: 'error', dismissed: false }),
+    notification({ id: '2', kind: 'warning', dismissed: false }),
+    notification({ id: '3', kind: 'debug', dismissed: false }),
+    notification({ id: '4', kind: 'error', dismissed: true }),
+  ]);
+  assert.equal(totalUnreadCount(counts), 3);
 });
 
 test('TITLEBAR_ICON_KINDS excludes only debug', () => {

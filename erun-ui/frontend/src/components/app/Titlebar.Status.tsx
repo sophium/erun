@@ -19,7 +19,6 @@ import {
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { TitlebarMessageCenter } from '@/components/app/Titlebar.MessageCenter';
 
 // Long error text can't be read or copied from a hover tooltip, so past
 // this length the message escalates to a selectable popover the operator
@@ -30,11 +29,10 @@ type TitlebarStatusKind = AppState['terminalStatusKind'];
 
 // TitlebarStatusValue is the currently-running/just-finished CLI command's
 // own status -- distinct from the classified message centre
-// (Titlebar.MessageCenter.tsx), which now owns every notification-queue
-// message. This pill is scoped to the terminal action just taken (piped
-// commands like `erun init`/`erun deploy`, or a dedicated PTY's own result),
-// never a global toast, so the two render side by side rather than
-// competing for one slot.
+// (Titlebar.MessageCenter.tsx, rendered in the titlebar's right-hand group),
+// which owns every notification-queue message. This pill is scoped to the
+// terminal action just taken (piped commands like `erun init`/`erun deploy`,
+// or a dedicated PTY's own result), never a global toast.
 interface TitlebarStatusValue {
   kind: TitlebarStatusKind;
   message: string;
@@ -57,34 +55,32 @@ const statusIconClassNames: Record<TitlebarStatusKind, string> = {
   info: 'text-muted-foreground',
 };
 
-export function TitlebarStatus(): React.ReactElement {
+export function TitlebarStatus(): React.ReactElement | null {
   const terminalStatus = useAppSelector((state) => state.terminalStatus);
   const status = computeTitlebarStatus(terminalStatus);
+  if (!status) {
+    return null;
+  }
   return (
-    <div className="flex min-w-0 max-w-full items-center gap-2 [--wails-draggable:no-drag]">
-      {status && (
-        // Cap width so the status pill never crowds the right-cluster buttons
-        // on narrow viewports.
-        <div
-          className="pointer-events-none flex min-w-0 max-w-full"
-          role={status.kind === 'error' ? 'alert' : 'status'}
-          aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
-        >
-          <div
-            className={cn(
-              'pointer-events-auto flex h-8 min-w-0 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
-              statusBorderClassNames[status.kind],
-            )}
-          >
-            <StatusIcon status={status} />
-            <StatusMessage status={status} />
-            {status.action === 'wait-longer' && <StatusWaitAction />}
-            {status.copyOutput && <StatusCopyAction status={status} />}
-            <StatusDismissAction />
-          </div>
-        </div>
-      )}
-      <TitlebarMessageCenter />
+    // Cap width so the status pill never crowds the right-cluster buttons
+    // on narrow viewports.
+    <div
+      className="pointer-events-none flex min-w-0 max-w-full [--wails-draggable:no-drag]"
+      role={status.kind === 'error' ? 'alert' : 'status'}
+      aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto flex h-8 min-w-0 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
+          statusBorderClassNames[status.kind],
+        )}
+      >
+        <StatusIcon status={status} />
+        <StatusMessage status={status} />
+        {status.action === 'wait-longer' && <StatusWaitAction />}
+        {status.copyOutput && <StatusCopyAction status={status} />}
+        <StatusDismissAction />
+      </div>
     </div>
   );
 }

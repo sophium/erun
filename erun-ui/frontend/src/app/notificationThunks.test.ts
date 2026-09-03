@@ -3,12 +3,14 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 
 import {
   dismissNotification,
+  markAllNotificationsRead,
   showNotification,
   showTerminalError,
   showTerminalFailure,
 } from './notificationThunks';
 import {
   dismissNotification as dismissNotificationAction,
+  dismissNotifications as dismissNotificationsAction,
   showNotification as showNotificationAction,
 } from './slices/notificationSlice';
 import { setTerminalCopyOutput, setTerminalMessage } from './slices/terminalStatusSlice';
@@ -167,4 +169,16 @@ test('showNotification stamps a fresh timestamp and dismissed: false on every en
 test('dismissNotification dispatches the slice action for exactly the given id', () => {
   const actions = collectDispatched(dismissNotification('notification-7'));
   assert.deepEqual(actions, [{ type: dismissNotificationAction.type, payload: 'notification-7' }]);
+});
+
+// markAllNotificationsRead is dismissNotification's bulk counterpart -- same
+// mark-read-never-remove contract, scoped by filter instead of by id.
+test('markAllNotificationsRead dispatches the bulk slice action for the given filter', () => {
+  const actions = collectDispatched(markAllNotificationsRead('error'));
+  assert.deepEqual(actions, [{ type: dismissNotificationsAction.type, payload: 'error' }]);
+});
+
+test('markAllNotificationsRead("all") dispatches the bulk slice action scoped to every class', () => {
+  const actions = collectDispatched(markAllNotificationsRead('all'));
+  assert.deepEqual(actions, [{ type: dismissNotificationsAction.type, payload: 'all' }]);
 });

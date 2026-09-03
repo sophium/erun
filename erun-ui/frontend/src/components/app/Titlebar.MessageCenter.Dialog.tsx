@@ -23,13 +23,16 @@ import { openManageDialog, setManageTab } from '@/app/manageDialogThunks';
 import {
   DIALOG_FILTER_KINDS,
   filterNotificationHistory,
+  type NotificationCounts,
   type NotificationFilter,
   notificationHistoryNewestFirst,
   notificationIdentityLabel,
   notificationKindLabel,
   notificationKindTone,
+  totalUnreadCount,
+  unreadNotificationCounts,
 } from '@/app/notificationCenter';
-import { dismissNotification } from '@/app/notificationThunks';
+import { dismissNotification, markAllNotificationsRead } from '@/app/notificationThunks';
 import { reportFailure, restartOrchestrator } from '@/app/orchestratorThunks';
 import type { AppNotification, AppNotificationKind } from '@/app/state';
 import { openTenantDashboard } from '@/app/tenantDialogThunks';
@@ -81,11 +84,17 @@ export function TitlebarMessageCenterDialog({
         <DialogHeader>
           <DialogTitle>Messages</DialogTitle>
           <DialogDescription>
-            Every message this session, newest first. Dismissing one only marks it read -- it stays
-            here for the rest of the session.
+            Every message this session, newest first. Dismissing or clearing only marks messages
+            read -- they stay here for the rest of the session.
           </DialogDescription>
         </DialogHeader>
-        <MessageCenterFilterBar filter={filter} onFilterChange={setFilter} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <MessageCenterFilterBar filter={filter} onFilterChange={setFilter} />
+          <MessageCenterBulkActions
+            filter={filter}
+            counts={unreadNotificationCounts(notifications)}
+          />
+        </div>
         <div className="flex items-center gap-2">
           <Checkbox
             id="message-center-show-debug"
@@ -139,6 +148,46 @@ function MessageCenterFilterBar({
         ))}
       </TabsList>
     </Tabs>
+  );
+}
+
+// MessageCenterBulkActions clears a whole class (or everything) at once,
+// as the bulk form of the same dismissNotification path a single row's
+// "Mark read" already uses -- clear means mark-all-read, not remove, so the
+// class icons zero out and disappear from the titlebar while every message
+// stays browsable here. Each button hides once its own scope has nothing
+// left unread, mirroring the per-row dismiss action's own hide-when-done
+// convention.
+function MessageCenterBulkActions({
+  filter,
+  counts,
+}: {
+  filter: NotificationFilter;
+  counts: NotificationCounts;
+}): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  const allUnread = totalUnreadCount(counts);
+  const scopedUnread = filter === 'all' ? allUnread : counts[filter];
+  if (allUnread === 0) {
+    return null;
+  }
+  return (
+    <div className="flex flex-none items-center gap-1">
+      {filter !== 'all' && scopedUnread > 0 && (
+        <ActionButton
+          label={`Mark ${notificationKindLabel(filter).toLowerCase()} read`}
+          onClick={() => {
+            dispatch(markAllNotificationsRead(filter));
+          }}
+        />
+      )}
+      <ActionButton
+        label="Mark all read"
+        onClick={() => {
+          dispatch(markAllNotificationsRead('all'));
+        }}
+      />
+    </div>
   );
 }
 
