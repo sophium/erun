@@ -128,6 +128,58 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/version_drift_json_output", normalize.Apply(result.Combined))
 	})
 
+	// erun#2052: `list` is a reporting command and always exits 0 on its own
+	// findings; --fail-on-drift is the opt-in that lets one invocation of a
+	// drift report be wired into a gate instead (erun-cli/AGENTS.md § "Exit-
+	// Code Contract: Reporting Commands Vs Gating Checks").
+
+	t.Run("fail_on_drift_requires_tenant_or_control_planes", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"list", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --fail-on-drift with neither --tenant nor --control-planes, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_requires_tenant_or_control_planes", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_tenant_behind_max_exits_non_zero", func(t *testing.T) {
+		// The real defect this exists to catch: build is behind code4, and
+		// nothing surfaced it before erun#2052 -- with --fail-on-drift, the
+		// report itself is now what a schedule can gate on.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a tenant with an environment behind max, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_tenant_behind_max_exits_non_zero", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_tenant_no_drift_exits_zero", func(t *testing.T) {
+		// The report still prints in full; --fail-on-drift changes only the
+		// exit code, and only when there is something to fail on.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for a tenant with no environment behind max, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_tenant_no_drift_exits_zero", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_gate_environment_behind_exits_non_zero", func(t *testing.T) {
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "build", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a gate environment behind what it gates, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_gate_environment_behind_exits_non_zero", normalize.Apply(result.Combined))
+	})
+
 	t.Run("empty_config", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
