@@ -136,7 +136,7 @@ type releaseArtifacts struct {
 }
 
 func ResolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
-	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitLocalBranchExists, params)
+	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitBranchExists, params)
 }
 
 func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (ReleaseSpec, error) {
@@ -573,14 +573,28 @@ func GitShortCommit(ctx Context, projectRoot string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func GitLocalBranchExists(ctx Context, projectRoot, branch string) (bool, error) {
+// GitBranchExists reports whether branch exists locally or as an
+// origin-tracking ref. release's sync-develop/push stages run `git checkout
+// <branch>`, which git resolves to a new local branch tracking
+// refs/remotes/origin/<branch> when no local ref exists — a checkout that
+// only ever cloned main and never fetched develop as a local branch still
+// runs those stages successfully. Checking refs/heads alone treated that
+// checkout the same as "no develop branch at all" and dropped both stages
+// from the resolved plan with no trace and no refusal.
+func GitBranchExists(ctx Context, projectRoot, branch string) (bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return false, nil
 	}
+	if exists, err := gitRefExists(ctx, projectRoot, "refs/heads/"+branch); err != nil || exists {
+		return exists, err
+	}
+	return gitRefExists(ctx, projectRoot, "refs/remotes/origin/"+branch)
+}
 
-	ctx.TraceCommand("", "git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-	cmd := Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+func gitRefExists(ctx Context, projectRoot, ref string) (bool, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "show-ref", "--verify", "--quiet", ref)
+	cmd := Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", ref)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -712,7 +726,7 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 		resolveCommit = GitShortCommit
 	}
 	if branchExists == nil {
-		branchExists = GitLocalBranchExists
+		branchExists = GitBranchExists
 	}
 	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists
 }
