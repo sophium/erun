@@ -6,14 +6,13 @@ import { hostnameFieldLabel } from './hostnameFieldLabel';
 import { DriveToolResult } from './mcpFormShared';
 import { buildOperateArgs, OPERATE_TOOL_OPTIONS, operateFormValid } from './operateToolArgs';
 
-// OperateToolForm is what an erun:operate-scoped token is actually for: the
-// mint form used to hand the token over with a note saying "present it to
-// your own MCP client" (#2024/#2026) because DriveToolForm only ever calls
-// the read-only `version` tool, which erun:operate deliberately cannot reach.
-// This drives the four tools the tier grants directly
-// (mcpCapabilities.go's mcpOperateTools), over the same live JSON-RPC edge
-// DriveToolForm already speaks -- so a console session holding only
-// erun:operate can do real operate-shaped work without leaving the browser.
+// OperateToolForm drives the four tools an erun:operate-scoped token grants
+// directly (mcpCapabilities.go's mcpOperateTools), over the same live
+// JSON-RPC edge DriveToolForm already speaks -- so a console session holding
+// only erun:operate can do real operate-shaped work without leaving the
+// browser, rather than just minting the token and handing it to another MCP
+// client (DriveToolForm only ever calls the read-only `version` tool, which
+// erun:operate deliberately cannot reach).
 
 interface OperateFieldsProps {
   tool: string;
