@@ -108,6 +108,15 @@ node reading above falls back to declared limits. **This environment's usage**, 
 resource sliders on the Runtime tab, is the direct route to it; [`erun usage`](/cli/usage) gives the
 same reading from a terminal or an MCP-connected orchestrator.
 
+**On an agent env, that reading excludes the environment's own builds.** An agent env's runtime pod
+carries a second container, `erun-dind`, and every `erun build`/`erun release` actually runs there —
+not in the `erun-devops` container the reading above measures. `erun-dind`'s build containers are a
+separate cgroup the `erun-devops` container has no path to read, so a build that is genuinely
+saturating the sidecar can still show as an idle environment here. Rather than leave that
+unexplained, both **This environment's usage** and `erun usage` say so directly whenever the
+environment carries the sidecar (every type except runtime and host); [`erun resize`](/cli/resize)
+is what sizes the sidecar independently, and its own limits show up under [`erun observe`](/cli/observe).
+
 ## What the environment thinks it should be sized as
 
 The figures above describe the node. The environment also has an opinion about *itself*: every

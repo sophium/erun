@@ -23,6 +23,29 @@ func TestEnvironmentTypeIsValid(t *testing.T) {
 	}
 }
 
+// TestEnvironmentTypeUsesDindSidecar pins which types carry the erun-dind
+// sidecar RunRuntimeUsage's reading cannot see -- local-agent and
+// remote-agent build in-pod via the sidecar; runtime never builds there, and
+// host has no pod at all.
+func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
+	cases := []struct {
+		envType EnvironmentType
+		want    bool
+	}{
+		{EnvironmentTypeLocalAgent, true},
+		{EnvironmentTypeRemoteAgent, true},
+		{EnvironmentTypeRuntime, false},
+		{EnvironmentTypeHost, false},
+		{"", false},
+		{"bogus", false},
+	}
+	for _, tc := range cases {
+		if got := tc.envType.UsesDindSidecar(); got != tc.want {
+			t.Errorf("EnvironmentType(%q).UsesDindSidecar() = %v, want %v", tc.envType, got, tc.want)
+		}
+	}
+}
+
 // TestEnvironmentTypePredicatesCoverEveryValidType is the completeness net the
 // issue asks for: it walks every type IsValid() accepts and calls each
 // exclusion-shaped predicate. BuildsHere and RemoteWorktree panic on an
@@ -44,6 +67,7 @@ func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 			_ = env.RemoteWorktree()
 			_ = env.HasPod()
 			_ = env.ResolvedUpgradeChannel()
+			_ = envType.UsesDindSidecar()
 		})
 	}
 }

@@ -23,6 +23,8 @@ erun usage --tenant my-tenant --environment dev --output json
 
 A crossed threshold (memory, memory's peak, or disk usage getting close to full) shows up as a plain-language warning in the output — you don't have to compute the percentages yourself.
 
+On an agent env, this reading cannot see the environment's own builds: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one this reads. The output says so directly on every environment that carries the sidecar — see [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why, and `erun observe` for the sidecar's own limits.
+
 ## Flags
 
 | Flag | Description |

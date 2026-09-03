@@ -12,6 +12,12 @@ usage cross a fixed threshold. Every field reports its own unavailability
 (cgroup v1, an unlimited limit, a file that could not be read) rather than
 failing the call, since those are normal on some clusters, not errors.
 
+On a build-capable environment (local-agent, remote-agent), CPU and memory
+are scoped to this container alone: every image build actually runs in the
+erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build
+can show as idle here. The output states this exclusion explicitly on those
+environments; `erun observe` reports the sidecar's own resource limits.
+
 Usage:
   erun usage [flags]
 

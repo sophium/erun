@@ -26,6 +26,7 @@
     "memory is at 90% of its 2048Mi limit (warns at 85%)",
     "memory.peak reached 98% of the limit (warns at 95%) -- this environment came close to an OOM kill",
     "the cgroup recorded 1 OOM kill(s)"
-  ]
+  ],
+  "excludesBuilds": true
 }
 audit: erun usage --output json
