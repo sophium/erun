@@ -53,6 +53,10 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - **Every workspace-sync pass emits one bounded diagnostic line, always on.** The line carries the pass's own inputs and outcome (`notGitRepo`, remote/stale/mirror/fetch/deleted counts, and any fetch or delete error) — counts only, never one line per file. This is not optional instrumentation: a mirror that silently added files and never removed any cost two investigations precisely because a pass left no trace of what it saw. Keep the line when touching `syncWorkspaceOnce`.
 - The shared runtime "ensure" (`ensureEnvRuntimeOnce`) is now a thin reconnect, not a deploy preflight: it rebinds the MCP/API forwarders against the already-deployed runtime. A failed ensure must be **surfaced**, not swallowed — set env-status failed + post an actionable notification — and must **not** stamp the dedup TTL on failure (so the next tab open retries). Discarding the error and TTL-stamping on failure (the pre-#644 behaviour) masks an undeployed env behind a downstream port-forward timeout.
 
+## Runtime Usage Accuracy
+
+- **The Runtime tab's CPU/memory figures (`runtime_usage.go`, `environment_usage.go`) understate a build-heavy environment's real resource use.** The probe samples the runtime container's own cgroup — CPU quota utilization and memory against that container's limit — but an `erun build`/`erun release` actually runs in the `erun-dind` sidecar, a separate cgroup with its own (often differently-sized) limits. A busy build can be invisible in the displayed figures, and the displayed memory percentage is measured against a limit that constrains nothing the build is doing (see `erun-devops/AGENTS.md`'s dind-sidecar-memory bullet, #1805, for why the sidecar's own limit is capacity planning rather than enforcement). Do not read a low reading here as proof an environment is idle.
+
 ## Frontend Workflow
 
 - Use Yarn for dependency management and frontend builds. Do not introduce `npm` or `pnpm` lockfiles unless the user explicitly asks for a toolchain change.
