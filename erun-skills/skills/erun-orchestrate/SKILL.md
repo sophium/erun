@@ -187,6 +187,11 @@ Every lane authenticates as the same GitHub user, so assignee cannot distinguish
   `grep`, or a `tail` reports success over a failed build. End such a wrapper with
   `rc=$?; …; exit $rc`, and still read the log for the tool's own verdict — a released version, a
   pushed tag, a published image — before believing it.
+- **A `tail` or `grep` at the end of a pipeline reports its own exit status, not the command it's
+  filtering.** `build | tail -40` puts `tail`'s exit code in `$?` — a failed build behind a
+  working `tail` still reads as zero. Capture `${PIPESTATUS[0]}` right after the pipe (bash), or
+  set `pipefail` before trusting `$?` at all; don't rely on the last stage's own code to speak for
+  the stages before it.
 - **A launcher's own timeout code is not the gate's verdict, and it can be disguised further by
   whatever ran the launcher.** A gate-running wrapper that detaches long work to survive a
   foreground window (this repo's `agent-gate.sh` is one) reports its *own* bounded-wait timeout —
