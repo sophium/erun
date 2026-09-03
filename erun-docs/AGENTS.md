@@ -162,6 +162,10 @@ JSON literal values (e.g., `"kind": "operator"` in audit events) keep their casi
 
 The docs are the spec. Behaviour that isn't documented isn't part of the contract.
 
+### Some claims are mechanically checked — nothing checks the rest
+
+A handful of pages are cross-checked against real code or chart state by a gate outside this module, so drift on those specific claims fails a build instead of waiting for the next human sweep: `mcp/overview.md`'s "Full tool index" against the registered MCP tools (`erun-mcp/mcp_overview_doc_test.go`), `deployment/data-retention.md`'s chart-value keys and stale-workaround absence against the `erun-backend-db` chart's rendered output (`erun-devops/k8s/erun-backend-db-chart_test.sh`), and `agent-reference/skills-spec.md`'s gate-run classifier spec against the real signature list (`erun-integration/docs_drift_test.go`'s `TestGateRunInfrastructureSignaturesAreDocumented`; see `erun-integration/AGENTS.md` § "Doc-drift gate"). Everything else in `erun-docs` is checked only by `yarn build` (links, markdown syntax) and by a human doc-drift sweep (root `AGENTS.md` § "Integration Test Gate" background, issue #2039) — a green `make check` says nothing about whether the other pages' prose still matches the code it describes. When you add a check for a new claim, wire it beside the source of truth it reads (a chart test, a doc test in the owning module) rather than building a second generic prose-checker.
+
 ### Treat vagueness as a bug
 
 When you find a page saying "ERun handles X" without specifying *how*, write the spec. Examples that have come up:

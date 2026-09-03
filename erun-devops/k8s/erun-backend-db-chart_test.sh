@@ -115,4 +115,19 @@ printf '%s\n' "$(document_named "${overridden}" CronJob team-backend-db-retentio
     grep -q 'image: ghcr.io/sophium/erun-backend-db:pinned' ||
     fail "imageOverrides.erun-backend-db must override the retention CronJob's image"
 
+# --- 8. The operator-facing data-retention doc's claimed default and chart-
+#        value keys must actually match what this chart reads. Retention
+#        shipped off by default in the same commit range that (briefly)
+#        documented it as always-on with no chart-level switch, pointing
+#        operators at a kubectl `suspend` workaround for a problem the chart
+#        already solved. This does not prove the whole page is accurate --
+#        only that the two chart-value keys it recommends are real and that
+#        the stale workaround it used to recommend has not crept back in.
+retention_doc="${script_dir}/../../erun-docs/docs/deployment/data-retention.md"
+[ -f "${retention_doc}" ] || fail "erun-docs/docs/deployment/data-retention.md not found -- update the path in this script if it moved"
+grep -q 'retention\.enabled' "${retention_doc}" || fail "the data-retention doc must reference the real retention.enabled chart value"
+grep -q 'retention\.dryRun' "${retention_doc}" || fail "the data-retention doc must reference the real retention.dryRun chart value"
+grep -qi 'suspend' "${retention_doc}" &&
+    fail "the data-retention doc must not recommend the kubectl CronJob 'suspend' workaround -- retention.enabled is the real, persistent off switch"
+
 echo "OK"

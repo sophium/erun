@@ -30,6 +30,20 @@ var gateRunInconclusiveSignatures = []string{
 	"tls handshake timeout",
 }
 
+// GateRunInconclusiveSignatures returns a copy of erun's own known
+// infrastructure-failure signatures -- the exact strings
+// classifyGateRunFailureText matches against. It exists so a doc-drift check
+// outside this package (erun-integration's structural gates) can cross-check
+// erun-docs/docs/agent-reference/skills-spec.md's spec of this classifier
+// against the real list, instead of a copy that can silently drift from it.
+// Returns a copy, not the package slice itself, so a caller cannot mutate the
+// classifier's own matching behavior.
+func GateRunInconclusiveSignatures() []string {
+	signatures := make([]string, len(gateRunInconclusiveSignatures))
+	copy(signatures, gateRunInconclusiveSignatures)
+	return signatures
+}
+
 // classifyGateRunFailureText reports which known infrastructure signature
 // (if any) appears in text, matched case-insensitively.
 func classifyGateRunFailureText(text string) (signature string, matched bool) {
