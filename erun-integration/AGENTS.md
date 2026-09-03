@@ -280,6 +280,54 @@ Rules for new scenarios:
   port-forward state file but never bound as a real socket — is not a hazard
   and does not need `skipIfPortsBusy` or a parallel exemption.
 
+### A second hazard: a real subprocess judged against a wall-clock threshold
+
+The literal-port class above is not the only way concurrency can bite a
+scenario. `TestJob`'s `--agent` scenarios (`job_test.go`) fork a real `erun
+job start --agent` supervisor and poll it via `job await`. Production judges
+that supervisor dead once it goes quiet for `EnvironmentJobAliveStaleMs` (5s —
+5x `EnvironmentJobAliveHeartbeatInterval`, `erun-common/job.go`) with no
+heartbeat. Under enough CPU contention the supervisor's own goroutine can be
+scheduled late enough to miss that window without having crashed, and the
+scenario fails with `exit 125: unknown: sweep (job supervisor <pid> is gone
+without recording an exit status...)` — a false failure caused by scheduling,
+not a real one. This reproduced once in five runs at 4x the pod's CPU quota
+(cgroup memory ceiling hit 15,754 times in that run, `oom_kill` at 0 —
+starvation, not corruption).
+
+The tell: a scenario that forks a real subprocess and asserts on its liveness
+within a wall-clock window is timing-sensitive under contention in a way a
+pure in-process test is not. Waiting on an observable condition instead of a
+sleep — the usual fix for test-side flakiness — doesn't apply here, because
+the condition itself is production's own wall-clock heartbeat-staleness
+judgment, not something the test controls.
+
+Unlike the literal-port class, this one is **not** structurally prevented,
+and that is a measured decision, not an oversight. `TestJob` calls
+`t.Parallel()` same as any other parallel-safe top-level test, even though it
+is exactly the kind of test the port rule above would exclude if the hazard
+were a guaranteed collision instead of a rare one:
+
+- `TestJob` alone, with nothing else contending for CPU, takes ~39s.
+- This module's full `go test ./...` currently takes ~111s.
+- A non-parallel top-level test is strictly additive to the parallel batch's
+  wall-clock — Go runs every serial test to completion before releasing the
+  parallel group (see the literal-port rules above) — so dropping
+  `t.Parallel()` from `TestJob` would add its ~39s to every gate run,
+  permanently, not just to the runs that would have hit the hazard.
+- The reproduction needed an artificial 4x CPU overcommit, well past anything
+  `scripts/parallel-gate.sh`'s quota-aware `width` mode would configure on its
+  own — it sizes concurrency *to* the real quota, not past it — so the hazard
+  needs conditions beyond what the gate's own parallelism control produces by
+  itself.
+
+So `TestJob` keeps `t.Parallel()`: paying ~39s on every run to guard against a
+failure mode that needed 4x overcommit to reproduce once is the wrong trade.
+If this class starts showing up in real gate runs rather than synthetic
+stress, the fix belongs in `parallel-gate.sh`'s width calibration (reserve
+headroom for supervisor-forking tests) or in the heartbeat-staleness
+threshold itself, not in reflexively un-parallelizing the whole function.
+
 ## Goldens and normalization
 
 - A stub `httptest` server's port is assigned per run, so a scenario whose trace names the URL it called passes a per-server `normalize.Replacement` as an `Apply` extra rule (`exec_test.go`'s `stubServerRule`) instead of a blanket port rule in `internal/normalize`. A blanket rule was tried and rejected: it also collapsed the deliberately-pinned ports other scenarios assert (the 17000/26100 port-forward ranges), turning a real assertion into a token. Match the already-normalized `<LOOPBACK>` form — the default rules run before the extras.
