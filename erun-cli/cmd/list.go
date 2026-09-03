@@ -12,30 +12,44 @@ import (
 func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var versionDriftTenant string
 	var gateEnvironment string
+	var controlPlanes bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
-			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.",
+			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes)
 		},
 	}
 	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
 	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
-	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json"
+	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
+	addDryRunFlag(cmd)
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --control-planes\n  erun list --control-planes --dry-run"
 	return cmd
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string) error {
+func validateListFlags(controlPlanes bool, versionDriftTenant, gateEnvironment string) error {
+	if gateEnvironment != "" && versionDriftTenant == "" {
+		return fmt.Errorf("--gate-environment requires --tenant")
+	}
+	if controlPlanes && (versionDriftTenant != "" || gateEnvironment != "") {
+		return fmt.Errorf("--control-planes cannot be combined with --tenant/--gate-environment")
+	}
+	return nil
+}
+
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
-	if gateEnvironment != "" && versionDriftTenant == "" {
-		return fmt.Errorf("--gate-environment requires --tenant")
+	if err := validateListFlags(controlPlanes, versionDriftTenant, gateEnvironment); err != nil {
+		return err
 	}
 
 	result, err := common.ResolveListResult(store, findProjectRoot, common.OpenParams{
@@ -46,18 +60,34 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 		return err
 	}
 
+	if controlPlanes {
+		return runListControlPlanes(ctx, result)
+	}
+
 	if versionDriftTenant != "" {
-		drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
-		if err != nil {
-			return err
-		}
-		if ctx.Output == common.OutputJSON {
-			return ctx.WriteResult(drift)
-		}
-		return writeVersionDriftReport(ctx, drift)
+		return runListVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
 	}
 
 	return writeListResult(ctx, result)
+}
+
+func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string) error {
+	drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
+	if err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		return ctx.WriteResult(drift)
+	}
+	return writeVersionDriftReport(ctx, drift)
+}
+
+func runListControlPlanes(ctx common.Context, result common.ListResult) error {
+	drift := common.ResolveControlPlaneVersionDrift(ctx, result, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+	if ctx.Output == common.OutputJSON {
+		return ctx.WriteResult(drift)
+	}
+	return writeControlPlaneVersionReport(ctx, drift)
 }
 
 func writeVersionDriftReport(ctx common.Context, drift common.TenantVersionDrift) error {
@@ -113,6 +143,53 @@ func writeVersionDriftGate(ctx common.Context, drift common.TenantVersionDrift) 
 		_, err := fmt.Fprintln(ctx.Stdout, "    behind: no")
 		return err
 	}
+}
+
+func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlaneVersionDrift) error {
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.")
+		return err
+	}
+	if drift.PublishedVersionError != "" {
+		if err := writeLabeledValue(ctx, "published version", "unresolved ("+drift.PublishedVersionError+")"); err != nil {
+			return err
+		}
+	} else {
+		if err := writeLabeledValue(ctx, "published version", valueOrNone(drift.PublishedVersion)); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "Control planes:"); err != nil {
+		return err
+	}
+	if len(drift.Planes) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "  none")
+		return err
+	}
+	for _, plane := range drift.Planes {
+		if err := writeControlPlaneVersionEntry(ctx, plane); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlaneVersionStatus) error {
+	line := "  - " + plane.Alias + " api-url=" + quotedValueOrNone(plane.APIURL)
+	if !plane.Reachable {
+		line += " reachable=no reason=" + quotedValueOrNone(plane.UnreachableReason)
+		_, err := fmt.Fprintln(ctx.Stdout, line)
+		return err
+	}
+	line += " reachable=yes version=" + quotedValueOrNone(plane.Version)
+	switch {
+	case plane.Behind:
+		line += " [behind published -- roll it]"
+	case plane.Ahead:
+		line += " [ahead of published -- running an unpublished version]"
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, line)
+	return err
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {

@@ -178,6 +178,24 @@ Version drift for tenant my-tenant:
 
 A gate older than the code it gates can pass a change that would fail on current code — this is what catches that before a bad merge slips through. See [collaboration › merge queue](/collaboration/merge-queue#the-gate) for what the gate does. For the exact flag contract and JSON shape, see [Agent reference › CLI flags](/agent-reference/cli-flags#version-drift).
 
+## Control plane versions {#control-plane-versions}
+
+`--tenant` catches drift *between* your own environments. It has no baseline for a different, easy-to-miss gap: a control plane can simply never get rolled onto a release that has already shipped, and nothing about its own reported version says whether that release exists. Pass `--control-planes` for that check instead: every erun-hosted control plane you've configured (a cloud provider alias with `provider: erun`, e.g. the one `erun cloud init erun` creates), compared against the newest version erun's own registry has actually published.
+
+```bash
+erun list --control-planes
+```
+
+```
+published version: 1.0.247
+Control planes:
+  - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+Each plane is checked with its own unauthenticated `GET /v1/platform` — the same call `erun cloud init erun` uses to discover a plane in the first place — so a plane that doesn't answer prints `reachable=no reason="..."` instead of a version; an unreachable plane is never reported current. `[behind published -- roll it]` means the plane is running a real, older release than what's published; `[ahead of published -- running an unpublished version]` means the opposite and more unusual case — the plane is running something the registry has never published at all, which is worth investigating on its own rather than "just roll it".
+
+This makes real network calls (each plane, plus erun's registry), so add `--dry-run` to preview which planes and which registry lookup would be checked without making either call.
+
 ## Common usages
 
 ```bash
@@ -198,3 +216,5 @@ erun list | grep "effective"      # what ERun targets right now
 | `--gate-environment` passed without `--tenant`. | Errors `--gate-environment requires --tenant`; nothing is printed. |
 | `--tenant` names a tenant with no config. | Errors `tenant "<name>" not found`. |
 | `--gate-environment` names an environment not in that tenant. | Errors `gate environment "<name>" not found in tenant "<tenant>"`. |
+| `--control-planes` combined with `--tenant`/`--gate-environment`. | Errors `--control-planes cannot be combined with --tenant/--gate-environment`; nothing is printed. |
+| `--control-planes` and a configured plane is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0`. |

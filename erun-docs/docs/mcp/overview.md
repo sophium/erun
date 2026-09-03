@@ -729,6 +729,8 @@ Two string inputs restore a config from its dated backup before any tenant/env w
 
 Same data as the CLI `erun list`, structured. Returns the caller's tenants, envs, and effective target.
 
+Pass `controlPlanes: true` to additionally check every configured erun-hosted control plane's deployed version against the newest version erun's own registry has actually published — deployed-vs-published, not deployed-vs-main; the result gains a `controlPlaneVersionDrift` field alongside the ordinary list result. This makes real network calls (each plane's own `GET /v1/platform`, plus a registry lookup); pass `preview: true` to trace which planes and which registry lookup would be checked instead of making either call. See [CLI flag spec · Control plane versions](/agent-reference/cli-flags#control-plane-versions) for the full field contract.
+
 ```jsonc
 {
   "default_tenant": "myapp",
