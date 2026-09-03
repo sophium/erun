@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Twelve subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), and `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run).
+Repository helpers that run from the project root. Thirteen subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run), and `plan-ruleset-bypass` (plan narrowing a ruleset's bypass grant to one non-human queue identity).
 
 ## Synopsis
 
@@ -20,7 +20,8 @@ erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --
 erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
 erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-commit SHA [flags]
 erun exec gate-run report GATE_RUN_ID --status STATUS [flags]
-erun exec reconcile-bypass --remote-url URL --ruleset-id ID --target-branch BRANCH [flags]
+erun exec reconcile-bypass --ruleset-id ID --target-branch BRANCH [flags]
+erun exec plan-ruleset-bypass --ruleset-id ID --queue-actor IDENTITY [flags]
 ```
 
 ## Subcommands
@@ -119,13 +120,44 @@ Reporting against a gate run that already has an outcome is refused: a verdict i
 
 ### `exec reconcile-bypass` {#exec-reconcile-bypass}
 
-Cross-references GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for `--ruleset-id` on `--target-branch` against erun's gate runs: every push that bypassed `--ruleset-id` is reported next to whether a `PASSED` gate run's merge commit exactly matches what actually landed. See [merge queue](/collaboration/merge-queue) for why the queue's own push structurally needs a ruleset bypass in the first place — this is the after-the-fact accountability check for it, not a substitute for narrowing who holds the bypass grant.
+Cross-references GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for `--ruleset-id` on `--target-branch` against erun's gate runs and the repository's own tags: every push that bypassed `--ruleset-id` is reported next to what accounts for it. See [merge queue](/collaboration/merge-queue#checking-each-bypass) for why the queue's own push structurally needs a ruleset bypass in the first place — this is the after-the-fact accountability check for it, and [`exec plan-ruleset-bypass`](#exec-plan-ruleset-bypass) below is the other half, narrowing who may hold the grant at all.
 
-`--remote-url` names the github.com remote the ruleset lives on. `--ruleset-id` is required and never defaulted: a bypass GitHub attributes to some other ruleset on the same push is not folded into this one's reconciliation. `--since` narrows the GitHub lookup window to one of `hour`, `day`, `week`, or `month`; omit it to use GitHub's own default window. Reading rule suites needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+| Verdict | What it means |
+|---|---|
+| `RECONCILED` | A `PASSED` gate run built one of the commits this push landed. |
+| `RELEASE` | A tag points at one of them — a release stamps, tags and then pushes, so its own commits were never gated as a merge. |
+| `UNEXPECTED_ACTOR` | An identity `--expected-actor` did not name exercised the bypass, whatever its content turned out to be. |
+| `UNRECONCILED` | Nothing accounts for what landed. |
 
-Prints one line per bypassed push (`RECONCILED`/`UNRECONCILED`, the commit, when it pushed, which rule it bypassed, and who pushed it) plus a summary count. **Exits non-zero, after printing the full report, when any push is `UNRECONCILED`** — an unreconcilable bypass is loud, never silent, so this command is safe to run on a schedule and alert on a non-zero exit.
+Matching is against **every commit the push added** (`before_sha..after_sha`), not only its tip: a release push carries three commits and a batched merge more than one, so a tip-only check would report every release as unaccounted for.
+
+`--remote-url` names the github.com remote the ruleset lives on; omit it to use the current checkout's `origin`. `--ruleset-id` is required and never defaulted: a bypass GitHub attributes to some other ruleset on the same push is not folded into this one's reconciliation. `--expected-actor` names an identity allowed to hold the bypass grant and is repeatable. `--since` narrows the GitHub lookup window to one of `hour`, `day`, `week`, or `month`; omit it to use GitHub's own default window. Reading rule suites needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+
+Prints one line per bypassed push (the verdict, the commit, when it pushed, which rule it bypassed, who pushed it, and what accounts for it) plus a summary count. **Exits non-zero, after printing the full report, when any push is unaccounted for or any unnamed identity bypassed** — a bypass nobody can explain is loud, never silent, so this command is safe to run on a schedule and alert on a non-zero exit.
 
 `--dry-run` traces the GitHub and platform lookups without sending them.
+
+### `exec plan-ruleset-bypass` {#exec-plan-ruleset-bypass}
+
+Resolves the exact ruleset edit that makes one non-human queue identity the **only** actor holding an `always` bypass on a protected branch, computed from the ruleset as it actually is rather than hand-written. GitHub's bypass is per-actor and per-ruleset, not per-rule, so layering a required status check on top of a broad `always` grant changes nothing for whoever holds it — see [merge queue § Narrowing who holds the grant](/collaboration/merge-queue#narrowing-the-bypass-grant).
+
+Two stages, in an order that never leaves the branch unmergeable:
+
+| Stage | Payload file | Effect |
+|---|---|---|
+| 1 | `ruleset-<id>-stage1.json` | Grants `--queue-actor` an `always` bypass alongside today's actors — both paths open, so the queue can be proven under the new identity first. |
+| 2 | `ruleset-<id>-stage2.json` | Demotes every other `always` (or `exempt`) actor to `pull_request`: an emergency lever that still requires opening a pull request. |
+| — | `ruleset-<id>-rollback.json` | Today's bypass list, exactly as read. One `PUT` puts it back. |
+
+`--queue-actor` is the identity: a login when `--queue-actor-type` is `User` (the default — GitHub resolves the login to its actor id, so a typo cannot become a grant to an account nobody meant), otherwise the numeric actor id for `Integration`, `Team`, `RepositoryRole`, `OrganizationAdmin`, or `DeployKey`. `--out-dir` is where the three payload files are written. `--target-branch`, when given, is checked against the ruleset's own conditions.
+
+It refuses, naming which, when the queue identity cannot already push to the repository, when GitHub does not return the ruleset's `bypass_actors` (it shows them only to a token with write access to the ruleset — planning without them would emit an edit that silently drops every actor already there), or when `--target-branch` is not a branch this ruleset governs. Reading needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN`.
+
+Prints the ruleset's current bypass list, the resolved queue identity, and the ordered commands that apply, verify, and revert the edit. Verification is per-identity: `gh api repos/<owner>/<repo>/rulesets/<id> --jq .current_user_can_bypass` answers `always`, `pull_requests_only`, or `never` **for the token that asked**.
+
+**This command never writes to GitHub.** A ruleset governs every contributor's merges and the edit happens once, so applying it stays a deliberate human step; erun emits the payloads and the read-back.
+
+`--dry-run` traces the GitHub lookups and the files it would write without sending or writing anything.
 
 ## Examples
 
@@ -187,7 +219,9 @@ erun exec reconcile-bypass --remote-url https://github.com/org/repo.git \
 | `--merge-commit` is missing and `--status` is not `failed`/`inconclusive` (`gate-run start`). | Refuses with `mergeCommit: is required unless status is FAILED or INCONCLUSIVE`. |
 | `--status failed` with no `--failing-step` (`gate-run start` or `gate-run report`). | Refuses with `failingStep: is required when status is FAILED`. |
 | GATE_RUN_ID already has an outcome (`gate-run report`). | Refuses with `409` and `gate run ... already reached ...; a verdict cannot be re-reported`. |
-| `--target-branch` or `--ruleset-id` is missing, or `--remote-url` is not a recognized github.com remote (`reconcile-bypass`). | Refuses with a message naming the missing or invalid field; nothing is looked up, even under `--dry-run`. |
+| `--target-branch` or `--ruleset-id` is missing, or `--remote-url` is not a recognized github.com remote and the checkout has no usable `origin` (`reconcile-bypass`, `plan-ruleset-bypass`). | Refuses with a message naming the missing or invalid field; nothing is looked up, even under `--dry-run`. |
 | No GitHub token is available (`reconcile-bypass`). | Refuses with `no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
 | GitHub rejects a request (`reconcile-bypass`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
-| Any bypassed push has no matching passed gate run (`reconcile-bypass`). | The full report still prints, then the command exits non-zero naming how many pushes are unreconciled. |
+| Any bypassed push is unaccounted for, or an unnamed identity bypassed (`reconcile-bypass`). | The full report still prints, then the command exits non-zero naming how many pushes are unaccounted for and how many an unexpected identity made. |
+| `--queue-actor` is missing, or `--queue-actor-type` is not a GitHub ruleset actor type (`plan-ruleset-bypass`). | Refuses naming the field and, for the actor type, the accepted values; nothing is looked up. |
+| The queue identity cannot push, GitHub hides the ruleset's `bypass_actors`, or the ruleset does not govern `--target-branch` (`plan-ruleset-bypass`). | Refuses naming which precondition failed and what to do about it; no payload file is written. |

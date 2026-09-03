@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -66,9 +67,28 @@ func VerifyGHCRPushScope(ctx context.Context, client *http.Client, tag string) e
 	return verifyGHCRPushScopeFor(ctx, client, registry, token, githubAPIBaseURL)
 }
 
-// githubAPIBaseURL is where the scope check asks. A variable so the test can
-// point it at a server that answers like GitHub does.
-var githubAPIBaseURL = "https://api.github.com/"
+// githubAPIBaseURL is where every GitHub REST call in this package goes. A
+// variable so a unit test can point it at a server that answers like GitHub
+// does, and resolved from the environment so the integration suite can drive
+// the real wire path from the compiled binary instead of only its dry-run
+// trace -- the seam the ruleset-bypass and commit-status calls previously had
+// no equivalent of.
+var githubAPIBaseURL = resolveGitHubAPIBaseURL()
+
+// gitHubAPIBaseURLOverrideEnv is a deliberate test seam, not a production
+// knob: nothing erun ships sets it, and a real run always talks to GitHub.
+const gitHubAPIBaseURLOverrideEnv = "ERUN_GITHUB_API_BASE_URL_OVERRIDE"
+
+func resolveGitHubAPIBaseURL() string {
+	override := strings.TrimSpace(os.Getenv(gitHubAPIBaseURLOverrideEnv))
+	if override == "" {
+		return "https://api.github.com/"
+	}
+	if !strings.HasSuffix(override, "/") {
+		override += "/"
+	}
+	return override
+}
 
 // verifyGHCRPushScopeFor is the decision, with the token and the endpoint as
 // inputs so it can be exercised without a real credential.

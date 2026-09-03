@@ -11,6 +11,7 @@ Available Commands:
   gate-run             Report a gate run's start and outcome to the erun platform
   job                  Start long work in the environment and observe it by handle
   merge                Merge a branch into the project working tree's current branch
+  plan-ruleset-bypass  Plan narrowing a ruleset's bypass grant to one non-human queue identity
   push                 Push the project working tree's current branch to a remote
   raw                  Run a raw command from the project root
   reconcile-bypass     Check every ruleset-bypassed push against a real passed gate run

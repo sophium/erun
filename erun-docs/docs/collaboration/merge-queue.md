@@ -52,9 +52,39 @@ That refusal happens on the review's `GATE` build, a record independent of the `
 
 ## Reconciling a bypass {#reconciling-a-bypass}
 
-The queue's own push (`erun exec push` at the end of `The gate` above) is a direct push to the target branch, never a GitHub PR merge — so on a repository whose branch protection requires pull requests, the queue's push structurally needs a ruleset bypass every time, and today a human collaborator's bypass looks identical to the queue's in GitHub's own audit log. Narrowing who holds that bypass grant to one dedicated, non-human identity is a repository-settings change outside this product; what erun can do is make every bypass checkable after the fact regardless of who holds it.
+The queue's own push (`erun exec push` at the end of `The gate` above) is a direct push to the target branch, never a GitHub PR merge — so on a repository whose branch protection requires pull requests, the queue's push structurally needs a ruleset bypass every time. Two separate things follow: **who** may hold that bypass grant, and **what** each exercise of it is accounted for by.
 
-[`erun exec reconcile-bypass`](/cli/exec#exec-reconcile-bypass) (also `exec_reconcile-bypass` over MCP) reads GitHub's own rule-suites ledger for a ruleset and target branch, and cross-references every push that used a bypass against `gate_runs` filtered to `PASSED` on that branch: a bypassed push whose landed commit matches no passed gate run's merge commit is reported `UNRECONCILED`, and the command exits non-zero after printing the full report. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit — an unreconcilable bypass should never go unnoticed. A push whose `GATE` build was refused by [the desktop coverage gap](#desktop-coverage-gap) above never records a `PASSED` gate run either (only `INCONCLUSIVE`, or no `gate_runs` row at all) — so it surfaces here as `UNRECONCILED` too, correctly: an unverified desktop build gives this check nothing to reconcile against.
+### Narrowing who holds the grant {#narrowing-the-bypass-grant}
+
+Adding a required status check does not narrow anything on its own: GitHub's ruleset bypass is **per-actor and per-ruleset, not per-rule**, so an actor with `bypass_mode: "always"` skips every rule in the ruleset — `required_status_checks` included — whether or not anything ever reported a status. The enforcement that matters is that exactly one nameable, non-human identity can bypass at all.
+
+[`erun exec plan-ruleset-bypass`](/cli/exec#exec-plan-ruleset-bypass) (also `exec_plan-ruleset-bypass` over MCP) resolves that edit from the ruleset as it actually is, and refuses up front on the preconditions that make it safe: the queue identity must already be able to push, GitHub must be showing the ruleset's bypass actors (it returns them only to a token with write access to the ruleset — planning without them would emit an edit that silently drops every actor already there), and `--target-branch` must be a branch this ruleset really governs. It emits two stages plus a rollback and never writes to GitHub itself:
+
+- **Stage 1** grants the queue identity an `always` bypass *alongside* today's actors. Both paths stay open, so the queue can be proven under the new identity before anything is taken away.
+- **Stage 2** demotes every other `always` actor to `pull_request` — an emergency lever that still requires opening a pull request, rather than removing a human's escape hatch outright.
+- **Rollback** is today's bypass list, exactly as read, so one `PUT` puts it back.
+
+Order matters in one direction only: stage 2 before a real gated merge has run under the new identity is what leaves a branch with no working way in. Verification is per-identity and GitHub answers it directly — `gh api repos/<owner>/<repo>/rulesets/<id> --jq .current_user_can_bypass` returns `always`, `pull_requests_only`, or `never` **for the token that asked**, so running it as each identity is the check that the edit did what it looked like it did.
+
+Two choices the plan deliberately leaves to the operator, because getting them wrong is what breaks a repository:
+
+- **A `bypass_mode` of `exempt` must never be used here.** An exempt actor's push skips enforcement *without being recorded as a bypass*, so it never appears in the ledger the reconciliation below reads — the push becomes invisible rather than accountable. Stage 2 demotes an existing `exempt` actor for the same reason.
+- **`erun release` pushes to the same protected branch** (its own tag, packaging-checksum sync, and version-stamp commits) and is a different actor from the gate's push unless it authenticates as the same identity. Whether release shares the queue identity or gets its own grant has to be decided *before* stage 2; leaving it unstated breaks the next release.
+
+### Checking what each bypass landed {#checking-each-bypass}
+
+[`erun exec reconcile-bypass`](/cli/exec#exec-reconcile-bypass) (also `exec_reconcile-bypass` over MCP) reads GitHub's own rule-suites ledger for a ruleset and target branch and accounts for every push that used a bypass:
+
+| Verdict | What it means |
+|---|---|
+| `RECONCILED` | A `PASSED` gate run built one of the commits this push landed. |
+| `RELEASE` | A tag in the repository points at one of them — a release stamps, tags and then pushes, so its own commits were never gated as a merge. |
+| `UNEXPECTED_ACTOR` | An identity `--expected-actor` did not name exercised the bypass, whatever the content turned out to be. |
+| `UNRECONCILED` | Nothing accounts for what landed. |
+
+A push is matched against **every commit it added** (`before_sha..after_sha`), not only its tip: a release push carries three commits and a batched merge more than one, so tip-only matching would report every release as unaccounted for. Naming `--expected-actor` is what makes the narrowing above observable rather than merely configured — a gated merge pushed by the wrong identity is still a finding.
+
+The command exits non-zero after printing the full report when anything is unaccounted for or any unnamed identity bypassed. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit. A push whose `GATE` build was refused by [the desktop coverage gap](#desktop-coverage-gap) above never records a `PASSED` gate run either (only `INCONCLUSIVE`, or no `gate_runs` row at all) — so it surfaces here as `UNRECONCILED` too, correctly: an unverified desktop build gives this check nothing to reconcile against.
 
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
