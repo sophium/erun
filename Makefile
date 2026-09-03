@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -387,6 +387,15 @@ test-retention-grants:
 # env, before merging a change to atlas.hcl, schema/, or migrations/default/.
 test-schema-drift:
 	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
+
+# End-to-end proof that the console's nginx config (default.conf.template)
+# never resolves a missing content-hashed asset or a health/version request to
+# the SPA shell (erun#2064). Same "needs a real docker daemon" exclusion from
+# make check as the tests above -- it needs to observe actual nginx
+# location/try_files behavior. Run this by hand, or via `erun exec job` in an
+# agent env, before merging a change to erun-devops/docker/erun-console/.
+test-console-nginx:
+	sh erun-devops/docker/erun-console/nginx_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
