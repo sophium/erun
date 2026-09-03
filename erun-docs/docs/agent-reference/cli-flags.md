@@ -649,21 +649,24 @@ Pass `--control-planes` to switch the command into a third distinct read: every 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--control-planes` | bool | `false` | Switches the command to a control-plane version report instead of the full listing. Errors `--control-planes cannot be combined with --tenant/--gate-environment` if either is also set. |
-| `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes and which registry lookup would be checked, without making either network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
-| `--fail-on-drift` | bool | `false` | Makes this one invocation exit non-zero when any plane is behind/ahead of published or unreachable, or the published baseline itself couldn't be resolved — see [Exit codes](#erun-list) below. Never fires under `--dry-run` (nothing was probed). |
+| `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes, which of their consoles, and which registry lookup would be checked, without making any network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
+| `--fail-on-drift` | bool | `false` | Makes this one invocation exit non-zero when any plane or its linked console is behind/ahead of published or unreachable, or the published baseline itself couldn't be resolved — see [Exit codes](#erun-list) below. Never fires under `--dry-run` (nothing was probed). |
 
 The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone. `--fail-on-drift` has no MCP equivalent, for the same reason as `--tenant`'s above.
 
 Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
+
+**Each reachable plane's own `GET /v1/platform` response also names its linked console's URL** (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias). When that field is non-empty, the command additionally calls the console's own unauthenticated `GET /version.json` (a static file `erun-devops/docker/erun-console`'s image stamps from `ERUN_VERSION` at build time — the console's counterpart to the API's `-ldflags`-baked version) and reports the result nested under the plane as a `console` field (`ConsoleVersionStatus`: `url`, `reachable`, `unreachableReason`, `version`, `behind`, `ahead` — the same shape and the same published baseline as the plane's own fields). A plane whose response carries no `consoleUrl` gets no `console` field at all (omitted from JSON, no `console:` line in text), never a guessed one. The plane's own reachability and the console's are independent: a reachable plane can have an unreachable console and vice versa.
 
 ```
 $ erun list --control-planes
 published version: 1.0.247
 Control planes:
   - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+    console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
 ```
 
-`behind` is set only when both the plane's deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the plane simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the plane is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live plane some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at.
+`behind` is set only when both the deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the deployable simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the deployable is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live deployable some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at. This applies identically to a plane's own fields and to its nested `console` fields, since both compare against the one published baseline the report resolves once per run.
 
 ### Exit codes
 
@@ -671,8 +674,8 @@ Control planes:
 
 | Code | Meaning |
 |---|---|
-| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane is unreachable or behind/ahead, or an environment is behind max — those are findings in the report, not command failures) **and** either `--fail-on-drift` was not passed, or it was passed and found nothing to fail on. |
-| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`; `--fail-on-drift` without `--tenant`/`--control-planes`; or `--fail-on-drift` was passed and the report found drift (an environment behind max, a behind/unresolved gate, an unreachable/behind/ahead plane, or an unresolved published baseline) — never while `--dry-run` is also set, since nothing was actually probed. |
+| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane or its console is unreachable or behind/ahead, or an environment is behind max — those are findings in the report, not command failures) **and** either `--fail-on-drift` was not passed, or it was passed and found nothing to fail on. |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`; `--fail-on-drift` without `--tenant`/`--control-planes`; or `--fail-on-drift` was passed and the report found drift (an environment behind max, a behind/unresolved gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline) — never while `--dry-run` is also set, since nothing was actually probed. |
 
 ---
 

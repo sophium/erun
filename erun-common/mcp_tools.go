@@ -209,9 +209,10 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"contribute_clone": {Family: "contribute", CLIPath: []string{"contribute", "clone"}, Title: "Clone the erun source into the environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"version":          {Family: "", CLIPath: []string{"version"}, Title: "Report erun build metadata", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	// OpenWorld: true because controlPlanes reaches outside this environment
-	// -- GET /v1/platform on each configured erun-hosted control plane, plus
-	// a lookup against erun's own registry -- even though the plain listing
-	// (controlPlanes unset) stays local.
+	// -- GET /v1/platform on each configured erun-hosted control plane, its
+	// linked console's GET /version.json, plus a lookup against erun's own
+	// registry -- even though the plain listing (controlPlanes unset) stays
+	// local.
 	"list": {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	// The environment read model composes list/idle/doctor into one resolved
 	// lifecycle state for an orchestrator or a future mobile client polling
