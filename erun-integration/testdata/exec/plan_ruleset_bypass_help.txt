@@ -1,0 +1,29 @@
+A merge queue's push is itself a direct push, so it must bypass the branch's pull-request rule. That is only accountable if exactly one nameable, non-human identity can bypass at all -- and GitHub's bypass is per-actor, not per-rule, so adding a required status check on top of a broad `always` grant changes nothing for whoever holds it.
+
+This resolves the exact edit from the ruleset as it actually is, in two stages that never leave the branch unmergeable: stage 1 grants --queue-actor an `always` bypass alongside today's actors (both paths open, so the queue can be proven under the new identity first), stage 2 demotes every other `always` actor to `pull_request` (an emergency lever that still requires a pull request). It refuses up front when the queue identity cannot already push, when GitHub will not show the ruleset's bypass actors (plan with an admin token), or when --target-branch is not a branch this ruleset governs.
+
+Writes three payload files -- stage1, stage2 and rollback (today's bypass list, exactly) -- and prints the `gh api` calls that apply, verify and revert them. It never writes to GitHub: a ruleset governs every contributor's merges, so applying the edit stays a deliberate, human step.
+
+--dry-run traces the GitHub lookups and the files it would write without sending or writing anything.
+
+Usage:
+  erun exec plan-ruleset-bypass [flags]
+
+Examples:
+  erun exec plan-ruleset-bypass --ruleset-id 11081432 --target-branch main \
+    --queue-actor erun-merge-queue --out-dir .erun/ruleset-plan
+
+Flags:
+      --dry-run                   Resolve and trace mutating actions without executing them.
+  -h, --help                      help for plan-ruleset-bypass
+      --out-dir string            Directory the stage1, stage2 and rollback payload files are written to (default ".")
+      --queue-actor string        The queue identity: a login for User, otherwise the numeric actor id (required)
+      --queue-actor-type string   The queue identity's GitHub actor type: User, Integration, Team, RepositoryRole, OrganizationAdmin, or DeployKey (default "User")
+      --remote-url string         The github.com remote the ruleset lives on (defaults to the current checkout's origin)
+      --ruleset-id int            The ruleset whose bypass grant is being narrowed (required)
+      --target-branch string      The protected branch the ruleset must govern, checked against its own conditions
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

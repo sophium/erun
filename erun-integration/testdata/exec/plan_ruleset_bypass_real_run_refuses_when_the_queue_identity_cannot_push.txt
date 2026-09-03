@@ -1,0 +1,9 @@
+audit: erun exec plan-ruleset-bypass --out-dir plan --queue-actor erun-merge-queue --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432
+plan-ruleset-bypass: resolving inputs
+plan-ruleset-bypass: owner = sophium, repo = erun, rulesetId = 11081432, queue actor = User erun-merge-queue
+github: GET <GITHUB_API>/repos/sophium/erun/rulesets/11081432
+github: GET <GITHUB_API>/users/erun-merge-queue to resolve the queue identity's actor id
+github: GET <GITHUB_API>/repos/sophium/erun/collaborators/{queueActor}/permission to prove the queue identity can already push
+plan-ruleset-bypass: resolving a github token
+plan-ruleset-bypass: queue identity erun-merge-queue is user id 221100 (User)
+queue identity erun-merge-queue has "read" access to sophium/erun and cannot push: grant it write access before narrowing the bypass to it

@@ -1,0 +1,11 @@
+audit: erun exec reconcile-bypass --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432 --target-branch main
+reconcile-bypass: resolving inputs
+reconcile-bypass: owner = sophium, repo = erun, rulesetId = 11081432, targetBranch = main
+reconcile-bypass: no expected bypass actors named; reporting on gate-run and release evidence alone
+github: GET <GITHUB_API>/repos/sophium/erun/rulesets/rule-suites?per_page=100&ref=refs%2Fheads%2Fmain&rule_suite_result=bypass
+platform: GET <PLATFORM_API>/v1/gate-runs (targetBranch=main, status=PASSED)
+github: GET <GITHUB_API>/repos/sophium/erun/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset 11081432's own rule was the bypassed one
+github: GET <GITHUB_API>/repos/sophium/erun/compare/{beforeSha}...{afterSha} per push no passed gate run's merge commit matched, to account for every commit the push added
+github: GET <GITHUB_API>/repos/sophium/erun/tags?per_page=100 (once, up to 5 pages) to tell a release's own push from an ungated one
+reconcile-bypass: resolving a github token
+github returned 403 for <GITHUB_API>/repos/sophium/erun/rulesets/rule-suites?per_page=100&ref=refs%2Fheads%2Fmain&rule_suite_result=bypass: {"message":"Resource not accessible by personal access token"}

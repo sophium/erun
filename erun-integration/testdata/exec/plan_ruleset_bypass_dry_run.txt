@@ -1,0 +1,10 @@
+Dry run: erun exec plan-ruleset-bypass planned.
+audit: erun exec plan-ruleset-bypass --dry-run --out-dir plan --queue-actor erun-merge-queue --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432 --target-branch main
+plan-ruleset-bypass: resolving inputs
+plan-ruleset-bypass: owner = sophium, repo = erun, rulesetId = 11081432, queue actor = User erun-merge-queue
+github: GET https://api.github.com/repos/sophium/erun/rulesets/11081432
+github: GET https://api.github.com/users/erun-merge-queue to resolve the queue identity's actor id
+github: GET https://api.github.com/repos/sophium/erun/collaborators/{queueActor}/permission to prove the queue identity can already push
+write-json plan/ruleset-11081432-rollback.json
+write-json plan/ruleset-11081432-stage1.json
+write-json plan/ruleset-11081432-stage2.json

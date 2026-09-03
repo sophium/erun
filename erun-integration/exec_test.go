@@ -2,9 +2,12 @@ package integration
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -24,6 +27,15 @@ func mustWriteFile(t testing.TB, path, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func mustReadFile(t testing.TB, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(body)
 }
 
 func captureGit(t testing.TB, dir string, args ...string) string {
@@ -1830,5 +1842,352 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/reconcile_bypass_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
+}
+
+// githubRulesetStubServer runs a minimal GitHub REST double covering every
+// call `exec reconcile-bypass` and `exec plan-ruleset-bypass` make. It is
+// reached through ERUN_GITHUB_API_BASE_URL_OVERRIDE, the seam that lets these
+// scenarios drive the real wire path -- pagination, per-ruleset filtering,
+// push-range expansion, tag lookup, payload construction -- from the compiled
+// binary instead of only the dry-run trace.
+//
+// The fixture models one real window of this repository's own history: a
+// gated merge (its tip is a passed gate run's merge commit), a release push
+// (three commits, the middle one carrying the release tag, and a tip no gate
+// run ever built), a push whose bypass belongs to a different ruleset (must
+// be filtered out entirely), and a push nothing accounts for.
+type githubRulesetStubOptions struct {
+	// RulesetStatus, when non-zero, forces the ruleset read to fail with it.
+	RulesetStatus int
+	// RuleSuitesStatus, when non-zero, forces the rule-suites list to fail.
+	RuleSuitesStatus int
+	// HideBypassActors drops bypass_actors from the ruleset response, the
+	// shape GitHub returns to a token without write access to the ruleset.
+	HideBypassActors bool
+	// RefInclude overrides the ruleset's own ref_name include list.
+	RefInclude string
+	// QueuePermission is what the queue identity's collaborator permission
+	// reads as.
+	QueuePermission string
+}
+
+func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httptest.Server {
+	t.Helper()
+	if opts.RefInclude == "" {
+		opts.RefInclude = `"refs/heads/main"`
+	}
+	if opts.QueuePermission == "" {
+		opts.QueuePermission = "write"
+	}
+	var serverURL string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/sophium/erun/rulesets/rule-suites", func(w http.ResponseWriter, r *http.Request) {
+		if opts.RuleSuitesStatus != 0 {
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, opts.RuleSuitesStatus)
+			return
+		}
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`[
+				{"id":4,"actor_name":"a-human","before_sha":"before-ungated","after_sha":"ungated-tip","pushed_at":"2026-09-02T09:00:00Z","result":"bypass"}
+			]`))
+			return
+		}
+		w.Header().Set("Link", `<`+serverURL+`/repos/sophium/erun/rulesets/rule-suites?page=2>; rel="next"`)
+		_, _ = w.Write([]byte(`[
+			{"id":1,"actor_name":"erun-merge-queue","before_sha":"before-merge","after_sha":"gated-merge-tip","pushed_at":"2026-09-02T12:00:00Z","result":"bypass"},
+			{"id":2,"actor_name":"erun-merge-queue","before_sha":"before-release","after_sha":"release-prepare-tip","pushed_at":"2026-09-02T11:00:00Z","result":"bypass"},
+			{"id":3,"actor_name":"erun-merge-queue","before_sha":"before-other","after_sha":"other-ruleset-tip","pushed_at":"2026-09-02T10:00:00Z","result":"bypass"}
+		]`))
+	})
+	mux.HandleFunc("GET /repos/sophium/erun/rulesets/rule-suites/{id}", func(w http.ResponseWriter, r *http.Request) {
+		rulesetID := "11081432"
+		if r.PathValue("id") == "3" {
+			rulesetID = "99999999"
+		}
+		_, _ = w.Write([]byte(`{"rule_evaluations":[
+			{"rule_source":{"type":"protected_branch"},"result":"pass","rule_type":"non_fast_forward"},
+			{"rule_source":{"type":"ruleset","id":` + rulesetID + `,"name":"main"},"result":"fail","rule_type":"pull_request"},
+			{"rule_source":{"type":"ruleset","id":` + rulesetID + `,"name":"main"},"result":"pass","rule_type":"deletion"}
+		]}`))
+	})
+	mux.HandleFunc("GET /repos/sophium/erun/compare/{range}", func(w http.ResponseWriter, r *http.Request) {
+		commits := map[string]string{
+			"before-release...release-prepare-tip": `[{"sha":"release-commit"},{"sha":"packaging-sync"},{"sha":"release-prepare-tip"}]`,
+			"before-ungated...ungated-tip":         `[{"sha":"ungated-tip"}]`,
+		}[r.PathValue("range")]
+		if commits == "" {
+			commits = `[]`
+		}
+		_, _ = w.Write([]byte(`{"commits":` + commits + `}`))
+	})
+	mux.HandleFunc("GET /repos/sophium/erun/tags", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"v1.0.247","commit":{"sha":"release-commit"}}]`))
+	})
+	mux.HandleFunc("GET /repos/sophium/erun/rulesets/11081432", func(w http.ResponseWriter, _ *http.Request) {
+		if opts.RulesetStatus != 0 {
+			http.Error(w, `{"message":"Not Found"}`, opts.RulesetStatus)
+			return
+		}
+		bypassActors := `,"bypass_actors":[
+			{"actor_id":2,"actor_type":"RepositoryRole","bypass_mode":"always"},
+			{"actor_id":4,"actor_type":"RepositoryRole","bypass_mode":"always"},
+			{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}
+		]`
+		if opts.HideBypassActors {
+			bypassActors = ""
+		}
+		_, _ = w.Write([]byte(`{"id":11081432,"name":"main","target":"branch","enforcement":"active",
+			"conditions":{"ref_name":{"include":[` + opts.RefInclude + `],"exclude":[]}},
+			"rules":[{"type":"deletion"},{"type":"non_fast_forward"},
+				{"type":"pull_request","parameters":{"required_approving_review_count":0}}],
+			"current_user_can_bypass":"always"` + bypassActors + `}`))
+	})
+	mux.HandleFunc("GET /users/{login}", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":221100,"login":"` + r.PathValue("login") + `","type":"User"}`))
+	})
+	mux.HandleFunc("GET /repos/sophium/erun/collaborators/{login}/permission", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"permission":"` + opts.QueuePermission + `"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	serverURL = server.URL
+	return server
+}
+
+// gateRunsStubServer answers the one platform call reconcile-bypass makes:
+// the PASSED gate runs on the target branch it cross-references against.
+func gateRunsStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/gate-runs", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"gateRunId": "gr_1", "tenantId": "tenant-1", "sourceBranch": "feature/x", "targetBranch": "main",
+			"sourceCommit": "feature-tip", "mergeCommit": "gated-merge-tip", "status": "PASSED",
+			"createdAt": "2026-09-02T12:00:00Z", "updatedAt": "2026-09-02T12:00:00Z",
+		}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// stubServerRule collapses one stub server's own base URL to a stable token.
+// The kernel assigns its port per run, so a trace naming the URL it called
+// could not otherwise have a stable golden -- and doing it per server, rather
+// than as a blanket port rule, keeps the deliberately-pinned ports other
+// scenarios assert (the port-forward ranges) visible in theirs.
+func stubServerRule(server *httptest.Server, token string) normalize.Replacement {
+	// The default rules run first and have already turned the host into
+	// <LOOPBACK>, so match that form rather than the raw URL.
+	normalized := strings.Replace(server.URL, "127.0.0.1", "<LOOPBACK>", 1)
+	return normalize.Replacement{Pattern: regexp.MustCompile(regexp.QuoteMeta(normalized)), Token: token}
+}
+
+func githubStubEnv(server *httptest.Server) []string {
+	return []string{
+		"ERUN_GITHUB_API_BASE_URL_OVERRIDE=" + server.URL + "/",
+		"GITHUB_TOKEN=gho_stub_token",
+	}
+}
+
+// TestExecRulesetBypass drives the two ruleset-bypass commands against stub
+// GitHub and platform servers: reconcile-bypass's own accounting (a gated
+// merge, a release push, a foreign ruleset's bypass, an unaccounted push, an
+// unexpected identity) and plan-ruleset-bypass's resolved two-stage edit.
+func TestExecRulesetBypass(t *testing.T) {
+	t.Run("reconcile_bypass_real_run_accounts_for_a_gated_merge_and_a_release_push", func(t *testing.T) {
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{})
+		platform := gateRunsStubServer(t)
+		platformAlias(t, setup, platform)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit while one push is unaccounted for, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_real_run_accounts_for_a_gated_merge_and_a_release_push",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>"), stubServerRule(platform, "<PLATFORM_API>")))
+	})
+
+	t.Run("reconcile_bypass_real_run_flags_a_bypass_by_an_unexpected_identity", func(t *testing.T) {
+		// Naming the expected identity is what turns a narrowed bypass grant
+		// from configuration into something observable: the human's push is
+		// reported UNEXPECTED_ACTOR even though its content is unchanged.
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{})
+		platform := gateRunsStubServer(t)
+		platformAlias(t, setup, platform)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+			"--expected-actor", "erun-merge-queue",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unexpected bypass identity, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_real_run_flags_a_bypass_by_an_unexpected_identity",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>"), stubServerRule(platform, "<PLATFORM_API>")))
+	})
+
+	t.Run("reconcile_bypass_real_run_surfaces_a_github_failure_response", func(t *testing.T) {
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{RuleSuitesStatus: http.StatusForbidden})
+		platform := gateRunsStubServer(t)
+		platformAlias(t, setup, platform)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "reconcile-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when github refuses the ledger read, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/reconcile_bypass_real_run_surfaces_a_github_failure_response",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>"), stubServerRule(platform, "<PLATFORM_API>")))
+	})
+
+	t.Run("plan_ruleset_bypass_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "plan-ruleset-bypass", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_ruleset_bypass_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+			"--queue-actor", "erun-merge-queue", "--out-dir", "plan",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "plan")); !os.IsNotExist(err) {
+			t.Fatalf("dry run created the output directory: %v", err)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_ruleset_bypass_dry_run_missing_queue_actor_traces_then_refuses", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a missing queue actor, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_dry_run_missing_queue_actor_traces_then_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_ruleset_bypass_dry_run_rejects_an_unsupported_actor_type", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--queue-actor", "erun-merge-queue",
+			"--queue-actor-type", "MachineAccount",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unsupported actor type, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_dry_run_rejects_an_unsupported_actor_type", normalize.Apply(result.Combined))
+	})
+
+	t.Run("plan_ruleset_bypass_real_run_writes_both_stages_and_the_rollback", func(t *testing.T) {
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+			"--queue-actor", "erun-merge-queue", "--out-dir", "plan",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_real_run_writes_both_stages_and_the_rollback",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+		// The payload files are the artifact an operator actually applies, and
+		// they are a side effect outside the captured streams, so they need
+		// their own assertion: the golden above only proves the plan named them.
+		for _, stage := range []string{"rollback", "stage1", "stage2"} {
+			golden.Equal(t, "exec/plan_ruleset_bypass_payload_"+stage,
+				normalize.Apply(mustReadFile(t, filepath.Join(setup.Cwd, "plan", "ruleset-11081432-"+stage+".json"))))
+		}
+	})
+
+	t.Run("plan_ruleset_bypass_real_run_refuses_when_the_queue_identity_cannot_push", func(t *testing.T) {
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{QueuePermission: "read"})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--queue-actor", "erun-merge-queue",
+			"--out-dir", "plan",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an identity that cannot push, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_real_run_refuses_when_the_queue_identity_cannot_push",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("plan_ruleset_bypass_real_run_refuses_when_the_ruleset_does_not_govern_the_branch", func(t *testing.T) {
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{RefInclude: `"refs/heads/release/*"`})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--target-branch", "main",
+			"--queue-actor", "erun-merge-queue", "--out-dir", "plan",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a ruleset that does not govern the branch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_real_run_refuses_when_the_ruleset_does_not_govern_the_branch",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("plan_ruleset_bypass_real_run_refuses_when_github_hides_the_bypass_actors", func(t *testing.T) {
+		// GitHub only returns bypass_actors to a token with write access to
+		// the ruleset. Planning from a response without them would emit an
+		// edit that silently drops every actor the ruleset already has.
+		setup := env.New(t)
+		github := githubRulesetStubServer(t, githubRulesetStubOptions{HideBypassActors: true})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "plan-ruleset-bypass",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--ruleset-id", "11081432", "--queue-actor", "erun-merge-queue",
+			"--out-dir", "plan",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when bypass actors are hidden, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/plan_ruleset_bypass_real_run_refuses_when_github_hides_the_bypass_actors",
+			normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
 	})
 }

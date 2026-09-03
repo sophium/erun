@@ -1,0 +1,35 @@
+Ruleset 11081432 ("main") on sophium/erun
+  bypass actors today (3):
+    RepositoryRole     2        always
+    RepositoryRole     4        always
+    RepositoryRole     5        always
+  this token's own bypass: always
+  queue identity: User erun-merge-queue (actor id 221100), write access
+
+Stage 1 -- grant the queue identity bypass alongside today's actors:
+  gh api --method PUT repos/sophium/erun/rulesets/11081432 --input plan/ruleset-11081432-stage1.json
+Then prove the queue under the new identity: run one real gated merge as erun-merge-queue before stage 2.
+
+Stage 2 -- demote every other always-bypass actor to pull_request:
+  gh api --method PUT repos/sophium/erun/rulesets/11081432 --input plan/ruleset-11081432-stage2.json
+
+Verify (GitHub answers this per token, so run it as each identity):
+  GH_TOKEN=<erun-merge-queue's token> gh api repos/sophium/erun/rulesets/11081432 --jq .current_user_can_bypass   # want: always
+  GH_TOKEN=<a human's token> gh api repos/sophium/erun/rulesets/11081432 --jq .current_user_can_bypass   # want: pull_requests_only after stage 2
+  erun exec reconcile-bypass --ruleset-id 11081432 --target-branch main --expected-actor erun-merge-queue
+
+Rollback (restores today's bypass list exactly):
+  gh api --method PUT repos/sophium/erun/rulesets/11081432 --input plan/ruleset-11081432-rollback.json
+audit: erun exec plan-ruleset-bypass --out-dir plan --queue-actor erun-merge-queue --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432 --target-branch main
+plan-ruleset-bypass: resolving inputs
+plan-ruleset-bypass: owner = sophium, repo = erun, rulesetId = 11081432, queue actor = User erun-merge-queue
+github: GET <GITHUB_API>/repos/sophium/erun/rulesets/11081432
+github: GET <GITHUB_API>/users/erun-merge-queue to resolve the queue identity's actor id
+github: GET <GITHUB_API>/repos/sophium/erun/collaborators/{queueActor}/permission to prove the queue identity can already push
+plan-ruleset-bypass: resolving a github token
+plan-ruleset-bypass: ruleset governs main (refs/heads/main)
+plan-ruleset-bypass: queue identity erun-merge-queue is user id 221100 (User)
+plan-ruleset-bypass: queue identity has write access
+plan-ruleset-bypass: wrote plan/ruleset-11081432-rollback.json
+plan-ruleset-bypass: wrote plan/ruleset-11081432-stage1.json
+plan-ruleset-bypass: wrote plan/ruleset-11081432-stage2.json
