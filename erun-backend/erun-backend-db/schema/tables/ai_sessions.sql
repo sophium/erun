@@ -20,7 +20,7 @@ CREATE TABLE ai_sessions (
   -- environment describes nothing real, unlike usage_events' own
   -- environment_id FK, which is deliberately SET NULL to keep an append-only
   -- metering trail alive past the row it described.
-  FOREIGN KEY (tenant_id, environment_id) REFERENCES environments (tenant_id, environment_id) ON DELETE CASCADE,
+  CONSTRAINT ai_sessions_tenant_environment_fkey FOREIGN KEY (tenant_id, environment_id) REFERENCES environments (tenant_id, environment_id) ON DELETE CASCADE,
   CONSTRAINT ai_sessions_session_id_check CHECK (length(trim(session_id)) > 0),
   CONSTRAINT ai_sessions_event_check CHECK (event IN ('turn-start', 'tool-use', 'turn-end', 'notify', 'exit'))
 );

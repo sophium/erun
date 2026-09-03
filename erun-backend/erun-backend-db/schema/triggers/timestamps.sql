@@ -129,3 +129,8 @@ CREATE TRIGGER ai_sessions_set_timestamps
   BEFORE INSERT OR UPDATE ON ai_sessions
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER gate_runs_set_timestamps
+  BEFORE INSERT OR UPDATE ON gate_runs
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
