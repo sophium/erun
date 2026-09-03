@@ -394,6 +394,17 @@ export const loadTenantDashboard =
     // just replays the first successful result for the life of the process.
     // unsubscribe once consumed so the one-shot call doesn't pin that cache
     // entry open forever either.
+    //
+    // loadTenantDashboard has many independent callers for the same tenant
+    // (dialog open, Refresh, and the post-mutation reload every registration,
+    // platform-connect, and invite-request thunk runs) with no periodic poll
+    // to catch a dropped one later, so two of them landing close together
+    // must not race. RTK Query's condition() bails a forced refetch out from
+    // under a pending request for the same query before ever looking at
+    // forceRefetch (see erun#1953's getInitialState fix), so without this
+    // wait the later caller would silently inherit the earlier request's
+    // pre-mutation data instead of its own fresh read.
+    await dispatch(tenantApi.util.getRunningQueryThunk('getTenantDashboard', input));
     const request = dispatch(
       tenantApi.endpoints.getTenantDashboard.initiate(input, { forceRefetch: true }),
     );

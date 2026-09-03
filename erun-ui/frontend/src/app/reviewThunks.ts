@@ -153,15 +153,22 @@ async function loadOneReviewDiff(
     dispatch(setEnvDiffLoading({ envKey, loading: true }));
     dispatch(setEnvDiffError({ envKey, error: '', reconnectable: slot.errorReconnectable }));
   }
+  const diffArgs = {
+    selection,
+    options: { scope: slot.scope, selectedCommit: slot.commit, target: contributeTarget },
+  };
   try {
+    // The periodic silent refresh (scheduleReviewDiffRefresh) and a manual
+    // "Refresh diff" click both land here for the same env with identical
+    // args, and the timer's own re-arm only guards against stacking a second
+    // tick on itself -- not against a manual click arriving mid-tick. RTK
+    // Query's condition() bails a forced refetch out from under a pending
+    // request for the same query before ever looking at forceRefetch (see
+    // erun#1953's getInitialState fix), so without this wait the click would
+    // silently inherit the in-flight tick's result instead of its own.
+    await dispatch(reviewApi.util.getRunningQueryThunk('getDiff', diffArgs));
     const diff = await dispatch(
-      reviewApi.endpoints.getDiff.initiate(
-        {
-          selection,
-          options: { scope: slot.scope, selectedCommit: slot.commit, target: contributeTarget },
-        },
-        { forceRefetch: true },
-      ),
+      reviewApi.endpoints.getDiff.initiate(diffArgs, { forceRefetch: true }),
     ).unwrap();
     applyReviewDiffSuccess(dispatch, getState, envKey, diff);
   } catch (error: unknown) {
