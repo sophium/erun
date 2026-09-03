@@ -46,11 +46,11 @@ Everything above happens somewhere with no name of its own by default: a gate bu
 
 A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. `erun gate list`/`erun gate show` are the CLI view; the desktop's tenant dashboard (see [Reviews § Gates tab](/desktop/reviews#gates-tab)) and the hosted console's own Gate runs section show the identical queue. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
 
-### The desktop coverage gap {#desktop-coverage-gap}
+### The desktop app is covered too {#desktop-coverage-gap}
 
-**The gate's `erun build` cannot verify the desktop app.** `erun-devops`'s test stage now carries the Wails/webkit toolchain and can run `erun-ui/playwright` on its own (`make test-playwright`), but that target isn't yet folded into `make check`'s own gate step, so `erun-ui/playwright` still never runs inside a gate build even though `erun-ui/AGENTS.md` makes that suite mandatory for every desktop change — a green `GATE` build proves nothing about `erun-ui/**` on its own today. `erun review record-build --gate` refuses a successful call whose commit changes `erun-ui/**` unless `--desktop-playwright-verified` is also set, attesting the suite was actually run against that commit and passed; `erun-merge-queue-drive` names the gap and the remedy before that refusal happens. This is a fail-closed stopgap, not a fix — see issue #1933 for the tracked follow-up that would let the gate run the suite itself.
+The gate's `erun build` verifies the desktop app the same way it verifies every other module: `erun-devops`'s test stage runs `make check`, and `make check` runs `erun-ui/playwright` as a real `check-gate` prerequisite, so a green `GATE` build against a commit touching `erun-ui/**` means that suite actually ran and passed against that exact commit — not narration, an executed gate. `erun review record-build --gate` no longer takes a desktop-coverage attestation flag; there is nothing left to attest that the build itself doesn't already prove.
 
-That refusal happens on the review's `GATE` build, a record independent of the `gate_runs` row above — so a caller that hits it must report the outcome to both. `erun-merge-queue-drive` reports its `gate-run` `INCONCLUSIVE` (never `FAILED`, since the `erun build` itself genuinely passed; never left `RUNNING`, since that would be exactly the silent gap `erun gate list` exists to close) when it cannot attest desktop coverage, then stops without recording a `GATE` build at all.
+This closes what was previously a fail-closed stopgap (issue #1933): the test stage originally had no Wails/webkit toolchain, so the suite couldn't run inside a gate build at all, and a `--desktop-playwright-verified` flag stood in as a manual attestation until the suite was fast, deterministic, and wired into `check-gate` for real. See root `AGENTS.md` § "Integration Test Gate" for the stabilization work and the repeated-run evidence that justified flipping it on.
 
 ## Reconciling a bypass {#reconciling-a-bypass}
 
@@ -86,7 +86,7 @@ Two choices the plan deliberately leaves to the operator, because getting them w
 
 A push is matched against **every commit it added** (`before_sha..after_sha`), not only its tip: a release push carries three commits and a batched merge more than one, so tip-only matching would report every release as unaccounted for. Naming `--expected-actor` is what makes the narrowing above observable rather than merely configured — a gated merge pushed by the wrong identity is still a finding.
 
-The command exits non-zero after printing the full report when anything is unaccounted for or any unnamed identity bypassed. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit. A push whose `GATE` build was refused by [the desktop coverage gap](#desktop-coverage-gap) above never records a `PASSED` gate run either (only `INCONCLUSIVE`, or no `gate_runs` row at all) — so it surfaces here as `UNRECONCILED` too, correctly: an unverified desktop build gives this check nothing to reconcile against.
+The command exits non-zero after printing the full report when anything is unaccounted for or any unnamed identity bypassed. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit.
 
 ## The unresolved-thread check {#the-unresolved-thread-check}
 

@@ -352,38 +352,21 @@ while IFS= read -r landing; do
   commit=$(echo "${landing}" | jq -r .commit)
   review_id=$(echo "${batch}" | jq -r --arg s "${source}" 'select(.source == $s) | .reviewId')
 
-  git checkout --quiet "${commit}"  # detached, so the diff below is this source's own, not the batch tip's
-  desktop_flag=""
-  if git diff --name-only "${commit}^" "${commit}" | grep '^erun-ui/' | grep -qv '\.md$'; then
-    echo "This landed source (${source}) changes erun-ui/** (desktop). The gate's own erun build does not run erun-ui/playwright (issue #1933), so a green GATE build proves nothing about the desktop frontend by itself."
-    echo "Build erun-app and run erun-ui/playwright/run.sh against ${commit} now."
-    if <the suite was actually run against ${commit} and passed>; then
-      desktop_flag="--desktop-playwright-verified"
-    else
-      erun exec gate-run report "${gate_run_id}" --status inconclusive \
-        --failing-step "erun-ui/playwright not verified against ${commit}"
-      echo "Cannot attest desktop coverage here; reported the gate-run INCONCLUSIVE rather than leaving it stuck RUNNING. Hand this build off to someone who can run erun-ui/playwright/run.sh against ${commit}, then re-drive this batch once it passes — do not record a passing GATE build for an unverified desktop change."
-      exit 1
-    fi
-  fi
-  if ! build_ids["${source}"]=$(erun review record-build "${review_id}" --commit "${commit}" --gate ${desktop_flag} --output json | jq -r .buildId); then
+  if ! build_ids["${source}"]=$(erun review record-build "${review_id}" --commit "${commit}" --gate --output json | jq -r .buildId); then
     erun exec gate-run report "${gate_run_id}" --status inconclusive \
       --failing-step "record-build --gate refused against ${commit}"
     echo "record-build --gate refused for ${review_id}; reported the gate-run INCONCLUSIVE — the erun build itself was green, but this review has no recorded GATE build to show for it. Read the refusal reason before re-driving."
     exit 1
   fi
 done <<< "${landed}"
-git checkout "${target}"  # back to the branch tip, not detached, before rung 6's push
 erun exec gate-run report "${gate_run_id}" --status passed
 ```
 
 Process landed entries in the order they landed — this is what rung 7 below
-depends on. **When the batch landed more than one source, checkout that
-source's own commit before diffing it.** `record-build --gate`'s own
-desktop-coverage check diffs whatever the working tree's `HEAD` currently is
-against its parent — it has no notion of "this review's commit" versus "the
-batch's final tip" — so leaving the tree at the final tip while recording an
-earlier-landed review would silently check the wrong commit's diff instead.
+depends on. `record-build --gate` is an ordinary API call keyed off the
+`--commit` passed to it, not the working tree's current `HEAD`, so recording
+each landed review's build needs no checkout of its own commit in between —
+the worktree stays on `${target}` throughout this rung.
 
 The `gate-run` outcome is reported here, once, for the whole batch,
 immediately once every landed review's build is recorded — independent of
@@ -397,13 +380,17 @@ nothing. Recording each review's build is what makes rung 7's
 `MERGE_NOT_VERIFIED` if `buildId` does not name an already-recorded,
 successful `GATE` build for that exact review.
 
-**A desktop-coverage or record-build refusal is reported as `INCONCLUSIVE`,
-never left `RUNNING` and never reported `FAILED`.** The gate run and a
-review's `GATE` build are independent records (`erun-backend-api/AGENTS.md`
-§ "Gate Runs") — the `erun build` this attempt already ran genuinely passed,
-so `FAILED` would assert a red verdict that never happened, and leaving the
-gate run at `RUNNING` forever is exactly the silent-gap failure `erun gate
-list` exists to prevent.
+**A record-build refusal is reported as `INCONCLUSIVE`, never left `RUNNING`
+and never reported `FAILED`.** The gate run and a review's `GATE` build are
+independent records (`erun-backend-api/AGENTS.md` § "Gate Runs") — the
+`erun build` this attempt already ran genuinely passed, so `FAILED` would
+assert a red verdict that never happened, and leaving the gate run at
+`RUNNING` forever is exactly the silent-gap failure `erun gate list` exists
+to prevent. That same `erun build` already covers the desktop app too:
+`check-gate` runs `erun-ui/playwright` for real now, so a landed change
+touching `erun-ui/**` needs no separate attestation from this skill (see
+[Merge queue § The desktop app is covered
+too](/collaboration/merge-queue#desktop-coverage-gap)).
 
 ### 6. Push once — only now, because the build was green
 

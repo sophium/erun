@@ -270,16 +270,16 @@ test-frontend:
 # run inside an agent pod; inside this Dockerfile stage neither applies
 # (ERUN_ENV_TYPE is unset during a docker build), so it just runs in place.
 #
-# Deliberately NOT a check-gate prerequisite yet. Wiring it in now would red
-# every build on main: a real run against main found 27 failing specs, and
-# two full runs on the same commit produced different failure sets (27 vs 24,
-# only 3 files red in both) -- the suite is not deterministic under parallel
-# load today. Gating on a suite that cries wolf is worse than the coverage
-# gap it would close (see erun-ui/playwright/AGENTS.md's "No flaky tests"
-# rule: fix the nondeterminism, never retry/quarantine it away). Run this by
-# hand, or via `erun exec job` in an agent env, to validate a fix to either
-# the failures or the flakiness; check-gate grows this as a real prerequisite
-# once the suite is green and stays green across repeated runs.
+# Now a check-gate prerequisite (see check-gate's own comment for the
+# evidence). It was not always: a real run against main once found 27
+# failing specs, with two full runs on the same commit producing different
+# failure sets (27 vs 24) -- the suite was not deterministic under parallel
+# load. #1937's fixture-isolation fix (the shared seeded-baseline-row cache
+# leak) resolved that, re-verified by repeated full-suite runs with zero
+# failures before this target joined check-gate. Run this by hand, or via
+# `erun exec job` in an agent env, when iterating on a fix -- it no longer
+# needs `--skip-lint`/manual wiring to get signal, but a full run still
+# costs ~20 minutes.
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)
@@ -434,11 +434,28 @@ check:
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
 # erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
 # frontend + console gates, the erun-ui Windows cross-compile check, the
+# erun-ui/playwright desktop e2e suite, the
 # erun-devops/k8s chart tests, then the integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
-check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build helm-chart-tests integration-test-gate
+#
+# test-playwright joined this list once the suite's own flakiness was
+# resolved and re-verified, not merely once the toolchain existed (root
+# AGENTS.md "Integration Test Gate" and erun-ui/playwright/AGENTS.md's "No
+# flaky tests" carried the exact bar: a repeated-run track record, not one
+# clean run). It has one now: a --repeat-each=5 full-suite run (2,525/2,525
+# passed, the whole suite five times over) plus two further independent
+# full runs (514/514 each, one against the exact commit this comment landed
+# on) -- zero failures across every full-suite execution recorded this
+# session. Before this, the suite had 27 failing specs and produced
+# different failure sets across repeated runs on the same commit -- see the
+# git history of this target for the original exclusion and #1937 for the
+# fixture-isolation fix that resolved it. A red here is therefore a real
+# regression, never "the suite crying wolf" -- fix it in the same PR per
+# root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
+# revert this line.
+check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
