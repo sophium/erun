@@ -506,6 +506,14 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "List tenants visible to the caller on the erun platform: every tenant for an operations-tenant caller, or just the caller's own tenant otherwise. Supports preview.",
 	}, platformTenantListTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "platform_tenant_repair-org-mapping",
+		Description: "Repair a tenant already stuck with an unresolvable (issuer, org) mapping -- one that lists but that no token can ever authenticate into, such as a tenant created with no orgFieldValue before platform_tenant_create started refusing that. Converts issuer to org-scoped (if not already) and sets tenantId's own org value. Requires an operations-tenant caller. There is no tenant delete on this platform, so this is the only way back short of direct database access. A real, immediate write, not a preview, unless preview is set.",
+	}, platformTenantRepairOrgMappingTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "platform_identity_org_create",
+		Description: "Create an organization on the erun platform's own identity provider. Requires an operations-tenant caller. An org-scoped tenant needs an org of its own before platform_tenant_create's orgFieldValue can produce a mapping any token will ever resolve to -- this is how a caller obtains that value. A real, immediate write, not a preview, unless preview is set.",
+	}, platformIdentityOrgCreateTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "platform_user_enroll",
 		Description: "Enroll a user in a tenant on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
 	}, platformUserEnrollTool(runtime))

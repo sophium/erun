@@ -6,6 +6,7 @@ Usage:
 Available Commands:
   context     Manage the erun platform's own cloud contexts (managed clusters)
   env         Manage hosted environments on the erun platform
+  identity    Administer the erun platform's own identity provider
   provision   Preview the ordered plan for provisioning a hosted environment
   tenant      Manage tenants on the erun platform
   user        Manage users on the erun platform

@@ -20,6 +20,7 @@ func newPlatformCmd(store common.CloudReadStore, promptRunner PromptRunner, deps
 		"Operate a hosted erun platform's control-plane API",
 		newPlatformWhoamiCmd(store, &alias, deps),
 		newPlatformTenantCmd(store, &alias, deps),
+		newPlatformIdentityCmd(store, &alias, deps),
 		newPlatformUserCmd(store, &alias, deps),
 		newPlatformEnvCmd(store, &alias, promptRunner, deps),
 		newPlatformContextCmd(store, &alias, deps),
@@ -64,6 +65,7 @@ func newPlatformTenantCmd(store common.CloudReadStore, alias *string, deps commo
 		"Manage tenants on the erun platform",
 		newPlatformTenantCreateCmd(store, alias, deps),
 		newPlatformTenantListCmd(store, alias, deps),
+		newPlatformTenantRepairOrgMappingCmd(store, alias, deps),
 	)
 }
 
@@ -158,6 +160,115 @@ func tenantUnreachableSuffix(tenant common.PlatformTenant) string {
 		return ""
 	}
 	return " UNREACHABLE (no issuer mapping any token can resolve through)"
+}
+
+// newPlatformIdentityCmd builds `erun platform identity`, the CLI's client
+// for the platform's own IdP administration surface (erun-backend-api's
+// /v1/identity/* routes). Today it covers exactly the operation `platform
+// tenant create` depends on: creating the org an org-scoped tenant mapping
+// needs. Before this, POST /v1/identity/orgs had no CLI, MCP, or desktop
+// surface at all, so the documented tenant-creation flow could produce a
+// tenant with no reachable org value — created, listed, and permanently
+// unauthenticatable.
+// newPlatformTenantRepairOrgMappingCmd fixes a tenant already stuck with an
+// unresolvable (issuer, org) mapping -- created before POST /v1/tenants
+// started refusing an org-scoped mapping with no org value, or left behind
+// when its issuer was converted to org-scoped after it registered. There is
+// no tenant delete endpoint on the platform at all, so this repair (not
+// delete-and-recreate, which is not even possible) is the only way back for
+// a tenant already in that state.
+func newPlatformTenantRepairOrgMappingCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var params common.PlatformRepairTenantIssuerOrgMappingParams
+	cmd := &cobra.Command{
+		Use:   "repair-org-mapping",
+		Short: "Repair a tenant's dead (issuer, org) mapping so it resolves again",
+		Long: "Repair a tenant's dead (issuer, org) mapping so it resolves again.\n\n" +
+			"Requires the caller to be signed in as an operations tenant. Converts issuer to " +
+			"org-scoped (if it is not already) and sets --tenant-id's own org value -- the fix for a " +
+			"tenant that lists but that no token can ever authenticate into, such as one " +
+			"`platform tenant create` produced with no --org-field-value before it started refusing " +
+			"that. There is no tenant delete on this platform, so this is the only way back short of " +
+			"direct database access. A real, immediate mutation of shared control-plane state, not a preview.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun platform tenant repair-org-mapping --tenant-id 01... --issuer https://auth.example --org-field-key urn:zitadel:iam:user:resourceowner:id --org-field-value 42",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			issuer, err := common.RunPlatformRepairTenantIssuerOrgMapping(ctx, store, *alias, params, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant org-mapping repair planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "repaired %s: org-field-value now %s\n", issuer.Issuer, issuer.OrgFieldValue); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(issuer)
+		},
+	}
+	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Tenant to repair (operations-tenant callers only; defaults to the caller's own tenant)")
+	cmd.Flags().StringVar(&params.Issuer, "issuer", "", "OIDC issuer the tenant is mapped under")
+	cmd.Flags().StringVar(&params.OrgFieldKey, "org-field-key", "", "Claim name that carries the org for this shared issuer")
+	cmd.Flags().StringVar(&params.OrgFieldValue, "org-field-value", "", "Org value to set on the tenant's mapping (see platform identity org create)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newPlatformIdentityCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	return newCommandGroup(
+		"identity",
+		"Administer the erun platform's own identity provider",
+		newPlatformIdentityOrgCmd(store, alias, deps),
+	)
+}
+
+func newPlatformIdentityOrgCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	return newCommandGroup(
+		"org",
+		"Manage organizations on the erun platform's own identity provider",
+		newPlatformIdentityOrgCreateCmd(store, alias, deps),
+	)
+}
+
+func newPlatformIdentityOrgCreateCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var params common.PlatformCreateOrgParams
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create an organization on the erun platform's own identity provider",
+		Long: "Create an organization on the erun platform's own identity provider.\n\n" +
+			"Requires the caller to be signed in as an operations tenant. An org-scoped tenant " +
+			"(one sharing an issuer with another tenant) needs an org of its own before " +
+			"`platform tenant create --org-field-value` can produce a mapping any token will " +
+			"ever resolve to -- this is how an operator obtains that value. A real, immediate " +
+			"mutation of shared control-plane state, not a preview.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun platform identity org create --name acme",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			org, err := common.RunPlatformCreateOrg(ctx, store, *alias, params, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform identity org creation planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "created org %s (%s) -- pass this id as --org-field-value\n", org.Name, org.ID); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(org)
+		},
+	}
+	cmd.Flags().StringVar(&params.Name, "name", "", "Organization name")
+	addDryRunFlag(cmd)
+	return cmd
 }
 
 func newPlatformUserCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {

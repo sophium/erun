@@ -1,0 +1,3 @@
+Dry run: erun platform tenant org-mapping repair planned.
+audit: erun platform tenant repair-org-mapping --dry-run --issuer https://idp.example --org-field-key urn:zitadel:iam:user:resourceowner:id --org-field-value 42 --tenant-id tenant-probeco
+platform: PATCH https://api.example.test/v1/tenant-issuers (issuer=https://idp.example, orgFieldKey=urn:zitadel:iam:user:resourceowner:id, orgFieldValue=42, tenantId=tenant-probeco)

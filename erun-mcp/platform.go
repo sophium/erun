@@ -109,6 +109,73 @@ func platformTenantListTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 	}
 }
 
+type PlatformIdentityOrgCreateInput struct {
+	platformAliasInput
+	Name string `json:"name" jsonschema:"organization name"`
+}
+
+type PlatformIdentityOrgResult struct {
+	Preview bool                   `json:"preview"`
+	Org     eruncommon.PlatformOrg `json:"org,omitempty"`
+	Trace   []string               `json:"trace,omitempty"`
+}
+
+// platformIdentityOrgCreateTool creates an organization on the platform's own
+// IdP -- the org an org-scoped tenant mapping needs before platform_tenant_create
+// can produce one any token will ever resolve to. Requires an
+// operations-tenant caller.
+func platformIdentityOrgCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformIdentityOrgCreateInput) (*mcp.CallToolResult, PlatformIdentityOrgResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformIdentityOrgCreateInput) (*mcp.CallToolResult, PlatformIdentityOrgResult, error) {
+		if strings.TrimSpace(input.Name) == "" {
+			return nil, PlatformIdentityOrgResult{}, fmt.Errorf("name is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "platform_identity_org_create"
+		org, err := eruncommon.RunPlatformCreateOrg(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateOrgParams{Name: input.Name}, cloudDependencies())
+		if err != nil {
+			return nil, PlatformIdentityOrgResult{}, err
+		}
+		return nil, PlatformIdentityOrgResult{Preview: input.Preview, Org: org, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+type PlatformTenantRepairOrgMappingInput struct {
+	platformAliasInput
+	TenantID      string `json:"tenantId,omitempty" jsonschema:"tenant to repair (operations-tenant callers only); defaults to the caller's own tenant"`
+	Issuer        string `json:"issuer" jsonschema:"OIDC issuer the tenant is mapped under"`
+	OrgFieldKey   string `json:"orgFieldKey" jsonschema:"claim name that carries the org for this shared issuer"`
+	OrgFieldValue string `json:"orgFieldValue" jsonschema:"org value to set on the tenant's mapping (see platform_identity_org_create)"`
+}
+
+type PlatformTenantIssuerResult struct {
+	Preview      bool                            `json:"preview"`
+	TenantIssuer eruncommon.PlatformTenantIssuer `json:"tenantIssuer,omitempty"`
+	Trace        []string                        `json:"trace,omitempty"`
+}
+
+// platformTenantRepairOrgMappingTool fixes a tenant already stuck with an
+// unresolvable (issuer, org) mapping -- a tenant that lists but that no token
+// can ever authenticate into. There is no tenant delete on the platform at
+// all, so this is the only way back short of direct database access.
+func platformTenantRepairOrgMappingTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformTenantRepairOrgMappingInput) (*mcp.CallToolResult, PlatformTenantIssuerResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformTenantRepairOrgMappingInput) (*mcp.CallToolResult, PlatformTenantIssuerResult, error) {
+		if strings.TrimSpace(input.Issuer) == "" || strings.TrimSpace(input.OrgFieldKey) == "" || strings.TrimSpace(input.OrgFieldValue) == "" {
+			return nil, PlatformTenantIssuerResult{}, fmt.Errorf("issuer, orgFieldKey, and orgFieldValue are required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "platform_tenant_repair-org-mapping"
+		issuer, err := eruncommon.RunPlatformRepairTenantIssuerOrgMapping(ctx, runtime.Store, input.Alias, eruncommon.PlatformRepairTenantIssuerOrgMappingParams{
+			TenantID: input.TenantID, Issuer: input.Issuer, OrgFieldKey: input.OrgFieldKey, OrgFieldValue: input.OrgFieldValue,
+		}, cloudDependencies())
+		if err != nil {
+			return nil, PlatformTenantIssuerResult{}, err
+		}
+		return nil, PlatformTenantIssuerResult{Preview: input.Preview, TenantIssuer: issuer, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type PlatformUserEnrollInput struct {
 	platformAliasInput
 	Username string   `json:"username" jsonschema:"username to enroll"`

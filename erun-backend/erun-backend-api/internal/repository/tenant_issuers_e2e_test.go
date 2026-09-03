@@ -70,7 +70,7 @@ func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) 
 
 	repo := NewTenantIssuerRepository(NewTxManager(db, DialectPostgres))
 	ctx := security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: "OPERATIONS"})
-	updated, err := repo.UpdateOrgScope(ctx, issuer, orgFieldKey, orgFieldValue)
+	updated, err := repo.UpdateOrgScope(ctx, tenantID, issuer, orgFieldKey, orgFieldValue)
 	mustNoErr(t, err, "UpdateOrgScope")
 	if updated.OrgFieldKey != orgFieldKey || updated.OrgFieldValue != orgFieldValue {
 		t.Fatalf("returned tenant_issuer = %+v, want key=%q value=%q", updated, orgFieldKey, orgFieldValue)

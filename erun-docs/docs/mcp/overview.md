@@ -279,6 +279,8 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | `platform_whoami` | Read | Resolve the caller's identity against the platform. |
 | `platform_tenant_list` | Read | List tenants visible to the caller — every tenant for an operations-tenant caller, otherwise just the caller's own. |
 | `platform_tenant_create` | Work | Register a new tenant. Requires an operations-tenant caller. |
+| `platform_tenant_repair-org-mapping` | Work | Repair a tenant already stuck with an unresolvable (issuer, org) mapping — one that lists but that no token can ever authenticate into. Converts `issuer` to org-scoped (if not already) and sets `tenantId`'s own org value. Requires an operations-tenant caller. There is no tenant delete on the platform, so this is the only way back short of direct database access. |
+| `platform_identity_org_create` | Work | Create an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform_tenant_create`'s `orgFieldValue` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. |
 | `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
 | `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`; `roleIds` names the roles to grant instead of the platform's default. |
 | `platform_env_list` | Read | List the caller's tenant's hosted environments. |
@@ -457,6 +459,8 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | platform | `platform_whoami` | `erun platform whoami` | Read |
 | platform | `platform_tenant_list` | `erun platform tenant list` | Read |
 | platform | `platform_tenant_create` | `erun platform tenant create` | Work |
+| platform | `platform_tenant_repair-org-mapping` | `erun platform tenant repair-org-mapping` | Work |
+| platform | `platform_identity_org_create` | `erun platform identity org create` | Work |
 | platform | `platform_user_list` | `erun platform user list` | Read |
 | platform | `platform_user_enroll` | `erun platform user enroll` | Work |
 | platform | `platform_env_list` | `erun platform env list` | Read |

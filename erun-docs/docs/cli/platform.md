@@ -14,6 +14,8 @@ For the concepts behind tenants, environments, and cloud contexts, see [Hosted p
 erun platform whoami [flags]
 erun platform tenant create --name <name> --issuer <issuer> [flags]
 erun platform tenant list [flags]
+erun platform tenant repair-org-mapping --issuer <issuer> --org-field-key <key> --org-field-value <value> [flags]
+erun platform identity org create --name <name> [flags]
 erun platform user enroll --username <username> [flags]
 erun platform user list [flags]
 erun platform env list [flags]
@@ -38,15 +40,30 @@ Resolves the caller's identity against the platform: tenant ID, user ID, usernam
 
 ### `platform tenant create` / `platform tenant list`
 
-Registers a new tenant, or lists tenants visible to the caller. `create` requires the caller to be signed in as an **operations tenant** — it maps a new OIDC issuer to the tenant and is a real, immediate write. `list` returns every tenant for an operations-tenant caller, or just the caller's own tenant otherwise.
+Registers a new tenant, or lists tenants visible to the caller. `create` requires the caller to be signed in as an **operations tenant** — it maps a new OIDC issuer to the tenant and is a real, immediate write. `list` returns every tenant for an operations-tenant caller, or just the caller's own tenant otherwise, flagging one with `UNREACHABLE` when no token can ever resolve to it.
 
 | Flag | Description |
 |---|---|
 | `--name` | Tenant name (hyphen-free; forms the `<tenant>-<env>` namespace). |
 | `--type` | `COMPANY` (default) or `OPERATIONS`. |
 | `--issuer` | OIDC issuer that resolves tokens to this tenant. |
-| `--org-field-key` / `--org-field-value` | Set only for a shared (org-scoped) issuer — see [tenant issuers](/agent-reference/api-protocol#tenant-issuers). |
+| `--org-field-key` / `--org-field-value` | Set only for a shared (org-scoped) issuer — see [tenant issuers](/agent-reference/api-protocol#tenant-issuers). **An org mapping is mandatory on a shared, org-scoped issuer**: an issuer already registered org-scoped (because another tenant shares it) refuses a new tenant with `--org-field-key` and no `--org-field-value`, since no token could ever resolve to it. Obtain the org id with `platform identity org create` and pass it as `--org-field-value`. |
 | `--display-name` | Label for the tenant/issuer mapping (defaults to the issuer). |
+
+### `platform tenant repair-org-mapping`
+
+Repairs a tenant already stuck with an unresolvable `(issuer, org)` mapping — one that lists but that no token can ever authenticate into, such as a tenant created with an empty `--org-field-value` before `tenant create` started refusing that. Converts the issuer to org-scoped (if it is not already) and sets `--tenant-id`'s own org value. Requires an operations-tenant caller. There is no tenant delete on this platform, so this is the only way back short of direct database access.
+
+| Flag | Description |
+|---|---|
+| `--tenant-id` | Tenant to repair (operations-tenant callers only; defaults to the caller's own tenant). |
+| `--issuer` | OIDC issuer the tenant is mapped under. |
+| `--org-field-key` | Claim name that carries the org for this shared issuer. |
+| `--org-field-value` | Org value to set on the tenant's mapping (see `platform identity org create`). |
+
+### `platform identity org create`
+
+Creates an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform tenant create --org-field-value` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. Prints the new org id in a form directly usable as `--org-field-value`.
 
 ### `platform user enroll` / `platform user list`
 
@@ -128,7 +145,8 @@ erun platform tenant list --output json
 |---|---|
 | No erun-type cloud alias configured. | Aborts before any network call, naming `erun cloud init erun --api-url <url>`. |
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
-| `tenant create`/`user enroll --tenant-id <other>`/`user list --tenant-id <other>` by a non-operations caller. | `403 Forbidden`. |
+| `tenant create`/`tenant repair-org-mapping`/`identity org create`/`user enroll --tenant-id <other>`/`user list --tenant-id <other>` by a non-operations caller. | `403 Forbidden`. |
+| `tenant create --org-field-key` with no `--org-field-value` against an issuer already registered org-scoped. | `409 Conflict`; the message names the claim and the exact `platform identity org create` command to run. |
 | `env register` names `--kubernetes-context` (a raw name, not a registered context) for a `runtime` environment, or `--context-id` that does not resolve for your tenant. | `400 Bad Request`; see [Placement](/concepts/hosted-platform#single-cluster-placement). |
 | `env register` names a `--context-id` that is already at its `maxEnvironments`, or names none while every one of your tenant's own registered contexts is full or not yet running. | `409 Conflict`. |
 | `platform provision` names `--kubernetes-context` or a bootstrap `--context-*` set for a `runtime` environment. | `400 Bad Request` — this preview does not support `runtime` placement onto a context; see [Placement](/concepts/hosted-platform#single-cluster-placement). |
