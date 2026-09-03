@@ -15,7 +15,8 @@
 # Environment:
 #   COVERAGE_THRESHOLD   default 75 (percent). See note below.
 #   GOCOVERDIR           override the directory used for raw counter files;
-#                        defaults to ./coverage/raw under the script.
+#                        defaults to a fresh, unique temp directory per
+#                        invocation (see note below on why not a fixed path).
 #
 # Notes:
 #   - The instrumented binary is rebuilt each run so signatures stay aligned
@@ -36,6 +37,21 @@
 #     production trace lift) that earned the increase; never raise it past
 #     measured reality minus margin, and never lower it without a tracked
 #     discussion in the PR.
+#   - The default coverage directory is unique per invocation rather than a
+#     fixed path under the module, because the fixed path used to be wiped
+#     by its own `rm -rf "$cover_dir"/*` cleanup step at the top of every
+#     run: two invocations against the same checkout (an overlapping retry,
+#     or a developer running this by hand while an already-detached
+#     agent-gate.sh job is mid-flight) each clean the same directory at
+#     startup, so the second invocation's cleanup can delete counter files
+#     the first invocation's already-finished subprocess calls had already
+#     written, before the first invocation's own merge step reads them. The
+#     result looks identical to a clean, passing run — normal test duration,
+#     every test green — except the merged total is missing whatever the
+#     wipe deleted, which can be most of it depending on timing. Passing an
+#     explicit GOCOVERDIR opts back into the old shared/reusable-path
+#     behavior (e.g. to inspect counters after the run); only the default
+#     changed.
 
 set -euo pipefail
 
@@ -66,11 +82,17 @@ fi
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
 
-cover_dir="${GOCOVERDIR:-$here/coverage/raw}"
 profile="$here/coverage/profile.txt"
-mkdir -p "$cover_dir"
 mkdir -p "$(dirname "$profile")"
-rm -rf "$cover_dir"/*
+
+if [[ -n "${GOCOVERDIR:-}" ]]; then
+    cover_dir="$GOCOVERDIR"
+    mkdir -p "$cover_dir"
+    rm -rf "$cover_dir"/*
+else
+    cover_dir="$(mktemp -d "${TMPDIR:-/tmp}/erun-integration-cover.XXXXXX")"
+    trap 'rm -rf "$cover_dir"' EXIT
+fi
 
 export GOCOVERDIR="$cover_dir"
 
