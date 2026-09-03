@@ -73,3 +73,64 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		}
 	}
 }
+
+// TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules is the same
+// asymmetry as TestRootDockerignoreExcludesDocsBuildArtifacts above, found by
+// diffing every nested .gitignore under a module the erun-devops test stage
+// COPYs wholesale (erun-ui, erun-kit, erun-console) against this file: each of
+// these local-only artifacts was excluded from computeBuildFingerprint via
+// loadNestedGitignores but not from the real docker build context, so
+// generating one on the host (a local `tsc`, `vite`, Playwright run, or just
+// Finder) would ship it into the image without moving the fingerprint that
+// decides whether the image rebuilds.
+func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	data, err := os.ReadFile(filepath.Join(root, ".dockerignore"))
+	if err != nil {
+		t.Fatalf("read root .dockerignore: %v", err)
+	}
+	set := parseIgnoreData(data, "")
+
+	excludedDirs := []string{
+		"erun-ui/build/bin",
+		"erun-ui/playwright/playwright/.cache",
+		"erun-kit/.vite",
+		"erun-console/.vite",
+		"erun-console/playwright/.cache",
+	}
+	for _, dir := range excludedDirs {
+		if !set.matches(dir, true) {
+			t.Errorf("root .dockerignore must exclude %q (mirrors a nested .gitignore entry)", dir)
+		}
+	}
+
+	excludedFiles := []string{
+		"erun-ui/frontend/tsconfig.tsbuildinfo",
+		"erun-ui/frontend/package.json.md5",
+		"erun-console/playwright/.e2e-oidc.env",
+		".DS_Store",
+		"erun-kit/src/.DS_Store",
+		"erun-kit/.env.local",
+		"erun-kit/src/config/.env.local",
+		"erun-console/.env.local",
+		"erun-console/src/app/.env.local",
+	}
+	for _, path := range excludedFiles {
+		if !set.matches(path, false) {
+			t.Errorf("root .dockerignore must exclude %q (mirrors a nested .gitignore entry)", path)
+		}
+	}
+
+	kept := []string{
+		"erun-ui/frontend/package.json",
+		"erun-ui/playwright/tests/example.spec.ts",
+		"erun-kit/src/index.ts",
+		"erun-console/src/App.tsx",
+		"erun-console/playwright/tests/example.spec.ts",
+	}
+	for _, path := range kept {
+		if set.matches(path, false) {
+			t.Errorf("root .dockerignore must NOT exclude %q (the erun-devops Dockerfile copies it)", path)
+		}
+	}
+}
