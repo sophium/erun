@@ -5,7 +5,11 @@
 # operation), the repair CronJob (migrate-repair-cronjob.yaml) added so a
 # database that loses its schema by any means outside a Helm operation is
 # re-migrated on its own, and the retention CronJob (retention-cronjob.yaml)
-# that runs erun-backend-db/retention/*.sql on a daily schedule.
+# that runs erun-backend-db/retention/*.sql on a daily schedule. Unlike the
+# other two, retention is off by default (retention.enabled=false, an
+# explicit off switch that needs no code change) and defaults to report-only
+# once enabled (retention.dryRun=true) -- a scheduled sweep must never start
+# deleting rows on its own.
 #
 # Lives beside the chart rather than inside it, like erun-devops-chart_test.sh:
 # helm renders every file under templates/.
@@ -67,20 +71,41 @@ printf '%s\n' "${repair_cronjob}" | grep -q 'concurrencyPolicy: Forbid' || fail 
 printf '%s\n' "${repair_cronjob}" | grep -q 'ERUN_DATABASE_URL' || fail "the repair CronJob must carry the database URL"
 printf '%s\n' "${repair_cronjob}" | grep -q 'helm.sh/hook' && fail "the repair CronJob must not be a Helm hook -- it must run independently of any Helm operation"
 
-# --- 3. The retention CronJob renders unconditionally, on a daily schedule,
-#        runs the retention entrypoint (not the migrate one), and forbids
-#        overlap the same way the repair CronJob does ---
-retention_cronjob="$(document_named "${rendered}" CronJob team-backend-db-retention)"
-[ -n "${retention_cronjob}" ] || fail "the retention CronJob must render"
+# --- 3. The retention CronJob does not render at all by default -- it is an
+#        opt-in, off-by-default mechanism, unlike the other two ---
+printf '%s\n' "${rendered}" | grep -q 'team-backend-db-retention' &&
+    fail "the retention CronJob must not render when retention.enabled is unset"
+
+# --- 4. Enabling it renders the CronJob on a daily schedule, running the
+#        retention entrypoint (not the migrate one), forbidding overlap the
+#        same way the repair CronJob does, and defaulting to report-only ---
+enabled_rendered="$(render enabled --set retention.enabled=true)"
+retention_cronjob="$(document_named "${enabled_rendered}" CronJob team-backend-db-retention)"
+[ -n "${retention_cronjob}" ] || fail "the retention CronJob must render when retention.enabled=true"
 printf '%s\n' "${retention_cronjob}" | grep -q 'schedule: "0 3 \* \* \*"' || fail "the retention CronJob must run daily"
 printf '%s\n' "${retention_cronjob}" | grep -q 'concurrencyPolicy: Forbid' || fail "overlapping retention runs must be forbidden"
 printf '%s\n' "${retention_cronjob}" | grep -q 'ERUN_DATABASE_URL' || fail "the retention CronJob must carry the database URL"
 printf '%s\n' "${retention_cronjob}" | grep -q 'command: \["erun-backend-db-retention"\]' ||
     fail "the retention CronJob must run the retention entrypoint, not the migrate one"
 printf '%s\n' "${retention_cronjob}" | grep -q 'helm.sh/hook' && fail "the retention CronJob must not be a Helm hook -- it must run independently of any Helm operation"
+printf '%s\n' "${retention_cronjob}" | grep -A1 'ERUN_RETENTION_DRY_RUN' | grep -q 'value: "true"' ||
+    fail "the retention CronJob must default to dry_run=true when retention.enabled=true and retention.dryRun is unset"
 
-# --- 4. All three mechanisms honour the same image override ---
-overridden="$(render overridden --set-string imageOverrides.erun-backend-db=ghcr.io/sophium/erun-backend-db:pinned)"
+# --- 5. retention.dryRun=false is honoured (a plain sprig 'default' can't
+#        tell "unset" from "explicitly false", so this also locks the
+#        hasKey-guarded resolution the template uses) ---
+real_rendered="$(render real --set retention.enabled=true --set retention.dryRun=false)"
+real_cronjob="$(document_named "${real_rendered}" CronJob team-backend-db-retention)"
+printf '%s\n' "${real_cronjob}" | grep -A1 'ERUN_RETENTION_DRY_RUN' | grep -q 'value: "false"' ||
+    fail "retention.dryRun=false must be honoured, not silently coerced back to true"
+
+# --- 6. retention.enabled=false explicitly still renders nothing ---
+disabled_rendered="$(render disabled --set retention.enabled=false --set retention.dryRun=false)"
+printf '%s\n' "${disabled_rendered}" | grep -q 'team-backend-db-retention' &&
+    fail "the retention CronJob must not render when retention.enabled=false, even with retention.dryRun set"
+
+# --- 7. All three mechanisms honour the same image override ---
+overridden="$(render overridden --set retention.enabled=true --set-string imageOverrides.erun-backend-db=ghcr.io/sophium/erun-backend-db:pinned)"
 printf '%s\n' "$(document "${overridden}" Job)" | grep -q 'image: ghcr.io/sophium/erun-backend-db:pinned' ||
     fail "imageOverrides.erun-backend-db must override the migrate Job's image"
 printf '%s\n' "$(document_named "${overridden}" CronJob team-backend-db-migrate-repair)" |

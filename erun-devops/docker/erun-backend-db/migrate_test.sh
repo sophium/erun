@@ -53,12 +53,35 @@ fail() {
     exit 1
 }
 
+# The official postgres image's first boot runs a temporary server to run
+# init scripts, stops it, then starts the real server -- both print
+# "database system is ready to accept connections", so pg_isready alone can
+# catch the temporary server's brief window and report ready moments before
+# it shuts down for the real restart, resetting any connection made in that
+# gap. Waiting for the line to appear a given number of times in the
+# container's own log (2 after first boot, one more after each restart) is
+# the documented reliable signal instead.
+wait_for_log_count() {
+    target="$1"
+    i=0
+    while [ "$i" -lt 60 ]; do
+        count="$(docker logs "${container}" 2>&1 | grep -c 'database system is ready to accept connections')"
+        [ "${count}" -ge "${target}" ] && return 0
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
+}
+
 psql_as() {
     docker exec -e PGPASSWORD=testpass "${container}" psql -v ON_ERROR_STOP=1 -U erun "$@"
 }
 
 apply_migrations() {
-    url="postgres://erun:testpass@localhost:${port}/erun?sslmode=disable"
+    # 127.0.0.1, not localhost: docker's port publish binds IPv4 only, and
+    # this host's resolver sometimes prefers localhost's IPv6 (::1) address,
+    # which gets a connection reset rather than falling back to IPv4.
+    url="postgres://erun:testpass@127.0.0.1:${port}/erun?sslmode=disable"
     (cd "${db_module}" && ERUN_DATABASE_URL="${url}" sh -c '
         set -eu
         if ! atlas migrate apply --env default --url "${ERUN_DATABASE_URL}" 2>/tmp/erun-migrate-test-apply.log; then
@@ -85,13 +108,7 @@ docker run -d --name "${container}" \
     -v "${volume}:/var/lib/postgresql/data" \
     postgres:18.3 >/dev/null
 
-i=0
-while [ "$i" -lt 60 ]; do
-    docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 && break
-    i=$((i + 1))
-    sleep 1
-done
-docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 || fail "postgres did not become ready"
+wait_for_log_count 2 || fail "postgres did not become ready"
 
 expected_head="$(basename -a "${db_module}"/migrations/default/*.sql | sed -n 's/^\([0-9]*\)_.*/\1/p' | sort | tail -1)"
 [ -n "${expected_head}" ] || fail "could not determine the latest migration version from ${db_module}/migrations/default"
@@ -104,13 +121,7 @@ fresh_table_count="$(table_count)"
 # --- 2. A restart never loses committed data ---
 psql_as -d erun -c "insert into tenants (name) values ('restart-survives-sentinel');" >/dev/null
 docker restart "${container}" >/dev/null
-i=0
-while [ "$i" -lt 60 ]; do
-    docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 && break
-    i=$((i + 1))
-    sleep 1
-done
-docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 || fail "postgres did not come back up after restart"
+wait_for_log_count 3 || fail "postgres did not come back up after restart"
 survived="$(psql_as -d erun -tAc "select name from tenants where name='restart-survives-sentinel';")"
 [ "${survived}" = "restart-survives-sentinel" ] || fail "a restart with no reset must never lose committed data"
 

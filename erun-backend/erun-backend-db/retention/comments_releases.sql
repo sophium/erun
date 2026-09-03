@@ -39,6 +39,42 @@ FROM comments
 WHERE comment_id IN (SELECT comment_id FROM roots_to_delete)
    OR parent_comment_id IN (SELECT comment_id FROM roots_to_delete);
 
+-- Record the run: eligible counts for both tables, tagged with the dry_run
+-- flag this invocation ran under. deleted_count is 0 for a dry run (nothing
+-- below actually deletes) or the same eligible count for a real run -- the
+-- delete below uses the identical predicate, and retention.sh holds a
+-- session-scoped advisory lock for the whole sweep, so nothing else can
+-- change eligibility between this count and that delete.
+WITH releases_ranked AS (
+  SELECT release_id, tenant_id, created_at,
+         row_number() OVER (PARTITION BY tenant_id ORDER BY created_at DESC) AS rn
+  FROM releases
+),
+releases_eligible AS (
+  SELECT count(*) AS n FROM releases_ranked
+  WHERE rn > 1000 OR created_at < now() - interval '180 days'
+),
+closed_roots AS (
+  SELECT comment_id, tenant_id, updated_at,
+         row_number() OVER (PARTITION BY tenant_id ORDER BY updated_at DESC) AS rn
+  FROM comments
+  WHERE parent_comment_id IS NULL AND status = 'CLOSED'
+),
+roots_to_delete AS (
+  SELECT comment_id FROM closed_roots
+  WHERE rn > 5000 OR updated_at < now() - interval '30 days'
+),
+comments_eligible AS (
+  SELECT count(*) AS n
+  FROM comments
+  WHERE comment_id IN (SELECT comment_id FROM roots_to_delete)
+     OR parent_comment_id IN (SELECT comment_id FROM roots_to_delete)
+)
+INSERT INTO retention_runs (policy_name, table_name, dry_run, eligible_count, deleted_count)
+SELECT 'comments_releases', 'releases', :dry_run, n, CASE WHEN :dry_run THEN 0 ELSE n END FROM releases_eligible
+UNION ALL
+SELECT 'comments_releases', 'comments', :dry_run, n, CASE WHEN :dry_run THEN 0 ELSE n END FROM comments_eligible;
+
 \if :dry_run
 \else
 BEGIN;

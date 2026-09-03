@@ -10,10 +10,28 @@
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+{{- $retention := default dict .Values.retention -}}
+{{- $retentionEnabled := default false $retention.enabled -}}
+{{/* default/dict can't distinguish "unset" from "explicitly false" (sprig's
+     default treats false as empty), so retention.dryRun=false needs the same
+     hasKey-guarded resolution mcpEnabled uses in erun-devops/templates/service.yaml
+     -- otherwise an operator opting into real deletion would silently stay in
+     dry-run mode. */}}
+{{- $retentionDryRun := true -}}
+{{- if hasKey $retention "dryRun" -}}
+{{- $retentionDryRun = $retention.dryRun -}}
+{{- end -}}
 # Runs the erun-backend-db retention sweeps (erun-backend-db/retention/*.sql)
-# once a day. Pruning has no urgency the way schema-drift repair does, so a
-# daily cadence is enough. Each policy file reports the rows it would delete
-# before deleting them, so the CronJob's own log is a per-run audit trail.
+# once a day. Off by default (retention.enabled=false) -- a fresh deploy of
+# this chart must never start deleting rows on its own, and turning it on
+# defaults to dry_run=true (retention.dryRun=true) so a misconfigured bound
+# is caught by reading a report before an operator opts into real deletion
+# with retention.dryRun=false. Pruning has no urgency the way schema-drift
+# repair does, so a daily cadence is enough once enabled. Each policy file
+# reports the rows it would delete before deleting them and records the
+# outcome in retention_runs, so both the CronJob's own log and a queryable
+# table are a per-run audit trail.
+{{- if $retentionEnabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -42,6 +60,8 @@ spec:
               env:
                 - name: HOME
                   value: /home/erun
+                - name: ERUN_RETENTION_DRY_RUN
+                  value: {{ $retentionDryRun | toString | quote }}
                 - name: ERUN_POSTGRES_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -49,3 +69,4 @@ spec:
                       key: {{ $postgresPasswordSecretKey }}
                 - name: ERUN_DATABASE_URL
                   value: {{ $databaseURL | quote }}
+{{- end }}

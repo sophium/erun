@@ -29,3 +29,8 @@ GRANT SELECT, INSERT, REFERENCES
 -- operations caller changes it.
 GRANT SELECT ON platform_rate_limits TO erun_tenant;
 GRANT SELECT, INSERT, UPDATE, REFERENCES ON platform_rate_limits TO erun_operations;
+
+-- retention_runs is a platform-wide operational log, not tenant data -- only
+-- the retention sweep (running as erun_operations) writes it, and only an
+-- operations caller has any reason to read it.
+GRANT SELECT, INSERT ON retention_runs TO erun_operations;
