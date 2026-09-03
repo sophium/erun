@@ -156,10 +156,18 @@ COPY bucket /src/bucket
 # only the charts and their *_test.sh scripts are needed, not the rest of
 # erun-devops (docker/, terraform-erun/, etc.).
 COPY erun-devops/k8s /src/erun-devops/k8s
+# erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
+# default and chart-value keys (retention.enabled, retention.dryRun) against
+# what this chart actually renders; only the one page is needed.
+COPY erun-docs/docs/deployment/data-retention.md /src/erun-docs/docs/deployment/data-retention.md
 # TestMCPOverviewDocumentsEveryTool cross-checks erun-common's registered MCP
 # tools against this page's "Full tool index" table; only the one file is
 # needed, not the built docs site.
 COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
+# TestGateRunInfrastructureSignaturesAreDocumented (erun-integration) cross-
+# checks erun-common's known infrastructure-failure signature list against
+# this page's spec of the gate-run/gate-build failure classifier.
+COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
