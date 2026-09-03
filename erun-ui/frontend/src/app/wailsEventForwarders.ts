@@ -1,6 +1,5 @@
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import type { ActivityLockEvent, ActivityQueueEntry } from './activityQueueState';
-import { wailsApi } from './api/wailsApi';
 import type { AppNotificationClearPayload } from './model';
 import { setActivityLock, upsertActivityEntry } from './slices/activitySlice';
 import { openCloseGate } from './slices/closeGateSlice';
@@ -37,9 +36,6 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
         source: event.source ?? '',
       }),
     );
-  });
-  EventsOn('environments-changed', () => {
-    dispatch(wailsApi.util.invalidateTags(['AppState']));
   });
   EventsOn('app-close-gate', (gate: AppCloseGatePayload) => {
     dispatch(openCloseGate(gate.running ?? []));

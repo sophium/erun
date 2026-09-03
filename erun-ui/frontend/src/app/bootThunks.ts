@@ -153,6 +153,14 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 // populated dropdown.
 export const reloadStateAfterEnvironmentChange =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    // RTK Query's own condition() check bails out on a forced refetch
+    // whenever a request for the same query is already pending, before it
+    // ever looks at forceRefetch — dispatching straight into an in-flight
+    // boot fetch would otherwise silently resolve with that fetch's
+    // pre-change data instead of a fresh one. Wait for any in-flight
+    // getInitialState request to settle first so the forced refetch below
+    // is guaranteed to actually run.
+    await dispatch(stateApi.util.getRunningQueryThunk('getInitialState', undefined));
     // initiate() registers a cache subscription that must be released, or
     // repeated reloads (e.g. handleEnvironmentInitialized's retry loop) leak
     // subscriptions and eventually stall RTK Query so a later refetch never
