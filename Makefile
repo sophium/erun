@@ -137,9 +137,26 @@ test-erun-ui:
 # have run automatically without this. Opt-in ERUN_E2E_* suites skip cleanly
 # with no database configured, so this stays fast with no external
 # dependency.
+#
+# -count=1 is load-bearing, not belt-and-braces (the same reasoning as
+# test-erun-ui's own -count=1 above): this module's Dockerfile RUN mounts a
+# persistent BuildKit cache over /root/.cache/go-build (see the erun-devops
+# Dockerfile), so Go's test cache survives across separate `erun build`
+# invocations of different commits, not just within one. Three tests here
+# read something at runtime that Go's cache cannot see as an input --
+# tenant_scope_test.go's TestContextOnlyRepositoryMethodsAreClassified
+# os.ReadDir-and-parses its own package directory, noexec_test.go's
+# TestBackendRunsNoExternalBinaries filepath.WalkDir-and-parses this whole
+# module's source tree (TestBannedCommonFuncsStillExist also filepath.Globs
+# erun-common/*.go, outside this module entirely), and
+# buildinfo_ldflags_test.go's TestDockerfileLdflagsActuallyStampsTheBinary
+# os.ReadFiles the erun-devops Dockerfile -- so editing any of those without
+# touching this module's own source would replay a stale cached "ok" and miss
+# the regression, exactly the failure mode -X's own history bullet above
+# describes.
 test-erun-backend-api:
 	@echo ">> go test erun-backend-api"
-	@(cd erun-backend/erun-backend-api && go test ./...)
+	@(cd erun-backend/erun-backend-api && go test -count=1 ./...)
 
 # erun-mcp's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-mcp is unioned
@@ -149,9 +166,18 @@ test-erun-backend-api:
 # neither erun-cli's nor erun-integration's `go test ./...` ever runs a single
 # erun-mcp test. 282 test cases (including subtests) sat green on every
 # contributor's own machine and reachable by nobody's gate.
+#
+# -count=1 is load-bearing, not belt-and-braces, same reasoning as
+# test-erun-backend-api's own -count=1 above: mcp_overview_doc_test.go's
+# TestMCPOverviewDocumentsEveryTool os.ReadFiles
+# erun-docs/docs/mcp/overview.md at run time -- a file in a different
+# top-level module this test has no source dependency on -- so editing that
+# doc without touching erun-mcp's own source would replay a stale cached "ok"
+# under this module's own persistent BuildKit go-build cache mount and miss a
+# drifted tool index.
 test-erun-mcp:
 	@echo ">> go test erun-mcp"
-	@(cd erun-mcp && go test ./...)
+	@(cd erun-mcp && go test -count=1 ./...)
 
 # erun-devops/dns01-webhook's own Go tests. This module has no entry in
 # LINT_MODULES and no test stage of its own -- its Dockerfile only builds the
