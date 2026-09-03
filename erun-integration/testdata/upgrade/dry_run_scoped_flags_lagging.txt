@@ -1,10 +1,10 @@
 audit: erun upgrade --dry-run --environment dev --tenant team --version <VERSION>
 trace-log: would append the full trace to <TMP>
-upgrade: tenant=team environment=dev version-override=<VERSION> force=false
+upgrade: tenant=team environment=dev version-override=<VERSION> force=false fleet=false gate-environment=
 upgrade: team/dev opted in, channel=stable current=<VERSION>
 upgrade: team/dev using version override <VERSION> for all channels
-==> Upgrade plan: 1 member(s), 1 lagging
-    team/dev [stable] <VERSION> -> <VERSION>  (will upgrade)
+==> Upgrade plan: 1 member(s), 1 lagging, in this order:
+    1. team/dev [stable] <VERSION> -> <VERSION>  (will upgrade)
 ==> Upgrading team/dev <VERSION> -> <VERSION> (stable)
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)

@@ -277,4 +277,113 @@ func TestUpgrade(t *testing.T) {
 		result := erun.Run(t, []string{"upgrade", "--tenant", "team", "--environment", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_scoped_flags_lagging", normalize.Apply(result.Combined))
 	})
+
+	t.Run("flags_fleet_requires_tenant", func(t *testing.T) {
+		// --fleet with no tenant in scope is refused outright: rolling every
+		// environment across every tenant is far too high a blast radius to
+		// resolve implicitly.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"upgrade", "--fleet", "--version", "1.2.3", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --fleet without --tenant, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/flags_fleet_requires_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("flags_gate_environment_requires_tenant", func(t *testing.T) {
+		// Mirrors `erun list --gate-environment`'s own "requires --tenant"
+		// refusal for the same reason: naming a gate makes no sense without
+		// naming whose fleet it gates.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"upgrade", "--gate-environment", "build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --gate-environment without --tenant, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/flags_gate_environment_requires_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_gate_environment_not_found_fails", func(t *testing.T) {
+		// A typo'd --gate-environment must fail loudly rather than silently
+		// resolving a plan with no gate verdict -- the same contract `erun
+		// list --gate-environment` already enforces for drift detection.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\n")
+		result := erun.Run(t, []string{"upgrade", "team", "--gate-environment", "ghost", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unknown --gate-environment, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_gate_environment_not_found_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_fleet_rolls_gate_environment_first", func(t *testing.T) {
+		// The fleet-remediation shape: a tenant with envs that never opted
+		// into Upgrade all (autoupgrade=false) still all roll under --fleet,
+		// and --gate-environment forces the merge-queue gate to the front of
+		// the resolved order regardless of where it sorts alphabetically --
+		// "zzz-build" would otherwise resolve last. This is the release
+		// cadence policy's "immediate, unconditional" gate redeploy: the gate
+		// must never be the last environment rolled, since it validates
+		// every change landing on the others.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "aaa-dev")
+		seedUpgradeEnv(t, setup, "team", "aaa-dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\n")
+		seedUpgradeEnv(t, setup, "team", "zzz-build",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\n")
+		fixture.SeedDevopsRepo(t, setup, "team", "aaa-dev")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		result := erun.Run(t, []string{"upgrade", "team", "--fleet", "--version", "2.0.0", "--gate-environment", "zzz-build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1. team/zzz-build") {
+			t.Fatalf("expected the gate environment first in the resolved order, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_fleet_rolls_gate_environment_first", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_held_lease_refuses_and_names_holder", func(t *testing.T) {
+		// A roll must never yank an environment out from under a running
+		// agent session: a held activity lease (the same signal `erun
+		// resize` already refuses on) refuses the deploy and names the
+		// holder, even under --dry-run.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedHeldExclusiveLease(t, setup, "team", "dev", "eng-42", "exec_job_attach")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit while a lease is held, got 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "orchestrator eng-42") {
+			t.Fatalf("expected the refusal to name the holder, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_held_lease_refuses_and_names_holder", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_held_lease_with_override_proceeds", func(t *testing.T) {
+		// --override-lease is explicit and recorded: the same held lease as
+		// above must let the dry-run plan through, tracing the override
+		// rather than staying silent about it.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedHeldExclusiveLease(t, setup, "team", "dev", "eng-42", "exec_job_attach")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--override-lease", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "overriding") {
+			t.Fatalf("expected the trace to record the override, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_held_lease_with_override_proceeds", normalize.Apply(result.Combined))
+	})
 }

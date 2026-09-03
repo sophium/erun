@@ -1,0 +1,5 @@
+audit: erun upgrade --dry-run --gate-environment ghost team
+upgrade: tenant=team environment= version-override= force=false fleet=false gate-environment=ghost
+upgrade: team/dev not opted in (autoupgrade=false), skipping
+upgrade: plan resolution failed: gate environment "ghost" not found in tenant "team"
+gate environment "ghost" not found in tenant "team"
