@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention test-retention-grants check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -300,6 +300,17 @@ test-retention:
 		echo "=== $$t ==="; \
 		sh "$$t" || exit 1; \
 	done
+
+# End-to-end proof that erun_operations -- the role every retention policy
+# runs as -- can actually INSERT then DELETE a row in every table under an
+# implemented or designed retention policy (the #1968 six-table sweep plus
+# builds/gate_runs), and remains refused on audit_events/usage_events per
+# #1959's deliberate append-only carve-out. Same "needs a real docker daemon
+# and the atlas CLI" exclusion from make check as test-retention above. Run
+# this by hand, or via `erun exec job` in an agent env, before merging a
+# change to schema/roles.sql or any retention policy's target tables.
+test-retention-grants:
+	sh erun-devops/docker/erun-backend-db/retention_grants_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
