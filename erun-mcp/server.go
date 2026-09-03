@@ -93,8 +93,9 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 		return newServer(info, runtime, identity, recorder)
 	})
 	handler := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
-		JSONResponse:   true,
-		SessionTimeout: 5 * time.Minute,
+		JSONResponse:          true,
+		SessionTimeout:        5 * time.Minute,
+		CrossOriginProtection: crossOriginProtectionForAuthenticatedEdge(cfg.Path),
 	})
 
 	authCfg := mcpAuthConfigFromEnv()
@@ -116,6 +117,31 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	// a valid token before the handler ever inspects capabilities or upgrades.
 	registerAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
 	return mux
+}
+
+// crossOriginProtectionForAuthenticatedEdge exempts this edge's one served
+// path from the MCP SDK's default same-origin CSRF guard
+// (net/http.CrossOriginProtection, on by default since go-sdk v1.4.1 --
+// NewStreamableHTTPHandler installs a zero-value one whenever the caller
+// leaves this option nil). That guard exists to stop a forged cross-site
+// request from riding a browser's *ambient* credentials -- a cookie the
+// browser attaches automatically. This edge has none: authHTTPMiddleware
+// already requires a bearer token in the Authorization header on every
+// request before it ever reaches this handler, and a cross-site page cannot
+// forge that header without already knowing the secret it protects -- at
+// which point origin is not doing any protective work left to do. Left at
+// its default, the guard 403s every legitimate cross-origin call this edge
+// exists to serve (the hosted console calling an environment's exposed MCP
+// hostname from a different origin) with "cross-origin request detected
+// from Sec-Fetch-Site header", regardless of corsMiddleware's own
+// reflected-Origin CORS headers below -- that middleware controls whether
+// the browser lets the caller's script *read* the response; this guard runs
+// deeper inside the SDK's own handler and rejects the request outright
+// before corsMiddleware's headers are even relevant.
+func crossOriginProtectionForAuthenticatedEdge(path string) *http.CrossOriginProtection {
+	protection := http.NewCrossOriginProtection()
+	protection.AddInsecureBypassPattern(path)
+	return protection
 }
 
 // corsMiddleware unblocks a browser calling this edge directly from a
