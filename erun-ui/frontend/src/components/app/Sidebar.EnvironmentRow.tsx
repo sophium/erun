@@ -253,6 +253,7 @@ export function EnvironmentRow({
     busyFromEnvironment,
     isLocal,
     isHost,
+    usageExcludesBuilds,
     runtimeVersion,
     runtimeVersionLine,
     erunVersion,
@@ -291,6 +292,7 @@ export function EnvironmentRow({
       nodeIndicator={nodeIndicator}
       node={node}
       usage={usage}
+      usageExcludesBuilds={usageExcludesBuilds}
     >
       <EnvironmentRowOpenButton
         environmentName={environmentName}

@@ -8,6 +8,7 @@ import {
   removeEnvironment,
   seedEnvironment,
   seedEnvironmentWithRuntimeVersions,
+  seedRuntimeEnvironment,
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
@@ -61,9 +62,15 @@ async function measureLabelColumnWidth(label: Locator): Promise<{ actual: number
   });
 }
 
-async function emitStaleEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
+async function emitEnvUsage(
+  page: Page,
+  tenant: string,
+  environment: string,
+  ageSeconds: number,
+  staleAfterSeconds: number,
+): Promise<void> {
   await page.evaluate(
-    ({ tenant, environment }) => {
+    ({ tenant, environment, ageSeconds, staleAfterSeconds }) => {
       const runtime = (
         window as unknown as {
           runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
@@ -85,12 +92,25 @@ async function emitStaleEnvUsage(page: Page, tenant: string, environment: string
             oomKills: 0,
           },
         },
-        observedAtUnix: Math.floor(Date.now() / 1000) - 600,
-        staleAfterSeconds: 90,
+        observedAtUnix: Math.floor(Date.now() / 1000) - ageSeconds,
+        staleAfterSeconds,
       });
     },
-    { tenant, environment },
+    { tenant, environment, ageSeconds, staleAfterSeconds },
   );
+}
+
+async function emitStaleEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
+  await emitEnvUsage(page, tenant, environment, 600, 90);
+}
+
+// emitFreshEnvUsage reports a reading that has not outlived its own sweep
+// interval, so UsageState's caption always renders "As of ... ago" rather
+// than the stale branch -- the fresh-branch counterpart of emitStaleEnvUsage,
+// used to check the #1979 "excludes builds" caveat on the branch it renders
+// most often.
+async function emitFreshEnvUsage(page: Page, tenant: string, environment: string): Promise<void> {
+  await emitEnvUsage(page, tenant, environment, 5, 90);
 }
 
 test.describe('sidebar env hover card layout (#1901)', () => {
@@ -265,5 +285,53 @@ test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => 
     await expect(card).toBeVisible();
     const { actual, tenCh } = await measureLabelColumnWidth(card.locator('dt:text-is("Status")'));
     expect(actual).toBeCloseTo(tenCh, 0);
+  });
+});
+
+// The Usage figures are read from the runtime container's own cgroup, which
+// is never where a build runs -- every build executes in the erun-dind
+// sidecar instead, so the reading can look idle while that sidecar saturates
+// the node (#1979). A build-capable environment's caption says so on every
+// reading, not only while a build happens to be running -- there is no
+// reliable "a build is running" signal that covers every way one can start
+// (desktop, CLI, an MCP-driven orchestrator). A runtime-type environment has
+// no dind sidecar at all (erun-devops/k8s/erun-devops/templates/service.yaml,
+// `$dindEnabled`), so its reading is the whole story and must not carry the
+// caveat.
+test.describe('sidebar env hover card usage caveat for build-capable environments (#1979)', () => {
+  test('usage caption for a build-capable environment says it excludes builds', async ({
+    app,
+    page,
+  }) => {
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(async () => {
+      await emitFreshEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA);
+      await page.mouse.move(0, 0);
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('excludes builds', { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  test('usage caption for a runtime environment does not claim it excludes builds', async ({
+    app,
+    page,
+  }) => {
+    const environment = uniqueEnvironmentName('usage-caveat-runtime');
+    seedRuntimeEnvironment(SEED_TENANT, environment);
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      const card = app.sidebar.envHoverCard(SEED_TENANT, environment);
+      await expect(async () => {
+        await emitFreshEnvUsage(page, SEED_TENANT, environment);
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(SEED_TENANT, environment);
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        await expect(card).toContainText('As of', { timeout: 1_000 });
+      }).toPass({ timeout: 20_000 });
+      await expect(card).not.toContainText('excludes builds');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
   });
 });
