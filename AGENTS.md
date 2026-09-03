@@ -271,6 +271,12 @@ Exceptions are narrow: changes with no live-target surface (pure refactors that 
 
 Probe artifacts the agent leaves behind during verification (injected files, manual patches that diverge from the source of truth, helper processes) are the agent's mess to clean up before declaring done, so the user's environment returns to a clean state.
 
+## Run `make fast-check` Before Pushing
+
+`make fast-check` is a fast, local subset of `check-gate` — golangci-lint, the tracker-reference gate, and prettier formatting — that runs in seconds to under a minute, not the 9-10 minutes a full `make check`/`check-gate` cycle costs. Agents are what push in this repository (see § "Contributing" above), so an agent pushing a branch without having run `fast-check` first is choosing to find out about a lint finding, a tracker reference in a comment, or an unformatted file ten minutes later in the merge gate instead of immediately. Run `make fast-check` before every push; it is cheap enough that there is no reason not to.
+
+`fast-check` is **not** a substitute for `make check` / `make check-gate`, and passing it does not mean the branch is ready to merge — it runs no tests, no build, and no integration suite. Still run the full gate (or push and let the merge queue's own gate run it) before merging; `fast-check` only shortens the feedback loop for the narrow class of failure it covers.
+
 ## Integration Test Gate (Mandatory)
 
 - `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.

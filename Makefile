@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -366,3 +366,58 @@ check:
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
 check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend helm-chart-tests integration-test-gate
+
+# A fast, local subset of check-gate for the cheap-and-common failures that
+# don't need a full check-gate cycle to find: golangci-lint findings, the
+# tracker-reference gate (root AGENTS.md § "Code Comments"), and prettier
+# formatting. This is NOT a substitute for check/check-gate -- it runs no
+# tests, no build, and no integration suite, so a green fast-check says
+# nothing about those. It exists purely so a contributor (human or agent)
+# can catch the failures it does cover in seconds locally instead of one
+# ~9-10 minute merge-gate cycle later. Measured against a day where 5 of the
+# gate's reds were exactly this class of failure (3x tracker reference, 1x
+# prettier on a markdown file, 1x erun-common lint finding): fast-check
+# reproduces all 5 in ~30s warm (golangci-lint's own cache and node_modules
+# already present) and comfortably under a minute cold, against 9-10 minutes
+# to discover the same failure via a full gate cycle.
+#
+# Both halves of the tracker-reference gate are scoped down from their
+# check-gate homes rather than reimplemented: the Go half normally only runs
+# as part of `go test ./...` inside integration-test-gate, which also builds
+# the instrumented erun binary for every other scenario in the module -- but
+# TestNoIssueReferenceInCode/TestIssueReferenceBaselineIsCurrent don't call
+# erun.Run, so scoping `go test` to erun-integration's root package (`.`
+# rather than `./...`) compiles just that package and skips the binary build
+# entirely, while the test itself still walks the whole repo tree (it
+# resolves its own root independently of which package invoked it). The
+# TypeScript half normally runs inside test-frontend after a full yarn
+# install plus every workspace's typecheck/lint/build/test; here it runs
+# directly against the same node script test-frontend calls, with nothing
+# else in front of it.
+#
+# -count=1 on the Go half is load-bearing, not belt-and-braces (the same
+# reasoning as test-erun-ui's own -count=1 above): the test walks the repo
+# tree with os/filepath at run time, which Go's test cache cannot see as an
+# input, so a second invocation right after adding a tracker reference
+# elsewhere in the tree replayed a stale cached "ok" and missed it -- caught
+# by hand while validating this target, not theoretical.
+#
+# Prettier runs the same `yarn format:check` each workspace's own
+# package.json already defines, across all three workspaces at once via
+# scripts/parallel-gate.sh (same aggregated-output/single-failure-report
+# contract as the `lint` target above) rather than the width-computed
+# parallelism lint and helm-chart-tests use -- there are only ever three
+# fixed jobs here, not a directory-scanned list that could grow unboundedly,
+# so a flat parallelism of 3 needs no cgroup-derived sizing to stay safe.
+fast-check: lint
+	@echo ">> issue-reference gate (Go, whole repo)"
+	@(cd erun-integration && go test -count=1 -run '^(TestNoIssueReferenceInCode|TestIssueReferenceBaselineIsCurrent)$$' .)
+	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
+	@yarn install --frozen-lockfile
+	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
+	@node --test scripts/check-issue-references.test.mjs
+	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
+	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
+	@for d in erun-kit erun-ui/frontend erun-console; do \
+		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \
+	done | ./scripts/parallel-gate.sh 3 fast-check-prettier
