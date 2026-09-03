@@ -342,3 +342,86 @@ func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T)
 		t.Fatalf("a call with no auth context must be audited as the registered identity, not the previous live caller: %q", lines[1])
 	}
 }
+
+// bearerRoundTripper injects a fixed bearer token on every request -- the
+// transport-level equivalent of what a real MCP client (console, or erun#1107's
+// mobile client) sets on its own HTTP client.
+type bearerRoundTripper struct {
+	token string
+}
+
+func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+rt.token)
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere
+// is the live-edge proof every other capability test in this file stops short
+// of: connectWithCapabilities injects an authIdentity directly, bypassing
+// authHTTPMiddleware entirely, so nothing here yet proved that a real signed
+// bearer token carrying erun:operate is actually accepted, resolved, and
+// scoped correctly by the production wiring (newHTTPHandler's
+// authHTTPMiddleware -> per-request capability resolution -> guardTool) a
+// deployed edge runs. identityWithScopedToken signs with the same
+// eruncommon.SignMCPToken call mcptoken.Signer.Sign wraps (same EdDSA JWT
+// shape, same file:// issuer scheme, just a test-scoped key and path rather
+// than the fixed in-pod one) -- erun-mcp cannot import erun-backend-api to
+// call its mint route directly (module boundary, root AGENTS.md), so this is
+// as close to the hosted backend's real output as this module can produce,
+// and it is the exact production code path a deployed edge runs against a
+// backend-minted token.
+func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere(t *testing.T) {
+	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityOperate))
+	t.Setenv(envMCPTrustedIssuer, issuer)
+	t.Setenv(envMCPAudience, "erun-mcp")
+	t.Setenv(envTenant, "acme")
+
+	cfg := HTTPConfig{Path: "/mcp"}
+	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	t.Cleanup(httpServer.Close)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "operate-edge-test", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:             httpServer.URL + cfg.Path,
+		DisableStandaloneSSE: true,
+		HTTPClient:           &http.Client{Transport: bearerRoundTripper{token: token}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect with an operate-scoped bearer token over the real edge: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	// tools/list over the real edge must be exactly the lifecycle surface --
+	// TestOperateCapabilitySeesOnlyLifecycleTools' claim, now driven by a real
+	// signed token through the production auth middleware instead of an
+	// injected authIdentity.
+	got := listToolNames(t, session)
+	want := []string{"context_start", "context_stop", "deploy", "resize"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("operate-scoped edge exposed %v, want %v", got, want)
+	}
+
+	// A permitted tool reaches its own business logic instead of being turned
+	// away for lack of capability: deploy with no version refuses for a reason
+	// that has nothing to do with authorization.
+	deployed, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "deploy", Arguments: map[string]any{"version": ""}})
+	if err != nil {
+		t.Fatalf("an operate-scoped token must reach deploy's handler, got a transport error: %v", err)
+	}
+	if deployed == nil || !deployed.IsError {
+		t.Fatalf("deploy with no version should report a business error, got %+v", deployed)
+	}
+	if text := removedToolText(t, deployed); !strings.Contains(text, "version") {
+		t.Fatalf("deploy's refusal should name the missing version, got %q", text)
+	}
+
+	// Tools the tier deliberately excludes -- everything that decides what
+	// environments exist or runs arbitrary code -- are not just missing from
+	// the menu; calling them by name is refused too, over the real edge.
+	for _, forbidden := range []string{"exec_raw", "delete", "terraform", "init"} {
+		if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: forbidden}); err == nil {
+			t.Fatalf("an operate-scoped token must not be able to call %q", forbidden)
+		}
+	}
+}
