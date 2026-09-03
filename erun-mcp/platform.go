@@ -47,6 +47,29 @@ func platformWhoamiTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 	}
 }
 
+type PlatformVersionInput struct {
+	platformAliasInput
+}
+
+type PlatformVersionResult struct {
+	Preview bool                    `json:"preview"`
+	Info    eruncommon.PlatformInfo `json:"info,omitempty"`
+	Trace   []string                `json:"trace,omitempty"`
+}
+
+func platformVersionTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformVersionInput) (*mcp.CallToolResult, PlatformVersionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformVersionInput) (*mcp.CallToolResult, PlatformVersionResult, error) {
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "platform_version"
+		info, err := eruncommon.RunPlatformVersion(ctx, runtime.Store, input.Alias, cloudDependencies())
+		if err != nil {
+			return nil, PlatformVersionResult{}, err
+		}
+		return nil, PlatformVersionResult{Preview: input.Preview, Info: info, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type PlatformTenantCreateInput struct {
 	platformAliasInput
 	Name          string `json:"name" jsonschema:"tenant name (hyphen-free; forms the <tenant>-<env> namespace)"`
