@@ -45,6 +45,7 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+			runCtx.MCPTool = "unexpose"
 			_, err := eruncommon.RunUnexposeService(runCtx, eruncommon.UnexposeParams{
 				Tenant:             tenant,
 				Environment:        environment,

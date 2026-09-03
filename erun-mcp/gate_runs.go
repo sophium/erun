@@ -44,6 +44,7 @@ func execGateRunStartTool(runtime RuntimeConfig) func(context.Context, *mcp.Call
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateRunStartInput) (*mcp.CallToolResult, GateRunResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "exec_gate-run_start"
 		run, err := eruncommon.RunGateRunStart(ctx, runtime.Store, input.Alias, eruncommon.GateRunStartParams{
 			SourceBranch: input.SourceBranch,
 			TargetBranch: input.TargetBranch,
@@ -77,6 +78,7 @@ func execGateRunReportTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "exec_gate-run_report"
 		run, err := eruncommon.RunGateRunReport(ctx, runtime.Store, input.Alias, eruncommon.GateRunReportParams{
 			GateRunID:   input.GateRunID,
 			Status:      input.Status,
@@ -102,6 +104,7 @@ func gateListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 	return func(_ context.Context, _ *mcp.CallToolRequest, input GateListInput) (*mcp.CallToolResult, GateRunListResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "gate_list"
 		runs, err := eruncommon.RunGateRunList(ctx, runtime.Store, input.Alias, eruncommon.GateRunListParams{
 			TargetBranch: input.TargetBranch,
 			SourceBranch: input.SourceBranch,
@@ -134,6 +137,7 @@ func execReconcileBypassTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReconcileBypassInput) (*mcp.CallToolResult, ReconcileBypassToolResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "exec_reconcile-bypass"
 		result, err := eruncommon.ReconcileBypass(ctx, runtime.Store, input.Alias, eruncommon.ReconcileBypassParams{
 			RemoteURL:      input.RemoteURL,
 			RulesetID:      input.RulesetID,
@@ -160,6 +164,7 @@ func gateShowTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "gate_show"
 		run, err := eruncommon.RunGateRunShow(ctx, runtime.Store, input.Alias, input.GateRunID, cloudDependencies())
 		if err != nil {
 			return nil, GateRunResult{}, err

@@ -53,6 +53,43 @@ func TestPlatformClientAuthenticatedCallSendsMintedBearer(t *testing.T) {
 	}
 }
 
+// TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of the
+// AuditEventTypeMCP fix (erun#763): erun-backend-api can only classify a call
+// as MCP-driven if the request actually carries this header, so a
+// regression here would silently widen the dead-audit-type gap again.
+func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(MCPToolAuditHeader); got != "review_show" {
+			t.Fatalf("%s = %q, want %q", MCPToolAuditHeader, got, "review_show")
+		}
+		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1")).WithMCPTool("review_show")
+	if _, err := client.Whoami(context.Background()); err != nil {
+		t.Fatalf("Whoami: %v", err)
+	}
+}
+
+// TestPlatformClientWithoutMCPToolSendsNoAuditHeader guards the CLI/library
+// default: a caller that never opts in must not send the header at all, so
+// erun-backend-api keeps classifying it as a plain API call.
+func TestPlatformClientWithoutMCPToolSendsNoAuditHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(MCPToolAuditHeader); got != "" {
+			t.Fatalf("%s = %q, want empty", MCPToolAuditHeader, got)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.Whoami(context.Background()); err != nil {
+		t.Fatalf("Whoami: %v", err)
+	}
+}
+
 func TestPlatformClientAuthenticatedCallWithoutMinterFailsClearly(t *testing.T) {
 	client := NewPlatformClient("https://api.example.test", nil)
 	if _, err := client.Whoami(context.Background()); err == nil {

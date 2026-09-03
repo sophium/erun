@@ -38,6 +38,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			var result *eruncommon.BuildResult
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
 				runCtx.BuildJobs = input.Jobs
+				runCtx.MCPTool = "build"
 				component := strings.TrimSpace(input.Component)
 				version := strings.TrimSpace(input.Version)
 				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental, input.Platforms)

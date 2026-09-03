@@ -35,6 +35,15 @@ type Context struct {
 	// push, deploy), set by that command's umbrella and nil everywhere else —
 	// see timing.go. Unexported: only erun-common's own umbrellas start one.
 	timing *stepTiming
+	// MCPTool names the MCP tool that initiated this call, set only by
+	// erun-mcp's tool handlers before they call into shared execution.
+	// newPlatformClientForAlias forwards it to erun-backend-api as an audit
+	// caller hint (see PlatformClient.WithMCPTool), so a platform-backed call
+	// an MCP tool triggers is audited as type MCP with this tool name instead
+	// of the generic API classification every other bearer-token caller gets.
+	// Empty means "not an MCP call" (CLI, tests, pure resolution) and changes
+	// nothing about the request. erun-cli does not populate this field yet.
+	MCPTool string
 }
 
 // WriteResult emits v as the command's structured result; callers invoke it on

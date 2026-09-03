@@ -101,6 +101,9 @@ func newPlatformClientForAlias(ctx Context, store CloudReadStore, alias string, 
 		}
 		return token.Token, nil
 	})
+	if ctx.MCPTool != "" {
+		client = client.WithMCPTool(ctx.MCPTool)
+	}
 	return client, provider, nil
 }
 

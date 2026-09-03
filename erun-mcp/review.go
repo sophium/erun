@@ -36,6 +36,7 @@ func reviewListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_list"
 		reviews, err := eruncommon.RunReviewList(ctx, runtime.Store, input.Alias, eruncommon.ReviewListParams{
 			TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch, Status: input.Status,
 			AuthorUserID: input.AuthorUserID, ReviewerUserID: input.ReviewerUserID,
@@ -66,6 +67,7 @@ func reviewShowTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_show"
 		detail, err := eruncommon.RunReviewShow(ctx, runtime.Store, input.Alias, input.ReviewID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewShowResult{}, err
@@ -94,6 +96,7 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_create"
 		review, err := eruncommon.RunReviewCreate(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateReviewParams{
 			Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
 		}, cloudDependencies())
@@ -127,6 +130,7 @@ func reviewCommentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToo
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_comment"
 		comment, err := eruncommon.RunReviewComment(ctx, runtime.Store, input.Alias, eruncommon.ReviewCommentParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, FilePath: input.FilePath,
 			Line: input.Line, Body: input.Body, ParentCommentID: input.ParentCommentID,
@@ -150,6 +154,7 @@ func reviewCloseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_close"
 		review, err := eruncommon.RunReviewClose(ctx, runtime.Store, input.Alias, input.ReviewID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
@@ -191,6 +196,7 @@ func reviewRecordBuildTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_record-build"
 		root := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 		build, err := eruncommon.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, eruncommon.ReviewRecordBuildParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, Gate: input.Gate, Version: input.Version,
@@ -229,6 +235,7 @@ func reviewReportMergedTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_report-merged"
 		review, err := eruncommon.RunReviewReportMerged(ctx, runtime.Store, input.Alias, input.ReviewID, input.BuildID, input.RemoteURL, cloudDependencies())
 		if err != nil {
 			return nil, ReviewReportMergedResult{}, err
@@ -250,6 +257,7 @@ func reviewResolveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToo
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_resolve"
 		comment, err := eruncommon.RunReviewResolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewCommentResult{}, err
@@ -265,6 +273,7 @@ func reviewUnresolveTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_unresolve"
 		comment, err := eruncommon.RunReviewUnresolve(ctx, runtime.Store, input.Alias, input.ReviewID, input.CommentID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewCommentResult{}, err
@@ -291,6 +300,7 @@ func reviewReviewersListTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_reviewers_list"
 		reviewers, err := eruncommon.RunReviewReviewersList(ctx, runtime.Store, input.Alias, input.ReviewID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewReviewersListResult{}, err
@@ -318,6 +328,7 @@ func reviewReviewerAddTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_reviewers_add"
 		reviewer, err := eruncommon.RunReviewReviewerAdd(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, cloudDependencies())
 		if err != nil {
 			return nil, ReviewReviewerResult{}, err
@@ -344,6 +355,7 @@ func reviewReviewerRemoveTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_reviewers_remove"
 		if err := eruncommon.RunReviewReviewerRemove(ctx, runtime.Store, input.Alias, input.ReviewID, input.UserID, cloudDependencies()); err != nil {
 			return nil, ReviewReviewerRemoveResult{}, err
 		}
@@ -363,6 +375,7 @@ func reviewMergeQueueListTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_queue_list"
 		reviews, err := eruncommon.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, input.TargetBranch, cloudDependencies())
 		if err != nil {
 			return nil, ReviewListResult{}, err
@@ -383,6 +396,7 @@ func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *m
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_queue_advance"
 		review, err := eruncommon.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, input.TargetBranch, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
@@ -404,6 +418,7 @@ func reviewMergeQueueOverrideAdvanceTool(runtime RuntimeConfig) func(context.Con
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_queue_override-advance"
 		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, input.TargetBranch, input.Reason, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err

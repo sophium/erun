@@ -10,7 +10,7 @@ The audit event shape and the hosted API's read contract. For the Operator-facin
 
 Every successfully authorized hosted-API request writes one row to the tenant's audit trail: authentication middleware logs it after token verification, tenant resolution, user resolution, and endpoint authorization all succeed. A request rejected before that point — missing or invalid token, unknown issuer, unknown user, denied permission — is never logged, so the trail records what happened, not every attempt.
 
-The schema also carries columns for CLI and MCP activity (`type: "CLI"` / `type: "MCP"`, `cliCommand`, `mcpTool`), but no CLI or MCP caller writes those rows yet. **(Planned.)** Every row today has `type: "API"`.
+The schema also carries columns for CLI and MCP activity (`type: "CLI"` / `type: "MCP"`, `cliCommand`, `mcpTool`). `type: "MCP"` is now written: an MCP tool call authenticates with the same bearer token as any other caller, so it sends an extra header (`X-Erun-Mcp-Tool`, naming the tool) that the audit middleware reads to classify the row and populate `mcpTool` instead of `apiMethod`/`apiPath`. Only MCP tools that call through to this API get classified this way — `review_*`, `platform_*`, `gate_*`/`exec_gate-run_*`/`exec_reconcile-bypass`, `expose`/`unexpose`'s platform DNS path, and `build`'s self-report of its own outcome. Most MCP tools (`exec_raw`, `list`, `idle`, job-status polling, and the rest of the purely in-pod surface) never call this API at all and so never write a row here, by design — this table is the hosted API's own request log, not a general activity log for everything an Agent does in a pod. `type: "CLI"` is still `(Planned.)`; every row from a CLI-driven call reads `type: "API"` today.
 
 ## Event shape
 
@@ -29,7 +29,7 @@ The schema also carries columns for CLI and MCP activity (`type: "CLI"` / `type:
 }
 ```
 
-A `CLI` row would carry `cliCommand` instead of `apiMethod`/`apiPath`; an `MCP` row would carry `mcpTool`. **(Planned.)**
+A `CLI` row would carry `cliCommand` instead of `apiMethod`/`apiPath`. **(Planned.)** An `MCP` row carries `mcpTool` (e.g. `"review_show"`) instead of `apiMethod`/`apiPath`, for the MCP tools named above.
 
 ### Field semantics
 
@@ -44,6 +44,7 @@ A `CLI` row would carry `cliCommand` instead of `apiMethod`/`apiPath`; an `MCP` 
 | `type` | `API`, `MCP`, or `CLI`. |
 | `apiMethod` | HTTP method; set when `type` is `API`. |
 | `apiPath` | The canonical route template registered for the endpoint (e.g. `/v1/reviews/{review_id}`), matching the same template `role_permissions` uses for authorization — never a concrete URL with resolved IDs or a query string. |
+| `mcpTool` | The MCP tool name (e.g. `"review_show"`); set when `type` is `MCP`. The request still hit the same route as an equivalent API call — `apiMethod`/`apiPath` are omitted from the row only because `type` is `MCP` instead, not because the request took a different route. |
 | `createdAt` | RFC3339 UTC. |
 
 ### What the read API never returns

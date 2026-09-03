@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
@@ -459,7 +461,7 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 	if !ok {
 		return errors.New("api path not resolved")
 	}
-	return m.audit.LogAuditEvent(r.Context(), AuditEvent{
+	event := AuditEvent{
 		TenantID:         auth.Tenant.TenantID,
 		ErunUserID:       auth.User.UserID,
 		ExternalUserID:   auth.Claims.Subject,
@@ -469,7 +471,16 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 		APIMethod:        r.Method,
 		APIPath:          apiPath,
 		CreatedAt:        time.Now().UTC(),
-	})
+	}
+	// A caller authenticates with the same bearer token whether it arrived via
+	// the CLI, the console, or an MCP tool call, so nothing about the request
+	// otherwise distinguishes them; PlatformClient.WithMCPTool sets this header
+	// only when erun-mcp made the call, naming which tool did.
+	if tool := strings.TrimSpace(r.Header.Get(eruncommon.MCPToolAuditHeader)); tool != "" {
+		event.Type = model.AuditEventTypeMCP
+		event.MCPTool = tool
+	}
+	return m.audit.LogAuditEvent(r.Context(), event)
 }
 
 func bearerToken(header string) (string, error) {
