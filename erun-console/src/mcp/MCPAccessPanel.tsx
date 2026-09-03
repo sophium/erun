@@ -14,6 +14,7 @@ import {
 import { KeyRound } from 'lucide-react';
 import * as React from 'react';
 
+import { type AISessionStatus, useListAISessionsQuery } from '../app/api/aiSessionsApi';
 import type { AttachSessionState, McpTokenState, McpToolCallState } from './controller';
 import {
   useAttachSessionController,
@@ -109,13 +110,108 @@ function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactEle
   return null;
 }
 
+// sessionFieldLabel mirrors hostnameFieldLabel's discovered-vs-manual wording
+// for the attach session id: the field stays editable either way, the label
+// just says whether this environment has reported any live sessions to pick
+// from.
+function sessionFieldLabel(discovered: boolean): string {
+  return discovered
+    ? 'Session id (pick a live session below, or edit to attach elsewhere)'
+    : 'Session id (none reported yet — enter one from `erun open --ai` or a linked orchestrator)';
+}
+
+// preferredDefaultSession picks the field's initial autofill: an
+// exited/oom-killed session's dtach socket is already gone, so defaulting to
+// it would just start a bare new shell under that id instead of reaching a
+// live process. Returns undefined when nothing live is reported -- the
+// quick-pick buttons still let an operator choose one of the dead sessions
+// explicitly.
+function preferredDefaultSession(sessions: AISessionStatus[]): AISessionStatus | undefined {
+  return sessions.find((s) => s.state !== 'exited' && s.state !== 'oom-killed');
+}
+
+// useDiscoveredSessions fetches this environment's reported AI sessions and
+// autofills the still-empty session field from the preferred one, once.
+// Split out of AttachSessionForm purely to keep that component under the
+// module's max-lines-per-function budget.
+function useDiscoveredSessions(
+  consoleToken: string,
+  environmentId: string,
+  session: string,
+  setSession: (value: string) => void,
+): AISessionStatus[] {
+  const sessionsQuery = useListAISessionsQuery({ token: consoleToken, environmentId });
+  const discoveredSessions = React.useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
+
+  React.useEffect(() => {
+    const preferred = preferredDefaultSession(discoveredSessions);
+    if (session === '' && preferred !== undefined) {
+      setSession(preferred.sessionId);
+    }
+  }, [session, discoveredSessions, setSession]);
+
+  return discoveredSessions;
+}
+
+// SessionIdField keeps the manual-entry input every environment supports,
+// plus one quick-pick button per session this environment has actually
+// reported, so a live session no longer has to be copied in by hand from a
+// separate panel.
+function SessionIdField({
+  session,
+  onChange,
+  disabled,
+  sessions,
+}: {
+  session: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+  sessions: AISessionStatus[];
+}): React.ReactElement {
+  return (
+    <>
+      <FieldLabel htmlFor="attach-session" required>
+        {sessionFieldLabel(sessions.length > 0)}
+      </FieldLabel>
+      <Input
+        id="attach-session"
+        value={session}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        disabled={disabled}
+        required
+      />
+      {sessions.length > 0 && (
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Live sessions">
+          {sessions.map((s) => (
+            <Button
+              key={s.sessionId}
+              type="button"
+              variant={s.sessionId === session ? 'secondary' : 'outline'}
+              size="sm"
+              disabled={disabled}
+              onClick={() => {
+                onChange(s.sessionId);
+              }}
+            >
+              {s.sessionId} — {s.state}
+            </Button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 // AttachSessionForm mints its own erun:attach-scoped token (never the
 // erun:admin one DriveToolForm above uses) and opens a live WebSocket to an
-// existing dtach session in the environment's pod -- the session id an
-// operator already knows from `erun open --ai` or a linked orchestrator, not
-// something this panel can discover on its own yet. This is a minimal,
-// line-based view, not a full terminal: see useAttachSessionController's
-// comment for why.
+// existing dtach session in the environment's pod. The session id field
+// discovers this environment's own reported AI sessions and prefills/
+// quick-picks from them when any exist; an environment with nothing reported
+// yet still falls back to plain manual entry. This is a minimal, line-based
+// view, not a full terminal: see useAttachSessionController's comment for
+// why.
 function AttachSessionForm({
   consoleToken,
   environmentId,
@@ -130,6 +226,12 @@ function AttachSessionForm({
   const [line, setLine] = React.useState('');
   const { state, scrollback, connect, sendLine, disconnect } =
     useAttachSessionController(consoleToken);
+  const discoveredSessions = useDiscoveredSessions(
+    consoleToken,
+    environmentId,
+    session,
+    setSession,
+  );
 
   const busy = state.status === 'minting' || state.status === 'connecting';
   const connected = state.status === 'connected';
@@ -166,17 +268,11 @@ function AttachSessionForm({
           disabled={connected}
           required
         />
-        <FieldLabel htmlFor="attach-session" required>
-          Session id (from `erun open --ai` or a linked orchestrator)
-        </FieldLabel>
-        <Input
-          id="attach-session"
-          value={session}
-          onChange={(e) => {
-            setSession(e.target.value);
-          }}
+        <SessionIdField
+          session={session}
+          onChange={setSession}
           disabled={connected}
-          required
+          sessions={discoveredSessions}
         />
         {connected ? (
           <Button

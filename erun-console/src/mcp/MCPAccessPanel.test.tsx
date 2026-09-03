@@ -215,6 +215,93 @@ describe('MCPAccessPanel driving a tool over the live edge', () => {
   });
 });
 
+// mockFetchByUrl dispatches per-URL, unlike mockFetch's one-handler-for-all --
+// the session-discovery tests below need the ai-sessions GET to answer
+// differently from the mcp-token POST hitting the very same environment.
+function mockFetchByUrl(handlers: Record<string, (req: MockReq) => Response>): MockReq[] {
+  const calls: MockReq[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL, init?: RequestInit) => {
+      const req = {
+        method: init?.method ?? 'GET',
+        url: requestUrl(input),
+        body: init?.body as string | undefined,
+      };
+      calls.push(req);
+      const handler = handlers[req.url];
+      if (handler === undefined) {
+        throw new Error(`unexpected fetch: ${req.method} ${req.url}`);
+      }
+      return Promise.resolve(handler(req));
+    }),
+  );
+  return calls;
+}
+
+describe('MCPAccessPanel attach session discovery', () => {
+  it('prefills the session id from a discovered live session and offers quick-picks for the rest', async () => {
+    mockFetchByUrl({
+      '/v1/environments/env-1/mcp-token': () =>
+        jsonResponse({ token: 'attach.jwt.value', audience: 'erun-mcp:acme/prod' }),
+      '/v1/environments/env-1/ai-sessions': () =>
+        jsonResponse([
+          { sessionId: 'sess-exited', state: 'exited', reason: 'process exited' },
+          { sessionId: 'sess-busy', state: 'busy', reason: 'running a tool' },
+        ]),
+    });
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    expect(
+      await screen.findByLabelText<HTMLInputElement>(/Session id \(pick a live session/),
+    ).toHaveProperty('value', 'sess-busy');
+    expect(screen.getByRole('button', { name: 'sess-busy — busy' })).toBeInTheDocument();
+    const exitedPick = screen.getByRole('button', { name: 'sess-exited — exited' });
+    expect(exitedPick).toBeInTheDocument();
+
+    fireEvent.click(exitedPick);
+    expect(screen.getByLabelText<HTMLInputElement>(/Session id/).value).toBe('sess-exited');
+  });
+
+  it('does not autofill a dead session, but still offers it as a quick-pick', async () => {
+    mockFetchByUrl({
+      '/v1/environments/env-1/mcp-token': () =>
+        jsonResponse({ token: 'attach.jwt.value', audience: 'erun-mcp:acme/prod' }),
+      '/v1/environments/env-1/ai-sessions': () =>
+        jsonResponse([{ sessionId: 'sess-exited', state: 'exited', reason: 'process exited' }]),
+    });
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    const exitedPick = await screen.findByRole('button', { name: 'sess-exited — exited' });
+    expect(screen.getByLabelText<HTMLInputElement>(/Session id \(pick a live session/).value).toBe(
+      '',
+    );
+
+    fireEvent.click(exitedPick);
+    expect(screen.getByLabelText<HTMLInputElement>(/Session id/).value).toBe('sess-exited');
+  });
+
+  it('falls back to plain manual entry when the environment has reported no sessions', async () => {
+    mockFetchByUrl({
+      '/v1/environments/env-1/mcp-token': () =>
+        jsonResponse({ token: 'attach.jwt.value', audience: 'erun-mcp:acme/prod' }),
+      '/v1/environments/env-1/ai-sessions': () => jsonResponse([]),
+    });
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+
+    expect(
+      await screen.findByLabelText<HTMLInputElement>(/Session id \(none reported yet/),
+    ).toHaveProperty('value', '');
+    expect(screen.queryByRole('group', { name: 'Live sessions' })).toBeNull();
+  });
+});
+
 // FakeWebSocket backs the attach-session tests below -- see
 // attachClient.test.ts for the fuller wire-protocol coverage; this only needs
 // enough to prove the panel wires mint -> connect -> render correctly.
