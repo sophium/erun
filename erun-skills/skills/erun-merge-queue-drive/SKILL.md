@@ -103,6 +103,22 @@ A conflicted squash leaves the working tree mid-conflict — do not resolve it
 yourself; the failed-build report above is what unwedges the queue, and the
 worktree is cleaned up by whoever re-drives this review after a fix.
 
+**One recurring cause of a squash conflict here is the source branch having
+been forked from another PR's branch head before that PR merged** (root
+`AGENTS.md` § "Branching Strategy"). The dependency's squash-merge landed
+under a new SHA; the source branch still carries the same work under its
+original SHAs, so it now conflicts with itself against `${target}`. There is
+no cheap, reliable way to detect this automatically before attempting the
+squash: the source branch's own commits rarely match the dependency's squash
+commit patch-for-patch (a squash of several commits produces one diff that no
+individual pre-squash commit's patch equals), so a patch-equivalence check
+would miss the common multi-commit case and give false confidence. When a
+conflict report names files that look like they belong to a since-merged
+dependency, check `git log --oneline ${target}..${source}` for commits that
+duplicate content `${target}` already has — that is the fix that unblocked
+erun#2007, and it is a human (or a deliberate agent) judgment call, not
+something this skill infers for you.
+
 This skill always drives an already-promoted review, so `--review-id` is
 always set above. A branch gated with no erun review at all (e.g. one
 gated by a plain GitHub pull request) calls the same `erun exec gate-run

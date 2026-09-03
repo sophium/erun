@@ -39,6 +39,7 @@ Each module owns its own `AGENTS.md` with the details for working in it; read th
 - Implement the change and run the relevant validation before publishing.
 - Push the branch and open a pull request back into `main`.
 - After a pull request is accepted, switch the local checkout back to the branch the PR targeted, usually `main`.
+- **Once a branch's PR has merged, that branch is dead — never push to it again.** The merge queue lands the PR as a squash commit under a new SHA, so a later push to the old branch updates a ref nothing reads: git and `gh` both report success, and the commit never reaches `main` (erun#2007). If trailing work turns up after merge — even minutes later — start a fresh branch from the updated `main` instead of resuming the old one. Before pushing to a branch you did not just create in this session, confirm its PR/review is still open.
 - When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
 - A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
@@ -351,6 +352,7 @@ Probe artifacts the agent leaves behind during verification (injected files, man
 - Use `feature/<issue-number>-<short-kebab-case-description>` for new functionality.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
 - Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
+- **Never branch from another open PR's branch head to pick up its unmerged work.** The merge queue lands a PR as a squash commit under a brand-new SHA (root `AGENTS.md` § "Integration Test Gate" / `erun-docs/docs/collaboration/merge-queue.md` § "The gate"); a branch forked from the old head still carries that same work under its original SHAs, so the moment the dependency merges, the dependent branch conflicts with itself against `main` — silently, with no warning from git, `gh`, or erun (erun#2007). If work genuinely depends on something unmerged, wait for it to merge and branch from `main` afterward; if it cannot wait, rebase the dependent branch onto `main` as soon as the dependency lands and drop the commits `main` already carries under the new SHA.
 
 ## Pull Request Titles
 
