@@ -229,6 +229,29 @@ export const handleAppNotification =
     );
   };
 
+// erun:events-dropped is the headless HTTP+SSE bridge's reserved gap marker
+// (headlessserver.eventsDroppedName): a full per-tab event buffer replaces
+// its oldest queued event with this one instead of discarding a real event
+// silently, so the tab can tell "I missed something" apart from "nothing
+// happened". Reacting to it is what makes that distinction worth drawing —
+// warn visibly (this can mean any of the events this tab reacts to went
+// missing) and resync the sidebar/env baseline from the backend rather than
+// continuing to render whatever the last-received event left behind.
+export const handleEventsDropped =
+  (missed: number): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    console.error(
+      `erun headless: missed ${missed.toString()} event(s) before this marker; resyncing`,
+    );
+    dispatch(
+      showNotification(
+        'warning',
+        `Lost ${missed.toString()} update${missed === 1 ? '' : 's'} from the app — refreshing to catch up.`,
+      ),
+    );
+    await dispatch(reloadStateAfterEnvironmentChange());
+  };
+
 // Bounded retry budget for surfacing a just-initialized env. A single reload
 // can miss it — a best-effort getInitialState failure, or a reload that
 // coalesced with the fsnotify watcher's refresh — leaving the sidebar stale

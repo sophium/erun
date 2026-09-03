@@ -5,6 +5,7 @@ import { setActivityLock, upsertActivityEntry } from './slices/activitySlice';
 import { openCloseGate } from './slices/closeGateSlice';
 import { dismissNotificationForEnv } from './slices/notificationSlice';
 import type { AppDispatch } from './store';
+import { handleEventsDropped } from './wailsEventThunks';
 
 // Payload shape of the "app-close-gate" event PrepareWindowClose emits (Go
 // main.uiCloseGate). Only the running list matters here: the event only
@@ -39,5 +40,12 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
   });
   EventsOn('app-close-gate', (gate: AppCloseGatePayload) => {
     dispatch(openCloseGate(gate.running ?? []));
+  });
+  // Reserved gap marker from the headless HTTP+SSE bridge (see
+  // headlessserver.eventsDroppedName) -- see handleEventsDropped's own
+  // comment for why this tab reacts rather than reading the marker's absence
+  // from every other handler above as "nothing happened".
+  EventsOn('erun:events-dropped', (missed: number) => {
+    void dispatch(handleEventsDropped(missed));
   });
 }
