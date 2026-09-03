@@ -2,9 +2,11 @@ import type { Request, Route } from '@playwright/test';
 
 import { expect, test } from '../fixtures/erunApp.js';
 import {
+  addERunCloudProviderAlias,
   removeTenant,
   seedEnvironment,
   seedTenant,
+  SEED_CLOUD_ALIAS,
   SEED_TENANT,
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
@@ -108,6 +110,60 @@ test.describe('sidebar tenant enrollment status icon', () => {
     await expect(
       app.page.getByRole('button', { name: `${SEED_TENANT} is not on erunpaas.com yet` }),
     ).toBeVisible();
+  });
+
+  // The erun#1955 regression, driven through the real Go resolution path --
+  // no RPC stub. A tenant whose own Manage-tenant selection is AWS-only must
+  // never authenticate its platform reads with a different, unselected erun
+  // alias that happens to exist on the machine (the operator's own machine
+  // hit exactly this: an "erun" tenant with an AWS alias checked and
+  // Primary, and a different tenant's erun credential silently backing its
+  // "enrolled" dot and dashboard).
+  //
+  // The sidebar glyph alone cannot tell the two failure shapes apart: an
+  // unselected-but-configured alias and a selected-but-never-signed-in alias
+  // both render local-only, since ListTenantPlatformEnrollmentStatuses
+  // collapses every non-ready platform state to local-only. The dashboard's
+  // own platform-state heading does not collapse them -- "Connect this
+  // tenant to erunpaas.com" (not-connected, this test's assertion) versus
+  // "Sign in to the erun platform" (not-signed-in, what the pre-fix
+  // resolution produced by reaching the wrong alias and finding it
+  // unsigned-in) -- so this test opens the dashboard rather than reading the
+  // icon, and is a genuine regression guard: it fails against the pre-fix
+  // resolution (which shows the sign-in heading for the alias it should
+  // never have reached) and passes only once the tenant's own selection is
+  // consulted. erun-ui/tenant_platform_test.go's
+  // TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant covers
+  // the same branch directly against the Go resolution.
+  test('the dashboard reports not-connected, never sign-in for an unselected alias, when a tenant selected only an AWS alias', async ({
+    app,
+  }) => {
+    const tenant = uniqueEnvironmentName('erun-1955');
+    const environment = uniqueEnvironmentName('env');
+    const erunAlias = `${uniqueEnvironmentName('erun-alias')}@erun`;
+    const restoreCloudProvider = addERunCloudProviderAlias(
+      erunAlias,
+      'http://127.0.0.1:1/unreachable',
+    );
+    seedTenant(
+      tenant,
+      environment,
+      `cloudprovideraliases:\n  - ${SEED_CLOUD_ALIAS}\n` +
+        `primarycloudprovideralias: ${SEED_CLOUD_ALIAS}\n`,
+    );
+    seedEnvironment(tenant, environment);
+    try {
+      await app.reloadEnvironments();
+      const icon = app.sidebar.tenantEnrollmentStatus(tenant);
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'local-only');
+
+      await app.sidebar.openTenantDashboard(tenant);
+      await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
+      await expect(app.tenantDashboard.notSignedInHeading()).toHaveCount(0);
+    } finally {
+      removeTenant(tenant);
+      restoreCloudProvider();
+    }
   });
 
   test('does not render for a tenant with zero local environments', async ({ app }) => {
