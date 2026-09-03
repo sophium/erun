@@ -19,7 +19,7 @@ CREATE TABLE usage_events (
   -- block on its own usage history, and the append-only metering trail should
   -- outlive the row it described (event_type and tenant_id already say what
   -- happened).
-  FOREIGN KEY (environment_id) REFERENCES environments (environment_id) ON DELETE SET NULL,
+  CONSTRAINT usage_events_environment_fkey FOREIGN KEY (environment_id) REFERENCES environments (environment_id) ON DELETE SET NULL,
   CONSTRAINT usage_events_event_type_check CHECK (
     event_type IN ('environment_provisioned', 'environment_stopped', 'environment_deleted')
   ),

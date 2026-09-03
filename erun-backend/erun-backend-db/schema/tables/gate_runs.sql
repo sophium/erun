@@ -24,7 +24,7 @@ CREATE TABLE gate_runs (
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
-  FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
+  CONSTRAINT gate_runs_tenant_review_fkey FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
   CONSTRAINT gate_runs_status_check CHECK (status IN ('RUNNING', 'PASSED', 'FAILED', 'INCONCLUSIVE')),
   CONSTRAINT gate_runs_source_branch_check CHECK (length(trim(source_branch)) > 0),
   CONSTRAINT gate_runs_target_branch_check CHECK (length(trim(target_branch)) > 0),

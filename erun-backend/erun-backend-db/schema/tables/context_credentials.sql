@@ -6,6 +6,6 @@ CREATE TABLE context_credentials (
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
-  FOREIGN KEY (tenant_id, context_id) REFERENCES contexts (tenant_id, context_id) ON DELETE CASCADE,
+  CONSTRAINT context_credentials_context_fkey FOREIGN KEY (tenant_id, context_id) REFERENCES contexts (tenant_id, context_id) ON DELETE CASCADE,
   CONSTRAINT context_credentials_tenant_context_key UNIQUE (tenant_id, context_id)
 );
