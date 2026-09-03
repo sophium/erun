@@ -13,42 +13,48 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 	var versionDriftTenant string
 	var gateEnvironment string
 	var controlPlanes bool
+	var failOnDrift bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.",
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes, failOnDrift)
 		},
 	}
 	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
 	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
 	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
+	cmd.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0")
 	addDryRunFlag(cmd)
-	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --control-planes\n  erun list --control-planes --dry-run"
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift"
 	return cmd
 }
 
-func validateListFlags(controlPlanes bool, versionDriftTenant, gateEnvironment string) error {
+func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment string) error {
 	if gateEnvironment != "" && versionDriftTenant == "" {
 		return fmt.Errorf("--gate-environment requires --tenant")
 	}
 	if controlPlanes && (versionDriftTenant != "" || gateEnvironment != "") {
 		return fmt.Errorf("--control-planes cannot be combined with --tenant/--gate-environment")
 	}
+	if failOnDrift && versionDriftTenant == "" && !controlPlanes {
+		return fmt.Errorf("--fail-on-drift requires --tenant or --control-planes")
+	}
 	return nil
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes bool) error {
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
-	if err := validateListFlags(controlPlanes, versionDriftTenant, gateEnvironment); err != nil {
+	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment); err != nil {
 		return err
 	}
 
@@ -61,33 +67,114 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 	}
 
 	if controlPlanes {
-		return runListControlPlanes(ctx, result)
+		return runListControlPlanes(ctx, result, failOnDrift)
 	}
 
 	if versionDriftTenant != "" {
-		return runListVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
+		return runListVersionDrift(ctx, result, versionDriftTenant, gateEnvironment, failOnDrift)
 	}
 
 	return writeListResult(ctx, result)
 }
 
-func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string) error {
+func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
 	drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
 	if err != nil {
 		return err
 	}
 	if ctx.Output == common.OutputJSON {
-		return ctx.WriteResult(drift)
+		if err := ctx.WriteResult(drift); err != nil {
+			return err
+		}
+	} else if err := writeVersionDriftReport(ctx, drift); err != nil {
+		return err
 	}
-	return writeVersionDriftReport(ctx, drift)
+	if !failOnDrift {
+		return nil
+	}
+	return versionDriftExitError(drift)
 }
 
-func runListControlPlanes(ctx common.Context, result common.ListResult) error {
+func runListControlPlanes(ctx common.Context, result common.ListResult, failOnDrift bool) error {
 	drift := common.ResolveControlPlaneVersionDrift(ctx, result, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
 	if ctx.Output == common.OutputJSON {
-		return ctx.WriteResult(drift)
+		if err := ctx.WriteResult(drift); err != nil {
+			return err
+		}
+	} else if err := writeControlPlaneVersionReport(ctx, drift); err != nil {
+		return err
 	}
-	return writeControlPlaneVersionReport(ctx, drift)
+	if ctx.DryRun || !failOnDrift {
+		return nil
+	}
+	return controlPlaneVersionDriftExitError(drift)
+}
+
+// versionDriftExitError makes tenant version drift a non-zero exit when
+// --fail-on-drift asks for it, after the full report has already printed:
+// any environment behind the tenant's own max, or a gate environment whose
+// own behind verdict is unresolved or true -- see erun-cli/AGENTS.md §
+// "Exit-Code Contract: Reporting Commands Vs Gating Checks" for why this is
+// opt-in rather than the command's default.
+func versionDriftExitError(drift common.TenantVersionDrift) error {
+	var problems []string
+	var behind []string
+	for _, env := range drift.Environments {
+		if env.BehindMax {
+			behind = append(behind, env.Environment)
+		}
+	}
+	if len(behind) > 0 {
+		problems = append(problems, fmt.Sprintf("%d environment(s) behind the tenant's max version: %s", len(behind), strings.Join(behind, ", ")))
+	}
+	if drift.GateEnvironment != "" {
+		switch {
+		case drift.GateVersionUnresolved:
+			problems = append(problems, fmt.Sprintf("gate environment %s's own erun version could not be resolved", drift.GateEnvironment))
+		case drift.GateBehind:
+			problems = append(problems, fmt.Sprintf("gate environment %s is outdated relative to %s", drift.GateEnvironment, strings.Join(drift.GateOutdatedBy, ", ")))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("version drift for tenant %s: %s", drift.Tenant, strings.Join(problems, "; "))
+}
+
+// controlPlaneVersionDriftExitError makes control-plane version drift a
+// non-zero exit when --fail-on-drift asks for it: any plane behind or ahead
+// of the published version, any plane erun could not reach, or a baseline
+// erun could not even resolve -- none of those confirm a plane is running
+// what erun actually published.
+func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) error {
+	var problems []string
+	if drift.PublishedVersionError != "" {
+		problems = append(problems, "the published version could not be resolved: "+drift.PublishedVersionError)
+	}
+	var unreachable, behind, ahead []string
+	for _, plane := range drift.Planes {
+		switch {
+		case !plane.Reachable:
+			unreachable = append(unreachable, plane.Alias)
+		case plane.Behind:
+			behind = append(behind, plane.Alias)
+		case plane.Ahead:
+			ahead = append(ahead, plane.Alias)
+		}
+	}
+	if len(unreachable) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) unreachable: %s", len(unreachable), strings.Join(unreachable, ", ")))
+	}
+	if len(behind) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) behind published: %s", len(behind), strings.Join(behind, ", ")))
+	}
+	if len(ahead) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) ahead of published: %s", len(ahead), strings.Join(ahead, ", ")))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
 }
 
 func writeVersionDriftReport(ctx common.Context, drift common.TenantVersionDrift) error {

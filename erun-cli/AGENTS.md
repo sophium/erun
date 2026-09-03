@@ -42,6 +42,16 @@ Methodology when reviewing or editing help / descriptions:
 - Do not blanket-lift one transport's description into the other. Each must be rewritten against the ground truth.
 - When reporting on help-text quality, quote the literal user-visible text (the `--help` block, the MCP description) and reason about what a reader can infer from it. Skip file:line citations — they do not change whether the help works. Reserve source references for places where something must be changed.
 
+## Exit-Code Contract: Reporting Commands Vs Gating Checks
+
+A command's default exit-code behavior follows its command family, not an ad hoc choice per command. Two shapes exist today, and a new command must pick the one that matches what it is, never invent a third:
+
+- **`erun exec <verb>` commands are gating checks.** Their whole purpose is to be wired into automation as a pass/fail gate (a merge queue, a cron job, a CI script). They print the full report, then exit non-zero by default whenever what they checked is not fully green — `route-check` (missing or unreachable routes), `gate-merge`, `reconcile-bypass` all follow this shape. Never add a flag that makes an `exec` command exit 0 on a real finding; a caller who wants to ignore a finding can do that with its own logic, but the check itself must keep failing loudly.
+- **`erun list` (and any future descriptive/enumeration command) reports.** Its job is to tell a human or a script what state exists, not to pass judgment on whether that state is acceptable, so its default exit code stays `0` regardless of what it finds — this is what keeps a plain `erun list` safe to pipe into `grep`/`jq` without ever needing to check `$?`. When a `list` variant surfaces something worth gating on (deployed-vs-published control-plane drift, environment-vs-gate version drift), it grows an explicit opt-in flag, `--fail-on-drift`, that a caller passes only when that specific invocation should fail non-zero on the condition the report already flags. Without the flag, behavior is unchanged.
+- The two shapes must never blur into each other. An `exec` command must never gain an opt-out that suppresses its default failure; a `list` variant must never fail by default without `--fail-on-drift` being passed. If a new command's purpose sits ambiguously between "report" and "gate", that ambiguity is a naming/placement problem to resolve — `exec` for a gate, `list ...` for a report — not a reason to pick a shape and hope the exit code follows.
+- This is a CLI-only contract. MCP tools never fail a call over a finding, only over the check itself failing to run, regardless of which exit-code shape the sibling CLI command follows — an MCP caller (an agent) reads the returned structured result and judges it itself, so `--fail-on-drift` has no MCP-side equivalent and none should be added for it.
+- The cost of skipping this: three related drift checks (`erun list --tenant`, `erun list --control-planes`, `erun exec route-check`) shipped with two different exit behaviors and no stated rule connecting them, so an automation author had no way to predict which of erun's own checks could be wired into a gate at all (erun#2052).
+
 ## Validation
 
 - Run `go test ./...` from this module after Go changes.

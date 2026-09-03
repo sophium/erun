@@ -4,6 +4,8 @@ Pass --tenant to instead report erun-version drift within one tenant: every envi
 
 Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.
 
+Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.
+
 Usage:
   erun list [flags]
 
@@ -12,12 +14,15 @@ Examples:
   erun list --tenant erun
   erun list --tenant erun --gate-environment build
   erun list --tenant erun --gate-environment build --output json
+  erun list --tenant erun --fail-on-drift
   erun list --control-planes
   erun list --control-planes --dry-run
+  erun list --control-planes --fail-on-drift
 
 Flags:
       --control-planes            Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing
       --dry-run                   Resolve and trace mutating actions without executing them.
+      --fail-on-drift             With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0
       --gate-environment string   With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates
   -h, --help                      help for list
       --tenant string             Report erun-version drift across this tenant's environments instead of the full listing

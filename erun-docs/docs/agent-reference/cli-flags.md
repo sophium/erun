@@ -622,8 +622,9 @@ Pass `--tenant` to switch the command into a distinct read: erun-version drift a
 |---|---|---|---|
 | `--tenant <name>` | string | none | Switches the command to a version-drift report for this tenant. Errors `tenant "<name>" not found` if the tenant has no config. |
 | `--gate-environment <name>` | string | none | Requires `--tenant`. Names the environment driving that tenant's merge-queue gate (erun has no stored concept of which environment gates a tenant's merges — see [merge-queue § the gate](/collaboration/merge-queue#the-gate) — so the caller states it). Errors `--gate-environment requires --tenant` when passed alone, or `gate environment "<name>" not found in tenant "<tenant>"` when the named environment doesn't exist in the tenant. |
+| `--fail-on-drift` | bool | `false` | Requires `--tenant` (or `--control-planes`, see below). Makes this one invocation exit non-zero when the report finds drift, instead of `list`'s usual unconditional `0` — see [Exit codes](#erun-list) below. Errors `--fail-on-drift requires --tenant or --control-planes` if neither is set. |
 
-The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone.
+The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone. `--fail-on-drift` has no MCP equivalent: an MCP tool call never fails over a finding, only over the check itself failing to run, so the calling agent reads `versionDrift` and judges it itself.
 
 Each environment's version comes from the same `ResolveErunVersion` config-only resolution the full listing's `runtime-version:` line uses (see [Release lines](/cli/list#release-lines)) — nil (rendered `version=none`) whenever it can't be read from config alone, e.g. a deploy that never recorded a resolved runtime image.
 
@@ -649,8 +650,9 @@ Pass `--control-planes` to switch the command into a third distinct read: every 
 |---|---|---|---|
 | `--control-planes` | bool | `false` | Switches the command to a control-plane version report instead of the full listing. Errors `--control-planes cannot be combined with --tenant/--gate-environment` if either is also set. |
 | `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes and which registry lookup would be checked, without making either network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
+| `--fail-on-drift` | bool | `false` | Makes this one invocation exit non-zero when any plane is behind/ahead of published or unreachable, or the published baseline itself couldn't be resolved — see [Exit codes](#erun-list) below. Never fires under `--dry-run` (nothing was probed). |
 
-The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone.
+The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone. `--fail-on-drift` has no MCP equivalent, for the same reason as `--tenant`'s above.
 
 Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
 
@@ -665,10 +667,12 @@ Control planes:
 
 ### Exit codes
 
+`list` is a reporting command, not a gate (see `erun-cli/AGENTS.md` § "Exit-Code Contract: Reporting Commands Vs Gating Checks") — every finding below prints in full regardless of exit code; `--fail-on-drift` only changes whether a finding also turns into a non-zero exit.
+
 | Code | Meaning |
 |---|---|
-| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane is unreachable or behind/ahead — those are findings in the report, not command failures). |
-| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`. |
+| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane is unreachable or behind/ahead, or an environment is behind max — those are findings in the report, not command failures) **and** either `--fail-on-drift` was not passed, or it was passed and found nothing to fail on. |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`; `--fail-on-drift` without `--tenant`/`--control-planes`; or `--fail-on-drift` was passed and the report found drift (an environment behind max, a behind/unresolved gate, an unreachable/behind/ahead plane, or an unresolved published baseline) — never while `--dry-run` is also set, since nothing was actually probed. |
 
 ---
 

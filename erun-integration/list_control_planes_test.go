@@ -238,4 +238,71 @@ func TestListControlPlanes(t *testing.T) {
 			}
 		}
 	})
+
+	// erun#2052: --fail-on-drift is the opt-in that lets this reporting
+	// command's own finding be wired into a gate -- without it this whole
+	// file's scenarios are right that the command always exits 0
+	// (erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands Vs
+	// Gating Checks").
+
+	t.Run("fail_on_drift_behind_published_exits_non_zero", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a plane behind published, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_behind_published_exits_non_zero",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_up_to_date_exits_zero", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for a plane already at the published version, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_up_to_date_exits_zero",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_unreachable_plane_exits_non_zero", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": "http://127.0.0.1:1"}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unreachable plane, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_unreachable_plane_exits_non_zero",
+			normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_dry_run_never_fails", func(t *testing.T) {
+		// Nothing was actually probed, so there is nothing to fail on --
+		// --fail-on-drift must not turn a dry-run preview into a failure.
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for a dry run, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_dry_run_never_fails",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
 }
