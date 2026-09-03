@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -265,6 +265,25 @@ test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)
 
+# Cross-compiles erun-app for Windows to prove the one other platform erun-ui
+# ships to (Scoop, built from source at install time) still compiles and
+# links. No CGO needed: unlike the darwin backend (real cgo + Objective-C,
+# see the macOS bullet in erun-ui/AGENTS.md's "End-to-end UI tests" section),
+# Wails' windows backend (`go-webview2`) drives WebView2 over COM through
+# plain `syscall` -- confirmed by grepping the module for `import "C"` --
+# so a stock cross-compiling `go build` is sufficient and needs no toolchain
+# this Dockerfile doesn't already have. Compile+link only: this never runs
+# the resulting binary, so it proves nothing about WebView2 runtime
+# behaviour, only that the Windows-only build-constrained source is not
+# broken. Needs erun-ui/frontend/dist (test-frontend, above) for the
+# go:embed in assets_production.go.
+test-erun-ui-windows-build:
+	@echo ">> erun-ui Windows cross-compile (desktop tags)"
+	@(cd erun-ui && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+		go build -tags "desktop,production" -ldflags "-H windowsgui" \
+		-o /tmp/erun-app-windows-cross-check.exe .)
+	@rm -f /tmp/erun-app-windows-cross-check.exe
+
 # Bound on how many chart-test scripts run at once. Each is a single `helm
 # template` render (no cluster, no docker), so unlike lint this scales cleanly
 # with width and memory stays flat: measured on a 12-core pod at p1 2.7s, p2
@@ -386,12 +405,12 @@ check:
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
 # erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
-# frontend + console gates, the erun-devops/k8s chart tests, then the
-# integration suite + coverage. The
+# frontend + console gates, the erun-ui Windows cross-compile check, the
+# erun-devops/k8s chart tests, then the integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
-check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend helm-chart-tests integration-test-gate
+check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
