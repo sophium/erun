@@ -61,7 +61,7 @@ function idleStatus(cloudContextStatus: string): UIIdleStatus {
   return { cloudContextStatus } as UIIdleStatus;
 }
 
-// erun#1981 (audit follow-up to #1953/#1976): refreshIdleStatus has more
+// refreshIdleStatus has more
 // than one independent trigger for the same selection -- its own
 // self-rescheduling poll, selectionSyncMiddleware on an env switch, a
 // cloud-context start/stop, and cancelPendingIdleStop. RTK Query's

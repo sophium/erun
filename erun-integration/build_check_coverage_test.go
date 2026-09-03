@@ -126,10 +126,12 @@ var buildCheckCoverage = map[string]coverageEntry{
 // skipDirNames are directories this gate never descends into: version
 // control metadata, and generated/vendored content that carries no committed
 // source of its own (node_modules, a frontend build's dist output, the
-// integration suite's own coverage scratch dir, and erun-ui/frontend's
-// gitignored Wails bindings).
+// integration suite's own coverage scratch dir, erun-ui/frontend's
+// gitignored Wails bindings, and a coding agent's own gitignored worktree
+// scratch space, which can hold a full second checkout of every module).
 var skipDirNames = map[string]bool{
 	".git":         true,
+	".claude":      true,
 	"node_modules": true,
 	"wailsjs":      true,
 	"dist":         true,

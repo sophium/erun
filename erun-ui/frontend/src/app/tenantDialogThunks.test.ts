@@ -59,7 +59,7 @@ function dashboard(platformState: string): UITenantDashboard {
   return { platformState } as UITenantDashboard;
 }
 
-// erun#1981 (audit follow-up to #1953/#1976): loadTenantDashboard has many
+// loadTenantDashboard has many
 // independent callers for the same tenant -- dialog open, the Refresh click,
 // and the post-mutation reload every registration/platform-connect/invite-
 // request thunk runs -- with no periodic poll to catch a dropped one later.

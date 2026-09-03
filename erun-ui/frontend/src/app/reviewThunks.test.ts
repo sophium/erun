@@ -72,7 +72,7 @@ function diffResult(rawDiff: string): DiffResult {
   };
 }
 
-// erun#1981 (audit follow-up to #1953/#1976): loadReviewDiff's own periodic
+// loadReviewDiff's own periodic
 // silent refresh (scheduleReviewDiffRefresh) and a manual "Refresh diff"
 // click both dispatch a forced getDiff refetch for the same env. The timer's
 // own re-arm only skips a tick while ITS OWN previous request is loading, not
