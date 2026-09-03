@@ -32,7 +32,10 @@ CREATE TABLE builds (
   CONSTRAINT builds_kind_check CHECK (kind IN ('RECORDED', 'GATE')),
   CONSTRAINT builds_gate_requires_review_check CHECK (kind <> 'GATE' OR review_id IS NOT NULL),
   CONSTRAINT builds_commit_id_check CHECK (length(trim(commit_id)) > 0),
-  CONSTRAINT builds_version_check CHECK (kind = 'GATE' OR (version IS NOT NULL AND length(trim(version)) > 0)),
+  CONSTRAINT builds_version_check CHECK (
+    (kind = 'RECORDED' AND version IS NOT NULL AND length(trim(version)) > 0)
+    OR (kind = 'GATE' AND version IS NULL)
+  ),
   CONSTRAINT builds_failure_detail_check CHECK (successful OR kind <> 'GATE' OR (failure_detail IS NOT NULL AND length(trim(failure_detail)) > 0)),
   CONSTRAINT builds_tenant_build_key UNIQUE (tenant_id, build_id),
   CONSTRAINT builds_tenant_review_build_key UNIQUE (tenant_id, review_id, build_id)
