@@ -72,6 +72,7 @@ export function EnvHoverCard({
   nodeIndicator,
   node,
   usage,
+  usageExcludesBuilds,
   children,
 }: {
   className?: string;
@@ -89,6 +90,7 @@ export function EnvHoverCard({
   nodeIndicator: EnvironmentNodeIndicator;
   node: UIEnvironmentNodeSnapshot | undefined;
   usage: UIEnvironmentUsageSnapshot | undefined;
+  usageExcludesBuilds: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   const { open, setOpen, openNow, closeSoon } = useHoverCardOpenState();
@@ -141,6 +143,7 @@ export function EnvHoverCard({
           activityLabel={activityLabel}
           indicator={indicator}
           usage={usage}
+          usageExcludesBuilds={usageExcludesBuilds}
           node={node}
           nodeIndicator={nodeIndicator}
         />
@@ -160,6 +163,7 @@ function EnvHoverCardFields({
   activityLabel,
   indicator,
   usage,
+  usageExcludesBuilds,
   node,
   nodeIndicator,
 }: {
@@ -171,6 +175,7 @@ function EnvHoverCardFields({
   activityLabel: string;
   indicator: EnvironmentIndicator;
   usage: UIEnvironmentUsageSnapshot | undefined;
+  usageExcludesBuilds: boolean;
   node: UIEnvironmentNodeSnapshot | undefined;
   nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
@@ -204,7 +209,7 @@ function EnvHoverCardFields({
           <ActivityState activityLabel={activityLabel} indicator={indicator} />
         </HoverCardRow>
         <HoverCardRow label="Usage">
-          <UsageState usage={usage} />
+          <UsageState usage={usage} excludesBuilds={usageExcludesBuilds} />
         </HoverCardRow>
         <HoverCardRow label="Cloud node">
           <NodeState node={node} nodeIndicator={nodeIndicator} />
@@ -365,33 +370,47 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // A stale or unmeasurable reading is rendered as degraded, never as an amber
 // warning: nothing the operator did caused either state and no action follows
 // from it, so it should recede rather than alarm (see the TYPE note in
-// Sidebar.HoverCardRow.tsx). This also matters beyond this card's own type
-// rules -- the percentage this row shows is not authoritative for a
-// build-capable environment: BuildKit runs as a sibling cgroup with no
-// enforced ceiling, so the limit shown does not bound what the environment
-// actually uses. A quiet, receded treatment does not overstate confidence in
-// a figure that can already be misleading; an alert-coloured one would.
+// Sidebar.HoverCardRow.tsx).
+//
+// The reading itself is scoped to the runtime container's own cgroup, which
+// is never where a build runs -- every image build executes in the erun-dind
+// sidecar instead, so this figure can read idle while that sidecar saturates
+// the node. Reading the sidecar's own cgroup would not fix it either: its
+// build containers run as cgroup siblings, not descendants, so nothing this
+// card could read would ever account for them, and the one place that view
+// is reachable is a host-wide path shared by every build-capable pod on the
+// node -- not attributable to this environment alone. Qualifying the reading
+// is the only honest option left, so `excludesBuilds` (environmentUsesDindSidecar
+// in Sidebar.helpers.ts) makes the caption say so on every build-capable
+// environment, not just the ones currently building.
 function UsageState({
   usage,
+  excludesBuilds,
 }: {
   usage: UIEnvironmentUsageSnapshot | undefined;
+  excludesBuilds: boolean;
 }): React.ReactElement {
   const summary = summarizeEnvironmentUsage(usage, Date.now());
   if (!summary.hasReading || !summary.headline) {
     return <Muted>{summary.detail}</Muted>;
   }
+  const scopeCaveat = excludesBuilds ? ' — excludes builds' : '';
   if (summary.stale) {
     return (
       <span className={HOVER_CARD_VALUE_STACK_CLASS}>
         <Muted>{summary.headline}</Muted>
-        <Muted>Stale — as of {summary.ageLabel} ago</Muted>
+        <Muted>
+          Stale — as of {summary.ageLabel} ago{scopeCaveat}
+        </Muted>
       </span>
     );
   }
   return (
     <span className={HOVER_CARD_VALUE_STACK_CLASS}>
       <span>{summary.headline}</span>
-      <span className={HOVER_CARD_CAPTION_CLASS}>As of {summary.ageLabel} ago</span>
+      <span className={HOVER_CARD_CAPTION_CLASS}>
+        As of {summary.ageLabel} ago{scopeCaveat}
+      </span>
     </span>
   );
 }

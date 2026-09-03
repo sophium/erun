@@ -1,4 +1,8 @@
-import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from '@/app/environmentType';
+import {
+  environmentTypeIsHost,
+  environmentTypeIsRemoteWorktree,
+  environmentTypeIsRuntime,
+} from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
 import { CloudProviderERun, type UIEnvironment, type UISelection } from '@/types';
@@ -44,6 +48,18 @@ export function environmentIsHost(environment: UIEnvironment | undefined): boole
   return environmentTypeIsHost(environment?.type);
 }
 
+// environmentUsesDindSidecar reports whether the env's runtime pod carries the
+// erun-dind sidecar every image build actually runs in (mirrors $dindEnabled
+// in erun-devops/k8s/erun-devops/templates/service.yaml, `ne $envType
+// "runtime"`), narrowed by the one case that chart condition doesn't cover: a
+// host env renders no pod at all. This is the signal the Usage row's caveat
+// gates on (Sidebar.EnvHoverCard.tsx's UsageState) — a runtime env's reading
+// is the whole story, but a build-capable env's reading is never the whole
+// story, because nothing it can read ever sees the sidecar's own activity.
+export function environmentUsesDindSidecar(environment: UIEnvironment | undefined): boolean {
+  return !environmentTypeIsHost(environment?.type) && !environmentTypeIsRuntime(environment?.type);
+}
+
 export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
@@ -60,6 +76,9 @@ export interface EnvironmentRowDerived {
   // its own badge instead, so a reader never mistakes "no pod" for a pod that
   // is merely local.
   isHost: boolean;
+  // usageExcludesBuilds says whether this env has an erun-dind sidecar that
+  // its own Usage reading cannot see — see environmentUsesDindSidecar.
+  usageExcludesBuilds: boolean;
   runtimeVersion: string;
   runtimeVersionLine: UIRuntimeVersionLine | undefined;
   erunVersion: UIErunVersion | undefined;
@@ -123,6 +142,7 @@ export function deriveEnvironmentRow(
     ?.environments.find((env) => env.name === environmentName);
   const isLocal = environmentIsLocal(environment);
   const isHost = environmentIsHost(environment);
+  const usageExcludesBuilds = environmentUsesDindSidecar(environment);
   return {
     selected,
     busy,
@@ -130,6 +150,7 @@ export function deriveEnvironmentRow(
     busyFromEnvironment,
     isLocal,
     isHost,
+    usageExcludesBuilds,
     ...environmentVersionFields(environment),
     selection: { tenant: tenantName, environment: environmentName },
   };
