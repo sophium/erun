@@ -95,6 +95,26 @@ command is a no-op past the fetch; proceed.
 
 ### 3. Commit if dirty, then push
 
+**A push to an already-merged branch succeeds and lands nowhere.** The merge
+queue lands a review as a squash commit under a brand-new SHA, so nothing
+about a later `git push` to the old branch fails — `gh` and git both report
+success, the ref updates, and the commit simply never reaches `main` (this
+cost real work once: erun#2007). Check before pushing, not after:
+
+```sh
+branch="$(git rev-parse --abbrev-ref HEAD)"
+prior_status=$(erun review list --source-branch "${branch}" --output json \
+  | jq -r '[.[] | select(.status == "MERGED" or .status == "CLOSED")][0].status // empty')
+if [ -n "${prior_status}" ]; then
+  echo "${branch} already has a review at ${prior_status}. Pushing more commits here lands nowhere — start a fresh branch from the current target instead of resuming this one."
+  exit 1
+fi
+```
+
+Skip this check for a branch you created earlier in this same run — it cannot
+have merged yet. Run it before pushing anything to a branch you are resuming
+(picked back up after a pause, handed off from another agent, etc.).
+
 ```sh
 if [ -n "$(git status --porcelain)" ]; then
   # Ask the operator for a one-line commit message if the tree has
