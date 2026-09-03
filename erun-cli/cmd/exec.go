@@ -65,6 +65,9 @@ func newExecGateRunStartCmd(store common.CloudReadStore, alias *string, deps com
 			"to `erun exec gate-run report` once the gate finishes.\n\n" +
 			"A run with no trackable running phase at all -- a squash conflict before any build ever starts -- " +
 			"may set --status directly to failed or inconclusive and omit --merge-commit.\n\n" +
+			"--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local " +
+			"file --log-ref points at names a known erun infrastructure failure (a registry or the network " +
+			"giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.\n\n" +
 			"--dry-run traces the request without sending it.",
 		Example: "  erun exec gate-run start --source-branch feature/x --target-branch main \\\n" +
 			"    --source-commit $(git rev-parse feature/x) --merge-commit $(git rev-parse HEAD)",
@@ -110,6 +113,9 @@ func newExecGateRunReportCmd(store common.CloudReadStore, alias *string, deps co
 			"A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must " +
 			"report inconclusive -- never failed, which asserts a real gate step actually produced a red " +
 			"verdict. --failing-step is required when --status is failed.\n\n" +
+			"--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local " +
+			"file --log-ref points at names a known erun infrastructure failure (a registry or the network " +
+			"giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.\n\n" +
 			"Reporting against a gate run that already has an outcome is refused: a verdict is immutable once " +
 			"reached.\n\n" +
 			"--dry-run traces the request without sending it.",

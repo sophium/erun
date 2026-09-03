@@ -2,6 +2,8 @@ Record the beginning of one attempt to gate a prospective merge -- the branch, t
 
 A run with no trackable running phase at all -- a squash conflict before any build ever starts -- may set --status directly to failed or inconclusive and omit --merge-commit.
 
+--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local file --log-ref points at names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.
+
 --dry-run traces the request without sending it.
 
 Usage:
