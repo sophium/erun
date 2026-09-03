@@ -10,20 +10,34 @@ import (
 )
 
 func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
-	return &cobra.Command{
-		Use:           "list",
-		Short:         "List configured tenants and environments",
+	var versionDriftTenant string
+	var gateEnvironment string
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List configured tenants and environments",
+		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
+			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment)
 		},
 	}
+	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
+	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json"
+	return cmd
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc) error {
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string) error {
 	ctx.TraceCommand("", "erun", "list")
+	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
+	gateEnvironment = strings.TrimSpace(gateEnvironment)
+	if gateEnvironment != "" && versionDriftTenant == "" {
+		return fmt.Errorf("--gate-environment requires --tenant")
+	}
+
 	result, err := common.ResolveListResult(store, findProjectRoot, common.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
@@ -31,7 +45,74 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 	if err != nil {
 		return err
 	}
+
+	if versionDriftTenant != "" {
+		drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
+		if err != nil {
+			return err
+		}
+		if ctx.Output == common.OutputJSON {
+			return ctx.WriteResult(drift)
+		}
+		return writeVersionDriftReport(ctx, drift)
+	}
+
 	return writeListResult(ctx, result)
+}
+
+func writeVersionDriftReport(ctx common.Context, drift common.TenantVersionDrift) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Version drift for tenant %s:\n", drift.Tenant); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "max version", valueOrNone(drift.MaxVersion)); err != nil {
+		return err
+	}
+	if err := writeVersionDriftEnvironments(ctx, drift.Environments); err != nil {
+		return err
+	}
+	if drift.GateEnvironment == "" {
+		return nil
+	}
+	return writeVersionDriftGate(ctx, drift)
+}
+
+func writeVersionDriftEnvironments(ctx common.Context, environments []common.EnvironmentVersionStatus) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "  environments:"); err != nil {
+		return err
+	}
+	for _, env := range environments {
+		line := "    - " + env.Environment + " version=" + quotedValueOrNone(env.Version)
+		if env.BehindMax {
+			line += " [behind max]"
+		}
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeVersionDriftGate(ctx common.Context, drift common.TenantVersionDrift) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "  gate:"); err != nil {
+		return err
+	}
+	if err := writeIndentedValue(ctx, 4, "environment", drift.GateEnvironment); err != nil {
+		return err
+	}
+	if err := writeIndentedValue(ctx, 4, "version", valueOrNone(drift.GateVersion)); err != nil {
+		return err
+	}
+	switch {
+	case drift.GateVersionUnresolved:
+		_, err := fmt.Fprintln(ctx.Stdout, "    behind: unknown (gate's own erun version could not be resolved from config)")
+		return err
+	case drift.GateBehind:
+		_, err := fmt.Fprintf(ctx.Stdout, "    behind: yes -- outdated relative to %s\n", strings.Join(drift.GateOutdatedBy, ", "))
+		return err
+	default:
+		_, err := fmt.Fprintln(ctx.Stdout, "    behind: no")
+		return err
+	}
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {

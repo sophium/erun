@@ -825,7 +825,7 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	assertListToolOutput(t, output)
 }
 
-func assertListToolOutput(t *testing.T, output eruncommon.ListResult) {
+func assertListToolOutput(t *testing.T, output ListToolResult) {
 	t.Helper()
 
 	if output.Defaults.Tenant != "tenant-a" || output.Defaults.Environment != "dev" {
