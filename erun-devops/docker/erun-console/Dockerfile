@@ -50,8 +50,16 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 # needed (the API sets no CORS headers by design).
 FROM nginx:1.27.4-alpine3.21
 
+ARG ERUN_VERSION
+
 COPY --from=builder /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
+
+# Stamps the build actually serving this container, read back at
+# GET /version.json (see default.conf.template) — the console's counterpart to
+# erun-backend-api's GET /v1/platform "version" field, since a static SPA has
+# no server process to bake a -ldflags version into.
+RUN printf '{"version":"%s"}\n' "${ERUN_VERSION}" > /usr/share/nginx/html/version.json
 
 # Rendered from the template at container start by the base image's own
 # entrypoint (docker-entrypoint.d/20-envsubst-on-templates.sh substitutes every
