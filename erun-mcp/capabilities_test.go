@@ -102,7 +102,7 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 	if len(admin) <= len(read) {
 		t.Fatalf("admin must expose more than read: admin=%d read=%d", len(admin), len(read))
 	}
-	for _, required := range []string{"raw", "deploy", "delete", "version", "list"} {
+	for _, required := range []string{"raw", "deploy", "delete", "version", "list", "context_start", "context_stop", "resize"} {
 		if !slices.Contains(admin, required) {
 			t.Fatalf("admin is missing %q: %v", required, admin)
 		}
@@ -112,6 +112,56 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 		if !slices.Contains(admin, tool) {
 			t.Fatalf("admin should include every read tool, missing %q", tool)
 		}
+	}
+}
+
+// Operate is erun#1107's Phase 3 tier: a caller that only drives the
+// lifecycle of an environment that already exists must see exactly those
+// tools, and no more -- neither observation (it is not a wider read) nor
+// anything that decides what environments exist or runs arbitrary code.
+func TestOperateCapabilitySeesOnlyLifecycleTools(t *testing.T) {
+	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityOperate)))
+
+	want := []string{"context_start", "context_stop", "deploy", "resize"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("operate capability exposed %v, want %v", got, want)
+	}
+}
+
+func TestOperateCapabilityCannotSeeExecutionOrEnvironmentLifecycleDecisions(t *testing.T) {
+	got := listToolNames(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityOperate)))
+
+	for _, forbidden := range []string{
+		"raw", "exec_raw", "delete", "terraform", "init", "context_init",
+		"build", "push", "doctor", "expose", "unexpose", "pin", "version", "list",
+	} {
+		if slices.Contains(got, forbidden) {
+			t.Fatalf("an operate-only caller must not be offered %q: %v", forbidden, got)
+		}
+	}
+}
+
+// An operate-scoped caller can actually reach its tools' handlers at call
+// time, not just see them listed -- the same guard-level proof
+// TestGuardRefusesEvenWhenAHandlerIsReachedDirectly uses for the negative
+// case, mirrored here for the positive one.
+func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
+	identity := authIdentity{
+		Tenant:       "acme",
+		Capabilities: eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityOperate)}),
+	}
+	called := false
+	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		called = true
+		return nil, struct{}{}, nil
+	}
+
+	guarded := guardTool(identity, "deploy", nil, handler)
+	if _, _, err := guarded(context.Background(), nil, struct{}{}); err != nil {
+		t.Fatalf("an operate capability must reach deploy's handler: %v", err)
+	}
+	if !called {
+		t.Fatal("deploy's handler must run for an operate-scoped caller")
 	}
 }
 

@@ -58,14 +58,16 @@ Being able to reach the edge depends on the port-forward `erun open` establishes
 
 Authentication answers *which tenant* is calling. It does not answer *what that caller may do* — and the edge needs both, because `raw` can run arbitrary commands in the pod and `deploy`, `delete` and `context_*` all mutate.
 
-Every tool requires one of two capabilities:
+Every tool requires one of four capabilities:
 
 | Capability | Tools |
 | --- | --- |
 | `erun:read` | Observation that cannot change anything: `version`, `list`, `idle`, `idle_stop_history`, `context_list`, `cloud_list`, `diff`, `observe`, `outputs_list`, `outputs_download`, `job_status`, `job_output`, `job_await` |
-| `erun:admin` | Everything else, including remote execution and every mutating tool |
+| `erun:attach` | Driving an existing attach session (the dtach takeover protocol) and nothing else |
+| `erun:operate` | Driving the lifecycle of an environment that already exists, without deciding what environments exist or running arbitrary code in one: `deploy`, `context_start`, `context_stop`, `resize` |
+| `erun:admin` | Everything else, including remote execution and every tool that decides what environments exist |
 
-`erun:admin` implies `erun:read`, so an admin token never carries both.
+`erun:admin` implies every other capability, so an admin token never carries them explicitly.
 
 A caller sees only the tools it may call. `tools/list` is filtered to the caller's capabilities, so a disallowed tool is *unknown* rather than forbidden — the answer to "what can I do here" is the same as the answer to "what am I allowed to do". Each surviving handler re-checks at call time as well, so a tool reached by any other route still refuses. Both decisions are audited with the resolved tenant, user and tool.
 

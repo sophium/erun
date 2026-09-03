@@ -22,11 +22,13 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 	}
 
 	// Remote execution, everything that mutates, and the leases that hold an
-	// environment awake (and therefore spend money).
+	// environment awake (and therefore spend money). deploy/context_start/
+	// context_stop/resize are deliberately absent here -- they require the
+	// narrower erun:operate tier, covered by TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle.
 	for _, tool := range []string{
-		"raw", "build", "push", "deploy", "delete", "init", "release", "upgrade",
+		"raw", "build", "push", "delete", "init", "release", "upgrade",
 		"expose", "terraform", "publish", "pin", "doctor", "contribute_clone",
-		"context_init", "context_start", "context_stop",
+		"context_init",
 		"cloud_login", "cloud_set", "cloud_init_aws", "cloud_inject_aws_credentials",
 		"job_cancel", "job_attach", "exec_job_cancel", "exec_job_attach", "exec_agent",
 		"activity_lease_take", "activity_lease_release",
@@ -39,6 +41,103 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 
 	if got := MCPToolCapability("a_tool_added_next_week"); got != MCPCapabilityAdmin {
 		t.Fatalf("an unclassified tool must fail closed, got %s", got)
+	}
+}
+
+// The boundary erun#1107's Phase 3 needs: a caller that only ever drives the
+// lifecycle of an environment that already exists -- deploying a published
+// version, starting/stopping its cloud context, resizing its runtime pod --
+// must not need erun:admin, but must still be refused everything that
+// decides what environments exist or runs arbitrary code in one.
+func TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle(t *testing.T) {
+	for _, tool := range []string{"deploy", "context_start", "context_stop", "resize"} {
+		if got := MCPToolCapability(tool); got != MCPCapabilityOperate {
+			t.Fatalf("%s should require operate, got %s", tool, got)
+		}
+	}
+
+	operate := NewMCPCapabilitySet([]string{string(MCPCapabilityOperate)})
+	for _, tool := range []string{"deploy", "context_start", "context_stop", "resize"} {
+		if !operate.AllowsTool(tool) {
+			t.Fatalf("an operate token must reach %q: %+v", tool, operate)
+		}
+	}
+	for _, forbidden := range []string{
+		"exec_raw", "raw", "delete", "terraform", "init", "context_init",
+		"build", "push", "doctor", "expose", "unexpose", "pin", "version",
+	} {
+		if operate.AllowsTool(forbidden) {
+			t.Fatalf("an operate-only token must not reach %q: %+v", forbidden, operate)
+		}
+	}
+}
+
+// Operate is a distinct tier, not a wider read and not implied by read: it
+// grants neither read nor admin, and neither of those grants it back except
+// through admin's blanket implication -- the same isolation erun:attach
+// already established.
+func TestOperateDoesNotImplyReadAndReadDoesNotImplyOperate(t *testing.T) {
+	operate := NewMCPCapabilitySet([]string{string(MCPCapabilityOperate)})
+	if operate.Allows(MCPCapabilityRead) || operate.AllowsTool("version") {
+		t.Fatalf("an operate-only token must not gain read observation: %+v", operate)
+	}
+
+	read := NewMCPCapabilitySet([]string{string(MCPCapabilityRead)})
+	if read.Allows(MCPCapabilityOperate) || read.AllowsTool("deploy") {
+		t.Fatalf("a read-only token must not gain operate: %+v", read)
+	}
+
+	admin := NewMCPCapabilitySet([]string{string(MCPCapabilityAdmin)})
+	if !admin.Allows(MCPCapabilityOperate) || !admin.AllowsTool("deploy") {
+		t.Fatalf("admin permits everything, including operate: %+v", admin)
+	}
+}
+
+// Both shapes issuers actually produce, mirroring how the other tiers already
+// reach a token.
+func TestOperateCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
+	fromScope := MCPCapabilitiesFromClaims("openid erun:operate", nil)
+	if !fromScope.Allows(MCPCapabilityOperate) || fromScope.Allows(MCPCapabilityRead) || fromScope.Allows(MCPCapabilityAdmin) {
+		t.Fatalf("an operate scope grants operate only, got %+v", fromScope)
+	}
+
+	fromRoles := MCPCapabilitiesFromClaims("", []string{"erun:operate"})
+	if !fromRoles.Allows(MCPCapabilityOperate) {
+		t.Fatalf("an operate role grants operate, got %+v", fromRoles)
+	}
+}
+
+// A role that merely resembles the operate tier's name must not resolve to
+// it -- the same fail-closed-on-unrecognized-role behavior the other tiers
+// already hold.
+func TestANearMissRoleNeverResolvesToOperate(t *testing.T) {
+	set := MCPCapabilitiesFromClaims("", []string{"erun:operating", "mobile:operate"})
+	if !set.Empty() {
+		t.Fatalf("a role that merely resembles erun:operate must not resolve to it, got %+v", set)
+	}
+	if set.Allows(MCPCapabilityOperate) {
+		t.Fatalf("a near-miss role string must not grant operate: %+v", set)
+	}
+}
+
+// This is erun:admin's regression guard: adding a fourth tier must not widen
+// or narrow what an admin token could already do.
+func TestAddingOperateDoesNotChangeWhatAdminCanDo(t *testing.T) {
+	admin := AdminMCPCapabilitySet()
+	for _, tool := range []string{
+		"version", "list", "raw", "exec_raw", "build", "push", "deploy",
+		"delete", "init", "release", "terraform", "context_init",
+		"context_start", "context_stop", "resize", "doctor", "expose",
+	} {
+		if !admin.AllowsTool(tool) {
+			t.Fatalf("admin must still reach %q, got %+v", tool, admin)
+		}
+	}
+	if !slices.Equal(admin.Names(), []string{"erun:admin", "erun:attach", "erun:operate", "erun:read"}) {
+		t.Fatalf("the admin desktop compatibility default must carry every tier explicitly, got %v", admin.Names())
+	}
+	if !admin.Allows(MCPCapabilityRead) || !admin.Allows(MCPCapabilityAttach) || !admin.Allows(MCPCapabilityOperate) || !admin.Allows(MCPCapabilityAdmin) {
+		t.Fatalf("admin must satisfy every tier: %+v", admin)
 	}
 }
 
@@ -163,22 +262,23 @@ func TestANearMissRoleNeverResolvesToAttach(t *testing.T) {
 func TestCapabilityKeyIdentifiesTheToolSurface(t *testing.T) {
 	a := NewMCPCapabilitySet([]string{"erun:read"})
 	b := NewMCPCapabilitySet([]string{"erun:read"})
-	admin := NewMCPCapabilitySet([]string{"erun:admin"})
-	attach := NewMCPCapabilitySet([]string{"erun:attach"})
-
 	if a.Key() != b.Key() {
 		t.Fatalf("equal capabilities must share a key: %q vs %q", a.Key(), b.Key())
 	}
-	if a.Key() == admin.Key() {
-		t.Fatalf("different capabilities must not share a key: %q", a.Key())
+
+	tiers := []MCPCapability{MCPCapabilityRead, MCPCapabilityAdmin, MCPCapabilityAttach, MCPCapabilityOperate}
+	sets := make(map[MCPCapability]MCPCapabilitySet, len(tiers))
+	for _, tier := range tiers {
+		sets[tier] = NewMCPCapabilitySet([]string{string(tier)})
+		if !slices.Equal(sets[tier].Names(), []string{string(tier)}) {
+			t.Fatalf("%s: unexpected names: %v", tier, sets[tier].Names())
+		}
 	}
-	if a.Key() == attach.Key() || admin.Key() == attach.Key() {
-		t.Fatalf("attach must be its own distinct key: read=%q admin=%q attach=%q", a.Key(), admin.Key(), attach.Key())
-	}
-	if !slices.Equal(admin.Names(), []string{"erun:admin"}) {
-		t.Fatalf("unexpected names: %v", admin.Names())
-	}
-	if !slices.Equal(attach.Names(), []string{"erun:attach"}) {
-		t.Fatalf("unexpected names: %v", attach.Names())
+	for i, left := range tiers {
+		for _, right := range tiers[i+1:] {
+			if sets[left].Key() == sets[right].Key() {
+				t.Fatalf("%s and %s must not share a key: %q", left, right, sets[left].Key())
+			}
+		}
 	}
 }
