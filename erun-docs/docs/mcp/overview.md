@@ -364,6 +364,14 @@ Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`
 
 Same commands as [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) / [`erun exec close-pr`](/cli/exec#exec-close-pr) / [`erun exec reconcile-bypass`](/cli/exec#exec-reconcile-bypass) / [`erun exec plan-ruleset-bypass`](/cli/exec#exec-plan-ruleset-bypass). Unlike the working-tree tools above, none touches the runtime repo's git state — all four only call GitHub's REST API — so this is its own section rather than a row in the working-tree table.
 
+### Proving a deployed plane actually serves what merged
+
+| Tool | Purpose |
+|---|---|
+| `exec_route-check` | Prove every route erun-backend-api's router registers is actually reachable on the plane `alias` resolves, rather than trusting that merged code is deployed code. Reads the route inventory straight out of erun-backend-api's own source (never a hand-maintained list) and sends a plain GET to each one; first sanity-probes `GET /v1/whoami` and reports the plane unreachable — rather than every route missing — when that alone does not answer. Every probe is a GET regardless of a route's own registered method, since the router reports `405` for a path it knows under a different method, so this never risks creating, updating, or deleting anything on the plane; only the plane's own unmodified `404 page not found` body means a route was never registered at all — a well-formed request for an id that doesn't exist always gets erun-backend-api's own JSON error shape instead, and is reported reachable. The result's `planeReachable`, `missing`, and `errors` fields are the loud signal — a caller must not treat a non-empty `missing` list as routine. `routesDir` overrides the default `erun-backend-api/internal/routes` path resolved from the runtime repo's project root. Set `preview` to trace the resolved plane and route inventory without sending any request. |
+
+Same command as [`erun exec route-check`](/cli/exec#exec-route-check).
+
 ### Gate runs — what is being gated now, and what recent gates decided {#gate-runs}
 
 A gate run is the first-class record of one attempt to gate a prospective merge, independent of whether an erun review exists for the change it gates — a repository whose changes arrive as GitHub pull requests, with no erun review at all, is exactly the case this exists for. See [merge queue](/collaboration/merge-queue) for how a review-driven gate fits alongside this.
@@ -434,6 +442,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | exec | `exec_gate-run_report` | `erun exec gate-run report` | Work |
 | exec | `exec_reconcile-bypass` | `erun exec reconcile-bypass` | Read |
 | exec | `exec_plan-ruleset-bypass` | `erun exec plan-ruleset-bypass` | Read |
+| exec | `exec_route-check` | `erun exec route-check` | Read |
 | exec | `exec_agent` | *(MCP-only; the CLI covers this as `erun exec job start --agent`)* | Work |
 | exec | `exec_job_attach` | `erun exec job attach` | Work |
 | exec | `exec_job_status` | `erun exec job status` | Read |

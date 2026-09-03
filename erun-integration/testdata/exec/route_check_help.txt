@@ -1,0 +1,22 @@
+Reads erun-backend-api's own registered routes straight out of its source (never a hand-maintained list) and GETs each one against the plane --erun-alias resolves. It first sanity-probes GET /v1/whoami and refuses outright if that does not answer, so a down or misconfigured plane is never reported as every route missing. Every probe is a plain GET regardless of a route's own registered method -- Go's router reports 405 for a path it knows under a different method, so this never risks creating, updating, or deleting anything -- and only the plane's own unmodified "404 page not found" means a route was never registered at all; an application-level 404 (a well-formed request for an id that doesn't exist) always looks different and is reported reachable.
+
+Exits non-zero, after printing the full report, when the plane cannot be reached at all or when any registered route comes back missing.
+
+--dry-run traces the resolved plane and the route inventory without sending any request.
+
+Usage:
+  erun exec route-check [flags]
+
+Examples:
+  erun exec route-check --erun-alias erun+api.erunpaas.com@erun
+
+Flags:
+      --dry-run             Resolve and trace mutating actions without executing them.
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for route-check
+      --routes-dir string   Path to erun-backend-api/internal/routes (defaults to that path under the current checkout's project root)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

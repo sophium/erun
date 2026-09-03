@@ -1,0 +1,11 @@
+MISSING  POST    /v1/missing-on-plane
+3/4 route(s) reachable on <PLATFORM_API>.
+audit: erun exec route-check --routes-dir <TMP>
+route-check: reading route inventory from <TMP>
+route-check: 4 route(s) registered
+platform: GET <PLATFORM_API>/v1/whoami (sanity probe: the plane must answer before any route in the inventory is probed)
+platform: GET <PLATFORM_API>/v1/known (probing registered route GET /v1/known)
+platform: GET <PLATFORM_API>/v1/missing-on-plane (probing registered route POST /v1/missing-on-plane)
+platform: GET <PLATFORM_API>/v1/reviews/route-check-probe (probing registered route GET /v1/reviews/{review_id})
+platform: GET <PLATFORM_API>/v1/whoami (probing registered route GET /v1/whoami)
+of 4 route(s) checked on <PLATFORM_API>: 1 registered route(s) are missing on the deployed plane

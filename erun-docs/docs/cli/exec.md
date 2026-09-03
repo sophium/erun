@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Thirteen subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run), and `plan-ruleset-bypass` (plan narrowing a ruleset's bypass grant to one non-human queue identity).
+Repository helpers that run from the project root. Fourteen subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run), `plan-ruleset-bypass` (plan narrowing a ruleset's bypass grant to one non-human queue identity), and `route-check` (prove every registered API route is reachable on a deployed plane).
 
 ## Synopsis
 
@@ -22,6 +22,7 @@ erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-
 erun exec gate-run report GATE_RUN_ID --status STATUS [flags]
 erun exec reconcile-bypass --ruleset-id ID --target-branch BRANCH [flags]
 erun exec plan-ruleset-bypass --ruleset-id ID --queue-actor IDENTITY [flags]
+erun exec route-check [flags]
 ```
 
 ## Subcommands
@@ -163,6 +164,18 @@ Prints the ruleset's current bypass list, the resolved queue identity, and the o
 
 `--dry-run` traces the GitHub lookups and the files it would write without sending or writing anything.
 
+### `exec route-check` {#exec-route-check}
+
+Proves every route erun-backend-api's router registers is actually reachable on the plane `--erun-alias` resolves, instead of trusting that merged code is deployed code. The route inventory comes straight from erun-backend-api's own source — never a hand-maintained list — read from `--routes-dir` (defaults to `erun-backend-api/internal/routes` under the current checkout's project root).
+
+It first sanity-probes `GET /v1/whoami`; if that alone does not answer, the command refuses outright rather than reporting every route in the inventory as missing — a down or misconfigured plane and an absent route are different failures with different remedies.
+
+Every probe is a plain **GET**, regardless of a route's own registered method: Go's router answers `405 Method Not Allowed` for a path it knows under a different method, so this can tell "the route exists" apart from "the route is absent" without ever sending the mutating method a route might actually be registered under. Only the plane's own unmodified `404 page not found` body means a route was never registered at all — an application-level 404 (a well-formed request for an id that does not exist) always returns erun-backend-api's own JSON error shape instead, and is reported reachable.
+
+Prints one `MISSING` line per route the plane's router does not know about, one `ERROR` line per route whose probe could not complete, then a summary line. Exits non-zero, after printing the full report, when the plane did not answer the sanity probe or any registered route came back missing.
+
+`--dry-run` traces the resolved plane and the route inventory without sending any request.
+
 ## Examples
 
 ```bash
@@ -186,6 +199,7 @@ erun exec gate-run report abc123 --status passed
 erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json
 erun exec reconcile-bypass --remote-url https://github.com/org/repo.git \
   --ruleset-id 11081432 --target-branch main
+erun exec route-check --erun-alias erun+api.erunpaas.com@erun
 ```
 
 ## Error behaviour
@@ -229,3 +243,6 @@ erun exec reconcile-bypass --remote-url https://github.com/org/repo.git \
 | Any bypassed push is unaccounted for, or an unnamed identity bypassed (`reconcile-bypass`). | The full report still prints, then the command exits non-zero naming how many pushes are unaccounted for and how many an unexpected identity made. |
 | `--queue-actor` is missing, or `--queue-actor-type` is not a GitHub ruleset actor type (`plan-ruleset-bypass`). | Refuses naming the field and, for the actor type, the accepted values; nothing is looked up. |
 | The queue identity cannot push, GitHub hides the ruleset's `bypass_actors`, or the ruleset does not govern `--target-branch` (`plan-ruleset-bypass`). | Refuses naming which precondition failed and what to do about it; no payload file is written. |
+| No usable `--erun-alias` is configured (`route-check`). | Refuses with a message naming the missing or ambiguous alias; nothing is read, even under `--dry-run`. |
+| The plane does not answer `GET /v1/whoami` (`route-check`). | Prints `<api url> did not answer the sanity probe (...); no routes were checked.`, then exits non-zero — every route in the inventory is left unprobed rather than reported missing. |
+| One or more registered routes come back `404` with the plane's own unmodified `404 page not found` body (`route-check`). | The full report still prints, one `MISSING` line per route, then the command exits non-zero naming how many routes are missing. |
