@@ -6,6 +6,12 @@
 -- deleted rows and how many, without relying on the CronJob's own
 -- transient pod logs (capped at successfulJobsHistoryLimit/
 -- failedJobsHistoryLimit and only reachable with cluster access).
+--
+-- Deliberately not audit_events: that table requires an authenticated,
+-- single-tenant caller (erun_user_id/external_user_id/external_issuer_id
+-- all NOT NULL), which a cross-tenant scheduled sweep has none of. This
+-- table is also not itself swept by any retention policy today, so the
+-- record of a deletion can never be the first thing a later sweep deletes.
 CREATE TABLE retention_runs (
   retention_run_id UUID PRIMARY KEY DEFAULT uuidv7(),
   policy_name TEXT NOT NULL,
