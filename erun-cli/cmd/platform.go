@@ -19,6 +19,7 @@ func newPlatformCmd(store common.CloudReadStore, promptRunner PromptRunner, deps
 		"platform",
 		"Operate a hosted erun platform's control-plane API",
 		newPlatformWhoamiCmd(store, &alias, deps),
+		newPlatformVersionCmd(store, &alias, deps),
 		newPlatformTenantCmd(store, &alias, deps),
 		newPlatformIdentityCmd(store, &alias, deps),
 		newPlatformUserCmd(store, &alias, deps),
@@ -53,6 +54,40 @@ func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps commo
 				}
 			}
 			return ctx.WriteResult(whoami)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newPlatformVersionCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "version",
+		Short: "Report the erun platform's own version and build",
+		Long: "Report the erun platform's own version and build.\n\n" +
+			"Unauthenticated: it works even with an expired or missing access token, so it stays " +
+			"useful for telling a stale plane apart from an unreachable one or an authorization " +
+			"failure on some other route. Compare the reported version against the version a route " +
+			"or feature was added in to tell \"merged but not deployed\" apart from a real bug.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun platform version\n  erun platform version --erun-alias erun+api.acme.services.erunpaas.com",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			info, err := common.RunPlatformVersion(ctx, store, *alias, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform version lookup planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "erun platform version %s (%s)\n", info.Version, info.APIURL); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(info)
 		},
 	}
 	addDryRunFlag(cmd)

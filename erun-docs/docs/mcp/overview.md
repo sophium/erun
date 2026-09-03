@@ -281,6 +281,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | Tool | Read/Work | Purpose |
 |---|---|---|
 | `platform_whoami` | Read | Resolve the caller's identity against the platform. |
+| `platform_version` | Read | Report the build actually serving the platform's own API — unauthenticated, so it still answers with an expired or missing access token. Compare against the version a route or feature was added in to tell "merged but not deployed" apart from a real bug. |
 | `platform_tenant_list` | Read | List tenants visible to the caller — every tenant for an operations-tenant caller, otherwise just the caller's own. |
 | `platform_tenant_create` | Work | Register a new tenant. Requires an operations-tenant caller. |
 | `platform_tenant_repair-org-mapping` | Work | Repair a tenant already stuck with an unresolvable (issuer, org) mapping — one that lists but that no token can ever authenticate into. Converts `issuer` to org-scoped (if not already) and sets `tenantId`'s own org value. Requires an operations-tenant caller. There is no tenant delete on the platform, so this is the only way back short of direct database access. |
@@ -470,6 +471,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | context | `context_start` | `erun context start` | Work |
 | context | `context_stop` | `erun context stop` | Work |
 | platform | `platform_whoami` | `erun platform whoami` | Read |
+| platform | `platform_version` | `erun platform version` | Read |
 | platform | `platform_tenant_list` | `erun platform tenant list` | Read |
 | platform | `platform_tenant_create` | `erun platform tenant create` | Work |
 | platform | `platform_tenant_repair-org-mapping` | `erun platform tenant repair-org-mapping` | Work |

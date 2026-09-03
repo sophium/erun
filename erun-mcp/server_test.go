@@ -169,7 +169,7 @@ var wantRegisteredTools = []string{
 	"platform_env_deploy", "platform_env_get", "platform_env_list",
 	"platform_env_register", "platform_env_stop", "platform_identity_org_create", "platform_provision",
 	"platform_tenant_create", "platform_tenant_list", "platform_tenant_repair-org-mapping", "platform_user_enroll",
-	"platform_user_list", "platform_whoami", "publish", "push", "raw",
+	"platform_user_list", "platform_version", "platform_whoami", "publish", "push", "raw",
 	"release", "resize", "review_close", "review_comment", "review_create", "review_list",
 	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build",
 	"review_report-merged", "review_resolve",
