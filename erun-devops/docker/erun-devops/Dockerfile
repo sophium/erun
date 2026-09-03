@@ -5,6 +5,14 @@
 ARG HELM_VERSION=v4.2.2
 
 # Declared once at the top for the same reason as HELM_VERSION above: the test
+# stage's own `atlas` (needed so `erun exec gate-merge`/`erun exec merge` can
+# regenerate a conflicted erun-backend-db atlas.sum for real inside
+# `make integration-test`, not just when a developer's own machine happens to
+# have atlas installed) and the final image's `atlas` stay pinned to the same
+# version.
+ARG ATLAS_VERSION=v1.2.0
+
+# Declared once at the top for the same reason as HELM_VERSION above: the test
 # stage's own Playwright install-deps call (below) and the final image's
 # install-deps call must stay pinned to the same version, so the installed
 # Chromium runtime library set is identical whether the suite runs inside the
@@ -80,6 +88,16 @@ RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-lin
     tar -xzf /tmp/helm.tar.gz -C /tmp && \
     install -m 0755 "/tmp/linux-${BUILDARCH}/helm" /usr/local/bin/helm && \
     rm -rf /tmp/helm.tar.gz "/tmp/linux-${BUILDARCH}"
+
+# `atlas` for the integration suite's real gate-merge/merge atlas.sum
+# regeneration scenarios (erun-integration/exec_test.go): those scenarios
+# invoke the real `atlas migrate hash`/`atlas migrate validate` via
+# ERUN_ATLAS_BIN, the same seam production code resolves it through, so the
+# suite proves the checksum this fix relies on is genuinely tamper-sensitive
+# rather than trusting a hand-rolled stub to reimplement atlas's own hashing.
+ARG ATLAS_VERSION
+RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
+    chmod 0755 /usr/local/bin/atlas
 
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
 # the pinned `node` stage above rather than apt/curl-installed, same pattern
@@ -272,7 +290,9 @@ ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.222
 ARG AWS_CLI_VERSION=2.32.16
-ARG ATLAS_VERSION=v1.2.0
+# ATLAS_VERSION's default lives in the global ARG at the top of this file,
+# shared with the test stage's own atlas install.
+ARG ATLAS_VERSION
 # Default lives in the global ARG at the top of this file, shared with the
 # test stage's own install-deps call. Keep it in sync with the
 # @playwright/test version resolved in erun-ui/playwright/yarn.lock so the

@@ -51,6 +51,9 @@ type MergeWorkingTreeBranchDependencies struct {
 	CurrentCommit   GitValueResolverFunc
 	RunGit          GitCommandRunnerFunc
 	ConflictedFiles func(root string, runGit GitCommandRunnerFunc) ([]string, error)
+	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
+	// for a human to resolve. See resolveAtlasSumConflicts.
+	RunAtlasHash AtlasMigrateHashRunnerFunc
 }
 
 func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDependencies) MergeWorkingTreeBranchDependencies {
@@ -65,6 +68,9 @@ func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDepe
 	}
 	if deps.ConflictedFiles == nil {
 		deps.ConflictedFiles = gitMergeConflictedFiles
+	}
+	if deps.RunAtlasHash == nil {
+		deps.RunAtlasHash = runAtlasMigrateHash
 	}
 	return deps
 }
@@ -113,10 +119,22 @@ func fetchAndMergeWorkingTree(ctx Context, root, target, remote, remoteRef strin
 	var mergeStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &mergeStderr, "merge", "--no-edit", remoteRef); err != nil {
 		conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
-		if conflictErr == nil && len(conflicted) > 0 {
-			return MergeWorkingTreeBranchResult{}, &MergeConflictError{TargetBranch: target, ConflictedFiles: conflicted}
+		if conflictErr != nil || len(conflicted) == 0 {
+			return MergeWorkingTreeBranchResult{}, fmt.Errorf("git merge: %w: %s", err, strings.TrimSpace(mergeStderr.String()))
 		}
-		return MergeWorkingTreeBranchResult{}, fmt.Errorf("git merge: %w: %s", err, strings.TrimSpace(mergeStderr.String()))
+		remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
+		if resolveErr != nil {
+			return MergeWorkingTreeBranchResult{}, fmt.Errorf("regenerate conflicted atlas.sum: %w", resolveErr)
+		}
+		if len(remaining) > 0 {
+			return MergeWorkingTreeBranchResult{}, &MergeConflictError{TargetBranch: target, ConflictedFiles: remaining}
+		}
+		// Every conflict was an atlas.sum this regenerated and staged —
+		// finish the merge commit `git merge` left pending.
+		var commitStderr bytes.Buffer
+		if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "--no-edit"); err != nil {
+			return MergeWorkingTreeBranchResult{}, fmt.Errorf("git commit --no-edit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
+		}
 	}
 
 	commit, err := deps.CurrentCommit(ctx, root)

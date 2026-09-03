@@ -49,6 +49,43 @@ func captureGit(t testing.TB, dir string, args ...string) string {
 	return string(out)
 }
 
+// atlasBin resolves the real atlas binary from the host PATH so a scenario
+// can seed and validate a real Atlas migration checksum end to end (erun#2025):
+// the erun-devops Dockerfile's test stage now installs atlas for exactly this
+// reason, so — per this suite's "nothing may gate on host capability" rule —
+// this fails loudly rather than skipping when it is unexpectedly absent.
+func atlasBin(t testing.TB) string {
+	t.Helper()
+	path, err := osexec.LookPath("atlas")
+	if err != nil {
+		t.Fatalf(`the integration suite needs "atlas" on the host PATH: %v`, err)
+	}
+	return path
+}
+
+// runAtlasHash regenerates dir's migrations/atlas.sum for real, the same way
+// a migration's author would before committing, so a fixture branch carries a
+// real Atlas checksum rather than a hand-authored placeholder.
+func runAtlasHash(t testing.TB, dir string) {
+	t.Helper()
+	cmd := osexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("atlas migrate hash: %v: %s", err, out)
+	}
+}
+
+// captureAtlasValidate runs the real `atlas migrate validate` against dir's
+// migrations directory, so a scenario can assert atlas's own tamper-detection
+// contract end to end rather than trusting that regeneration preserved it.
+func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
+	t.Helper()
+	cmd := osexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err == nil
+}
+
 // execDangerousContent carries the constructs a shell would reinterpret —
 // backticks, command substitution, embedded quotes, a trailing newline — so a
 // round trip through `exec write` / `exec commit` demonstrates the property
@@ -1562,6 +1599,140 @@ func TestExec(t *testing.T) {
 		status := strings.TrimSpace(captureGit(t, setup.Cwd, "status", "--porcelain"))
 		if status != "" {
 			t.Fatalf("expected the worktree to be left clean (aborted, not mid-conflict), got status: %q", status)
+		}
+	})
+
+	t.Run("gate_merge_real_run_batch_lands_migrations_with_conflicting_atlas_sum", func(t *testing.T) {
+		// erun#2025: migrations/atlas.sum is a generated checksum over every
+		// migration file in the directory, so two branches that each add a
+		// migration conflict on it by construction — the acceptance test this
+		// scenario locks: two such branches batch-gate together with nothing
+		// for a human to resolve. It also proves the fix doesn't weaken what
+		// atlas.sum is for: after the batch lands, the real `atlas migrate
+		// validate` still passes, and a migration edited after the fact is
+		// still caught.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260101000000_init.sql"), "CREATE TABLE foo (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "seed initial migration")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "a")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260102000000_add_bar.sql"), "CREATE TABLE bar (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add bar")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "a")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "b")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260103000000_add_baz.sql"), "CREATE TABLE baz (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add baz")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "b")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		envVars := append(setup.Env(), "ERUN_ATLAS_BIN="+atlasBin(t))
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "a", "--source", "b", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add bar\x00Add baz"})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the batch to land with nothing for a human to resolve, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 2 || len(parsed.Skipped) != 0 {
+			t.Fatalf("expected both migrations to land with nothing skipped, got: %+v", parsed)
+		}
+		for _, name := range []string{"20260102000000_add_bar.sql", "20260103000000_add_baz.sql"} {
+			if _, err := os.Stat(filepath.Join(setup.Cwd, "migrations", name)); err != nil {
+				t.Fatalf("expected %s to be squash-merged onto main: %v", name, err)
+			}
+		}
+		status := strings.TrimSpace(captureGit(t, setup.Cwd, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("expected a clean worktree after landing, got status: %q", status)
+		}
+
+		// The regenerated atlas.sum is not a plausible-looking placeholder: it
+		// passes atlas's own real integrity check against the migration files
+		// that actually landed.
+		if out, ok := captureAtlasValidate(t, setup.Cwd); !ok {
+			t.Fatalf("expected the regenerated atlas.sum to validate cleanly, got:\n%s", out)
+		}
+
+		// And the check still does its job: editing a migration after the
+		// fact, with no matching atlas.sum update, is still caught — this fix
+		// teaches the tooling to regenerate on conflict, not to stop checking.
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260102000000_add_bar.sql"), "CREATE TABLE bar (id int, tampered boolean);\n")
+		out, ok := captureAtlasValidate(t, setup.Cwd)
+		if ok {
+			t.Fatalf("expected atlas to catch a migration edited after the fact, but validate passed:\n%s", out)
+		}
+		if !strings.Contains(out, "checksum") {
+			t.Fatalf("expected a checksum-mismatch report, got:\n%s", out)
+		}
+	})
+
+	t.Run("merge_real_run_regenerates_conflicting_atlas_sum", func(t *testing.T) {
+		// erun#2025: the ordinary `erun exec merge` path (an author syncing a
+		// feature branch with main before opening a PR) hits the identical
+		// by-construction atlas.sum conflict whenever both branches add a
+		// migration. This proves the fix applies there too, not just to the
+		// gate-merge batch path.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260101000000_init.sql"), "CREATE TABLE foo (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "seed initial migration")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260102000000_add_bar.sql"), "CREATE TABLE bar (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature adds bar")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260103000000_add_baz.sql"), "CREATE TABLE baz (id int);\n")
+		runAtlasHash(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", "migrations")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "main adds baz")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "feature")
+
+		envVars := append(setup.Env(), "ERUN_ATLAS_BIN="+atlasBin(t))
+		result := erun.Run(t, []string{"exec", "merge", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the merge to land with nothing for a human to resolve, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		var parsed common.MergeWorkingTreeBranchResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Branch != "feature" || parsed.TargetBranch != "main" || parsed.Commit == "" {
+			t.Fatalf("unexpected result: %+v", parsed)
+		}
+		for _, name := range []string{"20260102000000_add_bar.sql", "20260103000000_add_baz.sql"} {
+			if _, err := os.Stat(filepath.Join(setup.Cwd, "migrations", name)); err != nil {
+				t.Fatalf("expected %s to be present after the merge: %v", name, err)
+			}
+		}
+		status := strings.TrimSpace(captureGit(t, setup.Cwd, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("expected a clean worktree after the merge commit, got status: %q", status)
+		}
+		if out, ok := captureAtlasValidate(t, setup.Cwd); !ok {
+			t.Fatalf("expected the regenerated atlas.sum to validate cleanly, got:\n%s", out)
 		}
 	})
 

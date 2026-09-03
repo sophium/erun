@@ -82,6 +82,9 @@ type GateMergeWorkingTreeDependencies struct {
 	ResolveRef       func(ctx Context, root, ref string) (string, error)
 	RunGit           GitCommandRunnerFunc
 	ConflictedFiles  func(root string, runGit GitCommandRunnerFunc) ([]string, error)
+	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
+	// for a human to resolve. See resolveAtlasSumConflicts.
+	RunAtlasHash AtlasMigrateHashRunnerFunc
 }
 
 func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependencies) GateMergeWorkingTreeDependencies {
@@ -96,6 +99,9 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 	}
 	if deps.ConflictedFiles == nil {
 		deps.ConflictedFiles = gitMergeConflictedFiles
+	}
+	if deps.RunAtlasHash == nil {
+		deps.RunAtlasHash = runAtlasMigrateHash
 	}
 	return deps
 }
@@ -244,18 +250,27 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 	if err := deps.RunGit(root, io.Discard, &mergeStderr, "merge", "--squash", sourceRef); err != nil {
 		conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
 		if conflictErr == nil && len(conflicted) > 0 {
-			var resetStderr bytes.Buffer
-			if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-				return nil, nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+			remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
+			if resolveErr != nil {
+				return nil, nil, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
 			}
-			return nil, &GateMergeSkippedSource{
-				SourceBranch:    source.Branch,
-				SourceCommit:    sourceCommit,
-				Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(conflicted)),
-				ConflictedFiles: conflicted,
-			}, nil
+			if len(remaining) > 0 {
+				var resetStderr bytes.Buffer
+				if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
+					return nil, nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+				}
+				return nil, &GateMergeSkippedSource{
+					SourceBranch:    source.Branch,
+					SourceCommit:    sourceCommit,
+					Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(remaining)),
+					ConflictedFiles: remaining,
+				}, nil
+			}
+			// Every conflict was an atlas.sum this regenerated and staged —
+			// fall through and land this source like a clean squash.
+		} else {
+			return nil, nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, err, strings.TrimSpace(mergeStderr.String()))
 		}
-		return nil, nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, err, strings.TrimSpace(mergeStderr.String()))
 	}
 
 	var commitStderr bytes.Buffer
