@@ -9,6 +9,7 @@ Available Commands:
   provision   Preview the ordered plan for provisioning a hosted environment
   tenant      Manage tenants on the erun platform
   user        Manage users on the erun platform
+  version     Report the erun platform's own version and build
   whoami      Show the caller's resolved identity on the erun platform
 
 Flags:

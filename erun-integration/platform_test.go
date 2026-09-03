@@ -72,6 +72,15 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 			"tenantId": "tenant-1", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
 		})
 	})
+	// GET /v1/platform is unauthenticated on the real API (routes.RegisterPlatformRoute),
+	// so this stub never calls requireBearer -- a scenario proving `platform
+	// version` works even with no/expired credentials would otherwise pass for
+	// the wrong reason if the stub itself demanded a bearer.
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": "https://idp.example", "apiUrl": "https://api.example.test", "version": "1.2.3",
+		})
+	})
 	mux.HandleFunc("POST /v1/tenants", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
@@ -265,6 +274,36 @@ func TestPlatform(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "test-user") || !strings.Contains(result.Combined, "tenant-1") {
 			t.Fatalf("expected whoami output to name the resolved identity, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("version_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"platform", "version", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/version_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_real_run_without_a_working_token", func(t *testing.T) {
+		// GET /v1/platform is unauthenticated (see platformAPIStubServer's own
+		// comment), so this must succeed even though the alias's cached access
+		// token is garbage -- the whole point of exposing this route is that it
+		// answers when a caller's credentials cannot be trusted to resolve
+		// anything else.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		alias := "erun+test@erun"
+		seedERunCloudProviderAlias(t, setup, alias, server.URL, "cli-test-client")
+		seedCachedERunAccessToken(t, setup, alias, "expired-or-garbage-token")
+		result := erun.Run(t, []string{"platform", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1.2.3") || !strings.Contains(result.Combined, "https://api.example.test") {
+			t.Fatalf("expected the reported version and api url, got:\n%s", result.Combined)
 		}
 	})
 

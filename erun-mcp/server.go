@@ -498,6 +498,10 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Resolve the caller's identity against a hosted erun platform (erun-backend-api) over the erun-type cloud alias erun cloud init erun / erun cloud login set up. Supports preview.",
 	}, platformWhoamiTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "platform_version",
+		Description: "Report the build actually serving a hosted erun platform's own API (erun-backend-api) over GET /v1/platform. Unauthenticated, so it still answers with an expired or missing access token -- useful for telling a stale plane apart from an unreachable one or an authorization failure on some other route. Compare the reported version against the version a route or feature was added in to tell \"merged but not deployed\" apart from a real bug. Supports preview.",
+	}, platformVersionTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "platform_tenant_create",
 		Description: "Register a new tenant on the erun platform. Requires an operations-tenant caller. A real, immediate write, not a preview, unless preview is set.",
 	}, platformTenantCreateTool(runtime))

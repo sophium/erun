@@ -131,6 +131,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"context_start":                {Family: "context", CLIPath: []string{"context", "start"}, Title: "Start a cloud context", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"context_stop":                 {Family: "context", CLIPath: []string{"context", "stop"}, Title: "Stop a cloud context", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 	"platform_whoami":              {Family: "platform", CLIPath: []string{"platform", "whoami"}, Title: "Report the authenticated platform identity", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"platform_version":             {Family: "platform", CLIPath: []string{"platform", "version"}, Title: "Report the erun platform's own version and build", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_tenant_list":         {Family: "platform", CLIPath: []string{"platform", "tenant", "list"}, Title: "List platform tenants", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_tenant_create":       {Family: "platform", CLIPath: []string{"platform", "tenant", "create"}, Title: "Create a platform tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_list":           {Family: "platform", CLIPath: []string{"platform", "user", "list"}, Title: "List platform users", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},

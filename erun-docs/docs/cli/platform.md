@@ -12,6 +12,7 @@ For the concepts behind tenants, environments, and cloud contexts, see [Hosted p
 
 ```
 erun platform whoami [flags]
+erun platform version [flags]
 erun platform tenant create --name <name> --issuer <issuer> [flags]
 erun platform tenant list [flags]
 erun platform user enroll --username <username> [flags]
@@ -35,6 +36,16 @@ Every subcommand accepts `--erun-alias` (defaults to the sole configured erun-ty
 ### `platform whoami`
 
 Resolves the caller's identity against the platform: tenant ID, user ID, username, and roles.
+
+### `platform version`
+
+Reports the build actually serving the platform's own API — the version, and the issuer/console/docs discovery fields `erun cloud init erun` reads. Unlike every other `platform` subcommand, this call is **unauthenticated**: it works even with an expired or missing access token, which is exactly the state a caller troubleshooting some other route's failure is likely to be in. Use it to tell three situations apart, which otherwise all look like "it didn't work":
+
+- The plane is unreachable (a network error, no HTTP response at all).
+- A route is missing because the deployed plane predates it (that route 404s while `platform version` itself succeeds).
+- The caller is unauthorized on some other route (`401`/`403` on that route — which, unlike a 404, proves the route exists).
+
+Compare the reported `version` against the version a route or feature was actually added in to tell "merged but not deployed" apart from a real bug.
 
 ### `platform tenant create` / `platform tenant list`
 
@@ -111,6 +122,7 @@ erun cloud init erun --api-url https://api.erunpaas.com
 erun cloud login --alias erun+api.erunpaas.com@erun
 
 erun platform whoami
+erun platform version
 erun platform env register --name prod --type runtime --runtime-version 1.4.2
 erun platform env get 018f4b2a-...
 erun platform env deploy 018f4b2a-... --version 1.5.0

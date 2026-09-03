@@ -132,6 +132,32 @@ func RunPlatformWhoami(ctx Context, store CloudReadStore, alias string, deps Clo
 	return client.Whoami(context.Background())
 }
 
+// RunPlatformVersion reports the build actually serving a hosted erun
+// platform's own API, over GET /v1/platform — the same unauthenticated route
+// `erun cloud init erun` already calls to discover the issuer and client ids.
+// It answers erun#2052's gap directly: `whoami` proves the caller is
+// authenticated and reachable, but returns identity, not build, so there was
+// no way to ask a deployed control plane what version it is running.
+// Unauthenticated on purpose: a client has to be able to compare the plane's
+// version before it can even mint a token against it (the same reason
+// PlatformInfo's other discovery fields -- issuer, client ids -- are
+// unauthenticated), and the fields it returns are this instance's own
+// self-description, never tenant data. This still goes through the resolved
+// alias (not a bare --api-url) so the same call keeps working when the
+// alias's cached credentials are stale or expired -- exactly the state a
+// caller troubleshooting a 404/401 on some other route is likely to be in.
+func RunPlatformVersion(ctx Context, store CloudReadStore, alias string, deps CloudDependencies) (PlatformInfo, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformInfo{}, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/platform")
+	if ctx.DryRun {
+		return PlatformInfo{}, nil
+	}
+	return client.Platform(context.Background())
+}
+
 // RunPlatformCreateTenant registers a new tenant. Requires an
 // operations-tenant caller.
 func RunPlatformCreateTenant(ctx Context, store CloudReadStore, alias string, params PlatformCreateTenantParams, deps CloudDependencies) (PlatformTenant, error) {
