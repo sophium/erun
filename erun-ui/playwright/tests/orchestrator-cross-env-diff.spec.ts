@@ -382,7 +382,28 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     await expect(alphaCurrent).toHaveAttribute('aria-pressed', 'true');
     await expect(betaCurrent).toHaveAttribute('aria-pressed', 'true');
 
+    // A scope change on ANY linked environment reloads every linked
+    // environment's diff (loadReviewDiff fetches the whole target set, not
+    // just the one whose scope changed), so alpha's click also sends beta a
+    // fresh (same-scope) LoadDiff round trip. Wait on that concrete round
+    // trip for both environments -- and re-confirm both files are still in
+    // the diff panel -- before reading any button state, rather than racing
+    // straight into the attribute check.
+    const reloadedBoth = Promise.all(
+      [SEED_ENV_ALPHA, SEED_ENV_BETA].map((environment) =>
+        page.waitForResponse(
+          (response) =>
+            response.url().includes('__erun_invoke') &&
+            (response.request().postData() ?? '').includes('"LoadDiff"') &&
+            (response.request().postData() ?? '').includes(environment),
+        ),
+      ),
+    );
     await alphaAll.click();
+    await reloadedBoth;
+    await expect
+      .poll(() => review.diffSectionPaths())
+      .toEqual(expect.arrayContaining(['alpha.ts', 'beta.ts']));
 
     await expect(alphaAll).toHaveAttribute('aria-pressed', 'true');
     await expect(alphaCurrent).toHaveAttribute('aria-pressed', 'false');

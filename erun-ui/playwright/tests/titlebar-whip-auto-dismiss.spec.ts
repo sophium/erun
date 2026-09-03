@@ -48,6 +48,16 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
+    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+    // timer while document.hasFocus() is true, and pauses/resumes on real
+    // blur/focus events -- deliberate, so a toast never silently marks
+    // itself seen while the operator is in another window. Under full-suite
+    // parallel load a fresh page is not guaranteed to already have that real
+    // focus, so the timer can end up never armed at all: fastForward then
+    // advances a clock with nothing scheduled on it, and the report never
+    // dismisses within the assertion's timeout. bringToFront forces the real
+    // precondition instead of hoping the page already has it.
+    await app.page.bringToFront();
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
@@ -64,6 +74,16 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'orchestrator', id: 'pw-orch', name: 'pw-orch', outcome: 'capped' },
     ]);
     await app.page.clock.install();
+    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+    // timer while document.hasFocus() is true, and pauses/resumes on real
+    // blur/focus events -- deliberate, so a toast never silently marks
+    // itself seen while the operator is in another window. Under full-suite
+    // parallel load a fresh page is not guaranteed to already have that real
+    // focus, so the timer can end up never armed at all: fastForward then
+    // advances a clock with nothing scheduled on it, and the report never
+    // dismisses within the assertion's timeout. bringToFront forces the real
+    // precondition instead of hoping the page already has it.
+    await app.page.bringToFront();
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Capped', { exact: true })).toBeVisible();
@@ -75,6 +95,16 @@ test.describe('whip report auto-dismiss', () => {
   test('an empty ("nothing was targeted") report is not treated as a success', async ({ app }) => {
     await mockWhipReport(app.page, []);
     await app.page.clock.install();
+    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+    // timer while document.hasFocus() is true, and pauses/resumes on real
+    // blur/focus events -- deliberate, so a toast never silently marks
+    // itself seen while the operator is in another window. Under full-suite
+    // parallel load a fresh page is not guaranteed to already have that real
+    // focus, so the timer can end up never armed at all: fastForward then
+    // advances a clock with nothing scheduled on it, and the report never
+    // dismisses within the assertion's timeout. bringToFront forces the real
+    // precondition instead of hoping the page already has it.
+    await app.page.bringToFront();
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Nothing was targeted')).toBeVisible();
@@ -88,6 +118,16 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
+    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+    // timer while document.hasFocus() is true, and pauses/resumes on real
+    // blur/focus events -- deliberate, so a toast never silently marks
+    // itself seen while the operator is in another window. Under full-suite
+    // parallel load a fresh page is not guaranteed to already have that real
+    // focus, so the timer can end up never armed at all: fastForward then
+    // advances a clock with nothing scheduled on it, and the report never
+    // dismisses within the assertion's timeout. bringToFront forces the real
+    // precondition instead of hoping the page already has it.
+    await app.page.bringToFront();
 
     await openAndWhip(app);
     const heading = app.titlebar.whipReportHeading();
@@ -109,6 +149,16 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
+    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+    // timer while document.hasFocus() is true, and pauses/resumes on real
+    // blur/focus events -- deliberate, so a toast never silently marks
+    // itself seen while the operator is in another window. Under full-suite
+    // parallel load a fresh page is not guaranteed to already have that real
+    // focus, so the timer can end up never armed at all: fastForward then
+    // advances a clock with nothing scheduled on it, and the report never
+    // dismisses within the assertion's timeout. bringToFront forces the real
+    // precondition instead of hoping the page already has it.
+    await app.page.bringToFront();
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
