@@ -12,7 +12,9 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	var versionOverride string
 	var tenant string
 	var environment string
-	var force bool
+	var gateEnvironment string
+	var force, fleet, overrideLease bool
+	var orchestrator string
 	cmd := &cobra.Command{
 		Use:   "upgrade [TENANT] [ENVIRONMENT]",
 		Short: "Redeploy opted-in environments to the latest version for their channel",
@@ -20,21 +22,38 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 			"version lags the latest for its channel (stable or snapshot). Snapshot-channel " +
 			"environments adopt a stable release once one is published on top of the latest " +
 			"snapshot.\n\n" +
+			"Pass --fleet to instead roll every environment in --tenant to --version regardless of " +
+			"its own Upgrade-all opt-in -- the explicit way to remediate version drift found by " +
+			"`erun list --tenant` (a tenant's environments do not all have to opt into the routine " +
+			"cadence to be rolled together once). Add --gate-environment to name the environment " +
+			"driving that tenant's merge-queue gate: it is always included and always rolled first, " +
+			"regardless of --fleet, so the gate never validates a change against code it is itself " +
+			"behind (the release-cadence policy's \"immediate, unconditional\" gate redeploy).\n\n" +
 			"High blast radius: this rolls out new runtime images to multiple — possibly remote — " +
 			"environments, which restarts their pods and can spend cloud money. Run with --dry-run " +
-			"first to review the resolved plan (each member, its channel, and current → target) and " +
-			"the exact deploy actions before anything ships. Scope it with TENANT/ENVIRONMENT to " +
-			"upgrade a subset; --version pins one version across the set, skipping channel resolution.",
-		Example:       "  erun upgrade --dry-run\n  erun upgrade\n  erun upgrade team\n  erun upgrade team prod --version 1.2.3",
+			"first to review the resolved plan (each member, its channel, and current → target, in " +
+			"the exact order it will deploy) and the exact deploy actions before anything ships. " +
+			"Scope it with TENANT/ENVIRONMENT to upgrade a subset (one environment at a time is a " +
+			"plain positional scope); --version pins one version across the set, skipping channel " +
+			"resolution. Because a roll restarts the runtime pod, each environment is refused — " +
+			"naming the holder — while it is held by another worker (a running build, deploy, or " +
+			"agent session); pass --override-lease to roll it anyway.",
+		Example: "  erun upgrade --dry-run\n  erun upgrade\n  erun upgrade team\n  erun upgrade team prod --version 1.2.3\n" +
+			"  erun upgrade team --fleet --version 1.2.3 --gate-environment build --dry-run\n" +
+			"  erun upgrade team --fleet --version 1.2.3 --gate-environment build\n" +
+			"  erun upgrade team build --version 1.2.3\n" +
+			"  erun upgrade team prod --version 1.2.3 --override-lease",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, err := upgradeTargetFromArgs(args, tenant, environment, versionOverride, force)
+			target, err := upgradeTargetFromArgs(args, tenant, environment, gateEnvironment, versionOverride, force, fleet)
 			if err != nil {
 				return err
 			}
+			holder := common.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
+			deployer = common.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
 			return runUpgrade(withCloudContextPreflight(commandContext(cmd), store), store, target, deployer)
 		},
 	}
@@ -43,10 +62,14 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Restrict the upgrade to a specific tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Restrict the upgrade to a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")
+	cmd.Flags().BoolVar(&fleet, "fleet", false, "Include every environment in --tenant regardless of its own Upgrade-all opt-in; requires --tenant")
+	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "Name the environment driving --tenant's merge-queue gate; always included and always rolled first, regardless of --fleet; requires --tenant")
+	cmd.Flags().BoolVar(&overrideLease, "override-lease", false, "Roll an environment even though it is currently held by another worker")
+	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on each deploy's lease and on any override")
 	return cmd
 }
 
-func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride string, force bool) (common.UpgradeTarget, error) {
+func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (common.UpgradeTarget, error) {
 	if len(args) >= 1 {
 		tenant = args[0]
 	}
@@ -61,6 +84,8 @@ func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride s
 		Environment:     strings.TrimSpace(environment),
 		VersionOverride: strings.TrimSpace(versionOverride),
 		Force:           force,
+		Fleet:           fleet,
+		GateEnvironment: strings.TrimSpace(gateEnvironment),
 	}, nil
 }
 
@@ -73,8 +98,8 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 		ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
 		defer closeEnvTrace()
 	}
-	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v",
-		target.Tenant, target.Environment, target.VersionOverride, target.Force))
+	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",
+		target.Tenant, target.Environment, target.VersionOverride, target.Force, target.Fleet, target.GateEnvironment))
 
 	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.UpgradeVersionsResolverForStore(store, common.ResolveRuntimeImageRegistryVersions))
 	if err != nil {
@@ -82,16 +107,16 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 		return err
 	}
 	if len(plan.Items) == 0 {
-		ctx.Info("==> No environments opted into Upgrade all" + scopeSuffix(target))
+		ctx.Info("==> No environments" + upgradeScopeReason(target) + scopeSuffix(target))
 		return nil
 	}
 	lagging := plan.Lagging()
-	ctx.Info(fmt.Sprintf("==> Upgrade plan: %d member(s), %d lagging", len(plan.Items), len(lagging)))
-	for _, item := range plan.Items {
-		ctx.Info(fmt.Sprintf("    %s/%s [%s] %s -> %s%s",
-			item.Tenant, item.Environment, item.Channel,
+	ctx.Info(fmt.Sprintf("==> Upgrade plan: %d member(s), %d lagging, in this order:", len(plan.Items), len(lagging)))
+	for i, item := range plan.Items {
+		ctx.Info(fmt.Sprintf("    %d. %s/%s [%s] %s -> %s%s%s",
+			i+1, item.Tenant, item.Environment, item.Channel,
 			displayUpgradeVersion(item.Current), displayUpgradeVersion(item.Target),
-			laggingSuffix(item)))
+			laggingSuffix(item), gateSuffix(item)))
 	}
 
 	result := common.RunUpgradePlan(ctx, plan, deploy)
@@ -126,6 +151,24 @@ func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfig
 		noticeStaleRuntimePortForwards(ctx, specs)
 		return nil
 	}
+}
+
+// upgradeScopeReason names why no environments are in the plan. --fleet and
+// --gate-environment already include every non-host environment in scope
+// regardless of opt-in, so an empty plan there means the tenant itself has no
+// environment to fill it, not a missed "Upgrade all" opt-in.
+func upgradeScopeReason(target common.UpgradeTarget) string {
+	if target.Fleet || target.GateEnvironment != "" {
+		return " to roll"
+	}
+	return " opted into Upgrade all"
+}
+
+func gateSuffix(item common.UpgradePlanItem) string {
+	if item.IsGate {
+		return "  [gate]"
+	}
+	return ""
 }
 
 func scopeSuffix(target common.UpgradeTarget) string {

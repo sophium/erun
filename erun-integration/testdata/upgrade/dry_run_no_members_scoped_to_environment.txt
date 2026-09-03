@@ -1,5 +1,5 @@
 audit: erun upgrade --dry-run team dev
 trace-log: would append the full trace to <TMP>
-upgrade: tenant=team environment=dev version-override= force=false
+upgrade: tenant=team environment=dev version-override= force=false fleet=false gate-environment=
 upgrade: team/dev not opted in (autoupgrade=false), skipping
 ==> No environments opted into Upgrade all for team/dev

@@ -1,10 +1,10 @@
 audit: erun upgrade --dry-run team
-upgrade: tenant=team environment= version-override= force=false
+upgrade: tenant=team environment= version-override= force=false fleet=false gate-environment=
 upgrade: team/agent opted in, channel=snapshot current=<VERSION>
 upgrade: resolving versions for team/agent from the listed registries
 upgrade: team/agent <VERSION> -> <VERSION>
-==> Upgrade plan: 1 member(s), 1 lagging
-    team/agent [snapshot] <VERSION> -> <VERSION>  (will upgrade)
+==> Upgrade plan: 1 member(s), 1 lagging, in this order:
+    1. team/agent [snapshot] <VERSION> -> <VERSION>  (will upgrade)
 ==> Upgrading team/agent <VERSION> -> <VERSION> (snapshot)
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)

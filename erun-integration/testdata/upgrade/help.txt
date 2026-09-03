@@ -1,6 +1,8 @@
 Redeploy every environment opted into "Upgrade all" (autoupgrade) whose runtime version lags the latest for its channel (stable or snapshot). Snapshot-channel environments adopt a stable release once one is published on top of the latest snapshot.
 
-High blast radius: this rolls out new runtime images to multiple — possibly remote — environments, which restarts their pods and can spend cloud money. Run with --dry-run first to review the resolved plan (each member, its channel, and current → target) and the exact deploy actions before anything ships. Scope it with TENANT/ENVIRONMENT to upgrade a subset; --version pins one version across the set, skipping channel resolution.
+Pass --fleet to instead roll every environment in --tenant to --version regardless of its own Upgrade-all opt-in -- the explicit way to remediate version drift found by `erun list --tenant` (a tenant's environments do not all have to opt into the routine cadence to be rolled together once). Add --gate-environment to name the environment driving that tenant's merge-queue gate: it is always included and always rolled first, regardless of --fleet, so the gate never validates a change against code it is itself behind (the release-cadence policy's "immediate, unconditional" gate redeploy).
+
+High blast radius: this rolls out new runtime images to multiple — possibly remote — environments, which restarts their pods and can spend cloud money. Run with --dry-run first to review the resolved plan (each member, its channel, and current → target, in the exact order it will deploy) and the exact deploy actions before anything ships. Scope it with TENANT/ENVIRONMENT to upgrade a subset (one environment at a time is a plain positional scope); --version pins one version across the set, skipping channel resolution. Because a roll restarts the runtime pod, each environment is refused — naming the holder — while it is held by another worker (a running build, deploy, or agent session); pass --override-lease to roll it anyway.
 
 Usage:
   erun upgrade [TENANT] [ENVIRONMENT] [flags]
@@ -10,14 +12,22 @@ Examples:
   erun upgrade
   erun upgrade team
   erun upgrade team prod --version <VERSION>
+  erun upgrade team --fleet --version <VERSION> --gate-environment build --dry-run
+  erun upgrade team --fleet --version <VERSION> --gate-environment build
+  erun upgrade team build --version <VERSION>
+  erun upgrade team prod --version <VERSION> --override-lease
 
 Flags:
-      --dry-run              Resolve and trace mutating actions without executing them.
-      --environment string   Restrict the upgrade to a specific environment; requires --tenant
-      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
-  -h, --help                 help for upgrade
-      --tenant string        Restrict the upgrade to a specific tenant
-      --version string       Deploy this exact version to every opted-in environment, skipping channel resolution
+      --dry-run                   Resolve and trace mutating actions without executing them.
+      --environment string        Restrict the upgrade to a specific environment; requires --tenant
+      --fleet                     Include every environment in --tenant regardless of its own Upgrade-all opt-in; requires --tenant
+      --force                     Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
+      --gate-environment string   Name the environment driving --tenant's merge-queue gate; always included and always rolled first, regardless of --fleet; requires --tenant
+  -h, --help                      help for upgrade
+      --orchestrator string       The calling orchestrator's own id, recorded on each deploy's lease and on any override
+      --override-lease            Roll an environment even though it is currently held by another worker
+      --tenant string             Restrict the upgrade to a specific tenant
+      --version string            Deploy this exact version to every opted-in environment, skipping channel resolution
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

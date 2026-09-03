@@ -1,0 +1,34 @@
+audit: erun upgrade --dry-run --fleet --gate-environment zzz-build --version <VERSION> team
+upgrade: tenant=team environment= version-override=<VERSION> force=false fleet=true gate-environment=zzz-build
+upgrade: team/aaa-dev included via --fleet (autoupgrade=false), channel=stable current=<VERSION>
+upgrade: team/aaa-dev using version override <VERSION> for all channels
+upgrade: team/zzz-build included as the gate environment (autoupgrade=false), channel=stable current=<VERSION>
+upgrade: team/zzz-build using version override <VERSION> for all channels
+==> Upgrade plan: 2 member(s), 2 lagging, in this order:
+    1. team/zzz-build [stable] <VERSION> -> <VERSION>  (will upgrade)  [gate]
+    2. team/aaa-dev [stable] <VERSION> -> <VERSION>  (will upgrade)
+==> Upgrading team/zzz-build <VERSION> -> <VERSION> (stable)
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+kubectl --context test-context get namespace team-zzz-build -o name
+deploy: namespace team-zzz-build is created if the check above reports it missing
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace team-zzz-build --debug --kube-context test-context --set-string tenant=team --set-string environment=zzz-build --set-string worktreeStorage=none --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17100 --set apiPort=17133 --set sshPort=17122 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-string containerRegistry=registry.example/test --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=registry.example/test/team-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string runtime.dind.resources.limits.cpu=4 --set-string runtime.dind.resources.limits.memory=20Gi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://registry.example/test/charts/erun-devops --version <VERSION>
+deploy: watching pods in team-zzz-build on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-zzz-build get pods -o json
+dedup: ready (release=test-context-team-zzz-build-team-devops, hash=<HASH>)
+==> Upgrading team/aaa-dev <VERSION> -> <VERSION> (stable)
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+kubectl --context test-context get namespace team-aaa-dev -o name
+deploy: namespace team-aaa-dev is created if the check above reports it missing
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace team-aaa-dev --debug --kube-context test-context --set-string tenant=team --set-string environment=aaa-dev --set-string worktreeStorage=none --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-string containerRegistry=registry.example/test --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=registry.example/test/team-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string runtime.dind.resources.limits.cpu=4 --set-string runtime.dind.resources.limits.memory=20Gi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://registry.example/test/charts/erun-devops --version <VERSION>
+deploy: watching pods in team-aaa-dev on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-aaa-dev get pods -o json
+dedup: ready (release=test-context-team-aaa-dev-team-devops, hash=<HASH>)
+==> Upgrade complete: 2 upgraded, 0 up to date, 0 unresolved, 0 failed
