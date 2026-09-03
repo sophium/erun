@@ -29,21 +29,22 @@ type EntitlementChecker interface {
 // decision, erun#1891). routeroles' backend classes and MCP's capability
 // tiers do not line up 1:1: this route's own classification is
 // TenantUserClass ("operating an environment that already exists"), and
-// erun:read/erun:attach are exactly that -- observation and driving an
-// existing attach session, nothing an ordinary TenantUser cannot already do
-// through the API. erun:admin is not a peer of that class: MCPToolCapability's
-// default-closed table puts delete/context_init/terraform/init (each
-// TenantAdminOnly on the backend) in the very same tier as build/deploy on an
-// existing environment (TenantUserClass), so a caller must separately hold a
-// TenantAdminOnly permission to receive it -- reaching this route at all is
-// not enough. DELETE on this exact environment is the narrowest available
-// anchor for that check: whatever role structure exists in the future, "can
-// this caller delete this environment" is the closest single permission to
-// "should this caller be trusted with admin (including exec_raw) reach into
-// it" -- the more restrictive reading where the mapping is not exact. A
-// caller entitled to neither read nor attach never reaches this check at all:
-// the route's own TenantUserClass gate already refused them before the
-// handler runs.
+// erun:read/erun:attach/erun:operate are exactly that -- observation, driving
+// an existing attach session, and driving an existing environment's own
+// lifecycle (deploy/context_start/context_stop/resize, erun#1107), nothing an
+// ordinary TenantUser cannot already do through the API. erun:admin is not a
+// peer of that class: MCPToolCapability's default-closed table puts
+// delete/context_init/terraform/init (each TenantAdminOnly on the backend) in
+// the very same tier as exec_raw and every other tool that runs arbitrary
+// code, so a caller must separately hold a TenantAdminOnly permission to
+// receive it -- reaching this route at all is not enough. DELETE on this
+// exact environment is the narrowest available anchor for that check:
+// whatever role structure exists in the future, "can this caller delete this
+// environment" is the closest single permission to "should this caller be
+// trusted with admin (including exec_raw) reach into it" -- the more
+// restrictive reading where the mapping is not exact. A caller entitled to
+// none of read/attach/operate never reaches this check at all: the route's
+// own TenantUserClass gate already refused them before the handler runs.
 const (
 	adminEntitlementMethod = http.MethodDelete
 	adminEntitlementPath   = "/v1/environments/{environment_id}"
@@ -133,11 +134,11 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 
 // authorizeScope refuses a requested erun:admin scope unless the caller
 // separately holds adminEntitlementMethod/Path (see that constant's doc
-// comment for the mapping this enforces). erun:read and erun:attach need no
-// check here: this route is itself routeroles.TenantUserClass, so reaching
-// the handler already proves that entitlement. A nil entitlement checker
-// (no permission backend wired) fails closed rather than minting admin
-// unconditionally.
+// comment for the mapping this enforces). erun:read, erun:attach, and
+// erun:operate need no check here: this route is itself
+// routeroles.TenantUserClass, so reaching the handler already proves that
+// entitlement. A nil entitlement checker (no permission backend wired) fails
+// closed rather than minting admin unconditionally.
 func (r MCPTokenRoutes) authorizeScope(ctx context.Context, scope string) error {
 	requestsAdmin := false
 	for _, requested := range strings.Fields(scope) {

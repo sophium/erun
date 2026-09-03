@@ -297,6 +297,71 @@ func TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd(t *testing.T) {
 	}
 }
 
+// TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd is erun#1107's Phase 3
+// mint path: erun:operate needs no entitlement beyond reaching this route
+// (the same as erun:read/erun:attach), because it only ever drives the
+// lifecycle of an environment the caller's tenant already owns -- unlike
+// erun:admin, it grants nothing a TenantUser could not already do through
+// the API.
+func TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityOperate))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response mcpTokenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	claims := decodeMCPTokenClaims(t, response.Token)
+	capabilities := claims.Capabilities()
+	if !capabilities.Allows(eruncommon.MCPCapabilityOperate) {
+		t.Fatal("an operate-scoped mint must actually carry the operate capability")
+	}
+	for _, required := range []string{"deploy", "context_start", "context_stop", "resize"} {
+		if !capabilities.AllowsTool(required) {
+			t.Fatalf("an operate-scoped mint must reach %q, got %+v", required, capabilities)
+		}
+	}
+	for _, forbidden := range []string{"exec_raw", "raw", "build", "push", "delete", "release", "upgrade", "expose", "terraform", "init", "context_init"} {
+		if capabilities.AllowsTool(forbidden) {
+			t.Fatalf("an operate-scoped mint must not reach %q, got %+v", forbidden, capabilities)
+		}
+	}
+	if capabilities.AllowsTool("version") {
+		t.Fatal("operate is a distinct tier, not a wider read; it must not gain observation")
+	}
+}
+
+// TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd proves the
+// entitlement refusal above is scoped to erun:admin, the same way
+// TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd already proves it for
+// erun:read: a caller denied the admin entitlement can still mint operate.
+func TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityOperate))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var response mcpTokenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	claims := decodeMCPTokenClaims(t, response.Token)
+	if !claims.Capabilities().AllowsTool("deploy") {
+		t.Fatal("a caller denied admin entitlement must still be able to mint operate")
+	}
+}
+
 // TestMintMCPTokenRefusesUnrecognizedScope is the entitlement test: a caller
 // cannot mint a token carrying a capability string this platform never
 // defined. The server is the authority over what a token may claim, not the
