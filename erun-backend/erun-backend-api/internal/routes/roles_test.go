@@ -314,11 +314,7 @@ func TestRevokeUserRoleFromOperationsOwnTenantPassesNoOverride(t *testing.T) {
 // an actionable message, not a generic 500.
 func TestRevokeUserRoleRefusesLastGrantCapableRole(t *testing.T) {
 	roles := &stubRoleRepository{revokeErr: apirepository.ErrLastGrantCapableRole}
-	req := httptest.NewRequest(http.MethodDelete, "/v1/users/user-1/roles/role-1", nil)
-	req.SetPathValue("user_id", "user-1")
-	req.SetPathValue("role_id", "role-1")
-	rec := httptest.NewRecorder()
-	RoleRoutes{roles: roles}.revokeUserRole(rec, req)
+	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "")
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
 	}
@@ -326,11 +322,7 @@ func TestRevokeUserRoleRefusesLastGrantCapableRole(t *testing.T) {
 
 func TestRevokeUserRoleMapsNotFoundToStatusNotFound(t *testing.T) {
 	roles := &stubRoleRepository{revokeErr: apirepository.ErrNotFound}
-	req := httptest.NewRequest(http.MethodDelete, "/v1/users/user-1/roles/role-1", nil)
-	req.SetPathValue("user_id", "user-1")
-	req.SetPathValue("role_id", "role-1")
-	rec := httptest.NewRecorder()
-	RoleRoutes{roles: roles}.revokeUserRole(rec, req)
+	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
