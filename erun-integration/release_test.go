@@ -116,6 +116,40 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_main_with_develop_emits_stable_plan", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_main_with_remote_only_develop_emits_stable_plan", func(t *testing.T) {
+		// Regression for erun#2013. A checkout that only ever fetched
+		// origin/develop as a remote-tracking ref (no local `develop` branch)
+		// must still get the stable release's sync-develop and both-branch
+		// push stages: `git checkout develop` resolves a remote-only ref into
+		// a new local tracking branch on its own, so the stages run fine —
+		// checking refs/heads alone used to treat this the same as "no
+		// develop branch exists" and silently dropped both stages with no
+		// trace and no refusal.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		remoteRoot := filepath.Join(setup.Home, "origin.git")
+		fixture.RunGit(t, setup.Home, "init", "-q", "--bare", remoteRoot)
+		fixture.RunGit(t, setup.Cwd, "remote", "add", "origin", remoteRoot)
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "-u", "origin", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "develop")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "-u", "origin", "develop")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "branch", "-q", "-D", "develop")
+		fixture.RunGit(t, setup.Cwd, "fetch", "-q", "origin")
+
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "sync-develop") {
+			t.Fatalf("expected the sync-develop stage in a plan for a remote-only develop branch:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "push --follow-tags origin main develop") {
+			t.Fatalf("expected the push stage to include develop for a remote-only develop branch:\n%s", result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_remote_only_develop_emits_stable_plan", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_main_without_develop_pushes_only_main", func(t *testing.T) {
 		// Without a develop branch, a stable release syncs and pushes only
 		// main.
