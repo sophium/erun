@@ -117,7 +117,7 @@ reporting beside them.
 gate_run_id=$(erun exec gate-run start --source-branch "${source}" --target-branch "${target}" \
   --source-commit "${source_commit}" --merge-commit "${merge_commit}" --review-id "${review_id}" \
   --output json | jq -r .gateRunId)
-if erun build --output json > /tmp/erun-merge-queue-drive-build.json; then
+if erun build --output json > /tmp/erun-merge-queue-drive-build.json 2>&1; then
   build_ok=0
 else
   build_ok=1
@@ -133,20 +133,44 @@ Queue" — "The gate is `erun build`, never `erun release`").
 *while it is still running* — before this step existed, a merge queue gate
 had no observable state at all between promotion and its terminal outcome.
 
-**On failure**, record a failed `GATE` build against the merge commit,
-report the `gate-run` `FAILED` naming the failing step, and stop, the same
-shape as rung 3's failure path:
+**Capture stderr, not just stdout.** `erun build --output json` only writes
+its JSON body on success; on failure it never reaches that write at all, and
+the actual reason (`DockerBuildStepError`'s one-line "last words", e.g. a
+ghcr.io TLS handshake timeout) goes to stderr. A plain `> file` redirect
+therefore captures an **empty file** on the exact failures rung 4's own
+classifier below exists to recognize — `2>&1` above is required, not
+cosmetic, or the classifier never sees anything to match against.
+
+**On failure**, classify it before deciding how to report it — a registry or
+network failure is not a verdict about the change, and reporting it as one
+loses exactly what `erun exec gate-run report`'s own classifier
+(`erun-common/gate_run_failure_classifier.go`) already knows how to tell
+apart:
 
 ```sh
 if [ "${build_ok}" -ne 0 ]; then
-  erun review record-build "${review_id}" --commit "${merge_commit}" --gate --failed \
-    --failure-detail "erun build failed against the prospective merge; see the build log"
-  erun exec gate-run report "${gate_run_id}" --status failed --failing-step "erun build" \
-    --log-ref /tmp/erun-merge-queue-drive-build.json
-  echo "Build failed; recorded a failed GATE build against ${merge_commit}. The review should now be FAILED. The worktree still holds the built-but-rejected merge on a local branch named ${target} — do not push it."
+  failure_reason=$(tail -n 1 /tmp/erun-merge-queue-drive-build.json)
+  report=$(erun exec gate-run report "${gate_run_id}" --status failed --failing-step "erun build" \
+    --log-ref /tmp/erun-merge-queue-drive-build.json --output json)
+  if [ "$(echo "${report}" | jq -r .run.status)" = "INCONCLUSIVE" ]; then
+    echo "Build failed on what erun recognizes as a known infrastructure signature (registry or network, not the change) -- reported the gate-run INCONCLUSIVE. Left the review at MERGE rather than recording a failed GATE build for it (erun review record-build --gate would itself refuse this failure-detail as the same known signature); re-drive this review once the registry/network recovers. The worktree still holds the built merge on a local branch named ${target} — do not push it."
+  else
+    erun review record-build "${review_id}" --commit "${merge_commit}" --gate --failed \
+      --failure-detail "${failure_reason}"
+    echo "Build failed; recorded a failed GATE build against ${merge_commit}. The review should now be FAILED. The worktree still holds the built-but-rejected merge on a local branch named ${target} — do not push it."
+  fi
   exit 1
 fi
 ```
+
+Report the `gate-run` first, not `record-build`: its reclassified `.run.status`
+is what decides whether this failure is real. `erun review record-build
+--gate --failed` applies the identical classifier to `--failure-detail`
+(`ensureNotKnownInfrastructureGateBuildFailure`) and refuses outright when it
+matches, precisely so a caller that reordered these two calls, or a future
+caller that only ever calls `record-build`, cannot record a false `FAILED`
+build for a network blip either — but reporting the gate-run first means
+this skill never has to depend on that refusal to know which branch to take.
 
 **If the build's own outcome is genuinely unknown** — this process was
 interrupted by an environment fault, or a wrapper around it hit its own

@@ -700,6 +700,51 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/record_build_gate_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("record_build_gate_failed_known_infrastructure_signature_refused", func(t *testing.T) {
+		// A failed GATE build whose --failure-detail names one of erun's own
+		// known infrastructure signatures (see
+		// erun-common/gate_run_failure_classifier.go) is refused locally --
+		// before any network call -- rather than recorded FAILED: builds.successful
+		// is a plain boolean with no INCONCLUSIVE, so recording it would move the
+		// review out of the merge queue for a network/registry blip the sibling
+		// gate-run classifier already knows is not a verdict about the change.
+		// No alias is seeded: the refusal fires before alias resolution, same as
+		// the desktop-coverage preflight beside it.
+		setup := env.New(t)
+		args := []string{
+			"review", "record-build", "review-1",
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--gate", "--failed",
+			"--failure-detail", "failed to solve: failed to resolve source metadata for ghcr.io/sophium/erun-devops:1.0.246: failed to authorize: failed to fetch oauth token: Post \"https://ghcr.io/token\": net/http: TLS handshake timeout",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the refusal to exit non-zero, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "known erun infrastructure") || !strings.Contains(result.Combined, "gate-run report") {
+			t.Fatalf("expected a refusal naming the known-infrastructure signature and the gate-run report remedy, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("record_build_gate_failed_genuine_failure_not_refused", func(t *testing.T) {
+		// A failure-detail that does not match a known infrastructure
+		// signature is unaffected: it traces and reports the resolved call
+		// exactly as before this classifier existed.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"review", "record-build", "review-1",
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--gate", "--failed",
+			"--failure-detail", "go test ./...: TestFoo: got 3, want 5",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/record_build_gate_failed_genuine_failure_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("report_merged_dry_run_traces_resolved_call", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
