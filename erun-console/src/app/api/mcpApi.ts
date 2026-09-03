@@ -27,10 +27,10 @@ export const MCP_ADMIN_SCOPE = 'erun:admin';
 // terminal has no reason to also hold `raw`/`build`/`deploy`/`delete`.
 export const MCP_ATTACH_SCOPE = 'erun:attach';
 
-// MCP_OPERATE_SCOPE mirrors erun-common's `erun:operate` capability tier
-// (erun#1999/#2001): deploy/context_start/context_stop/resize on an
-// environment that already exists, and nothing that decides what
-// environments exist or runs arbitrary code in one. The mint form offers
+// MCP_OPERATE_SCOPE mirrors erun-common's `erun:operate` capability tier:
+// deploy/context_start/context_stop/resize on an environment that already
+// exists, and nothing that decides what environments exist or runs
+// arbitrary code in one. The mint form offers
 // this as an alternative to MCP_ADMIN_SCOPE so an operator handing a token to
 // a lower-trust caller -- a script, a teammate, a future mobile client --
 // can choose the narrower blast radius when that is all the caller needs.
