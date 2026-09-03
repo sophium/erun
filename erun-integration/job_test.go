@@ -213,6 +213,139 @@ func TestJob(t *testing.T) {
 		golden.Equal(t, "job/start_handoff_dry_run_plans_the_supervisor_argv", normalize.Apply(result.Combined))
 	})
 
+	t.Run("start_exclusive_dry_run_plans_the_environment_claim", func(t *testing.T) {
+		// --exclusive is a decision the plan has to show, not only an effect at
+		// run time: the claim it takes is what will refuse every other job start
+		// here, and --exclusive must reach the supervisor argv or the supervisor
+		// would neither renew the claim nor release it on the way out.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "check", "--dry-run", "--exclusive",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_exclusive_dry_run_plans_the_environment_claim", normalize.Apply(result.Combined))
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "check")); !os.IsNotExist(err) {
+			t.Errorf("a dry-run start must not register a job, stat err: %v", err)
+		}
+	})
+
+	t.Run("an_exclusive_job_refuses_every_other_job_start_and_names_the_holder", func(t *testing.T) {
+		// The whole point of the claim, and the asymmetry that makes it worth
+		// more than a mutex between exclusive jobs: while a gate holds the
+		// environment, an ordinary job start is refused too. Scheduling probe
+		// jobs beside a running gate is exactly what turned a 7-minute green
+		// run into a 17-minute one and two reds on tests that pass standalone.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		release := filepath.Join(setup.Cwd, "release")
+		envVars := jobStubEnv(t, setup, "while [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 0")
+
+		start := startJob(t, setup, envVars, "gate", "--exclusive", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		held := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "gate"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+
+		plain := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "probe", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if plain.ExitCode == 0 {
+			t.Fatalf("an ordinary job start must be refused while a gate holds the environment, got 0:\n%s", plain.Combined)
+		}
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "probe")); !os.IsNotExist(err) {
+			t.Errorf("a refused start must register nothing, stat err: %v", err)
+		}
+		second := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "gate-two", "--exclusive", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if second.ExitCode == 0 {
+			t.Fatalf("a second exclusive job start must be refused, got 0:\n%s", second.Combined)
+		}
+
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "gate", "--timeout", "30s"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		// Released on the way out rather than left to lapse, so the next gate
+		// starts immediately instead of waiting out a TTL.
+		after := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "probe", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if after.ExitCode != 0 {
+			t.Fatalf("a job start after the exclusive job finished must succeed: exit %d: %s", after.ExitCode, after.Combined)
+		}
+		t.Cleanup(func() {
+			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "probe", "--signal", "KILL"},
+				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		})
+		golden.Equal(t, "job/an_exclusive_job_refuses_every_other_job_start_and_names_the_holder",
+			normalize.Apply(held.Combined+plain.Combined+second.Combined))
+	})
+
+	t.Run("an_expired_exclusive_claim_is_reclaimed_rather_than_pinning_the_environment", func(t *testing.T) {
+		// The requirement that keeps this from being a lock that can strand an
+		// environment: a claim nobody renews stops holding anything. Taken with
+		// a TTL that has already elapsed by the time the next read happens, so
+		// the reclaim is observable without waiting for one.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "abandoned-gate", "--id", "abandoned-gate", "--exclusive", "--scope", "environment", "--ttl", "1ns",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "gate", "--exclusive", "--dry-run", "--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("a lapsed claim must not refuse a new one: exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/an_expired_exclusive_claim_is_reclaimed_rather_than_pinning_the_environment",
+			normalize.Apply(result.Combined))
+	})
+
+	t.Run("a_job_started_by_the_holder_runs_under_its_claim_instead_of_being_refused", func(t *testing.T) {
+		// Lineage is the one exemption, and it has to exist: a gate job that
+		// detaches its own nested work (agent-gate.sh from inside an agent job)
+		// would otherwise be refused by its own ancestor's claim, which would
+		// make the mechanism unusable exactly where it is needed. The nested job
+		// takes no second claim -- releasing one on its way out would drop the
+		// ancestor's.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		release := filepath.Join(setup.Cwd, "release")
+		envVars := jobStubEnv(t, setup, "while [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 0")
+
+		start := startJob(t, setup, envVars, "gate", "--exclusive", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		// ERUN_JOB_ID is what the gate's own work inherits, so a start made from
+		// inside it names the gate as its parent exactly as a real nested start
+		// would.
+		nested := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "nested", "--dry-run", "--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: append(envVars, "ERUN_JOB_ID=gate")})
+		if nested.ExitCode != 0 {
+			t.Fatalf("the holder's own nested start must not be refused: exit %d: %s", nested.ExitCode, nested.Combined)
+		}
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		golden.Equal(t, "job/a_job_started_by_the_holder_runs_under_its_claim_instead_of_being_refused",
+			normalize.Apply(nested.Combined))
+	})
+
 	t.Run("start_env_refuses_a_name_that_could_redirect_the_job", func(t *testing.T) {
 		// PATH/LD_PRELOAD/etc. are refused up front: letting a caller
 		// override them would let it redirect what the job's own process executes

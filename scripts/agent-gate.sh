@@ -176,10 +176,36 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 	fi
 fi
 
+# --exclusive is what makes a gate's verdict mean something. A gate saturates
+# the pod, so anything scheduled beside it changes the answer rather than just
+# the duration: the same gate measured GREEN at 7m4s/7m38s/6m58s alone, and
+# GREEN 17m36s / RED / RED with a second gate batch and probe jobs sharing a
+# 12-CPU pod -- both reds on tests that pass standalone, one of them an
+# `erun usage --output json` golden whose actual output carried real OOM
+# warnings. A contended gate does not report a slow verdict, it reports a
+# wrong one, so the claim is taken rather than the contention merely
+# documented. Nested work this gate itself starts runs under the same claim
+# and is not refused by it.
+#
+# This script runs against whichever `erun` the pod has installed, which it
+# does not control and which is routinely a release or two behind the checkout
+# being gated -- so support for the flag is read off the installed binary's
+# own help rather than assumed. Passing an unknown flag would fail every start
+# outright, turning a protection into an outage of the gate itself on exactly
+# the environments that have not upgraded yet. Degrading loudly is the right
+# trade: an unprotected gate is what those environments already had.
+exclusive_flag=""
+if erun exec job start --help 2>/dev/null | grep -q -- '--exclusive'; then
+	exclusive_flag="--exclusive"
+else
+	printf 'agent-gate: this environment'\''s erun predates `job start --exclusive`, so %s runs without claiming the environment. Make sure nothing else is scheduled here while it runs -- a contended gate reports a wrong verdict, not a slow one. Upgrade the environment (erun pin / erun deploy) to have the claim enforced for you.\n' "$job_name" >&2
+fi
+
 start_status=0
 start_output=$(erun exec job start \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
 	--id "$resolved_job_id" --name "$job_name" \
+	${exclusive_flag:+"$exclusive_flag"} \
 	--env AGENT_GATE_DETACHED=1 \
 	-- "$@" 2>&1) || start_status=$?
 
@@ -188,6 +214,15 @@ if [ "$start_status" -ne 0 ]; then
 	*"is already running"*)
 		# Another invocation of this same command already detached the work;
 		# fall through and await the job already in flight.
+		;;
+	*"held exclusively"*)
+		# Something else holds this environment. Report the refusal verbatim --
+		# it names the holder and how to reach it -- and exit non-zero rather
+		# than awaiting a job that was never started, which would otherwise
+		# read as this gate's own failure.
+		printf '%s\n' "$start_output" >&2
+		printf 'agent-gate: %s was not started -- this environment is held by other work. Wait for the holder above to finish and re-invoke this command; running the gate beside it would report a wrong verdict, not just a slow one.\n' "$job_name" >&2
+		exit "$start_status"
 		;;
 	*)
 		printf '%s\n' "$start_output" >&2

@@ -363,6 +363,14 @@ type EnvironmentJob struct {
 	// this job is excluded from its parent's own finish check entirely, both
 	// while it runs and once it is done.
 	Handoff bool `json:"handoff,omitempty"`
+	// Exclusive says this job holds the environment to itself for its
+	// lifetime: while it runs, every other job start in this environment is
+	// refused and told this job holds it (see job_exclusive.go). It is what
+	// this job actually holds, not what its caller asked for — a job running
+	// under a claim its own ancestor already took reads as false here, because
+	// it took no claim of its own and releasing one on its way out would drop
+	// the ancestor's.
+	Exclusive bool `json:"exclusive,omitempty"`
 
 	LogPath          string `json:"logPath,omitempty"`
 	OutputBytes      int64  `json:"outputBytes"`

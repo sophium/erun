@@ -137,7 +137,10 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (EnvironmentJob, e
 		recorder.update(func(job *EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
-	beat, stopBeat := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, params.LeaseTTL, nil)
+	// Never exclusive: a task job is Go work inside this server's own
+	// long-lived process, not a detached supervisor, so it has no start call
+	// that could have claimed the environment on its behalf.
+	beat, stopBeat := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, params.LeaseTTL, nil, false)
 	stopAlive := startEnvironmentJobAliveBeat(recorder)
 	go runTaskEnvironmentJob(recorder, beat, stopBeat, stopAlive, log, writer, params.Run)
 

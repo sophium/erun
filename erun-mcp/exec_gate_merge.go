@@ -22,6 +22,7 @@ type ExecGateMergeInput struct {
 	Sources      []ExecGateMergeSource `json:"sources" jsonschema:"branches to squash-merge in, in order; more than one batches several unmerged branches into one prospective merge so the gate that follows tests whether they compile together"`
 	TargetBranch string                `json:"targetBranch" jsonschema:"branch the squash merge(s) land onto, checked out fresh from its own current remote tip"`
 	Remote       string                `json:"remote,omitempty" jsonschema:"git remote to fetch and merge from; defaults to origin"`
+	UnderLeaseID string                `json:"underLeaseId,omitempty" jsonschema:"id of an exclusive environment claim this caller already holds. This rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively -- a drive that took the claim for its own whole window names it here so its own hold does not refuse it"`
 	Preview      bool                  `json:"preview,omitempty" jsonschema:"when true, trace the fetch, checkout, and each squash merge and commit without running them"`
 	Verbosity    int                   `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -38,6 +39,7 @@ func execGateMergeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToo
 				Sources:      sources,
 				TargetBranch: input.TargetBranch,
 				Remote:       input.Remote,
+				UnderLeaseID: input.UnderLeaseID,
 			}, eruncommon.GateMergeWorkingTreeDependencies{})
 			if err != nil {
 				return err

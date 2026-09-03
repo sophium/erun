@@ -1408,6 +1408,66 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_merge_dry_run_batch_traces_each_source", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_merge_refuses_while_the_environment_is_held_exclusively", func(t *testing.T) {
+		// gate-merge rewrites the environment's one shared worktree, so two in
+		// flight at once corrupt each other's accounting rather than merely
+		// slowing each other down: a drive has already reported pushing a commit
+		// that belonged to another batch's tree, and closed two pull requests
+		// against work that had not landed. ERUN_TENANT/ERUN_ENVIRONMENT are what
+		// the runtime chart injects, and are what scopes this check to a real
+		// environment -- off-pod there is nothing to contend for, so the check
+		// no-ops and every other gate-merge scenario here is unaffected.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		// inEnvironment marks this as running inside the environment, so the lease
+		// verbs act on its own store directly instead of reaching for an MCP edge
+		// no scenario has.
+		envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "other drive", "--id", "other-drive", "--exclusive", "--scope", "environment",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal while the environment is held exclusively, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_while_the_environment_is_held_exclusively", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_under_lease_is_not_refused_by_the_callers_own_claim", func(t *testing.T) {
+		// A merge-queue drive holds the environment for its whole window, which
+		// spans several separate processes and so cannot be expressed as a job.
+		// Without --under-lease the mechanism would refuse the very caller it
+		// exists to protect -- a dead end rather than a safeguard.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		// inEnvironment marks this as running inside the environment, so the lease
+		// verbs act on its own store directly instead of reaching for an MCP edge
+		// no scenario has.
+		envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "this drive", "--id", "my-drive", "--exclusive", "--scope", "environment",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		result := erun.Run(t, []string{
+			"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
+			"--under-lease", "my-drive", "--remote", "nonexistent", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("the claim's own holder must not be refused: exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_under_lease_is_not_refused_by_the_callers_own_claim", normalize.Apply(result.Combined))
+	})
+
 	t.Run("gate_merge_real_run_squash_merges_onto_target", func(t *testing.T) {
 		// A real bare remote and a real divergent source branch, so "the squash
 		// merge actually landed on target" is an observable fact rather than a

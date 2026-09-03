@@ -73,6 +73,59 @@ func deprecatedTopLevelJobCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
+// jobStartLongHelp is `erun exec job start`'s own help body, kept beside the
+// command rather than inside its constructor: it is the longest single piece
+// of user-facing text in this file, and inlining it buried the command's
+// actual wiring under it.
+const jobStartLongHelp = "The command keeps running after this call returns and after the caller's\n" +
+	"connection drops: erun gives it its own session and captures its merged\n" +
+	"stdout and stderr to the job's log, so nothing has to be wrapped in setsid,\n" +
+	"nohup, or a redirect.\n\n" +
+	"The exit status is recorded by the process that waits on the work, inside\n" +
+	"the environment, so no sentinel token and no shell expansion sit between the\n" +
+	"work and its result. The id defaults to the name; re-using the id of a job\n" +
+	"that is still running is refused, while re-using a finished one replaces it.\n\n" +
+	"--agent runs an AI tool instead of a command, with the trailing arguments as\n" +
+	"the prompt. erun invokes the tool in its streaming mode, which is what makes\n" +
+	"an agent run observable at all: left to its default the tool prints nothing\n" +
+	"until it exits, so a multi-hour run reports no output while it is actively\n" +
+	"editing files. status then reports the current activity, not only \"running\".\n" +
+	"This is a one-shot, non-interactive run: nothing wakes it once it exits, so\n" +
+	"the prompt must not end its own turn believing something will notify it\n" +
+	"about work it is still waiting on -- there is no such notification, with one\n" +
+	"narrow exception. If this job's own process ends while a job it started has\n" +
+	"not reached a verdict, or has reached a bad one, erun resumes the same\n" +
+	"session with the concrete outcome so the agent can act on it -- fix it,\n" +
+	"verify it, or explain why it cannot be resolved. This is bounded (a small\n" +
+	"fixed count and a wall-clock budget, both shown by `job status` as\n" +
+	"\"resumed N/M\") and applies only to that one narrow case, never to a plain\n" +
+	"failing exit code: past the bound, or for any other outcome, there is still\n" +
+	"no notification and no further \"later\".\n\n" +
+	"--env sets additional environment for the job's own process, on top of what\n" +
+	"it inherits from the environment's runtime pod — for example raising\n" +
+	"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
+	"supervisor's argv, visible to anything that can list processes in this\n" +
+	"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
+	"few other names that could redirect what the job executes are refused.\n\n" +
+	"When this start itself runs from inside another job's own work (an agent\n" +
+	"job running `job start` for a gate, the common case), that other job waits\n" +
+	"for this one to reach a verdict before it reports its own outcome — its exit\n" +
+	"code alone is never trusted while work it started has not finished. Pass\n" +
+	"--handoff for work that is meant to outlive the caller on purpose (a release,\n" +
+	"a long render): it excludes this job from that wait entirely.\n\n" +
+	"--exclusive declares that the work needs the environment to itself. While it\n" +
+	"runs, every other job start here is refused and told which job holds the\n" +
+	"environment, rather than being queued or quietly allowed to contend. That\n" +
+	"includes plain jobs, not only other --exclusive ones: a gate needs protecting\n" +
+	"less from another gate than from everything else scheduled beside it. Reach\n" +
+	"for it whenever the work saturates the environment and a neighbour would make\n" +
+	"its result meaningless -- a full gate run measured 7 minutes alone and 17\n" +
+	"minutes with a second batch beside it, going red on two tests that pass\n" +
+	"standalone. The claim is a lease, not a lock: it expires without renewal and\n" +
+	"is reclaimed once its holder's process is gone, so a crashed job cannot pin\n" +
+	"the environment. Work this job itself starts is exempt -- a nested job runs\n" +
+	"under this claim instead of being refused by it."
+
 func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
@@ -84,45 +137,11 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	var handoff bool
+	var exclusive bool
 	cmd := &cobra.Command{
 		Use:   "start [flags] -- <command> [args...]",
 		Short: "Run a command, or an AI agent, as a detached job and return its handle",
-		Long: "The command keeps running after this call returns and after the caller's\n" +
-			"connection drops: erun gives it its own session and captures its merged\n" +
-			"stdout and stderr to the job's log, so nothing has to be wrapped in setsid,\n" +
-			"nohup, or a redirect.\n\n" +
-			"The exit status is recorded by the process that waits on the work, inside\n" +
-			"the environment, so no sentinel token and no shell expansion sit between the\n" +
-			"work and its result. The id defaults to the name; re-using the id of a job\n" +
-			"that is still running is refused, while re-using a finished one replaces it.\n\n" +
-			"--agent runs an AI tool instead of a command, with the trailing arguments as\n" +
-			"the prompt. erun invokes the tool in its streaming mode, which is what makes\n" +
-			"an agent run observable at all: left to its default the tool prints nothing\n" +
-			"until it exits, so a multi-hour run reports no output while it is actively\n" +
-			"editing files. status then reports the current activity, not only \"running\".\n" +
-			"This is a one-shot, non-interactive run: nothing wakes it once it exits, so\n" +
-			"the prompt must not end its own turn believing something will notify it\n" +
-			"about work it is still waiting on -- there is no such notification, with one\n" +
-			"narrow exception. If this job's own process ends while a job it started has\n" +
-			"not reached a verdict, or has reached a bad one, erun resumes the same\n" +
-			"session with the concrete outcome so the agent can act on it -- fix it,\n" +
-			"verify it, or explain why it cannot be resolved. This is bounded (a small\n" +
-			"fixed count and a wall-clock budget, both shown by `job status` as\n" +
-			"\"resumed N/M\") and applies only to that one narrow case, never to a plain\n" +
-			"failing exit code: past the bound, or for any other outcome, there is still\n" +
-			"no notification and no further \"later\".\n\n" +
-			"--env sets additional environment for the job's own process, on top of what\n" +
-			"it inherits from the environment's runtime pod — for example raising\n" +
-			"CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run. Values land in the job\n" +
-			"supervisor's argv, visible to anything that can list processes in this\n" +
-			"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
-			"few other names that could redirect what the job executes are refused.\n\n" +
-			"When this start itself runs from inside another job's own work (an agent\n" +
-			"job running `job start` for a gate, the common case), that other job waits\n" +
-			"for this one to reach a verdict before it reports its own outcome — its exit\n" +
-			"code alone is never trusted while work it started has not finished. Pass\n" +
-			"--handoff for work that is meant to outlive the caller on purpose (a release,\n" +
-			"a long render): it excludes this job from that wait entirely.",
+		Long:  jobStartLongHelp,
 		Example: "  # Start a test suite and come back for the result.\n" +
 			"  erun exec job start --tenant team --environment dev --name suite -- ./gradlew test\n" +
 			"  erun exec job await --tenant team --environment dev --id suite --timeout 5m\n\n" +
@@ -133,7 +152,9 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"  erun exec job start --tenant team --environment dev --name sweep --agent claude \\\n" +
 			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'\n\n" +
 			"  # Kick off a release that is meant to keep running past this run's own turn.\n" +
-			"  erun exec job start --tenant team --environment dev --name release --handoff -- erun release",
+			"  erun exec job start --tenant team --environment dev --name release --handoff -- erun release\n\n" +
+			"  # Run a gate that must not share the environment with anything else.\n" +
+			"  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			envMap, err := parseJobEnvFlags(env)
@@ -150,6 +171,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
 				Handoff:        handoff,
+				Exclusive:      exclusive,
 			}
 			if strings.TrimSpace(agent) != "" {
 				params.Agent = agent
@@ -169,6 +191,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check")
+	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim the environment for this job's lifetime; while it is held, every other job start here is refused and told which job holds it")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -463,7 +486,18 @@ func jobRunningLine(job common.EnvironmentJob) string {
 	} else if job.PID > 0 {
 		line += fmt.Sprintf(", pid %d", job.PID)
 	}
-	return line + jobAliveSuffix(job) + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobOutputSuffix(job)
+	return line + jobExclusiveSuffix(job) + jobAliveSuffix(job) + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobOutputSuffix(job)
+}
+
+// jobExclusiveSuffix names the one thing that explains why an unrelated job
+// start here is being refused right now. Without it an operator reading `job
+// status` sees a running job and a refusal that mentions a lease id, with
+// nothing on screen connecting the two.
+func jobExclusiveSuffix(job common.EnvironmentJob) string {
+	if !job.Exclusive {
+		return ""
+	}
+	return ", holding this environment exclusively"
 }
 
 // jobExitedLine renders the reason a clean exit cannot carry on its own. Every
@@ -929,6 +963,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	var maxOutputBytes int64
 	var leaseTTL time.Duration
 	var handoff bool
+	var exclusive bool
 	var startedByJobID string
 	cmd := &cobra.Command{
 		Use:    "supervise [flags] -- <command> [args...]",
@@ -952,6 +987,7 @@ func newJobSuperviseCmd() *cobra.Command {
 				MaxOutputBytes: maxOutputBytes,
 				LeaseTTL:       leaseTTL,
 				Handoff:        handoff,
+				Exclusive:      exclusive,
 				StartedByJobID: startedByJobID,
 			})
 		},
@@ -965,6 +1001,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", common.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it")
+	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "This job holds the environment's exclusivity claim, already taken by the start; renew it while the work runs and release it on the way out")
 	cmd.Flags().StringVar(&startedByJobID, "started-by-job-id", "", "Explicit override for the job this work records as its parent, for a start forwarded through a channel (the MCP edge) that cannot carry ERUN_JOB_ID inheritance itself")
 	return cmd
 }
