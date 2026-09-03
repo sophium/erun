@@ -158,6 +158,7 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
 | `record-build` on an unknown review id. | `404 Not Found`. |
 | `record-build --gate` (successful) whose commit changes `erun-ui/**` without `--desktop-playwright-verified`. | Aborts before any network call, naming the commit and the required remedy (build `erun-app`, run `erun-ui/playwright/run.sh`, retry with the flag). |
+| `record-build --gate --failed` whose `--failure-detail` matches a known erun infrastructure-failure signature (a registry or network giving up, not a verdict about the change). | Aborts before any network call, naming the matched signature and the remedy: report the gate run `inconclusive` via [`exec gate-run report`](/cli/exec#exec-gate-run-report) instead of recording a `FAILED` `GATE` build. |
 | `report-merged` whose `--build-id` does not name a recorded, successful `GATE` build for this review. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `report-merged` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |

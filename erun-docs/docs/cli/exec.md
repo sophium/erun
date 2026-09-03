@@ -116,6 +116,8 @@ Moves GATE_RUN_ID from `running` to a terminal verdict: `--status passed`, `fail
 
 A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report `inconclusive` — never `failed`, which asserts a real gate step actually produced a red verdict. `--failing-step` is required when `--status` is `failed`; `--log-ref` points at where to read the run's own output.
 
+A `--status failed` report is not taken at face value: if `--failing-step`, `--log-ref`, or the file `--log-ref` points at matches one of erun's own known infrastructure-failure signatures (a registry or network giving up, e.g. a TLS handshake timeout resolving a base image) rather than a real verdict about the change, the platform silently upgrades it to `inconclusive` before recording it — traced either way so the override is visible.
+
 Reporting against a gate run that already has an outcome is refused: a verdict is immutable once reached.
 
 `--dry-run` traces the request without sending it.
