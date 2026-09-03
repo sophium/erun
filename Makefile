@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart check check-gate
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright helm-chart-tests test-postgres-restart test-retention check check-gate
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -285,6 +285,15 @@ helm-chart-tests:
 # change to postgres reset, migrate, or restart behavior.
 test-postgres-restart:
 	sh erun-devops/docker/erun-backend-db/migrate_test.sh
+
+# End-to-end proof of the comments/releases retention sweep's age/count
+# bounds against a real postgres and the real migrations, same "needs a real
+# docker daemon and the atlas CLI, neither available in the bare test-stage
+# image" exclusion from make check as test-postgres-restart above. Run this
+# by hand, or via `erun exec job` in an agent env, before merging a change to
+# erun-backend-db/retention/*.sql or the retention CronJob.
+test-retention:
+	sh erun-devops/docker/erun-backend-db/retention_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in

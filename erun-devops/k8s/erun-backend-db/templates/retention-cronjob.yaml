@@ -1,0 +1,51 @@
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $api := default dict .Values.api -}}
+{{- $postgres := default dict $api.postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+# Runs the erun-backend-db retention sweeps (erun-backend-db/retention/*.sql)
+# once a day. Pruning has no urgency the way schema-drift repair does, so a
+# daily cadence is enough. Each policy file reports the rows it would delete
+# before deleting them, so the CronJob's own log is a per-run audit trail.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $tenant }}-backend-db-retention
+  labels:
+    app: {{ $tenant }}-backend-db-retention
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: {{ $tenant }}-backend-db-retention
+        spec:
+          restartPolicy: Never
+          containers:
+            - image: {{ $backendDBImage }}
+              name: erun-backend-db-retention
+              imagePullPolicy: IfNotPresent
+              command: ["erun-backend-db-retention"]
+              env:
+                - name: HOME
+                  value: /home/erun
+                - name: ERUN_POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $postgresPasswordSecretName }}
+                      key: {{ $postgresPasswordSecretKey }}
+                - name: ERUN_DATABASE_URL
+                  value: {{ $databaseURL | quote }}
