@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -149,6 +150,25 @@ func runAttachSession(conn *websocket.Conn, runtime RuntimeConfig, session strin
 	defer func() { _ = conn.Close() }()
 
 	socket := eruncommon.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
+	// The CLI's own shell path (open.go's remoteShellLaunchLines) always
+	// mkdir -p's this directory itself before reusing this same script
+	// builder, and session-prune.sh's boot-time reconciliation explicitly
+	// no-ops when the directory is absent ("nothing created yet: no
+	// sessions have ever run in this container") rather than creating it.
+	// This edge is the one caller of RemoteAppSessionAttachLines with no
+	// such guarantee upstream: a freshly deployed or restarted pod that has
+	// never had a CLI-driven session (`erun open --ai`, a linked
+	// orchestrator) ran inside it has no session directory yet, and an
+	// operator's very first attach -- reachable straight from the console,
+	// no CLI in between -- hit `dtach: ... No such file or directory`
+	// surfaced as raw shell stderr in the scrollback and a misdiagnosed
+	// "taken-over" outcome (the owner-file write silently failing reads the
+	// same as a real rival claiming the socket).
+	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
+		log.Printf("erun-mcp attach: creating session directory for %q: %v", session, err)
+		sendAttachOutcome(conn, eruncommon.AISessionAttachOutcomeUnknown)
+		return
+	}
 	script := strings.Join(eruncommon.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
 	cmd := exec.Command("sh", "-c", script)
 
