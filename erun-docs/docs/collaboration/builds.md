@@ -4,14 +4,14 @@ title: Builds
 
 # Builds
 
-> For the Operator view, see [`erun review show`](/cli/review#review-show).
+> For the Operator view, see [`erun review show`](/cli/review#review-show) and [`erun build`](/cli/build).
 
-A **build** records the outcome of building a specific commit on a specific review. Builds drive review status transitions — a `READY` review is one with a successful latest build.
+A **build** records the outcome of building a specific commit. Most builds belong to a review — those drive review status transitions, since a `READY` review is one with a successful latest build — but a build no longer *has* to: an ordinary `erun build` run (the command an Agent runs continuously, in every environment, whether or not a review exists yet) self-reports itself against the environment it ran in instead ([#1954](https://github.com/sophium/erun/issues/1954)). Every build carries exactly one of `reviewId` or `environmentId`, never both, and never neither.
 
 There are two kinds, distinguished by `kind`, and they are against different commits:
 
-- **`RECORDED`** — a *reported* build: a client's `POST /builds` (typically `erun build --release` or your own CI, against the review's `sourceBranch` tip), or a build recorded against the merge commit once a release has landed. A `RECORDED` build always names the `version` it produced.
-- **`GATE`** — a report of the [merge queue](#merge-queue)'s build of the *prospective* merge — the review's source squashed onto its current target, before anything is pushed. A `GATE` build publishes nothing, so it never has a `version`; a failed one carries `failureDetail` in the gate's own words.
+- **`RECORDED`** — a *reported* build: a client's `POST /builds` (an ordinary `erun build` run, `erun build --release`, or your own CI, against the review's `sourceBranch` tip or the environment that built it), or a build recorded against the merge commit once a release has landed. A `RECORDED` build always names the `version` it produced, and may or may not carry a `reviewId` (see [Builds with no review](#builds-with-no-review) below).
+- **`GATE`** — a report of the [merge queue](#merge-queue)'s build of the *prospective* merge — the review's source squashed onto its current target, before anything is pushed. A `GATE` build publishes nothing, so it never has a `version`; a failed one carries `failureDetail` in the gate's own words. A `GATE` build always carries a `reviewId` — it gates that review's merge by definition, so it has no unattached form.
 
 ## Resource shape
 
@@ -30,15 +30,35 @@ There are two kinds, distinguished by `kind`, and they are against different com
 }
 ```
 
+`environmentId`/`environmentName` replace `reviewId`/`reviewName` on a build with no review — see [Builds with no review](#builds-with-no-review).
+
 A failed build — `GATE` or `RECORDED` — may carry `failureDetail` (a string account of why it did not succeed). The gate always sets its own; a `RECORDED` build's reporter sets it optionally (`erun review record-build --failed --failure-detail "..."`).
 
 ## Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. |
-| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build. Body: `commitId`, `successful`, optional `failureDetail`, and `kind` (`RECORDED` if omitted). A `RECORDED` build also requires `version`; a `GATE` build must not carry one and must carry `failureDetail` when `successful` is `false`. [`erun review record-build`](/cli/review#review-record-build) is the CLI client for both — plain for `RECORDED`, `--gate` for `GATE`. |
+| `GET` | `/v1/reviews/{reviewId}/builds` | List builds for a review, both kinds. Unpaginated — one review's own attempts are naturally bounded. |
+| `POST` | `/v1/reviews/{reviewId}/builds` | Record a new build against this review. Body: `commitId`, `successful`, optional `failureDetail`, and `kind` (`RECORDED` if omitted). A `RECORDED` build also requires `version`; a `GATE` build must not carry one and must carry `failureDetail` when `successful` is `false`. [`erun review record-build`](/cli/review#review-record-build) is the CLI client for both — plain for `RECORDED`, `--gate` for `GATE`. |
 | `GET` | `/v1/reviews/{reviewId}/builds/{buildId}` | Fetch one build. |
+| `GET` | `/v1/builds` | List the tenant's whole build history — review-linked and unattached alike, newest first, paginated. See [Builds with no review](#builds-with-no-review). |
+| `POST` | `/v1/builds` | Record a build with no review, against `environmentId`. `erun build` calls this itself; see [Builds with no review](#builds-with-no-review). |
+
+## Builds with no review
+
+An ordinary `erun build` run has no review to report against — most of the time, none exists yet for the branch being built. `erun build` reports itself to the erun platform after it finishes, whenever the environment has a platform alias configured (`erun cloud init erun`/`erun cloud login`): best-effort, and silently skipped when no alias is configured at all, so a local build with no control plane sees no behavior change. When an alias is configured but the report itself cannot complete (the platform is unreachable, the environment is not registered on it), the build still succeeds or fails on its own merits — the skip is only ever traced, never a build failure.
+
+```jsonc
+POST /v1/builds
+{ "environmentId": "env_01H...", "commitId": "abc123def456...", "version": "1.0.0-snapshot-20260101010101", "successful": true }
+
+→ response: { "buildId": "bld_xyz", "environmentId": "env_01H...", "environmentName": "dev", "kind": "RECORDED", ... }
+```
+
+- `environmentId` is required; there is no review-status transition to trigger (`MarkBuildResult` is skipped entirely for a build with no `reviewId`).
+- `kind` must be `RECORDED` (or omitted) — `POST /v1/builds` refuses `kind: GATE` outright, since a gate build always belongs to the review it gates.
+- A caller-supplied `reviewId` in the body is always ignored on this route; report a review-linked build through `POST /v1/reviews/{reviewId}/builds` instead. There is exactly one route for each shape.
+- `GET /v1/builds` supports filters `environmentId`, `kind`, `successful` (`true`/`false`), `since`/`until` (RFC3339), and keyset pagination (`cursor`, `limit`, default 50, max 200) — the same shape the [audit log](/agent-reference/audit-log)'s pagination uses. The response is `{ "builds": [...], "nextCursor": "..." }`; `nextCursor` is absent on the last page. This route paginates where the review-nested `GET /v1/reviews/{reviewId}/builds` does not, because it is the platform's highest-frequency write — every `erun build` invocation, across every environment, reports here — where a review's own build history stays naturally small.
 
 ## How builds connect to review status
 
@@ -160,8 +180,9 @@ The queue's serialisation rules — one running release per tenant, a cooldown b
 | `commitId` | Exactly 40 lowercase hex characters: `^[0-9a-f]{40}$`. |
 | `version` | Required and must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`) — for a `RECORDED` build. Absent for a `GATE` build, which publishes nothing. |
 | `successful` | Required. Boolean. |
-| `kind` | `RECORDED` or `GATE`; defaults to `RECORDED` when omitted. |
+| `kind` | `RECORDED` or `GATE`; defaults to `RECORDED` when omitted. `POST /v1/builds` (no review) refuses `GATE`. |
 | `failureDetail` | Required, non-empty, on a failed `GATE` build. Optional on a `RECORDED` build's `POST` — a reporter may set it on a failed build to say why; omitted is fine. |
+| `reviewId` / `environmentId` | Exactly one of the two identifies a build. `POST /v1/reviews/{reviewId}/builds` sets `reviewId` from the path (any body value is ignored); `POST /v1/builds` requires `environmentId` in the body and always clears `reviewId`. |
 
 ## Errors
 
@@ -172,7 +193,8 @@ Same envelope and status-code conventions as [Reviews · Errors](/collaboration/
 | `400` | `INVALID_BODY` | Malformed JSON. |
 | `400` | `INVALID_COMMIT_ID` | `commitId` is not 40 lowercase hex chars. |
 | `400` | `INVALID_VERSION` | `version` fails the version grammar. `RECORDED` only — a `GATE` build is never checked against it, since the gate publishes nothing. |
-| `400` | `INVALID_BODY` | `kind` is neither `RECORDED` nor `GATE`; or a failed `GATE` build (`successful: false`) with no `failureDetail`. |
+| `400` | `INVALID_BODY` | `kind` is neither `RECORDED` nor `GATE`; a failed `GATE` build (`successful: false`) with no `failureDetail`; `POST /v1/builds` given `kind: GATE`; or a `POST /v1/builds` call with no `environmentId`. |
+| `400` | `INVALID_QUERY` | `GET /v1/builds`'s `successful` filter is not `true`/`false`, or `since`/`until` is not RFC3339, or `cursor` is malformed. |
 | `404` | — (generic) | The review id doesn't exist or isn't visible to the caller's tenant. |
 
 `422 Unprocessable Entity` and the `UNKNOWN_COMMIT` code from an earlier draft of this table do not appear above: nothing in this API returns `422`, and `UNKNOWN_COMMIT`'s original description — confirming `commitId` exists on the review's `sourceBranch` — is a check this route cannot perform (an ordinary `RECORDED` report carries no remote to fetch). A `MERGED` report is the one place the API does fetch the real repository to verify a commit — see [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes)'s `MERGE_NOT_VERIFIED`. `PATCH /reviews/{id}/status` referencing a `buildId` that doesn't belong to the review, or whose `successful` flag disagrees with the target status, is a plain `404` — see [Reviews · Errors](/collaboration/reviews#errors).
@@ -181,4 +203,6 @@ Builds are append-only — there is no `PATCH /builds/{id}` and no DELETE. Re-ru
 
 ## Pagination + rate limits
 
-Neither is implemented yet. `GET /builds` returns every build on the review in one response — see [API protocol · Pagination](/agent-reference/api-protocol#pagination) — and no request is refused for rate; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits) for the target design.
+`GET /v1/reviews/{reviewId}/builds` returns every build on the review in one response, unpaginated — one review's own attempts stay small enough that this is not a problem. `GET /v1/builds` (the tenant-wide history) does paginate, with the same keyset-cursor shape as the [audit log](/agent-reference/audit-log)'s: `cursor`/`limit` request params, `nextCursor` in the response, absent on the last page. See [API protocol · Pagination](/agent-reference/api-protocol#pagination). No request is refused for rate; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits) for the target design.
+
+Retention for the tenant-wide build history is intentionally not part of this contract yet — see [#1956](https://github.com/sophium/erun/issues/1956): the table has no TTL or row cap today, the same as every other high-volume table on the platform (`usage_events`, `gate_runs`, `audit_events`).

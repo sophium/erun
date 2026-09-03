@@ -287,6 +287,12 @@ var apiRouteWailsBindings = map[string]string{
 	// both read through) -- the real desktop entry point this route's own
 	// literal path never appears in TypeScript for.
 	"GET /v1/invite-requests/mine": "GetMyTenantInviteRequest",
+	// LoadTenantDashboard -> appendUnattachedTenantDashboardBuilds ->
+	// client.ListAllBuilds -> "GET /v1/builds" (erun-ui/tenant_dashboard.go,
+	// erun-common/platform_client_builds.go) -- merges an unattached build
+	// (erun#1954) into the same Builds tab the review-nested read above
+	// already populates.
+	"GET /v1/builds": "LoadTenantDashboard",
 }
 
 // apiRouteCapabilities parses every non-test .go file in

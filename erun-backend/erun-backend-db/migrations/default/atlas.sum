@@ -1,4 +1,4 @@
-h1:BTiFTTGezGBKNbU4OfIno5+GGbp/rtx/o2iY+hws4yg=
+h1:X/I76K8o6fYrXd3lLbIFRGHLSzMXWbCXrVx3GVIhl/c=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
@@ -24,4 +24,5 @@ h1:BTiFTTGezGBKNbU4OfIno5+GGbp/rtx/o2iY+hws4yg=
 20260830100000_invite_requests_and_rate_limits.sql h1:DhXMNt1E1+NNYtspHRMx+OV0mFS5bMZ6vcnuJSaMuZc=
 20260831120000_ai_sessions.sql h1:otRU5bHcoItuTeFyEnKjTtFKDHcII204qfn4hB5TcHo=
 20260902120000_env_exposed_hostname.sql h1:eAPZPQonRfXGbgPyYxwOooQ7hylyqjGKhl2Ate3HVOw=
-20260902130000_gate_runs.sql h1:h+SZP2gDdyNdvC4z6doseOgNgsyVML3ktpwYN6frbwQ=
+20260902130000_gate_runs.sql h1:LModzkQM/FuWAccZOux5+6oSer7C0aR+Alo63uqgG8I=
+20260903120000_builds_environment_and_optional_review.sql h1:1YjVQJ24JqzWOEXvU29IOwf3KhmL3eTx8v9m9ruJ3CE=

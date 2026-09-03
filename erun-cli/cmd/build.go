@@ -22,7 +22,7 @@ var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version
 
 var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
 
-func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var jobs int
 	cmd := &cobra.Command{
@@ -52,7 +52,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
 			ctx.BuildJobs = jobs
-			return runBuildCommand(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
+			return runBuildCommand(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart, cloudStore, cloudDeps)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -64,7 +64,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	return cmd
 }
 
-func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
+func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		)
 	}
 	if !target.Deploy {
-		if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push); err != nil {
+		if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 			return err
 		}
 		return ctx.WriteResult(common.NewBuildResult(execution))
@@ -105,7 +105,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return err
 	}
 
-	if err := common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart); err != nil {
+	if err := common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps); err != nil {
 		return err
 	}
 	return ctx.WriteResult(common.NewBuildResult(execution))
@@ -167,7 +167,7 @@ func pushBuildWithRetry(ctx common.Context, buildDockerImage common.DockerImageB
 // newRootPushCmd is the top-level `erun push`. --build is an operator shortcut
 // that builds first; that build→push orchestration deliberately lives in this
 // caller so push itself stays a pure primitive publishing an explicit version.
-func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
@@ -198,7 +198,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				if strings.TrimSpace(target.VersionOverride) != "" {
 					return errPushBuildVersionConflict
 				}
-				if err := runPushBuildStep(ctx, store, findProjectRoot, resolveBuildContext, now, &target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push); err != nil {
+				if err := runPushBuildStep(ctx, store, findProjectRoot, resolveBuildContext, now, &target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, cloudStore, cloudDeps); err != nil {
 					return err
 				}
 			} else if strings.TrimSpace(target.VersionOverride) == "" {
@@ -232,13 +232,13 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	return cmd
 }
 
-func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
+func runPushBuildStep(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, target *common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
 	}
 	buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
-	if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push); err != nil {
+	if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 		return err
 	}
 	version := strings.TrimSpace(common.NewBuildResult(execution).Version)

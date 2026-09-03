@@ -46,7 +46,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 				}
 				// build is a pure primitive that only builds and mints the version;
 				// MCP composes primitives itself rather than exposing a deploy switch.
-				if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime)); err != nil {
+				if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.Store, cloudDependencies()); err != nil {
 					return err
 				}
 				built := eruncommon.NewBuildResult(execution)

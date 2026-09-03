@@ -580,15 +580,19 @@ type uiTenantDashboardReview struct {
 }
 
 type uiTenantDashboardBuild struct {
-	BuildID    string `json:"buildId"`
-	TenantID   string `json:"tenantId"`
-	ReviewID   string `json:"reviewId"`
-	ReviewName string `json:"reviewName,omitempty"`
-	Successful bool   `json:"successful"`
-	CommitID   string `json:"commitId"`
-	Version    string `json:"version"`
-	CreatedAt  string `json:"createdAt,omitempty"`
-	UpdatedAt  string `json:"updatedAt,omitempty"`
+	BuildID  string `json:"buildId"`
+	TenantID string `json:"tenantId"`
+	// ReviewID is empty for a build with no review attached (erun#1954) --
+	// identified by EnvironmentID instead.
+	ReviewID        string `json:"reviewId,omitempty"`
+	ReviewName      string `json:"reviewName,omitempty"`
+	EnvironmentID   string `json:"environmentId,omitempty"`
+	EnvironmentName string `json:"environmentName,omitempty"`
+	Successful      bool   `json:"successful"`
+	CommitID        string `json:"commitId"`
+	Version         string `json:"version"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
 }
 
 // uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates

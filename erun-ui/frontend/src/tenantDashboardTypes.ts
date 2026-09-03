@@ -370,8 +370,12 @@ export interface UITenantDashboardReview {
 export interface UITenantDashboardBuild {
   buildId: string;
   tenantId: string;
-  reviewId: string;
+  // reviewId is empty for a build with no review attached -- an ordinary
+  // `erun build` self-report, identified by environmentId instead.
+  reviewId?: string;
   reviewName?: string;
+  environmentId?: string;
+  environmentName?: string;
   successful: boolean;
   commitId: string;
   version: string;

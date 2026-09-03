@@ -60,13 +60,18 @@ type PlatformReviewer struct {
 
 // PlatformBuild mirrors model.Build's JSON shape.
 type PlatformBuild struct {
-	BuildID    string `json:"buildId"`
-	TenantID   string `json:"tenantId"`
-	ReviewID   string `json:"reviewId"`
+	BuildID  string `json:"buildId"`
+	TenantID string `json:"tenantId"`
+	// ReviewID is empty for a build with no review attached (erun#1954).
+	ReviewID   string `json:"reviewId,omitempty"`
 	ReviewName string `json:"reviewName,omitempty"`
-	Successful bool   `json:"successful"`
-	CommitID   string `json:"commitId"`
-	Version    string `json:"version"`
+	// EnvironmentID is the environment the build ran in, when the caller
+	// reported one; empty for a review-linked build.
+	EnvironmentID   string `json:"environmentId,omitempty"`
+	EnvironmentName string `json:"environmentName,omitempty"`
+	Successful      bool   `json:"successful"`
+	CommitID        string `json:"commitId"`
+	Version         string `json:"version"`
 	// FailureDetail is the caller's own account of why a RECORDED build
 	// failed; empty for a successful build.
 	FailureDetail string    `json:"failureDetail,omitempty"`
