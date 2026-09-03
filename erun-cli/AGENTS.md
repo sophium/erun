@@ -33,6 +33,8 @@ Quality bar:
 - Every command whose flag combinations meaningfully change behaviour needs an `Example:` block with at least one realistic invocation.
 - The CLI `Short:` + `Long:` and the MCP tool `Description:` for the same operation must reflect the same ground-truth behaviour. If they diverge in meaning, one of them is wrong — fix both, not just one.
 
+**Two narrow slices of this are mechanically checked, not just reviewed:** `erun-integration/cli_help_flag_drift_test.go` (see `erun-integration/AGENTS.md` § "CLI help drift gate") cross-checks every literal `erun ...` invocation in a command's own `Example:` field, and every backtick-quoted invocation in any command's `Short:`/`Long:`, against the real command tree — a flag mentioned in help or reached for in an example that was never registered fails there — plus the gate-run status vocabulary specifically, against erun-backend-api's real accepted values and case-normalization. That gate does not read for usefulness, tone, or whether a flag's prose description (what it does, its documented default) still matches reality; the quality bar and methodology above stay a human review job for everything outside those two checks.
+
 Methodology when reviewing or editing help / descriptions:
 
 - Establish ground truth first. Trace the command's execution path end-to-end and write down what it actually does — operations performed, side effects, files written, network calls, prompts, output, error paths. Only then read the existing `Short:` / `Long:` / MCP `Description:` and score each against that ground truth. Reviewing docs against impressions of the code, or against the sibling transport's docs, is not the review — it produces false positives.
