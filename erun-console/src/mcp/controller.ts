@@ -64,12 +64,20 @@ export type McpToolCallState =
 
 export interface McpToolCallController {
   state: McpToolCallState;
-  callTool: (hostname: string, token: string, toolName: string) => void;
+  callTool: (
+    hostname: string,
+    token: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+  ) => void;
 }
 
-// useMcpToolCallController drives one read-only tool call against a
-// deployed environment's exposed MCP edge -- the console's first caller of
-// the live edge, not just the token-minting half of it (see liveClient.ts).
+// useMcpToolCallController drives one tool call against a deployed
+// environment's exposed MCP edge -- the console's first caller of the live
+// edge, not just the token-minting half of it (see liveClient.ts). Used both
+// for the admin-scope smoke test (`version`, no args) and for driving an
+// erun:operate-scoped tool (`deploy`/`context_start`/`context_stop`/
+// `resize`, each with its own real arguments).
 export function useMcpToolCallController(): McpToolCallController {
   const [state, setState] = React.useState<McpToolCallState>({ status: 'idle' });
 
@@ -81,20 +89,23 @@ export function useMcpToolCallController(): McpToolCallController {
     };
   }, []);
 
-  const callTool = React.useCallback((hostname: string, token: string, toolName: string) => {
-    setState({ status: 'loading' });
-    callMcpTool(hostname, token, toolName)
-      .then((result) => {
-        if (activeRef.current) {
-          setState({ status: 'ready', result });
-        }
-      })
-      .catch((error: unknown) => {
-        if (activeRef.current) {
-          setState({ status: 'error', message: queryErrorMessage(error) });
-        }
-      });
-  }, []);
+  const callTool = React.useCallback(
+    (hostname: string, token: string, toolName: string, args?: Record<string, unknown>) => {
+      setState({ status: 'loading' });
+      callMcpTool(hostname, token, toolName, args)
+        .then((result) => {
+          if (activeRef.current) {
+            setState({ status: 'ready', result });
+          }
+        })
+        .catch((error: unknown) => {
+          if (activeRef.current) {
+            setState({ status: 'error', message: queryErrorMessage(error) });
+          }
+        });
+    },
+    [],
+  );
 
   return { state, callTool };
 }

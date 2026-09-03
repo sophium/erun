@@ -71,11 +71,13 @@ describe('MCPAccessPanel', () => {
     expect(post?.url).toBe('/v1/environments/env-1/mcp-token');
     expect(post?.body).toBe(JSON.stringify({ scope: 'erun:operate' }));
 
-    // The version smoke test would always be refused under erun:operate
-    // (it needs erun:read, which erun:operate deliberately does not imply),
-    // so it is replaced by an explanatory note instead of a button that
-    // would always fail.
+    // The version smoke test would always be refused under erun:operate (it
+    // needs erun:read, which erun:operate deliberately does not imply), so
+    // it is replaced by OperateToolForm -- a form that drives
+    // deploy/context_start/context_stop/resize directly instead of handing
+    // the token off to an external MCP client.
     expect(screen.queryByRole('button', { name: 'Call the version tool' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Call the tool' })).toBeInTheDocument();
     expect(screen.getByText(/it can deploy an already-published/)).toBeInTheDocument();
   });
 
@@ -240,6 +242,124 @@ describe('MCPAccessPanel driving a tool over the live edge', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Call the version tool' }));
 
     expect(await screen.findByText(/Could not call the tool: could not reach/)).toBeInTheDocument();
+  });
+});
+
+// liveEdgeMockFetch answers the initialize -> notifications/initialized ->
+// tools/call handshake generically, capturing the tools/call request so a
+// test can assert on the exact tool name and arguments the form sent -- the
+// proof that an erun:operate-scoped session drives real operate-shaped work,
+// not just a mint-and-hand-off dead end.
+function liveEdgeMockFetch(toolResult: { isError: boolean; text: string }): {
+  toolCalls: { name: string; arguments: unknown }[];
+} {
+  const toolCalls: { name: string; arguments: unknown }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as {
+        method: string;
+        params?: { name: string; arguments: unknown };
+      };
+      if (body.method === 'initialize') {
+        return Promise.resolve(
+          jsonResponseWithHeaders(
+            { jsonrpc: '2.0', id: 1, result: {} },
+            { 'Mcp-Session-Id': 'session-1' },
+          ),
+        );
+      }
+      if (body.method === 'notifications/initialized') {
+        return Promise.resolve(jsonResponseWithHeaders(''));
+      }
+      if (body.params !== undefined) {
+        toolCalls.push({ name: body.params.name, arguments: body.params.arguments });
+      }
+      return Promise.resolve(
+        jsonResponseWithHeaders({
+          jsonrpc: '2.0',
+          id: 2,
+          result: {
+            isError: toolResult.isError,
+            content: [{ type: 'text', text: toolResult.text }],
+          },
+        }),
+      );
+    }),
+  );
+  return { toolCalls };
+}
+
+describe('MCPAccessPanel driving an operate tool over the live edge', () => {
+  async function mintOperateToken(): Promise<void> {
+    mockFetch(() =>
+      jsonResponse({
+        token: 'operate.jwt.value',
+        audience: 'erun-mcp:acme/prod',
+        scope: 'erun:operate',
+      }),
+    );
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+    await screen.findByText('erun-mcp:acme/prod');
+    fireEvent.change(screen.getByLabelText(/MCP hostname/), {
+      target: { value: 'mcp.acme-prod.services.example.com' },
+    });
+  }
+
+  it('calls deploy with the entered version, preview on by default', async () => {
+    await mintOperateToken();
+    const { toolCalls } = liveEdgeMockFetch({ isError: false, text: '{"status":"planned"}' });
+
+    fireEvent.change(screen.getByLabelText('Version', { exact: false }), {
+      target: { value: '1.2.3' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Call the tool' }));
+
+    expect(await screen.findByText('{"status":"planned"}')).toBeInTheDocument();
+    expect(toolCalls).toEqual([{ name: 'deploy', arguments: { preview: true, version: '1.2.3' } }]);
+  });
+
+  it('refuses to submit deploy with no version entered', async () => {
+    await mintOperateToken();
+    expect(screen.getByRole('button', { name: 'Call the tool' })).toBeDisabled();
+  });
+
+  it('calls context_start with the entered name and the force override', async () => {
+    await mintOperateToken();
+    const { toolCalls } = liveEdgeMockFetch({ isError: false, text: '{"status":"running"}' });
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Tool' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Start the cloud context' }));
+    fireEvent.change(screen.getByLabelText('Cloud context name', { exact: false }), {
+      target: { value: 'ctx1' },
+    });
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Override the working-hours start gate' }),
+    );
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Preview only — resolve and trace the plan without changing anything',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Call the tool' }));
+
+    expect(await screen.findByText('{"status":"running"}')).toBeInTheDocument();
+    expect(toolCalls).toEqual([
+      { name: 'context_start', arguments: { preview: false, name: 'ctx1', force: true } },
+    ]);
+  });
+
+  it('surfaces a tool-level refusal as an inline error rather than crashing', async () => {
+    await mintOperateToken();
+    liveEdgeMockFetch({ isError: true, text: 'deploy requires a version' });
+
+    fireEvent.change(screen.getByLabelText('Version', { exact: false }), {
+      target: { value: '1.2.3' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Call the tool' }));
+
+    expect(await screen.findByText('deploy requires a version')).toBeInTheDocument();
   });
 });
 

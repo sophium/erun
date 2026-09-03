@@ -159,6 +159,54 @@ describe('callMcpTool', () => {
     ).rejects.toThrow('token grants no erun capabilities');
   });
 
+  it('sends the caller-supplied arguments in the tools/call request', async () => {
+    const calls = mockSequence([
+      () => jsonResponse({ jsonrpc: '2.0', id: 1, result: {} }, { sessionId: 'session-1' }),
+      () => emptyResponse(202),
+      () =>
+        jsonResponse({
+          jsonrpc: '2.0',
+          id: 2,
+          result: { isError: false, content: [{ type: 'text', text: '{"status":"planned"}' }] },
+        }),
+    ]);
+
+    await callMcpTool('mcp.acme-prod.services.example.com', 'the-token', 'deploy', {
+      preview: true,
+      version: '1.2.3',
+    });
+
+    expect((calls[2]?.body as { params: { name: string; arguments: unknown } }).params).toEqual({
+      name: 'deploy',
+      arguments: { preview: true, version: '1.2.3' },
+    });
+  });
+
+  // An erun:operate-scoped token's server never registers an admin-only tool
+  // at all (erun-mcp/capabilities.go's addTool filters at registration, per
+  // erun-common/mcp_capabilities.go's MCPCapabilityOperate doc comment), so a
+  // caller reaching for one -- whether through this console's own UI or
+  // hand-rolled against the same edge -- gets refused, surfaced by this
+  // generic client exactly like any other JSON-RPC error rather than a crash
+  // or a silently-ignored call. This is erun-mcp/guardTool's own error
+  // shape (`tool %q requires the %s capability`) verbatim.
+  it('surfaces an admin-only tool refusal for an operate-scoped caller like any other JSON-RPC error', async () => {
+    mockSequence([
+      () => jsonResponse({ jsonrpc: '2.0', id: 1, result: {} }, { sessionId: 'session-1' }),
+      () => emptyResponse(202),
+      () =>
+        jsonResponse({
+          jsonrpc: '2.0',
+          id: 2,
+          error: { code: -32601, message: 'tool "exec_raw" requires the erun:admin capability' },
+        }),
+    ]);
+
+    await expect(
+      callMcpTool('mcp.acme-prod.services.example.com', 'operate-token', 'exec_raw'),
+    ).rejects.toThrow('tool "exec_raw" requires the erun:admin capability');
+  });
+
   it('wraps a network failure with the URL it was trying to reach', async () => {
     vi.stubGlobal(
       'fetch',
