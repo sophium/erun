@@ -286,14 +286,20 @@ helm-chart-tests:
 test-postgres-restart:
 	sh erun-devops/docker/erun-backend-db/migrate_test.sh
 
-# End-to-end proof of the comments/releases retention sweep's age/count
-# bounds against a real postgres and the real migrations, same "needs a real
-# docker daemon and the atlas CLI, neither available in the bare test-stage
-# image" exclusion from make check as test-postgres-restart above. Run this
-# by hand, or via `erun exec job` in an agent env, before merging a change to
+# End-to-end proof of every retention sweep's age/count bounds against a real
+# postgres and the real migrations, same "needs a real docker daemon and the
+# atlas CLI, neither available in the bare test-stage image" exclusion from
+# make check as test-postgres-restart above. Iterates retention*_test.sh
+# (one script per policy group, run against its own postgres container) so a
+# new policy's test is picked up with no Makefile edit, the same reasoning
+# helm-chart-tests' directory iteration gives. Run this by hand, or via
+# `erun exec job` in an agent env, before merging a change to
 # erun-backend-db/retention/*.sql or the retention CronJob.
 test-retention:
-	sh erun-devops/docker/erun-backend-db/retention_test.sh
+	@for t in erun-devops/docker/erun-backend-db/retention*_test.sh; do \
+		echo "=== $$t ==="; \
+		sh "$$t" || exit 1; \
+	done
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
