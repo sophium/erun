@@ -13,11 +13,13 @@ import { wailsApi } from './api/wailsApi';
 import { loadReviewDiff } from './reviewThunks';
 import contributeReducer from './slices/contributeSlice';
 import diffReviewStatusReducer from './slices/diffReviewStatusSlice';
-import layoutReducer from './slices/layoutSlice';
+import layoutReducer, { setReviewOpen } from './slices/layoutSlice';
+import type { OrchestratorInfo } from './slices/orchestratorsSlice';
+import orchestratorsReducer, { setOrchestrators } from './slices/orchestratorsSlice';
 import requestCountersReducer from './slices/requestCountersSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer, { setSelected } from './slices/selectionSlice';
-import terminalReducer from './slices/terminalSlice';
+import terminalReducer, { setSessionId } from './slices/terminalSlice';
 import type { AppDispatch } from './store';
 import type { TerminalController } from './TerminalController';
 import { thunkExtra } from './thunkExtra';
@@ -33,6 +35,7 @@ function buildTestStore() {
       contribute: contributeReducer,
       diffReviewStatus: diffReviewStatusReducer,
       layout: layoutReducer,
+      orchestrators: orchestratorsReducer,
       requestCounters: requestCountersReducer,
       review: reviewReducer,
       selection: selectionReducer,
@@ -42,6 +45,32 @@ function buildTestStore() {
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({ thunk: { extraArgument: thunkExtra } }).concat(wailsApi.middleware),
   });
+}
+
+function orchestrator(sessionId: number): OrchestratorInfo {
+  return {
+    id: 'orch-1',
+    name: 'orch-1',
+    environments: [
+      { tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha', role: '' },
+      { tenant: 'acme', environment: 'beta', directory: '/tmp/beta', role: '' },
+    ],
+    tenants: ['acme'],
+    directories: ['/tmp/alpha', '/tmp/beta'],
+    sessionId,
+    status: 'running',
+    busy: false,
+    transient: false,
+    shellRunning: false,
+    shellCommand: '',
+    shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    nudgeCapped: false,
+    autoNudgeCount: 0,
+    whipCount: 0,
+    restartRequired: false,
+    roleChanged: false,
+  };
 }
 
 interface Deferred {
@@ -130,6 +159,62 @@ test('a diff load triggered during an in-flight getDiff still produces a fresh f
       'fresh',
       'the click must land its own fresh data, not the in-flight request’s stale result',
     );
+  } finally {
+    thunkExtra.controller = null;
+  }
+});
+
+// scheduleReviewDiffRefresh's outer guard (checked once, before arming the
+// timer) used to bail on `!state.selection.selected`, while the timer
+// callback's own guard deliberately does not -- an orchestrator session has
+// linked environments but no sidebar selection of its own. That mismatch left
+// periodic review-diff refresh permanently dead for every orchestrator
+// session: loadReviewDiff always calls scheduleReviewDiffRefresh at the end
+// of its own fetch, so the outer guard ran on literally every load an
+// orchestrator session ever made. Proves the fix behaviourally: the
+// timer now arms (and fires) for an orchestrator session with no
+// state.selection.selected.
+test('scheduleReviewDiffRefresh arms its timer for an orchestrator session with no sidebar selection', async () => {
+  const pendingCalls: Deferred[] = [];
+  stubWailsBridge({
+    LoadDiff: () =>
+      new Promise<DiffResult>((resolve) => {
+        pendingCalls.push({ resolve });
+      }),
+  });
+
+  const store = buildTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+  // An orchestrator session: sessionId matches an orchestrator, and the
+  // sidebar's own selection is cleared -- exactly focusOrchestratorSession's
+  // shape.
+  store.dispatch(setOrchestrators([orchestrator(42)]));
+  store.dispatch(setSessionId(42));
+  store.dispatch(setSelected(null));
+  store.dispatch(setReviewOpen(true));
+
+  let scheduled = false;
+  let scheduledCallback: (() => void) | null = null;
+  thunkExtra.controller = {
+    cancelReviewDiffRefresh: () => undefined,
+    scheduleReviewDiffRefreshTimer: (callback: () => void) => {
+      scheduled = true;
+      scheduledCallback = callback;
+    },
+  } as unknown as TerminalController | null;
+
+  try {
+    const loaded = dispatch(loadReviewDiff());
+    await waitFor(() => pendingCalls.length === 2);
+    resolveCall(pendingCalls, 0, diffResult('alpha-diff'));
+    resolveCall(pendingCalls, 1, diffResult('beta-diff'));
+    await loaded;
+
+    assert.ok(
+      scheduled,
+      'the periodic refresh timer must arm for an orchestrator session even though state.selection.selected is null',
+    );
+    assert.ok(scheduledCallback, 'a callback must have been captured');
   } finally {
     thunkExtra.controller = null;
   }

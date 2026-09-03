@@ -275,6 +275,21 @@ export const openSelection =
     const previousSelected = getState().selection.selected;
 
     const verdict = await resolveAutoStartGate(selection, getState);
+    // resolveAutoStartGate can await real backend work. If the terminal's
+    // active session or selection has changed while it was resolving --
+    // most commonly an orchestrator session (or a different environment)
+    // grabbing focus while this was boot()'s own automatic
+    // default-landing-environment open still in flight -- that newer focus
+    // change already won and must not be dragged back by this stale call
+    // going on to dispatch prepareOpenSelection's unconditional setSelected
+    // underneath it.
+    const stateAfterGate = getState();
+    if (
+      stateAfterGate.terminal.sessionId !== previousSessionId ||
+      stateAfterGate.selection.selected !== previousSelected
+    ) {
+      return;
+    }
     if (verdict === 'prompt') {
       dispatch(
         setAutoStartPrompt({

@@ -242,15 +242,17 @@ function scheduleReviewDiffRefresh(
 ): void {
   controller.cancelReviewDiffRefresh();
   const state = getState();
-  if (!state.layout.reviewOpen || !state.selection.selected) {
+  // An orchestrator session has linked environments but no sidebar selection
+  // of its own, so this arms off the resolved env set rather than
+  // state.selection.selected -- which would have stopped the refresh outright
+  // for exactly the cross-env case (#1178). Keep this guard identical to the
+  // timer callback's own below; a mismatch here left periodic review-diff
+  // refresh permanently dead for every orchestrator session.
+  if (!state.layout.reviewOpen || reviewEnvTargets(state).length === 0) {
     return;
   }
   controller.scheduleReviewDiffRefreshTimer(() => {
     const next = getState();
-    // An orchestrator session has linked environments but no sidebar selection
-    // of its own, so the timer arms off the resolved env set rather than
-    // state.selection.selected -- which would have stopped the refresh outright
-    // for exactly the cross-env case (#1178).
     if (!next.layout.reviewOpen || reviewEnvTargets(next).length === 0) {
       controller.stopReviewDiffRefresh();
       return;
@@ -279,7 +281,7 @@ const idleReconnect = () => ({
 // globally-selected environment. An orchestrator session shows one card per
 // linked environment, and the selected env is rarely the one that failed, so
 // deriving the target from selection.selected reconnected the wrong
-// environment (#1230).
+// environment.
 export const requestReconnect =
   (tenant: string, environment: string, kind: ReachabilityKind): AppThunk =>
   (dispatch) => {
