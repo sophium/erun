@@ -225,6 +225,46 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 	}
 }
 
+// TestAttachCreatesSessionDirectoryOnAFreshPod is the regression test for the
+// defect erun-console/playwright/tests/mcp-attach-session.spec.ts found by
+// actually driving a real browser against a real emcp instance with no prior
+// CLI session: session-prune.sh's own boot-time reconciliation explicitly
+// no-ops when eruncommon.RemoteAppSessionSocketDir is absent ("nothing
+// created yet: no sessions have ever run in this container"), and nothing
+// else in the runtime image's boot path creates it either -- so a freshly
+// deployed or restarted pod that has never had a CLI-driven session
+// (`erun open --ai`, a linked orchestrator) has no session directory at all
+// until this handler creates one itself. Before the fix this failed with
+// `dtach: ...: No such file or directory` surfaced as raw shell stderr piped
+// into the client's own byte stream, and a misdiagnosed "taken-over" outcome
+// (the owner-file write failing open reads identically to a real rival
+// claiming the socket) -- exactly the "unknown must not render as a definite
+// value" property this file's own doc comment calls out.
+func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
+	runtime := newAttachTestRuntime(t)
+	if err := os.RemoveAll(eruncommon.RemoteAppSessionSocketDir); err != nil {
+		t.Fatalf("simulating a pod that has never run a session: %v", err)
+	}
+	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
+	server := newAuthedAttachServer(t, runtime, issuer, "acme")
+
+	conn, resp, err := dialAttach(server.URL, "fresh-pod", token)
+	if err != nil {
+		t.Fatalf("dial: %v (response %+v)", err, resp)
+	}
+	defer func() { _ = conn.Close() }()
+
+	writeBinary(t, conn, "echo ATTACH_MARKER_FRESH\n")
+	waitForBinaryContaining(t, conn, "ATTACH_MARKER_FRESH")
+
+	writeBinary(t, conn, "exit\n")
+	outcome := readOutcomeMessage(t, conn)
+	if outcome.Outcome != eruncommon.AISessionAttachOutcomeEnded {
+		t.Fatalf("outcome = %q, want %q (a fresh pod's first attach must behave identically to a warm one)",
+			outcome.Outcome, eruncommon.AISessionAttachOutcomeEnded)
+	}
+}
+
 // TestAttachResizeControlMessageResizesThePTY proves the resize wire message
 // actually reaches the PTY: `stty size` reports the shell's own view of the
 // terminal dimensions, so a mismatch here means the control message was

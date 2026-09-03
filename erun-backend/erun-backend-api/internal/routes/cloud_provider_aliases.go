@@ -31,6 +31,10 @@ func RegisterCloudProviderAliasRoutes(register ProtectedRouteRegistrar, aliases 
 // setAlias needs no operations gate: RLS binds each alias row to the caller, so
 // every authorized tenant manages only its own aliases.
 func (r CloudProviderAliasRoutes) setAlias(w http.ResponseWriter, req *http.Request) {
+	if r.aliases == nil {
+		writeError(w, http.StatusNotImplemented, "cloud provider alias storage is not configured (ERUN_SECRETS_KEY is unset)")
+		return
+	}
 	alias := strings.TrimSpace(req.PathValue("alias"))
 	if alias == "" {
 		writeError(w, http.StatusBadRequest, "alias is required")

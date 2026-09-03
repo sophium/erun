@@ -3,4 +3,6 @@ test-results/
 playwright-report/
 .cache/
 .cache-mcp-operate-scope/
+.cache-mcp-attach-session/
+.cache-rest-surfaces/
 .e2e-oidc.env

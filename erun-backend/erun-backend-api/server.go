@@ -354,21 +354,34 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner, authorizer)
 	routes.RegisterDNS01TokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
 	routes.RegisterEnvironmentHostnameRoutes(register, repos.environments, repos.tenants, options.EnvironmentHostnameWriter, options.EnvironmentHostnameServicesZone)
+	// aliases is nil without a cipher, the same precondition every other
+	// Cipher-gated dependency on this page requires -- but unlike those (which
+	// simply leave a caller with a narrower feature set), the console's own
+	// ProvisionPanel is the *only* operator surface for registering BYO-cloud
+	// credentials, so a route left unregistered here 404s with no diagnosis
+	// at all: "alias request failed (404)" gives an operator nothing to act
+	// on, exactly the "advice that cannot work" dead end root AGENTS.md's
+	// "Smooth, Seamless, No Dead Ends" section calls a defect. The route is
+	// therefore always registered; setAlias itself reports the missing
+	// configuration with a named, actionable 501 (the same pattern
+	// mintMCPToken uses for a nil signer) instead of the mux's bare 404.
+	var aliases routes.CloudProviderAliasWriter
 	var contextProvisioner routes.ContextProvisioner
 	if options.Cipher != nil {
-		aliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
-		routes.RegisterCloudProviderAliasRoutes(register, aliases)
+		concreteAliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
+		aliases = concreteAliases
 		if options.DBOSContext != nil {
 			contextProvisioner = provision.NewProvisioner(
 				options.DBOSContext,
 				repos.contexts,
 				contextCredentials,
-				aliases,
+				concreteAliases,
 				options.Cipher,
 				options.AWSEndpoint,
 			)
 		}
 	}
+	routes.RegisterCloudProviderAliasRoutes(register, aliases)
 	routes.RegisterContextRoutes(register, repos.contexts, contextProvisioner)
 	tenantService := service.NewTenantService(repos.tenants, repos.environments, options.BootstrapTenantName)
 	routes.RegisterTenantRoutes(register, repos.tenants, tenantService)
