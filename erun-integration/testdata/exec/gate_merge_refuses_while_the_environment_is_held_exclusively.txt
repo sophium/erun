@@ -1,0 +1,5 @@
+audit: erun exec gate-merge --dry-run --source [feature/add-widget] --target main
+gate-merge: refused, other-drive holds team/dev exclusively
+refusing to run gate-merge: this environment is held exclusively by an unnamed holder (other drive, lease id other-drive), and work that claims the environment must not overlap with anything else here
+the claim expires in <ELAPSED> unless its holder renews it, and is reclaimed on the next read if the holder's process is gone or its pod was replaced
+wait for it, or release it: erun activity lease release --tenant team --environment dev --id other-drive --exclusive --scope environment

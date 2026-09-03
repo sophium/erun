@@ -6,6 +6,8 @@ The working tree must already be clean: this checks out a different local branch
 
 A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict recorded in the result, and the rest of the batch still gates against the tree as it stood before that attempt. A batch where every source is skipped lands nothing and exits non-zero.
 
+Refused outright while something else holds this environment exclusively: this rewrites the one shared worktree, so two gate-merges in flight at once do not merely slow each other down, they corrupt each other's accounting — a drive has already reported pushing a commit that belonged to another batch's tree. A caller that took the claim itself passes --under-lease so its own hold does not refuse it.
+
 --dry-run traces the fetch, checkout, and each squash merge and commit without running them.
 
 Usage:
@@ -22,6 +24,7 @@ Flags:
       --remote string        Git remote to fetch and merge from (defaults to origin)
       --source stringArray   Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)
       --target string        Target branch the squash merge(s) land onto (required)
+      --under-lease string   Id of an exclusive environment claim this caller already holds, so its own hold does not refuse it
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

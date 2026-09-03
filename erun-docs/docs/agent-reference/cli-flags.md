@@ -1189,6 +1189,30 @@ Once either cap is reached, the job finalizes exactly as it would without this f
 
 Not every job a job starts is meant to be waited for. `job start --handoff` marks the new job as deliberately outliving whatever starts it — a release, a long render, anything an agent kicks off on purpose before ending its own turn. A handoff job is excluded from its parent's finish check entirely: it is never counted toward `gate-incomplete`, and its own eventual outcome (success or failure) is never folded into `startedJobFailed`. Without `--handoff`, *every* nested `job start` defaults into the wait-then-report behavior above, which is correct for a gate but wrong for work genuinely meant to keep running past the caller's own turn.
 
+### Environment exclusivity: `--exclusive` {#job-exclusivity}
+
+An activity lease is **presence** — many holders coexist, and taking one says nothing about whether anybody else should. That is the right default for observability and the wrong one for a gate, whose verdict a neighbour changes rather than merely delays. Measured on one 12-CPU/23-GiB agent pod, the same gate ran `GREEN 7m4s`, `GREEN 7m38s`, `GREEN 6m58s` alone, and `GREEN 17m36s`, `RED`, `RED` with a second gate batch and a handful of probe jobs beside it — the two reds on *different* tests, both of which pass standalone (an `erun usage --output json` golden whose actual output carried real OOM warnings, and an auth-retry test that timed out). A contended gate does not report a slow verdict; it reports a wrong one, and the wrong one costs a false attribution before anyone thinks to re-measure alone.
+
+`job start --exclusive` is how work declares it needs the environment to itself:
+
+| Property | Value |
+|---|---|
+| Requested by | `erun exec job start --exclusive`; MCP `exec_raw` (`wait: false`) and `exec_agent` both take `exclusive: true`. |
+| Scope | Always `environment` — the [exclusive-claim](/agent-reference/idle-policy#exclusive-claims) scope that means "no other work here at all". Job exclusivity is deliberately not scope-parameterised: what a gate contends for is the pod's CPU and memory, which no worktree boundary divides. A narrower claim is still available directly through `erun activity lease take --exclusive --scope <scope>`. |
+| Refuses a second exclusive job | Yes. |
+| Refuses an **ordinary** job too | Yes, and this is the point. A gate needs protecting less from another gate than from everything else scheduled beside it; a probe job started during a gate is exactly what the measurement above recorded. |
+| Refusal shape | Never queued and never silently allowed. The error names the holder (`orchestrator`/`user`/`tenant`, lease `name`, lease `id`), how long the claim has left, that it is reclaimed if its holder dies, and the exact `erun exec job cancel` (or `erun activity lease release`) command that clears it. |
+| Lineage exemption | A start whose parent chain (`startedByJobId`, walked transitively) reaches the holder proceeds — that is the holder starting its own work, not contention. Such a job takes **no** second claim, so it cannot drop the ancestor's on its way out, and its record reads `exclusive: false`. |
+| Expiry and reclaim | It is a lease, not a lock. The claim is taken at start time with no pid (the supervisor does not exist yet), and the supervisor's first heartbeat records its own pid on it; from then on a dead supervisor releases the environment on the next read. It also expires at `--lease-ttl` (default `15m`, renewed at TTL/3) and at the 12-hour lease lifetime ceiling. A crashed gate cannot pin an environment. |
+| Release | Explicit, on the supervisor's way out, so the next gate starts immediately rather than waiting out a TTL. A start that fails before its supervisor comes up releases the claim it took. |
+| Storage | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/leases/exclusive/environment.json`, id `job-exclusive-<jobId>` — keyed by scope, created with `O_CREATE\|O_EXCL`, so of any number of concurrent starts exactly one create lands and the losers are refused with the winner named. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `exclusive` | bool | Whether this job holds the environment's claim. It is what the job actually holds, not what its caller asked for: a job running under an ancestor's claim reads `false`. `job status` appends `, holding this environment exclusively` to its line. |
+
+`scripts/agent-gate.sh` passes `--exclusive` for every gate it detaches (`make check`, `make integration-test`, `erun-ui/playwright/run.sh`), so the repository's own long gates hold the pod by default. `erun exec gate-merge` is gated by the same claim from the other direction: it rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively — two merge-queue drives racing that worktree is how a batch came to report pushing another batch's commit and closed two pull requests against work that had not landed. A caller that took the claim itself (a drive holding the environment across several separate processes, which cannot be expressed as one job) passes `erun exec gate-merge --under-lease <leaseId>` so its own hold does not refuse it.
+
 ### The alive contract {#alive-contract}
 
 `state` alone answers "did the work finish", but it can only be as fresh as the last thing that read and reconciled the record — a pid-liveness check runs only when something calls `status`/`await`/`output`. A supervisor can also die between reads (a `SIGTERM`'d container, an OOM kill) with nothing to say so from the inside until the next reconcile. To close that gap every job record carries three more fields, written by the supervisor on a fixed cadence independent of the work's own output:
@@ -1217,6 +1241,7 @@ In practice the two signals — `state` and `aliveAgeMs` — usually agree, beca
 | `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
 | `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs, and at 2s intervals for an agent job so the lease's name can carry the current activity. |
 | `--handoff` | bool | `false` | Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check. See [Deliberate handoff](#job-handoff). |
+| `--exclusive` | bool | `false` | Claim the environment for this job's lifetime; while it is held, **every** other job start here is refused and told which job holds it. See [Environment exclusivity](#job-exclusivity). |
 | `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
 
 erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.

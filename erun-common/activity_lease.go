@@ -55,6 +55,17 @@ const (
 	// environment's one worktree, which is the common case.
 	defaultEnvironmentActivityLeaseScope = "worktree"
 
+	// EnvironmentActivityLeaseScopeEnvironment is the one scope that means "no
+	// other work here at all", rather than "not this resource". It exists
+	// because the contention that actually hurts is not a shared worktree: it
+	// is the pod's own CPU and memory, which no worktree boundary divides. Two
+	// gate batches in separate clones of the same repo still fight over the
+	// same cores, and a gate that takes 7 minutes alone took 17 and went red on
+	// two unrelated tests when a second one ran beside it. Work that declares
+	// this scope is refused a second holder, and — uniquely for this scope —
+	// so is any job started while it is held (see job_exclusive.go).
+	EnvironmentActivityLeaseScopeEnvironment = "environment"
+
 	// EnvironmentActivityLeaseMaxLifetime is the hard ceiling a renewal cannot
 	// push past. Without it a holder that renews forever — or a wrapper looping
 	// on a hung job — would keep an environment awake indefinitely, which is the

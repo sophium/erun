@@ -51,6 +51,36 @@ on its own, naming `erun cloud init erun --api-url <url>` as the fix.
 
 ## The rungs, each skipped when already satisfied
 
+### 0. Claim the environment for this whole drive
+
+```sh
+drive_lease="merge-queue-drive-$$"
+if [ -n "${ERUN_TENANT:-}" ] && [ -n "${ERUN_ENVIRONMENT:-}" ]; then
+  erun activity lease take --tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+    --name "merge-queue drive $*" --id "$drive_lease" --exclusive --ttl 45m \
+    --orchestrator "${ERUN_ORCHESTRATOR_ID:-}" || {
+    echo "This environment is held exclusively by other work (named above). A merge-queue drive rewrites the shared worktree and saturates the pod, so it must not run beside anything else — wait for the holder to finish and re-invoke this skill."
+    exit 1
+  }
+fi
+```
+
+**Two concurrent drives in one environment corrupt merge accounting, not just
+each other's wall-clock.** It has already happened here: one batch reported
+`Pushed main to origin (<sha>)` where that sha was the *other* batch's commit,
+and two pull requests were closed against work that had not landed. Both
+drives rewrite the same worktree, and `git rev-parse HEAD` answers whichever
+of them touched it last. The claim closes that window for the whole drive —
+`erun exec gate-merge` refuses while another holder has the environment, and
+so does every `erun exec job start` here, which is what keeps a probe or gate
+job from being scheduled beside the build in rung 4.
+
+Carry `${drive_lease}` through every later rung: pass it to `gate-merge` as
+`--under-lease` (rung 3), re-take it to renew before rung 4's long build, and
+release it in rung 9. It is a lease, not a lock — 45m without a renewal and it
+lapses, so an interrupted drive cannot pin the environment, and the worst a
+crashed one costs is a wait.
+
 ### 1. Resolve every review and confirm each is actually `MERGE`
 
 ```sh
@@ -120,9 +150,14 @@ while IFS= read -r entry; do
   messages+=("$(echo "${entry}" | jq -r .name)")
 done <<< "${batch}"
 merge_result=$(printf '%s\0' "${messages[@]}" | head -c -1 | \
-  erun exec gate-merge "${source_flags[@]}" --target "${target}" --output json \
+  erun exec gate-merge "${source_flags[@]}" --target "${target}" \
+  --under-lease "${drive_lease}" --output json \
   2>/tmp/erun-merge-queue-drive-gate-merge.log)
 ```
+
+`--under-lease` names the claim rung 0 already took, so this drive's own hold
+on the environment does not refuse it. Without it, `gate-merge` would refuse
+here — it is refused by *any* exclusive holder, including this drive's own.
 
 One `git fetch` covers every branch; one call squashes each `--source` onto
 the same working tree in landing order, so the build that follows in rung 4
@@ -224,6 +259,13 @@ skill entirely for that branch.
 
 ```sh
 merge_commit=$(echo "${merge_result}" | jq -r .commit)
+# Renew the drive's claim before the one step long enough to outlive its TTL.
+# Re-taking the same id renews rather than stacking, so this is safe to repeat.
+if [ -n "${ERUN_TENANT:-}" ] && [ -n "${ERUN_ENVIRONMENT:-}" ]; then
+  erun activity lease take --tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+    --name "merge-queue drive build ${merge_commit}" --id "${drive_lease}" --exclusive --ttl 45m \
+    --orchestrator "${ERUN_ORCHESTRATOR_ID:-}"
+fi
 gate_run_id=$(erun exec gate-run start --target-branch "${target}" \
   --merge-commit "${merge_commit}" --output json | jq -r .gateRunId)
 if erun build --output json > /tmp/erun-merge-queue-drive-build.json 2>&1; then
@@ -430,7 +472,19 @@ refusal here for a landed, reported source means something pushed to it
 after rung 3 fetched it — that review's `MERGED` status stands regardless;
 report this plainly as a separate anomaly for a human to reconcile.
 
-### 9. Report and stop
+### 9. Release the environment, then report and stop
+
+```sh
+if [ -n "${ERUN_TENANT:-}" ] && [ -n "${ERUN_ENVIRONMENT:-}" ]; then
+  erun activity lease release --tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+    --id "${drive_lease}" --exclusive
+fi
+```
+
+Release it on **every** exit path, including the early ones — rung 0's own
+refusal aside, every `exit 1` above should release first, or the next drive
+waits out the remaining TTL for no reason. Releasing a claim that already
+lapsed succeeds, so this is safe to run unconditionally.
 
 State plainly, for the whole batch: every review's id, source and target
 branches, its landed/skipped outcome, its `GATE` build id and commit where
@@ -462,6 +516,10 @@ not clean up the local `${target}` checkout it left behind.
   not retried blind.
 - **Closing a pull request whose head has moved since the gate ran.** Rung 8
   refuses, loudly, rather than discarding content the gate never saw.
+- **Running beside another drive, gate, or probe job in the same
+  environment.** Rung 0 claims the environment and stops if it cannot get it.
+  Two drives sharing one worktree is how a batch came to report pushing
+  another batch's commit.
 
 ## Resuming after a partial failure
 

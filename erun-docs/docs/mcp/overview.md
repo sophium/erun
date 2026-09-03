@@ -183,6 +183,8 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 
 `activity_lease_take` also accepts `exclusive: true` (plus `scope`, default `worktree`) to claim a scope exclusively rather than merely holding it busy: a second exclusive take in the same scope is refused and told who the current holder is, and a fresh (non-renewal) claim is also refused while an operator's own SSH session is active in the env. Take this before any mutating work — a git checkout, staging, a commit — in a target env; a plain lease says only "something is here", the exclusive claim says "nobody else may mutate this worktree right now". See [Agent reference · Idle policy · Exclusive claims](/agent-reference/idle-policy#exclusive-claims).
 
+One scope is special: `scope: "environment"` means "no other work here at all", not "not this resource". While it is held, **every** job start in that env is refused and told who holds it — ordinary jobs included, not only other exclusive ones — because what a gate contends for is the pod's CPU and memory, which no worktree boundary divides. Prefer `exec_raw`/`exec_agent`'s own `exclusive: true` over taking this claim by hand for a single job; take it directly only when the hold has to span several separate calls, and pass its id to `exec_gate_merge` as `underLeaseId` so your own hold does not refuse you.
+
 ### Jobs — long work you come back to {#job-tools}
 
 | Tool | Purpose |
@@ -206,6 +208,8 @@ The job tools remove all five:
 - **`exec_job_output` is incremental.** Pass the previous read's `nextOffset` back to continue; progress is visible long before the work exits.
 - **`exec_job_status` is definite or explicitly `unknown`** — never truncated, and never a success nobody recorded.
 - **`exec_job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel. It refuses a backgrounded action tool (`build`, `deploy`, `doctor`, and the rest of the [job-envelope tools](#job-envelope) started with `wait: false`): that kind of job runs in-process rather than as a subprocess, so there is nothing to signal.
+
+`exec_raw` (with `wait: false`) and `exec_agent` both take `exclusive: true` for work that needs the env to itself — a full gate run, a build whose result a neighbour would invalidate. While such a job runs, every other job start in that env is refused and told which job holds it. The claim expires without renewal and is reclaimed once its holder is gone, so a crashed job cannot pin an env, and work the holder itself starts runs under the claim rather than being refused by it. Full contract: [Agent reference · Environment exclusivity](/agent-reference/cli-flags#job-exclusivity).
 
 A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun exec job`](/agent-reference/cli-flags#erun-job).
 

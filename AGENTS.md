@@ -196,6 +196,69 @@ surface an agent fully controls: its own final turn.
   unfinished, uncommitted, or unrecovered, and the orchestrator believed it
   because nothing in the job's own status said otherwise (erun#1374).
 
+## A Gate Holds The Environment To Itself (Mandatory)
+
+**A contended gate does not report a slow verdict, it reports a wrong one.**
+Measured on one 12-CPU/23-GiB agent pod, the same gate ran `GREEN 7m4s`,
+`GREEN 7m38s`, `GREEN 6m58s` alone (3/3), and `GREEN 17m36s`, `RED`, `RED`
+(1/3, 2.4x slower) with a second gate batch and verification probe jobs
+scheduled beside it. The two reds were on **different** tests, and both pass
+standalone: an `erun usage --output json` golden whose actual output carried
+real OOM warnings, and `TestPush/real_run_auth_failure_retries_after_login_via_auto_login_env`
+timing out. Contention did not just cost 10 minutes; it cost a false
+attribution, because two reds at a plausible-looking count read exactly like a
+real regression until a baseline was re-measured alone. That is the same trap
+§ "Working Rules" already warns about under "Identical failure counts across
+repeated runs do not prove a failure is real", arriving from the other
+direction.
+
+Worse than a wrong verdict, concurrency corrupts merge accounting. Two gate
+batches sharing one worktree produced a batch that reported `Pushed main to
+origin (<sha>)` where that sha was the **other** batch's commit, and two pull
+requests were closed against work that had not landed. `git rev-parse HEAD`
+answers whichever batch touched the tree last.
+
+So the rule is structural, not advisory:
+
+- **Long gates claim the environment.** `erun exec job start --exclusive`
+  takes an exclusive activity-lease claim on the scope named `environment`
+  for the job's lifetime, and while it is held **every** other job start
+  there is refused and told which job holds it — ordinary jobs included, not
+  only other exclusive ones. A gate needs protecting less from another gate
+  than from everything else scheduled beside it.
+  `scripts/agent-gate.sh` already passes `--exclusive`, so `make check`,
+  `make integration-test`, and `erun-ui/playwright/run.sh` hold the pod
+  without anybody remembering to ask.
+- **Work that mutates the shared worktree is refused by the same claim.**
+  `erun exec gate-merge` rewrites the environment's one worktree onto a
+  target branch, so it refuses while anything else holds the environment. A
+  caller whose hold spans several separate processes — a merge-queue drive,
+  which cannot be expressed as one job — takes the claim directly
+  (`erun activity lease take --exclusive --scope environment`) and names it
+  as `gate-merge --under-lease <id>` so its own hold does not refuse it. The
+  `erun-merge-queue-drive` skill does exactly this at rung 0.
+- **Never schedule work into an environment running a gate**, and do not
+  reach for a second environment's worth of parallelism inside one pod. If a
+  start is refused, the refusal names the holder and how to clear it; wait,
+  or use a different environment.
+- **This is a lease, not a lock.** It expires without renewal (`--lease-ttl`,
+  default 15m, renewed at TTL/3), reconciles against the supervisor pid
+  recorded on it, and is capped by the 12-hour lease lifetime ceiling, so a
+  crashed gate cannot pin an environment — the same three bounds every other
+  activity lease has. A start that fails before its supervisor comes up
+  releases the claim it took, and the supervisor releases it explicitly on
+  the way out so the next gate starts immediately rather than waiting out a
+  TTL.
+- **A gate's own nested work is exempt.** A start whose parent chain
+  (`startedByJobId`, walked transitively) reaches the holder proceeds under
+  that claim and takes no second one — otherwise a gate detached from inside
+  an agent job would be refused by its own ancestor, which is a dead end
+  rather than a safeguard.
+
+See `erun-common/job_exclusive.go` for the mechanism and
+`erun-docs/docs/agent-reference/cli-flags.md` § "Environment exclusivity" for
+the full contract.
+
 ## Long Gates Detach Themselves Inside An Agent Pod
 
 `make check` is a thin front door (`scripts/agent-gate.sh`) around the real

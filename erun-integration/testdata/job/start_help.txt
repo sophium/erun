@@ -39,6 +39,19 @@ code alone is never trusted while work it started has not finished. Pass
 --handoff for work that is meant to outlive the caller on purpose (a release,
 a long render): it excludes this job from that wait entirely.
 
+--exclusive declares that the work needs the environment to itself. While it
+runs, every other job start here is refused and told which job holds the
+environment, rather than being queued or quietly allowed to contend. That
+includes plain jobs, not only other --exclusive ones: a gate needs protecting
+less from another gate than from everything else scheduled beside it. Reach
+for it whenever the work saturates the environment and a neighbour would make
+its result meaningless -- a full gate run measured 7 minutes alone and 17
+minutes with a second batch beside it, going red on two tests that pass
+standalone. The claim is a lease, not a lock: it expires without renewal and
+is reclaimed once its holder's process is gone, so a crashed job cannot pin
+the environment. Work this job itself starts is exempt -- a nested job runs
+under this claim instead of being refused by it.
+
 Usage:
   erun job start [flags] -- <command> [args...]
 
@@ -58,12 +71,16 @@ Examples:
   # Kick off a release that is meant to keep running past this run's own turn.
   erun exec job start --tenant team --environment dev --name release --handoff -- erun release
 
+  # Run a gate that must not share the environment with anything else.
+  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate
+
 Flags:
       --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt
       --dir string             Working directory in the environment to run the command from
       --dry-run                Resolve and trace mutating actions without executing them.
       --env stringArray        Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv
       --environment string     Environment the job runs in
+      --exclusive              Claim the environment for this job's lifetime; while it is held, every other job start here is refused and told which job holds it
       --handoff                Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check
   -h, --help                   help for start
       --id string              Handle to address the job by (defaults to the name)

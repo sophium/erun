@@ -64,6 +64,13 @@ type StartEnvironmentJobParams struct {
 	// EnvironmentJob.Handoff). Only meaningful when this start itself runs
 	// from inside another job's own work.
 	Handoff bool
+	// Exclusive declares that this job needs the environment to itself: it
+	// claims EnvironmentActivityLeaseScopeEnvironment for its lifetime, and
+	// while it holds that claim every other job start here is refused (see
+	// job_exclusive.go). Resolution rewrites this field to what the start
+	// actually did, so a job running under an ancestor's existing claim reads
+	// as not holding one of its own.
+	Exclusive bool
 	// StartedByJobID is an explicit override for the job this new work should
 	// record as its own parent (see EnvironmentJob.StartedByJobID). Leave it
 	// empty for the common case: the supervisor this spawns inherits its own
@@ -353,18 +360,42 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 	if err := reserveEnvironmentJobID(ctx, dir, params.ID); err != nil {
 		return EnvironmentJob{}, err
 	}
+	// Resolved before anything is spawned: a start that has lost the
+	// environment must be refused, not handed a handle to a job that then has
+	// to die. params.Exclusive becomes what this job actually holds, so the
+	// supervisor argv and the recorded job agree with it.
+	if params.Exclusive, err = resolveEnvironmentJobExclusivity(ctx, dir, params, time.Now()); err != nil {
+		return EnvironmentJob{}, err
+	}
 
 	logPath := filepath.Join(dir, params.ID+".log")
 	args := environmentJobSupervisorArgs(params)
 	ctx.Trace(fmt.Sprintf("job: detaching %q as job %s, output at %s", params.Name, params.ID, logPath))
 	ctx.Trace(fmt.Sprintf("job: holding activity lease %s for the job's lifetime", environmentJobLeaseID(params.ID)))
+	if params.Exclusive {
+		ctx.Trace(fmt.Sprintf("job: holding exclusive claim %s on scope %q, refusing every other job start here while it runs", environmentJobExclusiveLeaseID(params.ID), EnvironmentActivityLeaseScopeEnvironment))
+	}
 	ctx.TraceCommand(params.Dir, params.SupervisorPath, args...)
 	if ctx.DryRun {
 		return plannedEnvironmentJob(params, logPath), nil
 	}
+	return spawnEnvironmentJobSupervisor(dir, params, args)
+}
 
+// spawnEnvironmentJobSupervisor takes whatever the resolved plan says this job
+// holds, detaches the supervisor, and returns only once that supervisor has
+// registered the job — so a start either yields a handle that resolves or fails
+// outright, never a handle to nothing. Every failure path here gives back an
+// exclusivity claim this start took, so a failed start cannot strand the
+// environment for the claim's whole TTL.
+func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams, args []string) (EnvironmentJob, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return EnvironmentJob{}, err
+	}
+	if params.Exclusive {
+		if _, err := takeEnvironmentJobExclusivityClaim(params, time.Now()); err != nil {
+			return EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
+		}
 	}
 	cmd := Command(params.SupervisorPath, args...)
 	// The supervisor inherits nothing from the caller's terminal: no working
@@ -376,6 +407,7 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 	cmd.Stderr = nil
 	detachEnvironmentJobSupervisor(cmd)
 	if err := cmd.Start(); err != nil {
+		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, 0)
 		return EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", err)
 	}
 	// Reap the supervisor when it eventually exits. A long-lived caller (the MCP
@@ -384,9 +416,26 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 
 	job, err := awaitEnvironmentJobRecord(dir, params.ID, cmd.Process.Pid)
 	if err != nil {
+		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, cmd.Process.Pid)
 		return EnvironmentJob{}, err
 	}
 	return job, nil
+}
+
+// releaseUnsupervisedEnvironmentJobExclusivityClaim drops a claim this start
+// took for a supervisor that then failed to come up, so a failed start never
+// strands the environment for the claim's whole TTL. It refuses to release
+// while that supervisor is in fact alive: a start can fail to *observe* the
+// job's registration and still have left a real supervisor running, and taking
+// the environment out from under it would be worse than the failed start.
+func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, supervisorPID int) {
+	if !params.Exclusive {
+		return
+	}
+	if supervisorPID > 0 && processAlive(supervisorPID) {
+		return
+	}
+	_ = releaseEnvironmentJobExclusivityClaim(params.Tenant, params.Environment, params.ID)
 }
 
 // reserveEnvironmentJobID makes the id unambiguous before anything is spawned.
@@ -444,6 +493,7 @@ func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) Env
 		OutputLimitBytes: params.MaxOutputBytes,
 		LeaseID:          environmentJobLeaseID(params.ID),
 		Handoff:          params.Handoff,
+		Exclusive:        params.Exclusive,
 	}
 }
 
@@ -472,6 +522,9 @@ func environmentJobSupervisorArgs(params StartEnvironmentJobParams) []string {
 	if params.Handoff {
 		args = append(args, "--handoff")
 	}
+	if params.Exclusive {
+		args = append(args, "--exclusive")
+	}
 	if params.StartedByJobID != "" {
 		args = append(args, "--started-by-job-id", params.StartedByJobID)
 	}
@@ -499,6 +552,12 @@ type EnvironmentJobSupervisorParams struct {
 	// Handoff carries StartEnvironmentJobParams.Handoff into the record the
 	// supervisor registers (see registerEnvironmentJob).
 	Handoff bool
+	// Exclusive says this job holds the environment's exclusivity claim, which
+	// the start already took (see takeEnvironmentJobExclusivityClaim). The
+	// supervisor renews it alongside its presence lease and drops it on the way
+	// out; it never decides exclusivity itself, since by the time it runs the
+	// question has already been answered and acted on.
+	Exclusive bool
 	// StartedByJobID carries StartEnvironmentJobParams.StartedByJobID's explicit
 	// override into the record the supervisor registers; empty defers to this
 	// process's own ERUN_JOB_ID (see registerEnvironmentJob).
@@ -605,6 +664,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		// outside any job.
 		StartedByJobID: firstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(environmentJobIDEnvVar))),
 		Handoff:        params.Handoff,
+		Exclusive:      params.Exclusive,
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		return nil, err
@@ -645,7 +705,7 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	if job.Kind == EnvironmentJobKindAgent {
 		agent = newAgentProgressReader(job.AgentTool)
 	}
-	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl, agent)
+	beat, stop := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, ttl, agent, params.Exclusive)
 	defer stop()
 	stopAlive := startEnvironmentJobAliveBeat(recorder)
 	defer stopAlive()
@@ -1048,6 +1108,11 @@ type jobHeartbeat struct {
 	recorder    *jobRecorder
 	// agent is nil for a command job, whose log is not an event stream.
 	agent *agentProgressReader
+	// exclusive says this job holds the environment's exclusivity claim, so
+	// each tick renews that claim as well as the presence lease. One ticker
+	// drives both: two renewal cadences for two leases with one TTL would only
+	// create a window where one has lapsed and the other has not.
+	exclusive bool
 
 	mu        sync.Mutex
 	progress  AgentJobProgress
@@ -1063,9 +1128,9 @@ type jobHeartbeat struct {
 //
 // agent is the same reader the output writer feeds, so the heartbeat's snapshot
 // reflects everything the process wrote, not only what the output cap retained.
-func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecorder, ttl time.Duration, agent *agentProgressReader) (*jobHeartbeat, func()) {
+func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecorder, ttl time.Duration, agent *agentProgressReader, exclusive bool) (*jobHeartbeat, func()) {
 	job := recorder.snapshot()
-	beat := &jobHeartbeat{tenant: tenant, environment: environment, ttl: ttl, recorder: recorder, agent: agent}
+	beat := &jobHeartbeat{tenant: tenant, environment: environment, ttl: ttl, recorder: recorder, agent: agent, exclusive: exclusive}
 	interval := beat.leaseInterval()
 	if agent != nil {
 		interval = agentJobProgressInterval
@@ -1095,6 +1160,13 @@ func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecor
 		// would outlive the supervisor and keep the environment reading as busy.
 		stopped.Wait()
 		_ = ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
+		if exclusive {
+			// Releasing the environment promptly is what lets the next gate
+			// start immediately rather than waiting out a TTL. Best-effort like
+			// the presence lease above: a supervisor killed outright releases
+			// nothing, and the claim's own recorded pid is what reclaims it.
+			_ = releaseEnvironmentJobExclusivityClaim(tenant, environment, job.ID)
+		}
 	}
 }
 
@@ -1131,8 +1203,37 @@ func (h *jobHeartbeat) refresh(force bool) {
 		PID:         job.PID,
 		TTL:         h.ttl,
 	})
+	h.renewExclusiveClaim(job, name)
 	h.leaseName = name
 	h.renewedAt = time.Now()
+}
+
+// renewExclusiveClaim keeps this job's hold on the environment alive, and is
+// also the first thing to record the supervisor's own pid on a claim the start
+// took before that process existed — from this tick on, a supervisor that dies
+// releases the environment on the next read instead of waiting out the TTL.
+//
+// A conflict here is ignored, matching the presence lease's own best-effort
+// renewal. It can only happen if this supervisor was frozen past its own TTL
+// and something else legitimately reclaimed the environment in the gap, which
+// is the window every lease-based exclusion has; the alternative — killing a
+// job's work over a renewal it lost — trades a rare, bounded overlap for a
+// routine one.
+func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
+	if !h.exclusive {
+		return
+	}
+	_, _ = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant:      h.tenant,
+		Environment: h.environment,
+		Name:        name,
+		ID:          environmentJobExclusiveLeaseID(job.ID),
+		PID:         job.PID,
+		TTL:         h.ttl,
+		Exclusive:   true,
+		Scope:       EnvironmentActivityLeaseScopeEnvironment,
+		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")), Tenant: h.tenant},
+	})
 }
 
 // leaseInterval renews well inside the TTL, with a floor so a short TTL cannot

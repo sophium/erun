@@ -440,9 +440,10 @@ func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinde
 
 func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var (
-		sources []string
-		target  string
-		remote  string
+		sources    []string
+		target     string
+		remote     string
+		underLease string
 	)
 	cmd := &cobra.Command{
 		Use:   "gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...]",
@@ -465,6 +466,11 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
 			"tree as it stood before that attempt. A batch where every source is skipped lands nothing and " +
 			"exits non-zero.\n\n" +
+			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
+			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
+			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +
+			"another batch's tree. A caller that took the claim itself passes --under-lease so its own hold " +
+			"does not refuse it.\n\n" +
 			"--dry-run traces the fetch, checkout, and each squash merge and commit without running them.",
 		Example: "  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main\n" +
 			"  printf 'Add widget\\0Add gadget' | erun exec gate-merge --source feature/add-widget " +
@@ -473,17 +479,18 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, sources, target, remote)
+			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, sources, target, remote, underLease)
 		},
 	}
 	cmd.Flags().StringArrayVar(&sources, "source", nil, "Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)")
 	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge(s) land onto (required)")
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
+	cmd.Flags().StringVar(&underLease, "under-lease", "", "Id of an exclusive environment claim this caller already holds, so its own hold does not refuse it")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote string) error {
+func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}
@@ -505,6 +512,7 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 		Sources:      sources,
 		TargetBranch: targetBranch,
 		Remote:       remote,
+		UnderLeaseID: underLease,
 	}, common.GateMergeWorkingTreeDependencies{})
 	if err != nil {
 		return err
