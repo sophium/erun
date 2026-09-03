@@ -62,6 +62,7 @@ func observeHelmListStubDefault() string {
 }
 
 func TestObserve(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"observe", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

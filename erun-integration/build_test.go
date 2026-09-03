@@ -81,6 +81,7 @@ func chartPackageVersion(t testing.TB, out, chart string) string {
 }
 
 func TestBuild(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")

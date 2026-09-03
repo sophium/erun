@@ -77,6 +77,7 @@ func TestIdleOffEnvironment(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_the_environment_call", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"idle", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -186,6 +187,7 @@ func TestJobOffEnvironment(t *testing.T) {
 	})
 
 	t.Run("start_dry_run_traces_the_environment_call", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "suite", "--dry-run", "--", "work", "--all"},
@@ -197,6 +199,7 @@ func TestJobOffEnvironment(t *testing.T) {
 	})
 
 	t.Run("a_malformed_request_fails_before_reaching_the_edge", func(t *testing.T) {
+		t.Parallel()
 		// A request that is wrong on its face is refused for that, not for whatever
 		// the edge happened to answer — so the error does not change with connectivity.
 		setup := env.New(t)
@@ -326,6 +329,7 @@ func TestJobOffEnvironment(t *testing.T) {
 	})
 
 	t.Run("attach_a_malformed_request_fails_before_reaching_the_edge", func(t *testing.T) {
+		t.Parallel()
 		// A nameless attach is invalid on its face -- refused before the call
 		// ever reaches the environment's edge, the same shape as job start's
 		// equivalent refusal above.

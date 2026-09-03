@@ -12,6 +12,7 @@ import (
 // erun-common COPYs erun-common before its first `go mod download` — a cold
 // (cache-miss) build otherwise fails resolving the missing local replace target.
 func TestImageDockerfilesCopyLocalReplaceTarget(t *testing.T) {
+	t.Parallel()
 	// The integration suite also runs inside the erun-devops image build, whose
 	// context copies only the Go modules, not the full source tree; this full-tree
 	// guard no-ops there and runs on a full checkout.

@@ -431,6 +431,7 @@ func operatorConfigCapabilities() []desktopsurface.Capability {
 // InternalAPIRoutes, and erun-common/operator_settable_config.go's
 // OperatorSettableConfigFields for the four declaration mechanisms.
 func TestDesktopSurfaceGate(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	operatorSurface := readOperatorSurfaceSource(t,
 		filepath.Join(root, "erun-ui", "frontend", "src"),
@@ -522,6 +523,7 @@ func appMethodDecls(t testing.TB, root string) []desktopsurface.AppMethodDecl {
 // that combination is a Wails binding location with no binding -- the
 // specific shape whipOrchestratorNow shipped in.
 func TestNoUnboundAppMethods(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	decls := appMethodDecls(t, root)
 	if len(decls) == 0 {

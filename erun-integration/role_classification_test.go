@@ -98,6 +98,7 @@ func routeRoleClassifications(t testing.TB, root string) map[string]bool {
 // hazard: a wildcard role (ReadAll/WriteAll) can never miss a new route this
 // way, since it grants everything by pattern.
 func TestRouteRoleClassificationGate(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	routes := protectedRouteSites(t, root)
 	if len(routes) == 0 {

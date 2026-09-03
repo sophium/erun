@@ -230,6 +230,56 @@ so their ports (26100/26122/26133) never collide with a developer's live erun
 session on the default 17000 range. Keep new real-run scenarios on that range
 and keep `skipIfPortsBusy` as a last-resort guard only.
 
+## Parallel execution: `t.Parallel()` is the default, port-bound scenarios are the exception
+
+The suite runs under `go test -parallel <N>` (`N` from `scripts/parallel-gate.sh`'s
+CPU-quota-aware `width` mode, not raw `GOMAXPROCS`; see
+`scripts/integration-test.sh`'s header comment for the measured memory
+numbers behind that choice). Almost every scenario is safe to run
+concurrently with every other scenario, because the two things that would
+make concurrent runs collide are already scenario-scoped: `env.New(t)` roots
+each scenario in its own `t.TempDir()` (HOME/XDG/cwd, never shared), and every
+scenario that needs an HTTP double calls `httptest.NewServer`/
+`httptest.NewUnstartedServer` fresh per scenario, which binds an OS-assigned
+ephemeral port, not a fixed one.
+
+The one real hazard is a scenario that binds a **literal, hardcoded** TCP
+port with `net.Listen` — the `skipIfPortsBusy`-guarded real-run scenarios in
+`mcp_test.go`, `open_test.go`, `app_test.go`, `whip_test.go`, and
+`environment_half_scenarios_test.go`, plus
+`job_off_environment_agent_test.go`'s single top-level test. Two scenarios
+racing to bind the same literal port is a real, silent collision `skipIfPortsBusy`
+can only detect and skip after the fact — and a skip is itself a defect per
+this file's own "Anti-patterns" section. `deploy_test.go`'s
+`net.Listen("tcp", "127.0.0.1:0")` (OS-assigned port, read back from
+`listener.Addr()`) is the safe alternative when a scenario can plumb the
+resolved port into whatever it's testing; the `skipIfPortsBusy` family
+predates that pattern and pins a literal port instead because production code
+resolves the port from fixture-seeded config rather than being handed one at
+runtime.
+
+Rules for new scenarios:
+
+- Default: add `t.Parallel()` as the first statement of every new `t.Run(...)`
+  closure, and of every new top-level `Test<Command>` function if the whole
+  function is free of `skipIfPortsBusy`-guarded scenarios.
+- If your scenario binds a literal port (or calls a helper that does —
+  `edge.start`, `startSilentPortForward`, `stubDesktopControlServer`,
+  `fixture.StartStalePortHolder`, or anything else that wraps
+  `net.Listen` with a fixed port number), guard it with `skipIfPortsBusy` as
+  today, and do **not** add `t.Parallel()` to it. If it lives in a
+  `Test<Command>` function that otherwise has only parallel-safe scenarios,
+  also make sure the function itself never calls `t.Parallel()` — Go never
+  interleaves a non-parallel top-level test with any other top-level test
+  (parallel or not), so leaving the function itself unmarked is what keeps
+  every port-bound scenario in the whole suite mutually exclusive, not just
+  the ones in the same file.
+- A literal port reference that is pure fixture *data* — e.g.
+  `seedMCPPortForwardState`'s or `SeedRemoteTenantEnvWithWorkspaceSync`'s
+  `rangeStart` argument, which is written into a config file or a
+  port-forward state file but never bound as a real socket — is not a hazard
+  and does not need `skipIfPortsBusy` or a parallel exemption.
+
 ## Goldens and normalization
 
 - A stub `httptest` server's port is assigned per run, so a scenario whose trace names the URL it called passes a per-server `normalize.Replacement` as an `Apply` extra rule (`exec_test.go`'s `stubServerRule`) instead of a blanket port rule in `internal/normalize`. A blanket rule was tried and rejected: it also collapsed the deliberately-pinned ports other scenarios assert (the 17000/26100 port-forward ranges), turning a real assertion into a token. Match the already-normalized `<LOOPBACK>` form — the default rules run before the extras.

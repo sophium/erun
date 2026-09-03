@@ -13,6 +13,7 @@ import (
 // for macOS, which has no automated compile check at all (see
 // erun-ui/AGENTS.md's "End-to-end UI tests" section for why).
 func TestCheckGateRunsWindowsDesktopCrossCompile(t *testing.T) {
+	t.Parallel()
 	root, ok := findFullCheckoutRoot()
 	if !ok {
 		t.Skip("full source tree not present (partial in-build build context)")

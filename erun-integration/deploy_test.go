@@ -24,6 +24,7 @@ import (
 )
 
 func TestDeploy(t *testing.T) {
+	t.Parallel()
 	t.Run("help_outside_devops_cwd", func(t *testing.T) {
 		// Regression: when cwd has no devops context, the
 		// deploy command must still be registered so the desktop UI's

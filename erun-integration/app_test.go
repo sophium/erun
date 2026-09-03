@@ -63,6 +63,7 @@ func writeDesktopControlMarker(t *testing.T, setup env.Setup, pid, controlPort i
 
 func TestApp(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"app", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -72,6 +73,7 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_app_executable_without_launching", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"app", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -81,6 +83,7 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_headless_flags_for_app_executable", func(t *testing.T) {
+		t.Parallel()
 		// --headless / --port let a headless browser harness drive the
 		// same frontend the desktop app renders.
 		setup := env.New(t)
@@ -92,6 +95,7 @@ func TestApp(t *testing.T) {
 	})
 
 	t.Run("real_run_detaches_app_stub_with_headless_args", func(t *testing.T) {
+		t.Parallel()
 		// The launcher detaches the desktop process immediately, so the only
 		// proof the headless argv was delivered is the marker file the stub
 		// writes — the golden cannot observe the detached child.
@@ -113,6 +117,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_app_binary_missing", func(t *testing.T) {
+		t.Parallel()
 		// A missing erun-app must surface the friendly build-or-install
 		// message rather than a raw exec error. The scenario's scrubbed PATH is
 		// what makes erun-app absent, on every host.
@@ -125,6 +130,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_invalid_override_path_error", func(t *testing.T) {
+		t.Parallel()
 		// A bad executable override must propagate the raw fork/exec error,
 		// not the friendly not-found message, so the broken path stays visible.
 		setup := env.New(t)
@@ -137,6 +143,7 @@ exit 0`)
 	})
 
 	t.Run("restart_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"app", "restart", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -146,6 +153,7 @@ exit 0`)
 	})
 
 	t.Run("restart_dry_run_refused_when_no_desktop_running", func(t *testing.T) {
+		t.Parallel()
 		// No marker was ever staged, which is the ordinary "nothing running"
 		// case: dry-run must refuse plainly rather than guess at a target.
 		setup := env.New(t)
@@ -157,6 +165,7 @@ exit 0`)
 	})
 
 	t.Run("restart_dry_run_refused_when_target_pid_does_not_resolve", func(t *testing.T) {
+		t.Parallel()
 		// A marker naming a pid nothing on this host will ever use: the
 		// unsafe-target refusal root AGENTS.md requires (a relauncher armed
 		// against a dead target kills nothing and a following relaunch just
@@ -171,6 +180,7 @@ exit 0`)
 	})
 
 	t.Run("restart_dry_run_resolves_a_live_target", func(t *testing.T) {
+		t.Parallel()
 		// The marker names this test process's own pid, which is alive for the
 		// whole scenario, so the dry-run plan resolves a real, verified target
 		// and reports would-restart without contacting it.
@@ -184,6 +194,7 @@ exit 0`)
 	})
 
 	t.Run("restart_dry_run_orchestrator_defaults_from_env_var", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		writeDesktopControlMarker(t, setup, os.Getpid(), 4242)
 		envVars := append(setup.Env(), "ERUN_ORCHESTRATOR_ID=env-orchestrator")

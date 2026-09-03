@@ -25,6 +25,7 @@ func stubKubectlUploadAccepts(t *testing.T, stubs string, size int, sha string) 
 }
 
 func TestInputs(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"inputs", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

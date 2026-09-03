@@ -94,6 +94,7 @@ func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
 const execDangerousContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
 
 func TestExec(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -2424,6 +2425,7 @@ func githubStubEnv(server *httptest.Server) []string {
 // merge, a release push, a foreign ruleset's bypass, an unaccounted push, an
 // unexpected identity) and plan-ruleset-bypass's resolved two-stage edit.
 func TestExecRulesetBypass(t *testing.T) {
+	t.Parallel()
 	t.Run("reconcile_bypass_real_run_accounts_for_a_gated_merge_and_a_release_push", func(t *testing.T) {
 		setup := env.New(t)
 		github := githubRulesetStubServer(t, githubRulesetStubOptions{})

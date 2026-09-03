@@ -181,6 +181,7 @@ func readUsageHistory(t *testing.T, cacheHome, tenant, environment string) map[s
 }
 
 func TestActivity(t *testing.T) {
+	t.Parallel()
 	t.Run("touch_records_cli_activity", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -1172,6 +1173,7 @@ func TestActivity(t *testing.T) {
 // output-volume heuristic cannot distinguish "waiting on the human" from
 // "idle" or "gone" because both produce the same signal, no output at all.
 func TestActivityAISession(t *testing.T) {
+	t.Parallel()
 	report := func(t *testing.T, setup env.Setup, args ...string) erun.Result {
 		t.Helper()
 		full := append([]string{"activity", "ai-session", "report", "--tenant", "team", "--environment", "dev"}, args...)

@@ -388,6 +388,7 @@ func decodeJWTSegment(t *testing.T, segment string, into any) {
 
 func TestMCP(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -397,6 +398,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_emcp_launch", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{
@@ -413,6 +415,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
+		t.Parallel()
 		// Seeding alpha first pushes "team" to index 1, so the default port
 		// resolves to 17100 (17000 + 100), not the index-0 17000 — the seed
 		// order proves the port is environment-scoped.
@@ -427,6 +430,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("real_run_launches_emcp_stub", func(t *testing.T) {
+		t.Parallel()
 		// Real-run: the launcher body only executes past the dry-run gate,
 		// so a stub is the only way to reach the bare-name emcp resolution
 		// and lock the argv it launches.
@@ -444,6 +448,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_emcp_missing", func(t *testing.T) {
+		t.Parallel()
 		// A missing emcp must surface the friendly "build or install it
 		// first" message, not a raw exec error. The scenario's scrubbed PATH is
 		// what makes emcp absent, on every host.
@@ -457,6 +462,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_emcp_exit_failure", func(t *testing.T) {
+		t.Parallel()
 		// A launched emcp that exits non-zero must propagate its raw exit
 		// error and the tool's stderr (not the friendly missing-binary
 		// message).
@@ -474,6 +480,7 @@ exit 3`)
 	})
 
 	t.Run("call_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "call", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -483,6 +490,7 @@ exit 3`)
 	})
 
 	t.Run("tools_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "tools", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -492,6 +500,7 @@ exit 3`)
 	})
 
 	t.Run("proxy_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "proxy", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -501,6 +510,7 @@ exit 3`)
 	})
 
 	t.Run("token_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "token", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -510,6 +520,7 @@ exit 3`)
 	})
 
 	t.Run("call_dry_run_traces_the_resolved_tool_call", func(t *testing.T) {
+		t.Parallel()
 		// The plan must name the endpoint the call would reach, the tool, and the
 		// arguments, and must not touch the network.
 		setup := env.New(t)
@@ -523,6 +534,7 @@ exit 3`)
 	})
 
 	t.Run("call_without_a_tool_fails_informatively", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"mcp", "call", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -533,6 +545,7 @@ exit 3`)
 	})
 
 	t.Run("call_with_malformed_args_fails_before_resolving", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{"mcp", "call", "--tool", "raw", "--args", "not-json", "--dry-run"}
@@ -544,6 +557,7 @@ exit 3`)
 	})
 
 	t.Run("token_dry_run_traces_the_audience", func(t *testing.T) {
+		t.Parallel()
 		// The audience is the whole point of the token, so the plan names it; no
 		// identity is read in dry-run.
 		setup := env.New(t)
@@ -556,6 +570,7 @@ exit 3`)
 	})
 
 	t.Run("token_without_a_desktop_identity_says_where_it_comes_from", func(t *testing.T) {
+		t.Parallel()
 		// No identity on this machine: the error must point at the desktop app
 		// rather than mint a key no deployed environment would trust.
 		setup := env.New(t)
@@ -568,6 +583,7 @@ exit 3`)
 	})
 
 	t.Run("token_real_run_mints_a_verifiable_bearer", func(t *testing.T) {
+		t.Parallel()
 		// Real-run: the mint only happens past the dry-run gate. The token is a
 		// fresh signature over a live timestamp, so the golden locks the result
 		// shape (with the token normalized away) and the claims are asserted from
@@ -792,6 +808,7 @@ exit 3`)
 	})
 
 	t.Run("proxy_dry_run_traces_the_resolved_edge", func(t *testing.T) {
+		t.Parallel()
 		// The plan must name the edge the relay would reach, and must neither read
 		// stdin nor touch the network.
 		setup := env.New(t)
@@ -1082,6 +1099,7 @@ exit 3`)
 	})
 
 	t.Run("proxy_real_run_serves_inputs_upload_locally", func(t *testing.T) {
+		t.Parallel()
 		// inputs_upload is host-served like workspace_sync: it must never touch
 		// the edge at all, which is why no fake edge is started here — a message
 		// reaching the network would fail this scenario outright.
@@ -1130,6 +1148,7 @@ exit 3`)
 	})
 
 	t.Run("proxy_real_run_previews_inputs_upload_without_sending", func(t *testing.T) {
+		t.Parallel()
 		// preview must resolve and describe the transfer without ever invoking
 		// kubectl — no stub is declared, so a real call here would fail on a
 		// missing binary rather than silently pass.

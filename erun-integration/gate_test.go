@@ -14,6 +14,7 @@ import (
 // change gated. Reporting a gate run's start and outcome is `erun exec
 // gate-run`, covered in exec_test.go.
 func TestGate(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"gate", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

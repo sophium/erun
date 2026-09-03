@@ -155,6 +155,7 @@ func findBareRequiredInputLiterals(t testing.TB, root string) []bareRequiredInpu
 // a baseline entry may not exceed it: that would be a new call site added
 // next to the tracked ones, not fixing them.
 func TestNoBareRequiredInputError(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	counts := map[string]int{}
 	for _, hit := range findBareRequiredInputLiterals(t, root) {
@@ -180,6 +181,7 @@ func TestNoBareRequiredInputError(t *testing.T) {
 // still enforces the shrink-only contract for every file, since only there
 // do all baselined files exist to compare.
 func TestBareRequiredInputBaselineIsCurrent(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	counts := map[string]int{}
 	for _, hit := range findBareRequiredInputLiterals(t, root) {
@@ -205,6 +207,7 @@ func TestBareRequiredInputBaselineIsCurrent(t *testing.T) {
 // unrelated string that merely ends in "is required". Only a real
 // production-code literal should be reported.
 func TestFindBareRequiredInputLiteralsExclusions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	files := map[string]string{
 		"production.go": `package fixture
@@ -269,6 +272,7 @@ func requireAlias(alias string) error {
 // the two original literals, while still leaving an unrelated
 // specifically-named subject alone.
 func TestBareRequiredInputPatternCatchesShapeVariants(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  bool

@@ -74,6 +74,7 @@ func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
 }
 
 func TestPin(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"pin", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

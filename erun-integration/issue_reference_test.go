@@ -368,6 +368,7 @@ var issueReferenceBaseline = map[string]int{
 // with a baseline entry may not exceed it: that would be a new reference
 // added next to the pre-existing ones, not cleaning them up.
 func TestNoIssueReferenceInCode(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	counts := map[string]int{}
 	for _, hit := range findIssueReferenceHits(t, root) {
@@ -398,6 +399,7 @@ func TestNoIssueReferenceInCode(t *testing.T) {
 // contain the file -- including a full checkout -- so the contract holds
 // everywhere the file exists to check.
 func TestIssueReferenceBaselineIsCurrent(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	counts := map[string]int{}
 	for _, hit := range findIssueReferenceHits(t, root) {
@@ -426,6 +428,7 @@ func TestIssueReferenceBaselineIsCurrent(t *testing.T) {
 // correspond to any real GitHub issue, written into a temp directory rather
 // than committed source.
 func TestFindIssueReferenceHitsExclusions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	files := map[string]string{
 		"production.go": `package fixture
@@ -491,6 +494,7 @@ func errFatalMessage() error {
 // reference, not one fixed phrasing. Every "true" case here uses a
 // deliberately fake org/repo and issue number.
 func TestIssueReferencePatternCatchesShapeVariants(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  bool
@@ -518,6 +522,7 @@ func TestIssueReferencePatternCatchesShapeVariants(t *testing.T) {
 // a number. A bare number in a name (Test1234) is not enough on its own --
 // too many legitimately numbered identifiers exist for that to be useful.
 func TestIssueReferenceIdentPatternCatchesShapeVariants(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  bool
