@@ -401,6 +401,12 @@ func TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail(t *testing.T) 
 	if recorded.Version != "1.0.0" {
 		t.Fatalf("version = %q, want 1.0.0", recorded.Version)
 	}
+
+	if _, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-versioned", Version: "1.0.0",
+	}); err == nil {
+		t.Fatal("a GATE build with a version was accepted, want the CHECK constraint to refuse it: the gate publishes nothing and mints no version")
+	}
 }
 
 // TestBuildTenantIsolation proves a caller from one tenant cannot see or fetch
