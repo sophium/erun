@@ -42,6 +42,35 @@ func classifyGateRunFailureText(text string) (signature string, matched bool) {
 	return "", false
 }
 
+// ensureNotKnownInfrastructureGateBuildFailure is RunReviewRecordBuild's
+// counterpart to reclassifyKnownInfrastructureGateFailure: `builds.successful`
+// is a plain boolean with no INCONCLUSIVE (see AGENTS.md "Gate Runs" on why
+// gate_runs is a separate table), so a failed GATE build for a known
+// infrastructure signature cannot be silently reclassified the way a gate
+// run's own status can -- recording it FAILED would still move the review
+// out of the merge queue for a network/registry blip, gaining nothing from
+// the gate-run classifier a caller already gets right. Refuse instead, the
+// same fail-closed shape checkDesktopPlaywrightCoverageForGate already uses
+// in this file's sibling preflight, so the caller reports the gate run
+// INCONCLUSIVE and re-drives the review once the signature clears rather
+// than recording a false FAILED build.
+func ensureNotKnownInfrastructureGateBuildFailure(gate, successful bool, failureDetail string) error {
+	if !gate || successful {
+		return nil
+	}
+	signature, matched := classifyGateRunFailureText(failureDetail)
+	if !matched {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to record a failed GATE build: --failure-detail %q matches a known erun infrastructure "+
+			"failure signature (%q) -- this is a statement about the network or registry, not the change; "+
+			"report the gate run INCONCLUSIVE instead (erun exec gate-run report <gateRunId> --status "+
+			"inconclusive --failing-step ... --log-ref ...) and re-drive this review once the signature "+
+			"clears, rather than recording a FAILED build for it",
+		failureDetail, signature)
+}
+
 // reclassifyKnownInfrastructureGateFailure upgrades a caller-reported FAILED
 // status to INCONCLUSIVE when failingStep or logRef names one of erun's own
 // known infrastructure failure signatures, and leaves every other status

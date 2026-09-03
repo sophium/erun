@@ -369,6 +369,11 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"so a green GATE build proves nothing about the desktop frontend on its own. Build erun-app and run " +
 			"`erun-ui/playwright/run.sh` against this exact commit first, then pass " +
 			"--desktop-playwright-verified once it passes.\n\n" +
+			"A --gate --failed whose --failure-detail names a known erun infrastructure failure (a registry or " +
+			"the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright: builds.successful " +
+			"has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a " +
+			"network blip rather than a real defect. Report the gate run INCONCLUSIVE instead (`erun exec " +
+			"gate-run report`) and re-drive the review once the signature clears.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
 			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'\n" +

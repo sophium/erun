@@ -309,6 +309,9 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	if err := checkDesktopPlaywrightCoverageForGate(ctx, params); err != nil {
 		return PlatformBuild{}, err
 	}
+	if err := ensureNotKnownInfrastructureGateBuildFailure(params.Gate, params.Successful, params.FailureDetail); err != nil {
+		return PlatformBuild{}, err
+	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformBuild{}, err
