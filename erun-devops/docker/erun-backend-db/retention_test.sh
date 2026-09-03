@@ -17,7 +17,13 @@
 #   4. comments beyond the 5,000-most-recent-closed-root-per-tenant count
 #      cap are deleted even when every row is well within the age bound.
 #
-# It also proves dry_run=true reports the same counts but deletes nothing.
+# It also proves dry_run=true reports the same counts but deletes nothing,
+# that both runs record their outcome in retention_runs (eligible_count and
+# deleted_count, tagged with dry_run), and -- driving the real
+# retention.sh entrypoint rather than psql directly -- that a second run
+# started while one is already in flight is refused by the session-scoped
+# advisory lock, and that a plain invocation with no ERUN_RETENTION_DRY_RUN
+# set defaults to report-only.
 #
 # Lives beside migrate_test.sh and follows the same shape: a real docker
 # daemon runs postgres, the real migrations from the sibling erun-backend-db
@@ -47,16 +53,37 @@ command -v atlas >/dev/null 2>&1 || {
 container="erun-backend-db-retention-test-$$"
 volume="erun-backend-db-retention-test-$$"
 port=15433
+work_root="$(mktemp -d 2>/dev/null || mktemp -d -t erun-backend-db-retention-test)"
 
 cleanup() {
     docker rm -f "${container}" >/dev/null 2>&1 || true
     docker volume rm "${volume}" >/dev/null 2>&1 || true
+    rm -rf "${work_root}"
 }
 trap cleanup EXIT INT TERM
 
 fail() {
     echo "FAIL: $1" >&2
     exit 1
+}
+
+# The official postgres image's first boot runs a temporary server to run
+# init scripts, stops it, then starts the real server -- both print
+# "database system is ready to accept connections", so pg_isready alone can
+# catch the temporary server's brief window and report ready moments before
+# it shuts down for the real restart, resetting any connection made in that
+# gap. Waiting for the line to appear twice in the container's own log is
+# the documented reliable signal instead.
+wait_for_log_count() {
+    target="$1"
+    i=0
+    while [ "$i" -lt 60 ]; do
+        count="$(docker logs "${container}" 2>&1 | grep -c 'database system is ready to accept connections')"
+        [ "${count}" -ge "${target}" ] && return 0
+        i=$((i + 1))
+        sleep 1
+    done
+    return 1
 }
 
 psql_as() {
@@ -74,15 +101,12 @@ docker run -d --name "${container}" \
     -v "${volume}:/var/lib/postgresql/data" \
     postgres:18.3 >/dev/null
 
-i=0
-while [ "$i" -lt 60 ]; do
-    docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 && break
-    i=$((i + 1))
-    sleep 1
-done
-docker exec "${container}" pg_isready -U erun -d erun >/dev/null 2>&1 || fail "postgres did not become ready"
+wait_for_log_count 2 || fail "postgres did not become ready"
 
-url="postgres://erun:testpass@localhost:${port}/erun?sslmode=disable"
+# 127.0.0.1, not localhost: docker's port publish binds IPv4 only, and this
+# host's resolver sometimes prefers localhost's IPv6 (::1) address, which
+# gets a connection reset rather than falling back to IPv4.
+url="postgres://erun:testpass@127.0.0.1:${port}/erun?sslmode=disable"
 (cd "${db_module}" && ERUN_DATABASE_URL="${url}" sh -c '
     set -eu
     if ! atlas migrate apply --env default --url "${ERUN_DATABASE_URL}" 2>/tmp/erun-retention-test-apply.log; then
@@ -159,8 +183,28 @@ printf '%s\n' "${report}" | grep -E '^\s*comments\s*\|\s*7\s*$' >/dev/null ||
 [ "$(count_query "select count(*) from releases;")" = "${initial_releases}" ] || fail "dry run must not delete any releases"
 [ "$(count_query "select count(*) from comments;")" = "${initial_comments}" ] || fail "dry run must not delete any comments"
 
+# --- The dry run recorded its outcome: eligible counts, zero deleted ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='comments_releases' and table_name='releases' and dry_run=true order by created_at desc limit 1;")" = "6" ] ||
+    fail "the dry run must record 6 releases eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='comments_releases' and table_name='releases' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 releases deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='comments_releases' and table_name='comments' and dry_run=true order by created_at desc limit 1;")" = "7" ] ||
+    fail "the dry run must record 7 comments eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='comments_releases' and table_name='comments' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 comments deleted in retention_runs"
+
 # --- Real run deletes exactly the eligible rows ---
 psql_as -d erun -v "dry_run=false" -f /tmp/comments_releases.sql >/dev/null
+
+# --- The real run recorded its outcome: eligible counts, matching deleted counts ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='comments_releases' and table_name='releases' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 releases eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='comments_releases' and table_name='releases' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 releases deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='comments_releases' and table_name='comments' and dry_run=false order by created_at desc limit 1;")" = "7" ] ||
+    fail "the real run must record 7 comments eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='comments_releases' and table_name='comments' and dry_run=false order by created_at desc limit 1;")" = "7" ] ||
+    fail "the real run must record 7 comments deleted in retention_runs"
 
 # 1. releases-age-tenant: the 200-day-old row is gone, the 10-day-old row survives.
 [ "$(count_query "select count(*) from releases where tenant_id = '00000000-0000-0000-0000-000000000001' and commit_id = 'ra-old';")" = "0" ] ||
@@ -195,4 +239,67 @@ psql_as -d erun -v "dry_run=false" -f /tmp/comments_releases.sql >/dev/null
 [ "$(count_query "select count(*) from comments where tenant_id = '00000000-0000-0000-0000-000000000004' and file_path = 'cc-1';")" = "1" ] ||
     fail "the count-cap tenant's newest closed root must survive"
 
-echo "OK: comments/releases retention deletes exactly the age- and count-bound rows the design specifies, and nothing else"
+# --- retention.sh itself: default dry_run, and the advisory lock refuses a
+#     second run while one is already in flight ---
+# Everything above ran comments_releases.sql directly to control fixtures
+# precisely; this section drives the real entrypoint (erun-devops/docker/
+# erun-backend-db/retention.sh) inside the same postgres container -- it
+# only needs psql, which the postgres image already carries, so this needs
+# no image build.
+docker exec "${container}" mkdir -p /opt/erun-backend-db/retention
+docker cp "${script_dir}/retention.sh" "${container}:/usr/local/bin/erun-backend-db-retention"
+docker exec "${container}" chmod +x /usr/local/bin/erun-backend-db-retention
+docker cp "${db_module}/retention/comments_releases.sql" "${container}:/opt/erun-backend-db/retention/comments_releases.sql"
+
+in_container_url="postgres://erun:testpass@127.0.0.1:5432/erun?sslmode=disable"
+
+# A plain invocation with ERUN_RETENTION_DRY_RUN unset must default to
+# report-only -- it must not delete the two releases that survived above.
+before_release_count="$(count_query "select count(*) from releases;")"
+docker exec -e "ERUN_DATABASE_URL=${in_container_url}" "${container}" erun-backend-db-retention >/dev/null ||
+    fail "retention.sh must succeed with no ERUN_RETENTION_DRY_RUN set"
+[ "$(count_query "select count(*) from releases;")" = "${before_release_count}" ] ||
+    fail "retention.sh with no ERUN_RETENTION_DRY_RUN set must default to dry_run=true and delete nothing"
+[ "$(count_query "select dry_run from retention_runs where policy_name='comments_releases' order by created_at desc limit 1;")" = "t" ] ||
+    fail "retention.sh's default run must record dry_run=true in retention_runs"
+
+# Hold the advisory lock in a background session (marking readiness via a
+# file, rather than a fixed sleep, so the test doesn't race the lock
+# acquisition) and confirm a concurrent retention.sh run is refused.
+docker exec "${container}" rm -f /tmp/erun-retention-lock-held
+holder="${work_root}/hold_lock.sh"
+cat >"${holder}" <<'HOLDER'
+#!/bin/sh
+psql -U erun -d erun -v ON_ERROR_STOP=1 <<'SQL'
+SELECT pg_advisory_lock(hashtext('erun_retention'));
+\! touch /tmp/erun-retention-lock-held
+SELECT pg_sleep(5);
+SQL
+HOLDER
+docker cp "${holder}" "${container}:/tmp/hold_lock.sh"
+docker exec "${container}" chmod +x /tmp/hold_lock.sh
+docker exec -d -e PGPASSWORD=testpass "${container}" /tmp/hold_lock.sh
+
+i=0
+while [ "$i" -lt 30 ]; do
+    docker exec "${container}" test -f /tmp/erun-retention-lock-held && break
+    i=$((i + 1))
+    sleep 1
+done
+docker exec "${container}" test -f /tmp/erun-retention-lock-held || fail "background session never acquired the advisory lock"
+
+concurrent_log="${work_root}/concurrent.log"
+if docker exec -e "ERUN_DATABASE_URL=${in_container_url}" "${container}" erun-backend-db-retention >"${concurrent_log}" 2>&1; then
+    fail "retention.sh must refuse to run while the advisory lock is held by another session"
+fi
+grep -q "advisory lock held" "${concurrent_log}" ||
+    fail "retention.sh's refusal must name the advisory lock, got: $(cat "${concurrent_log}")"
+
+# The holder session's own pg_sleep(5) started at (approximately) the point
+# it touched the marker file above; sleeping past that bound guarantees its
+# session has disconnected and the session-scoped lock has released.
+sleep 7
+docker exec -e "ERUN_DATABASE_URL=${in_container_url}" "${container}" erun-backend-db-retention >/dev/null ||
+    fail "retention.sh must succeed once the advisory lock is released"
+
+echo "OK: comments/releases retention deletes exactly the age- and count-bound rows the design specifies, records the outcome in retention_runs, and the retention.sh entrypoint defaults to dry_run=true and refuses to overlap a run holding the advisory lock"
