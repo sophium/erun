@@ -43,17 +43,34 @@ type tenantPlatformResolution struct {
 }
 
 // resolveTenantPlatform resolves the erun-type cloud alias backing tenant's
-// platform reads, exactly the way `erun platform` does: the explicit alias
-// override when given, else the caller's sole configured erun alias. A
-// tenant-level APIURL override, when configured (TenantConfig.APIURL — the
-// same field `erun list` already treats as the tenant's own stable API
-// address), still wins over the resolved alias's own ERun.APIURL; an
-// environment's own loopback port-forward never does, and no longer
-// participates in this resolution at all.
+// platform reads. Once a tenant has attached any cloud alias at all, only an
+// erun-type alias within that tenant's own selection may back its platform
+// identity (resolveTenantERunPlatformAlias) — never a global alias the
+// tenant itself did not attach, even when it is the only erun alias
+// configured on the machine. Before this (erun#1955), a tenant whose
+// selection was AWS-only still authenticated its platform reads with a
+// different tenant's erun credential, because the resolution never looked at
+// the tenant's own selection at all.
+//
+// The erun platform's own API URL always comes from the resolved alias
+// (provider.ERun.APIURL), never from TenantConfig.APIURL: that field is
+// documented only as `erun open`'s own port-forward address
+// (erun-docs/docs/reference/configuration.md), and letting it redirect an
+// unrelated alias's bearer token to an arbitrary address is exactly the
+// credential-disclosure shape erun#1955 also flagged — filling in that field
+// used to send one platform's bearer to whatever address the field named.
 func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatformResolution, error) {
-	provider, err := eruncommon.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
+	tenantConfig, _, err := a.deps.store.LoadTenantConfig(tenant)
+	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+		return tenantPlatformResolution{}, err
+	}
+
+	provider, terminal, err := a.resolveTenantERunPlatformAlias(tenantConfig, strings.TrimSpace(aliasOverride))
 	if err != nil {
-		return a.tenantPlatformResolutionForResolveError(err)
+		return tenantPlatformResolution{}, err
+	}
+	if terminal != nil {
+		return *terminal, nil
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.APIURL) == "" {
 		// Mirrors newPlatformClientForAlias's own guard: a Provider already
@@ -62,15 +79,7 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 		// re-running `erun cloud login`, not by reconnecting from scratch.
 		return tenantPlatformResolution{}, fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias)
 	}
-
 	apiURL := provider.ERun.APIURL
-	tenantConfig, _, err := a.deps.store.LoadTenantConfig(tenant)
-	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
-		return tenantPlatformResolution{}, err
-	}
-	if override := strings.TrimSpace(tenantConfig.APIURL); override != "" {
-		apiURL = override
-	}
 
 	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
 	bearer := strings.TrimSpace(token.Token)
@@ -90,6 +99,93 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 		issuer:  issuer,
 		subject: subject,
 	}, nil
+}
+
+// resolveTenantERunPlatformAlias picks which erun-type cloud alias backs
+// tenant's platform reads. It returns exactly one of: a usable provider (the
+// caller proceeds to mint a bearer from it), a terminal resolution the
+// caller returns as-is (not-connected / choose-alias), or an error.
+//
+// An explicit aliasOverride — the operator's own choose-alias pick, or an
+// MCP/dashboard caller naming one directly — is always honored verbatim,
+// exactly like `erun platform --erun-alias`; it is a deliberate one-time
+// choice, not an implicit default, so it is not further restricted to the
+// tenant's own selection.
+//
+// Otherwise: a tenant that has never attached any cloud alias at all
+// (TenantConfig.CloudProviderAliases empty) keeps the prior convenience of
+// falling back to the machine's sole configured erun alias, since the
+// tenant has expressed no preference to consult. A tenant that HAS attached
+// aliases is scoped strictly to the erun-type aliases within that selection
+// (erun-docs/docs/reference/configuration.md: "cloud provider aliases the
+// tenant is allowed to use") — none found there means not-connected, full
+// stop, never a fallback to an alias the tenant did not attach.
+func (a *App) resolveTenantERunPlatformAlias(tenantConfig eruncommon.TenantConfig, aliasOverride string) (provider eruncommon.CloudProviderConfig, terminal *tenantPlatformResolution, err error) {
+	if aliasOverride != "" || len(tenantConfig.CloudProviderAliases) == 0 {
+		return a.resolveGlobalERunPlatformAlias(aliasOverride)
+	}
+
+	tenantERunAliases := a.tenantSelectedERunAliases(tenantConfig)
+	if len(tenantERunAliases) == 0 {
+		return eruncommon.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateNotConnected}, nil
+	}
+	chosen := chooseTenantERunAlias(tenantERunAliases, tenantConfig.PrimaryCloudProviderAlias)
+	if chosen == "" {
+		return eruncommon.CloudProviderConfig{}, &tenantPlatformResolution{state: tenantPlatformStateChooseAlias, aliasChoices: tenantERunAliases}, nil
+	}
+	provider, err = eruncommon.ResolveCloudProvider(a.deps.store, chosen)
+	if err != nil {
+		return eruncommon.CloudProviderConfig{}, nil, err
+	}
+	return provider, nil, nil
+}
+
+// resolveGlobalERunPlatformAlias is the pre-erun#1955 resolution, unchanged:
+// the explicit override when given, else the machine's sole configured erun
+// alias. Used both for an explicit aliasOverride (always honored verbatim)
+// and for a tenant that has never attached any cloud alias at all.
+func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (eruncommon.CloudProviderConfig, *tenantPlatformResolution, error) {
+	provider, err := eruncommon.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
+	if err != nil {
+		resolution, resolveErr := a.tenantPlatformResolutionForResolveError(err)
+		return eruncommon.CloudProviderConfig{}, &resolution, resolveErr
+	}
+	return provider, nil, nil
+}
+
+// tenantSelectedERunAliases filters tenantConfig's own attached aliases down
+// to the erun-type ones, preserving order. A stale/removed alias name in the
+// tenant's own selection is skipped rather than failing the whole read.
+func (a *App) tenantSelectedERunAliases(tenantConfig eruncommon.TenantConfig) []string {
+	var erunAliases []string
+	for _, alias := range tenantConfig.CloudProviderAliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		candidate, err := eruncommon.ResolveCloudProvider(a.deps.store, alias)
+		if err != nil || candidate.Provider != eruncommon.CloudProviderERun {
+			continue
+		}
+		erunAliases = append(erunAliases, alias)
+	}
+	return erunAliases
+}
+
+// chooseTenantERunAlias picks primary when it names one of candidates, the
+// sole candidate when there is exactly one, or "" (ambiguous — the caller
+// renders choose-alias) otherwise.
+func chooseTenantERunAlias(candidates []string, primary string) string {
+	primary = strings.TrimSpace(primary)
+	for _, alias := range candidates {
+		if alias == primary {
+			return alias
+		}
+	}
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
+	return ""
 }
 
 // tenantPlatformResolutionForResolveError classifies why

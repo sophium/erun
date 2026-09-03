@@ -639,12 +639,12 @@ export function removeHeldLease(tenant: string, environment: string, name: strin
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
 // uninitialized. Mirrors what `erun init` writes (createTenantConfig in
 // erun-common/init.go).
-export function seedTenant(tenant: string, defaultEnvironment: string): void {
+export function seedTenant(tenant: string, defaultEnvironment: string, extraYaml = ''): void {
   const tenantDir = path.join(erunConfigDir(), tenant);
   fs.mkdirSync(tenantDir, { recursive: true });
   writeConfigFile(
     path.join(tenantDir, 'config.yaml'),
-    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n`,
+    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n` + extraYaml,
   );
 }
 
@@ -787,6 +787,65 @@ export function removeOrchestrator(id: string): void {
   }
   lines.splice(itemStart, itemEnd - itemStart);
   writeConfigFile(configPath, lines.join('\n'));
+}
+
+const CLOUD_PROVIDERS_KEY = 'cloudproviders:';
+
+// erunCloudProviderEntry renders one erun-type cloud provider alias's
+// sequence item at whatever indentation the file already uses (see
+// withOrchestrators above for why the indentation cannot be assumed fixed).
+// No secret store entry is written -- a spec staging this only needs the
+// alias to exist and classify as erun-type, never to actually mint a bearer.
+function erunCloudProviderEntry(alias: string, apiURL: string, indent: number): string[] {
+  const item = ' '.repeat(indent);
+  const key = ' '.repeat(indent + 2);
+  const nested = ' '.repeat(indent + 4);
+  return [
+    `${item}- alias: ${alias}`,
+    `${key}provider: erun`,
+    `${key}erun:`,
+    `${nested}apiurl: ${apiURL}`,
+    `${nested}clientid: pw-erun-client`,
+  ];
+}
+
+// withERunCloudProviderAlias returns `source` with one erun-type alias added
+// to the top-level `cloudproviders:` sequence. seedBaseline always writes
+// that key (for the seeded aws/cloudflare aliases), so unlike
+// withOrchestrators this never needs the key-missing fallback, but keeps it
+// for the same reason withOrchestrators does: a re-emitted config the
+// desktop's own YAML marshaller wrote may have reordered top-level keys.
+function withERunCloudProviderAlias(source: string, alias: string, apiURL: string): string {
+  const lines = source.split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === CLOUD_PROVIDERS_KEY);
+  if (keyIndex < 0) {
+    const base = source === '' || source.endsWith('\n') ? source : `${source}\n`;
+    return `${base}${CLOUD_PROVIDERS_KEY}\n${erunCloudProviderEntry(alias, apiURL, 2).join('\n')}\n`;
+  }
+  let end = keyIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  const existingItem = lines.slice(keyIndex + 1, end).find((line) => /^\s+- /.test(line));
+  const indent = existingItem ? existingItem.length - existingItem.trimStart().length : 2;
+  lines.splice(end, 0, ...erunCloudProviderEntry(alias, apiURL, indent));
+  return lines.join('\n');
+}
+
+// addERunCloudProviderAlias stages a throwaway erun-type cloud provider
+// alias in the shared root config.yaml, the way seedBaseline's aws/cloudflare
+// aliases are staged -- for specs that need a real, resolvable erun platform
+// alias to exist on the machine without ever signing in to one (erun#1955's
+// tenant-scoped-alias-selection regression needs the alias to exist globally
+// while the tenant under test never selected it). Returns a restore function
+// that puts the root config back exactly as found, mirroring addOrchestrators.
+export function addERunCloudProviderAlias(alias: string, apiURL: string): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  writeConfigFile(configPath, withERunCloudProviderAlias(before, alias, apiURL));
+  return () => {
+    writeConfigFile(configPath, before);
+  };
 }
 
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the
