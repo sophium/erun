@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -64,6 +65,15 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 
+	// orgScopedIssuers mirrors the real backend's issuers.org_field_key: once
+	// an issuer is registered org-scoped (the first POST /v1/tenants that
+	// names an orgFieldKey for it), every later tenant on that issuer needs a
+	// real orgFieldValue or it can never resolve. This is what lets the
+	// identity-org-create scenarios below prove the reachable path actually
+	// produces a tenant that would resolve, not merely one that was accepted.
+	var mu sync.Mutex
+	orgScopedIssuers := map[string]string{}
+
 	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
@@ -72,12 +82,42 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 			"tenantId": "tenant-1", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
 		})
 	})
+	mux.HandleFunc("POST /v1/identity/orgs", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "org-" + body["name"], "name": body["name"]})
+	})
 	mux.HandleFunc("POST /v1/tenants", func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
 		}
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
+
+		mu.Lock()
+		if body["orgFieldKey"] != "" {
+			if _, seen := orgScopedIssuers[body["issuer"]]; !seen {
+				orgScopedIssuers[body["issuer"]] = body["orgFieldKey"]
+			}
+		}
+		orgFieldKey := orgScopedIssuers[body["issuer"]]
+		mu.Unlock()
+
+		// Mirrors assertResolvableIssuerMapping: an org-scoped issuer with no
+		// org value on this mapping can never resolve any token, so the real
+		// backend refuses it rather than minting a dead tenant.
+		if orgFieldKey != "" && body["orgFieldValue"] == "" {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":    "UNRESOLVABLE_ISSUER_MAPPING",
+				"message": "issuer resolves tenants by an org claim; create one with `erun platform identity org create --name <org-name>` and pass its id as --org-field-value",
+			})
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tenantId": "tenant-2", "name": body["name"], "type": body["type"], "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
@@ -220,6 +260,27 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 		})
 	})
 
+	mux.HandleFunc("PATCH /v1/tenant-issuers", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		if body["orgFieldKey"] != "" {
+			orgScopedIssuers[body["issuer"]] = body["orgFieldKey"]
+		}
+		mu.Unlock()
+		tenantID := body["tenantId"]
+		if tenantID == "" {
+			tenantID = "tenant-1"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenantId": tenantID, "issuer": body["issuer"], "name": "repaired",
+			"orgFieldKey": body["orgFieldKey"], "orgFieldValue": body["orgFieldValue"],
+		})
+	})
+
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
@@ -314,6 +375,107 @@ func TestPlatform(t *testing.T) {
 		}
 		if strings.Contains(acmeLine, "UNREACHABLE") {
 			t.Fatalf("a resolvable tenant must not be flagged unreachable, got:\n%s", acmeLine)
+		}
+	})
+
+	t.Run("identity_org_create_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "identity", "org", "create", "--name", "acme", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/identity_org_create_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// This is erun#2049's core defect, reproduced end to end: before the org
+	// create command existed, an operator following `platform tenant create
+	// --org-field-key/--org-field-value` had no reachable way to obtain an
+	// org id at all, so an org-scoped tenant could only be created with an
+	// empty org value -- accepted, listed, and permanently unresolvable (see
+	// tenant_create_and_list_real_run's "probeco" fixture above). This proves
+	// the reachable path: create the org, feed its id into tenant create, and
+	// the same org-scoped issuer that refuses an empty value accepts this one.
+	t.Run("identity_org_create_and_tenant_create_reachable_path_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		orgResult := erun.Run(t, []string{"platform", "identity", "org", "create", "--name", "acme-reachable", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if orgResult.ExitCode != 0 {
+			t.Fatalf("org create exit %d: %s", orgResult.ExitCode, orgResult.Combined)
+		}
+		var org struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(orgResult.Stdout), &org); err != nil || org.ID == "" {
+			t.Fatalf("expected a JSON org result with an id, got err=%v combined:\n%s", err, orgResult.Combined)
+		}
+
+		const issuer = "https://auth.reachable-path.example"
+		const orgFieldKey = "urn:zitadel:iam:user:resourceowner:id"
+
+		// Without the org id this reachable path just produced, the same
+		// issuer refuses -- proving the refusal from erun#1832 is still live
+		// and that what follows is a genuine positive case, not a stub that
+		// always says yes.
+		refused := erun.Run(t, []string{
+			"platform", "tenant", "create", "--name", "acme-reachable-dead",
+			"--issuer", issuer, "--org-field-key", orgFieldKey,
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if refused.ExitCode == 0 {
+			t.Fatalf("expected an org-scoped tenant with no org value to be refused, got:\n%s", refused.Combined)
+		}
+		if !strings.Contains(refused.Combined, "erun platform identity org create") {
+			t.Fatalf("refusal must name the org-create command, got:\n%s", refused.Combined)
+		}
+
+		resolvedResult := erun.Run(t, []string{
+			"platform", "tenant", "create", "--name", "acme-reachable",
+			"--issuer", issuer, "--org-field-key", orgFieldKey, "--org-field-value", org.ID,
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if resolvedResult.ExitCode != 0 {
+			t.Fatalf("tenant create with the org id from the reachable path: exit %d: %s", resolvedResult.ExitCode, resolvedResult.Combined)
+		}
+		if !strings.Contains(resolvedResult.Combined, "acme-reachable") {
+			t.Fatalf("expected the created tenant to be named, got:\n%s", resolvedResult.Combined)
+		}
+	})
+
+	t.Run("tenant_repair_org_mapping_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "tenant", "repair-org-mapping", "--tenant-id", "tenant-probeco",
+			"--issuer", "https://idp.example", "--org-field-key", "urn:zitadel:iam:user:resourceowner:id",
+			"--org-field-value", "42", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/tenant_repair_org_mapping_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// The repair path for a tenant already stuck in probeco's state (created
+	// before erun#1832's refusal existed, or left behind when its issuer was
+	// converted to org-scoped afterward): an operations caller repairs a
+	// tenant other than its own by naming --tenant-id explicitly.
+	t.Run("tenant_repair_org_mapping_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{
+			"platform", "tenant", "repair-org-mapping", "--tenant-id", "tenant-probeco",
+			"--issuer", "https://auth.repair-path.example", "--org-field-key", "urn:zitadel:iam:user:resourceowner:id",
+			"--org-field-value", "org-probeco-repaired",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "org-probeco-repaired") {
+			t.Fatalf("expected the repaired org value to be reported, got:\n%s", result.Combined)
 		}
 	})
 

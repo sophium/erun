@@ -22,9 +22,10 @@ type stubTenantIssuerRepository struct {
 	listCalled    bool
 	gotListFilter repository.TenantIssuerFilter
 
-	gotOrgFieldKey   string
-	gotOrgFieldValue string
-	orgScopeCalled   bool
+	gotOrgFieldKey      string
+	gotOrgFieldValue    string
+	gotOrgScopeTenantID string
+	orgScopeCalled      bool
 }
 
 func (r *stubTenantIssuerRepository) List(_ context.Context, filter repository.TenantIssuerFilter) ([]model.TenantIssuer, error) {
@@ -39,8 +40,9 @@ func (r *stubTenantIssuerRepository) UpdateName(_ context.Context, issuer string
 	return r.updated, r.updateErr
 }
 
-func (r *stubTenantIssuerRepository) UpdateOrgScope(_ context.Context, issuer, orgFieldKey, orgFieldValue string) (model.TenantIssuer, error) {
+func (r *stubTenantIssuerRepository) UpdateOrgScope(_ context.Context, tenantID, issuer, orgFieldKey, orgFieldValue string) (model.TenantIssuer, error) {
 	r.orgScopeCalled = true
+	r.gotOrgScopeTenantID = tenantID
 	r.gotIssuer = issuer
 	r.gotOrgFieldKey = orgFieldKey
 	r.gotOrgFieldValue = orgFieldValue
@@ -218,12 +220,59 @@ func TestTenantIssuerRoutesOrgScopeConverts(t *testing.T) {
 	if repo.gotOrgFieldKey != "urn:zitadel:iam:user:resourceowner:id" || repo.gotOrgFieldValue != "123" {
 		t.Fatalf("key=%q value=%q", repo.gotOrgFieldKey, repo.gotOrgFieldValue)
 	}
+	if repo.gotOrgScopeTenantID != "tenant-1" {
+		t.Fatalf("expected the caller's own tenant by default, got %q", repo.gotOrgScopeTenantID)
+	}
 	var issuer model.TenantIssuer
 	if err := json.NewDecoder(rec.Body).Decode(&issuer); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if issuer.OrgFieldKey == "" || issuer.OrgFieldValue == "" {
 		t.Fatalf("response must report the resulting scope: %+v", issuer)
+	}
+}
+
+// An operations caller can target another tenant's mapping directly — the
+// repair path for a tenant already stuck with an unresolvable (issuer, org)
+// mapping (the probeco-shaped state assertResolvableIssuerMapping now
+// refuses at creation time, but cannot undo for a row written before that
+// refusal existed).
+func TestTenantIssuerRoutesOrgScopeRepairsAnotherTenant(t *testing.T) {
+	repo := &stubTenantIssuerRepository{updated: model.TenantIssuer{
+		TenantID:      "tenant-2",
+		Issuer:        "https://issuer.example",
+		OrgFieldKey:   "urn:zitadel:iam:user:resourceowner:id",
+		OrgFieldValue: "999",
+	}}
+	rec := httptest.NewRecorder()
+	body := `{"issuer":"https://issuer.example","orgFieldKey":"urn:zitadel:iam:user:resourceowner:id","orgFieldValue":"999","tenantId":"tenant-2"}`
+
+	TenantIssuerRoutes{issuers: repo}.updateTenantIssuerName(rec, tenantIssuerRequest(body, string(model.TenantTypeOperations)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if repo.gotOrgScopeTenantID != "tenant-2" {
+		t.Fatalf("expected the named target tenant, got %q", repo.gotOrgScopeTenantID)
+	}
+}
+
+// A non-operations caller naming another tenant is refused before the
+// repository is ever called, mirroring the read-side gate above.
+func TestTenantIssuerRoutesOrgScopeRefusesCrossTenantForNonOperations(t *testing.T) {
+	repo := &stubTenantIssuerRepository{}
+	rec := httptest.NewRecorder()
+	body := `{"issuer":"https://issuer.example","orgFieldKey":"urn:zitadel:iam:user:resourceowner:id","orgFieldValue":"999","tenantId":"tenant-2"}`
+
+	// A company tenant is refused outright before tenantId is even
+	// considered (the operations-tenant-type gate runs first).
+	TenantIssuerRoutes{issuers: repo}.updateTenantIssuerName(rec, tenantIssuerRequest(body, string(model.TenantTypeCompany)))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if repo.orgScopeCalled {
+		t.Fatal("a company tenant must not reach the repository")
 	}
 }
 

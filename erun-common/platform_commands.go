@@ -147,6 +147,42 @@ func RunPlatformCreateTenant(ctx Context, store CloudReadStore, alias string, pa
 	return client.CreateTenant(context.Background(), params)
 }
 
+// RunPlatformCreateOrg creates an organization on the platform's own IdP —
+// the org an org-scoped tenant mapping needs before CreateTenant can produce
+// one any token will ever resolve to. Requires an operations-tenant caller.
+func RunPlatformCreateOrg(ctx Context, store CloudReadStore, alias string, params PlatformCreateOrgParams, deps CloudDependencies) (PlatformOrg, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformOrg{}, err
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/identity/orgs", "name="+params.Name)
+	if ctx.DryRun {
+		return PlatformOrg{}, nil
+	}
+	return client.CreateOrg(context.Background(), params)
+}
+
+// RunPlatformRepairTenantIssuerOrgMapping fixes a tenant already stuck with
+// an unresolvable (issuer, org) mapping -- the repair path for a tenant a
+// pre-fix `platform tenant create` produced with no org value, or one whose
+// issuer was converted to org-scoped after it registered. Requires an
+// operations-tenant caller.
+func RunPlatformRepairTenantIssuerOrgMapping(ctx Context, store CloudReadStore, alias string, params PlatformRepairTenantIssuerOrgMappingParams, deps CloudDependencies) (PlatformTenantIssuer, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformTenantIssuer{}, err
+	}
+	details := []string{"issuer=" + params.Issuer, "orgFieldKey=" + params.OrgFieldKey, "orgFieldValue=" + params.OrgFieldValue}
+	if strings.TrimSpace(params.TenantID) != "" {
+		details = append(details, "tenantId="+params.TenantID)
+	}
+	tracePlatformCall(ctx, provider, "PATCH", "/v1/tenant-issuers", details...)
+	if ctx.DryRun {
+		return PlatformTenantIssuer{}, nil
+	}
+	return client.RepairTenantIssuerOrgMapping(context.Background(), params)
+}
+
 // RunPlatformListTenants lists tenants visible to the caller.
 func RunPlatformListTenants(ctx Context, store CloudReadStore, alias string, deps CloudDependencies) ([]PlatformTenant, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)

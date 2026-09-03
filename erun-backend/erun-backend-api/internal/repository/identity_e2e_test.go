@@ -357,7 +357,7 @@ func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing
 	// the second tenant below.
 	issuers := NewTenantIssuerRepository(NewTxManager(db, DialectPostgres))
 	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: firstTenant.TenantID, TenantType: string(model.TenantTypeOperations)})
-	_, err = issuers.UpdateOrgScope(opsCtx, issuer, orgClaimKey, firstOrg)
+	_, err = issuers.UpdateOrgScope(opsCtx, firstTenant.TenantID, issuer, orgClaimKey, firstOrg)
 	mustNoErr(t, err, "convert the issuer to org-scoped and backfill the first tenant's mapping")
 
 	// Register a second tenant on the same issuer under a different org --

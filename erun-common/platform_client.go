@@ -296,6 +296,60 @@ func (c *PlatformClient) ListTenants(ctx context.Context) ([]PlatformTenant, err
 	return tenants, err
 }
 
+// PlatformOrg mirrors zitadel.Org's JSON shape: the platform's own IdP
+// organization that an org-scoped tenant's mapping points at.
+type PlatformOrg struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// PlatformCreateOrgParams is the org-creation input.
+type PlatformCreateOrgParams struct {
+	Name string `json:"name"`
+}
+
+// CreateOrg creates an organization on the platform's own IdP: the org an
+// org-scoped tenant's mapping needs before it can resolve any token —
+// POST /v1/tenants refuses an org-scoped mapping with no org value, and this
+// is the reachable way to obtain one. Requires an operations-tenant caller.
+// Pair the returned id with CreateTenant's OrgFieldValue.
+func (c *PlatformClient) CreateOrg(ctx context.Context, params PlatformCreateOrgParams) (PlatformOrg, error) {
+	var org PlatformOrg
+	err := c.do(ctx, http.MethodPost, "/v1/identity/orgs", params, true, &org)
+	return org, err
+}
+
+// PlatformTenantIssuer mirrors model.TenantIssuer's JSON shape.
+type PlatformTenantIssuer struct {
+	TenantID      string `json:"tenantId"`
+	Issuer        string `json:"issuer"`
+	Name          string `json:"name"`
+	OrgFieldKey   string `json:"orgFieldKey,omitempty"`
+	OrgFieldValue string `json:"orgFieldValue,omitempty"`
+}
+
+// PlatformRepairTenantIssuerOrgMappingParams is the repair-path input for a
+// tenant already stuck with an unresolvable (issuer, org) mapping. TenantID,
+// when set, targets a tenant other than the caller's own and is honored only
+// for an operations-scoped caller.
+type PlatformRepairTenantIssuerOrgMappingParams struct {
+	TenantID      string `json:"tenantId,omitempty"`
+	Issuer        string `json:"issuer"`
+	OrgFieldKey   string `json:"orgFieldKey"`
+	OrgFieldValue string `json:"orgFieldValue"`
+}
+
+// RepairTenantIssuerOrgMapping converts issuer to org-scoped (if it is not
+// already) and sets the target tenant's own org value, so a tenant created
+// with an empty --org-field-value before POST /v1/tenants started refusing
+// that (or converted from a single-tenant issuer after a second tenant needed
+// one) resolves again. Requires an operations-tenant caller.
+func (c *PlatformClient) RepairTenantIssuerOrgMapping(ctx context.Context, params PlatformRepairTenantIssuerOrgMappingParams) (PlatformTenantIssuer, error) {
+	var issuer PlatformTenantIssuer
+	err := c.do(ctx, http.MethodPatch, "/v1/tenant-issuers", params, true, &issuer)
+	return issuer, err
+}
+
 // PlatformCreateUserParams is the user-enrollment input. TenantID, when set,
 // targets a tenant other than the caller's own and is honored only for an
 // operations-scoped caller.

@@ -58,6 +58,19 @@ func TestAssertResolvableIssuerMappingNamesTheClaimAndTheMode(t *testing.T) {
 	}
 }
 
+// TestAssertResolvableIssuerMappingNamesTheOrgCreateCommand covers a refusal
+// that names the claim but leaves an operator with no way to actually obtain
+// an org value. The message must point at the command that closes that gap.
+func TestAssertResolvableIssuerMappingNamesTheOrgCreateCommand(t *testing.T) {
+	err := assertResolvableIssuerMapping("https://auth.example", "urn:zitadel:iam:user:resourceowner:id", "")
+	if err == nil {
+		t.Fatal("expected an org-scoped issuer with no org value to be refused")
+	}
+	if !strings.Contains(err.Error(), "erun platform identity org create") {
+		t.Fatalf("message %q does not name the org-create command", err.Error())
+	}
+}
+
 // TestAssertResolvableIssuerMappingRefusesAnOrgValueOnASingleTenantIssuer is
 // the mirror case: the value is read by nothing, so the mapping is just as
 // dead, and the message must say which way round the mismatch is rather than

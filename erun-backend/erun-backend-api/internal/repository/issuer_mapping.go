@@ -32,7 +32,8 @@ func (e *UnresolvableIssuerMappingError) Error() string {
 	}
 	if e.OrgFieldKey != "" {
 		return fmt.Sprintf(
-			"issuer %q resolves tenants by the %q claim, so this tenant's mapping needs the org value that claim will carry; it has none, and no token can resolve to it",
+			"issuer %q resolves tenants by the %q claim, so this tenant's mapping needs the org value that claim will carry; it has none, and no token can resolve to it. "+
+				"Create one with `erun platform identity org create --name <org-name>` and pass its id as --org-field-value.",
 			e.Issuer, e.OrgFieldKey)
 	}
 	return fmt.Sprintf(
