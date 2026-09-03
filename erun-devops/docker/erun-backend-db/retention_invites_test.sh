@@ -23,7 +23,11 @@
 #      is deleted once that reference is gone (invite_requests is pruned
 #      first, in the same sweep).
 #
-# It also proves dry_run=true reports the same counts but deletes nothing.
+# It also proves dry_run=true reports the same counts but deletes nothing,
+# and that both runs record their outcome in retention_runs (eligible_count
+# and deleted_count, tagged with dry_run) -- invites_invite_requests.sql
+# previously computed these counts for its own report but never persisted
+# them, unlike comments_releases.sql; this test locks the fix.
 #
 # Lives beside retention_test.sh and follows the same shape: a real docker
 # daemon runs postgres, the real migrations are applied via the atlas CLI,
@@ -158,8 +162,28 @@ printf '%s\n' "${report}" | grep -E '^\s*invites\s*\|\s*7\s*$' >/dev/null ||
 [ "$(count_query "select count(*) from invites;")" = "${initial_invites}" ] || fail "dry run must not delete any invites"
 [ "$(count_query "select count(*) from invite_requests;")" = "${initial_requests}" ] || fail "dry run must not delete any invite_requests"
 
+# --- The dry run recorded its outcome: eligible counts, zero deleted ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='invites_invite_requests' and table_name='invite_requests' and dry_run=true order by created_at desc limit 1;")" = "1" ] ||
+    fail "the dry run must record 1 invite_requests eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='invites_invite_requests' and table_name='invite_requests' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 invite_requests deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='invites_invite_requests' and table_name='invites' and dry_run=true order by created_at desc limit 1;")" = "7" ] ||
+    fail "the dry run must record 7 invites eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='invites_invite_requests' and table_name='invites' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 invites deleted in retention_runs"
+
 # --- Real run deletes exactly the eligible rows ---
 psql_as -d erun -v "dry_run=false" -f /tmp/invites_invite_requests.sql >/dev/null
+
+# --- The real run recorded its outcome: eligible counts, matching deleted counts ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='invites_invite_requests' and table_name='invite_requests' and dry_run=false order by created_at desc limit 1;")" = "1" ] ||
+    fail "the real run must record 1 invite_requests eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='invites_invite_requests' and table_name='invite_requests' and dry_run=false order by created_at desc limit 1;")" = "1" ] ||
+    fail "the real run must record 1 invite_requests deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='invites_invite_requests' and table_name='invites' and dry_run=false order by created_at desc limit 1;")" = "7" ] ||
+    fail "the real run must record 7 invites eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='invites_invite_requests' and table_name='invites' and dry_run=false order by created_at desc limit 1;")" = "7" ] ||
+    fail "the real run must record 7 invites deleted in retention_runs"
 
 # 1. invite_requests: PENDING survives regardless of age, APPROVED-old is
 #    gone, DECLINED-young survives.

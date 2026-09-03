@@ -55,6 +55,51 @@ SELECT 'invites' AS table_name, count(*) AS eligible_for_deletion
 FROM invites_eligible i
 WHERE NOT EXISTS (SELECT 1 FROM invite_requests ir WHERE ir.minted_invite_id = i.invite_id);
 
+-- Record the run: eligible counts for both tables, tagged with the dry_run
+-- flag this invocation ran under. deleted_count is 0 for a dry run or the
+-- same eligible count for a real run -- the delete below uses the identical
+-- predicate, and retention.sh holds a session-scoped advisory lock for the
+-- whole sweep, so nothing else can change eligibility between this count and
+-- that delete.
+WITH decided_ranked AS (
+  SELECT invite_request_id, updated_at,
+         row_number() OVER (ORDER BY updated_at DESC) AS rn
+  FROM invite_requests
+  WHERE status IN ('APPROVED', 'DECLINED')
+),
+invite_requests_eligible AS (
+  SELECT count(*) AS n FROM decided_ranked
+  WHERE rn > 10000 OR updated_at < now() - interval '180 days'
+),
+consumed_ranked AS (
+  SELECT invite_id, tenant_id, consumed_at,
+         row_number() OVER (PARTITION BY tenant_id ORDER BY consumed_at DESC) AS rn
+  FROM invites
+  WHERE consumed_at IS NOT NULL
+),
+expired_unconsumed_ranked AS (
+  SELECT invite_id, tenant_id, expires_at,
+         row_number() OVER (PARTITION BY tenant_id ORDER BY expires_at DESC) AS rn
+  FROM invites
+  WHERE consumed_at IS NULL AND expires_at < now()
+),
+invites_eligible2 AS (
+  SELECT invite_id FROM consumed_ranked
+  WHERE rn > 10000 OR consumed_at < now() - interval '365 days'
+  UNION
+  SELECT invite_id FROM expired_unconsumed_ranked
+  WHERE rn > 10000 OR expires_at < now() - interval '30 days'
+),
+invites_eligible_count AS (
+  SELECT count(*) AS n
+  FROM invites_eligible2 i
+  WHERE NOT EXISTS (SELECT 1 FROM invite_requests ir WHERE ir.minted_invite_id = i.invite_id)
+)
+INSERT INTO retention_runs (policy_name, table_name, dry_run, eligible_count, deleted_count)
+SELECT 'invites_invite_requests', 'invite_requests', :dry_run, n, CASE WHEN :dry_run THEN 0 ELSE n END FROM invite_requests_eligible
+UNION ALL
+SELECT 'invites_invite_requests', 'invites', :dry_run, n, CASE WHEN :dry_run THEN 0 ELSE n END FROM invites_eligible_count;
+
 \if :dry_run
 \else
 BEGIN;
