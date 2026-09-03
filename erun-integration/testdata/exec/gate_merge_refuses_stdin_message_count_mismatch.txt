@@ -1,0 +1,2 @@
+audit: erun exec gate-merge --source [a,b] --target main
+expected 2 NUL-separated commit message(s) on stdin (one per --source), got 1

@@ -1,0 +1,2 @@
+audit: erun exec gate-merge --target main
+at least one --source is required

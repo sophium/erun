@@ -7,53 +7,72 @@ import (
 	"strings"
 )
 
-// GateMergeWorkingTreeParams squash-merges SourceBranch onto a fresh local
-// checkout of TargetBranch — the git half of gating a merge queue promotion.
-// The environment a review's merge queue promotes to MERGE runs this before
-// `erun build`: fetch both branches, build the prospective squash merge onto
-// the target's *current* remote tip (never the working tree's own existing
-// branch, and never the source branch as its author left it), leaving one
-// commit ready to gate before anything is pushed.
+// GateMergeSource is one branch to squash into the prospective merge, in the
+// order it should land. Message becomes that branch's own squash commit
+// message — normally the branch's review name (AGENTS.md: "Review name is
+// the squash merge message") — since a landed branch becomes a real commit
+// on TargetBranch if the gate passes.
+type GateMergeSource struct {
+	Branch  string
+	Message string
+}
+
+// GateMergeWorkingTreeParams squash-merges Sources onto a fresh local
+// checkout of TargetBranch, one commit per landed source — the git half of
+// gating a merge queue promotion. The environment a review's merge queue
+// promotes to MERGE runs this before `erun build`: fetch every branch, build
+// the prospective merge onto the target's *current* remote tip (never the
+// working tree's own existing branch, and never a source branch as its
+// author left it), leaving a stack of squash commits ready to gate before
+// anything is pushed.
+//
+// A single review's ordinary gate is the Sources-of-one case. Batching
+// (Sources with more than one entry) is what lets a caller test whether
+// several unmerged branches compile *together*, not just individually —
+// something no repeated single-source call can see, since each call resets
+// the working tree from the target's remote tip and discards whatever an
+// earlier call landed.
 type GateMergeWorkingTreeParams struct {
-	// SourceBranch is the review's source branch to squash in.
-	SourceBranch string
-	// TargetBranch is the branch the squash merge lands onto, checked out
+	// Sources are the branches to squash in, in order. At least one is
+	// required.
+	Sources []GateMergeSource
+	// TargetBranch is the branch the squash merges land onto, checked out
 	// fresh from its own current remote tip — not from the working tree's
 	// checked-out branch, which this leaves behind.
 	TargetBranch string
-	// Message becomes the squash commit's message. This is the review's name
-	// (AGENTS.md: "Review name is the squash merge message"), since that
-	// commit is what ends up on TargetBranch if the gate passes.
-	Message string
-	// Remote is the git remote both branches are fetched from. Empty
-	// defaults to "origin".
+	// Remote is the git remote every branch is fetched from. Empty defaults
+	// to "origin".
 	Remote string
 }
 
-// GateMergeWorkingTreeResult is what actually landed.
-type GateMergeWorkingTreeResult struct {
-	TargetBranch string `json:"targetBranch"`
+// GateMergeLandedSource is one source branch that squash-merged cleanly.
+type GateMergeLandedSource struct {
 	SourceBranch string `json:"sourceBranch"`
-	Remote       string `json:"remote"`
 	SourceCommit string `json:"sourceCommit"`
-	Commit       string `json:"commit"`
+	// Commit is the squash commit that landed this branch.
+	Commit string `json:"commit"`
 }
 
-// GateSquashConflictError reports a squash merge that left the working tree
-// mid-conflict — the same distinct, named outcome MergeConflictError gives an
-// ordinary merge, so a caller driving this unattended can tell "stop and
-// record the GATE build as failed" apart from any other failure.
-type GateSquashConflictError struct {
-	SourceBranch    string
-	TargetBranch    string
-	ConflictedFiles []string
+// GateMergeSkippedSource is one source branch that did not land — a
+// conflicting squash, or a branch this could not even resolve after
+// fetching (e.g. deleted since the caller decided to batch it). The rest of
+// the batch still gates; a skip here is reported, not fatal.
+type GateMergeSkippedSource struct {
+	SourceBranch    string   `json:"sourceBranch"`
+	SourceCommit    string   `json:"sourceCommit,omitempty"`
+	Reason          string   `json:"reason"`
+	ConflictedFiles []string `json:"conflictedFiles,omitempty"`
 }
 
-func (e *GateSquashConflictError) Error() string {
-	return fmt.Sprintf(
-		"squashing %s onto %s left %d file(s) conflicted: %s",
-		e.SourceBranch, e.TargetBranch, len(e.ConflictedFiles), strings.Join(e.ConflictedFiles, ", "),
-	)
+// GateMergeWorkingTreeResult is what actually landed. Commit is the tip of
+// the resulting stack — the last landed source's squash commit, or the
+// target's own unchanged tip when every source was skipped.
+type GateMergeWorkingTreeResult struct {
+	TargetBranch string                   `json:"targetBranch"`
+	Remote       string                   `json:"remote"`
+	Commit       string                   `json:"commit"`
+	Landed       []GateMergeLandedSource  `json:"landed"`
+	Skipped      []GateMergeSkippedSource `json:"skipped,omitempty"`
 }
 
 // GateMergeWorkingTreeDependencies lets tests replace the git plumbing
@@ -81,12 +100,14 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 	return deps
 }
 
-// GateMergeWorkingTree fetches Remote/TargetBranch and Remote/SourceBranch,
-// checks out a local branch named TargetBranch at its own fresh remote tip,
-// and squash-merges SourceBranch onto it as one commit carrying Message. A
-// conflicted squash is reported as *GateSquashConflictError, distinct from
-// any other failure, and the worktree is left exactly as git left it for the
-// caller to resolve or abort — nothing here cleans that up automatically.
+// GateMergeWorkingTree fetches Remote/TargetBranch and every Remote/source in
+// Params.Sources, checks out a local branch named TargetBranch at its own
+// fresh remote tip, then squash-merges each source onto it in order, each as
+// its own commit. A source whose squash conflicts is skipped — the merge is
+// aborted, the conflict recorded in the result's Skipped list, and the next
+// source is tried against the working tree as it stood before that attempt
+// — rather than failing the whole batch, so one bad branch cannot turn an
+// otherwise-clean batch dead. Sources is required to be non-empty.
 //
 // The working tree must be clean before this runs: unlike the ordinary
 // exec merge/commit/push primitives, this checks out a different local
@@ -94,13 +115,12 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // left uncommitted there would otherwise be silently carried onto the
 // prospective merge or lost.
 func GateMergeWorkingTree(ctx Context, root string, params GateMergeWorkingTreeParams, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
-	source := strings.TrimSpace(params.SourceBranch)
 	target := strings.TrimSpace(params.TargetBranch)
-	if source == "" || target == "" {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("source branch and target branch are required")
+	if target == "" {
+		return GateMergeWorkingTreeResult{}, fmt.Errorf("target branch is required")
 	}
-	if strings.TrimSpace(params.Message) == "" {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("message is required")
+	if err := validateGateMergeSources(params.Sources); err != nil {
+		return GateMergeWorkingTreeResult{}, err
 	}
 	remote := strings.TrimSpace(params.Remote)
 	if remote == "" {
@@ -120,31 +140,58 @@ func GateMergeWorkingTree(ctx Context, root string, params GateMergeWorkingTreeP
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("refusing to gate-merge: the working tree has uncommitted changes")
 	}
 
-	sourceRef := remote + "/" + source
 	targetRef := remote + "/" + target
-	ctx.TraceCommand(root, "git", "fetch", remote, target, source)
-	ctx.TraceCommand(root, "git", "checkout", "-B", target, targetRef)
-	ctx.TraceCommand(root, "git", "merge", "--squash", sourceRef)
-	ctx.TraceCommand(root, "git", "commit", "-m", "<message>")
+	fetchArgs := traceGateMergePlan(ctx, root, params.Sources, target, remote, targetRef)
 	if ctx.DryRun {
-		return GateMergeWorkingTreeResult{TargetBranch: target, SourceBranch: source, Remote: remote}, nil
+		return GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}, nil
 	}
 
-	return fetchAndGateMergeWorkingTree(ctx, root, source, target, remote, sourceRef, targetRef, params.Message, deps)
+	return fetchAndGateMergeWorkingTree(ctx, root, params.Sources, target, remote, fetchArgs, targetRef, deps)
+}
+
+// validateGateMergeSources checks that every source names a branch and a
+// commit message, isolated so GateMergeWorkingTree's own branching stays low
+// enough for the cyclomatic-complexity gate.
+func validateGateMergeSources(sources []GateMergeSource) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("at least one source branch is required")
+	}
+	for _, source := range sources {
+		if strings.TrimSpace(source.Branch) == "" {
+			return fmt.Errorf("source branch is required for every entry")
+		}
+		if strings.TrimSpace(source.Message) == "" {
+			return fmt.Errorf("message is required for every source branch")
+		}
+	}
+	return nil
+}
+
+// traceGateMergePlan emits the trace lines for the fetch, the checkout, and
+// each source's squash-merge + commit pair, and returns the fetch argv so
+// the real run doesn't have to rebuild it. Traced unconditionally (not only
+// under --dry-run), matching every other exec primitive's audit contract.
+func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, target, remote, targetRef string) []string {
+	fetchArgs := []string{"fetch", remote, target}
+	for _, source := range sources {
+		fetchArgs = append(fetchArgs, source.Branch)
+	}
+	ctx.TraceCommand(root, "git", fetchArgs...)
+	ctx.TraceCommand(root, "git", "checkout", "-B", target, targetRef)
+	for _, source := range sources {
+		ctx.TraceCommand(root, "git", "merge", "--squash", remote+"/"+source.Branch)
+		ctx.TraceCommand(root, "git", "commit", "-m", "<message>")
+	}
+	return fetchArgs
 }
 
 // fetchAndGateMergeWorkingTree runs the mutating half of GateMergeWorkingTree,
 // isolated so the validation and dry-run branching above it don't inflate
 // that function's complexity.
-func fetchAndGateMergeWorkingTree(ctx Context, root, source, target, remote, sourceRef, targetRef, message string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
+func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
 	var fetchStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &fetchStderr, "fetch", remote, target, source); err != nil {
+	if err := deps.RunGit(root, io.Discard, &fetchStderr, fetchArgs...); err != nil {
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(fetchStderr.String()))
-	}
-
-	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
-	if err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("resolve %s: %w", sourceRef, err)
 	}
 
 	var checkoutStderr bytes.Buffer
@@ -152,32 +199,76 @@ func fetchAndGateMergeWorkingTree(ctx Context, root, source, target, remote, sou
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("git checkout: %w: %s", err, strings.TrimSpace(checkoutStderr.String()))
 	}
 
+	result := GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}
+	tip, err := deps.ResolveRef(ctx, root, "HEAD")
+	if err != nil {
+		return GateMergeWorkingTreeResult{}, fmt.Errorf("resolve target tip: %w", err)
+	}
+	result.Commit = tip
+
+	for _, source := range sources {
+		landed, skipped, err := gateMergeOneSource(ctx, root, source, remote, deps)
+		if err != nil {
+			return GateMergeWorkingTreeResult{}, err
+		}
+		if skipped != nil {
+			result.Skipped = append(result.Skipped, *skipped)
+			continue
+		}
+		result.Landed = append(result.Landed, *landed)
+		result.Commit = landed.Commit
+	}
+
+	return result, nil
+}
+
+// gateMergeOneSource squash-merges and commits one source branch onto
+// whatever the working tree currently holds. A conflicted squash is backed
+// out with `git reset --hard HEAD` and reported as a skip rather than
+// returned as an error, so the caller can keep trying the rest of the batch
+// against a clean tree — `git merge --abort` is not available here, since
+// `--squash` deliberately never records a MERGE_HEAD to abort. Any other
+// git failure (a bad ref, a real I/O error) is fatal for the whole batch,
+// since it says something is wrong beyond this one branch.
+func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+	sourceRef := remote + "/" + source.Branch
+	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
+	if err != nil {
+		return nil, &GateMergeSkippedSource{
+			SourceBranch: source.Branch,
+			Reason:       fmt.Sprintf("could not resolve %s after fetch: %v", sourceRef, err),
+		}, nil
+	}
+
 	var mergeStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &mergeStderr, "merge", "--squash", sourceRef); err != nil {
 		conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
 		if conflictErr == nil && len(conflicted) > 0 {
-			return GateMergeWorkingTreeResult{}, &GateSquashConflictError{SourceBranch: source, TargetBranch: target, ConflictedFiles: conflicted}
+			var resetStderr bytes.Buffer
+			if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
+				return nil, nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+			}
+			return nil, &GateMergeSkippedSource{
+				SourceBranch:    source.Branch,
+				SourceCommit:    sourceCommit,
+				Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(conflicted)),
+				ConflictedFiles: conflicted,
+			}, nil
 		}
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git merge --squash: %w: %s", err, strings.TrimSpace(mergeStderr.String()))
+		return nil, nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, err, strings.TrimSpace(mergeStderr.String()))
 	}
 
 	var commitStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", message); err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
+	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", source.Message); err != nil {
+		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, strings.TrimSpace(commitStderr.String()))
 	}
 
 	commit, err := deps.ResolveRef(ctx, root, "HEAD")
 	if err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("resolve squash merge commit: %w", err)
+		return nil, nil, fmt.Errorf("resolve squash merge commit for %s: %w", source.Branch, err)
 	}
 
-	return GateMergeWorkingTreeResult{
-		TargetBranch: target,
-		SourceBranch: source,
-		Remote:       remote,
-		SourceCommit: sourceCommit,
-		Commit:       commit,
-	}, nil
+	return &GateMergeLandedSource{SourceBranch: source.Branch, SourceCommit: sourceCommit, Commit: commit}, nil, nil
 }
 
 // gitResolveRef resolves ref to its full commit hash.

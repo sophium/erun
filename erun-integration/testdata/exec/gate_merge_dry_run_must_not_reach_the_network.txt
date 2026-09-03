@@ -1,4 +1,4 @@
-audit: erun exec gate-merge --dry-run --remote nonexistent --target main feature/add-widget
+audit: erun exec gate-merge --dry-run --remote nonexistent --source [feature/add-widget] --target main
 git -C <TMP> status --porcelain --untracked-files=no
 cd <TMP> && git fetch nonexistent main feature/add-widget
 cd <TMP> && git checkout -B main nonexistent/main

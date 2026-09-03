@@ -76,7 +76,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"exec_commit":     {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_push":       {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"exec_merge":      {Family: "exec", CLIPath: []string{"exec", "merge"}, Title: "Merge a branch into the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"exec_gate-merge": {Family: "exec", CLIPath: []string{"exec", "gate-merge"}, Title: "Build the prospective squash merge a merge queue promotion gates", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_gate-merge": {Family: "exec", CLIPath: []string{"exec", "gate-merge"}, Title: "Build the prospective merge a merge queue promotion (or batch) gates", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_report-commit-status": {
 		Family: "exec", CLIPath: []string{"exec", "report-commit-status"}, Title: "Report a GitHub commit status for a merge queue gate result",
 		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,

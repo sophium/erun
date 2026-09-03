@@ -34,7 +34,7 @@ type ClosePullRequestParams struct {
 	// against more than one base.
 	TargetBranch string
 	// GatedCommit is Branch's tip at the moment the gate actually fetched
-	// and tested it (GateMergeWorkingTreeResult.SourceCommit). Closing is
+	// and tested it (GateMergeLandedSource.SourceCommit). Closing is
 	// refused when the pull request's current head no longer matches this:
 	// something pushed to Branch after the gate fetched it, so the gated
 	// content is not what closing would discard.

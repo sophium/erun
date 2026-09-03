@@ -1296,14 +1296,35 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_merge_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_merge_refuses_missing_source", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "gate-merge", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no --source, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_missing_source", normalize.Apply(result.Combined))
+	})
+
 	t.Run("gate_merge_refuses_missing_target", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
-		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without --target, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/gate_merge_refuses_missing_target", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_refuses_stdin_message_count_mismatch", func(t *testing.T) {
+		// Two --source flags need two NUL-separated messages on stdin, one per
+		// source in order; a mismatched count is refused before touching git.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "a", "--source", "b", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\n"})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a message-count mismatch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_stdin_message_count_mismatch", normalize.Apply(result.Combined))
 	})
 
 	t.Run("gate_merge_dry_run_must_not_reach_the_network", func(t *testing.T) {
@@ -1312,7 +1333,7 @@ func TestExec(t *testing.T) {
 		// network-free dry-run contract.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
-		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget", "--target", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1329,11 +1350,24 @@ func TestExec(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "uncommitted change\n")
-		result := erun.Run(t, []string{"exec", "gate-merge", "feature/add-widget", "--target", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit against a dirty worktree, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/gate_merge_dry_run_refuses_dirty_worktree", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_merge_dry_run_batch_traces_each_source", func(t *testing.T) {
+		// A batch's dry-run trace must show the fetch naming every source, one
+		// checkout, and one squash-merge + commit pair per source, in order —
+		// the plan a caller audits before actually running the batch.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/a", "--source", "feature/b", "--target", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\x00Add b"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_dry_run_batch_traces_each_source", normalize.Apply(result.Combined))
 	})
 
 	t.Run("gate_merge_real_run_squash_merges_onto_target", func(t *testing.T) {
@@ -1351,7 +1385,7 @@ func TestExec(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
 		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
 
-		result := erun.Run(t, []string{"exec", "gate-merge", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget"})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1359,8 +1393,11 @@ func TestExec(t *testing.T) {
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
-		if parsed.TargetBranch != "main" || parsed.SourceBranch != "feature" || parsed.Remote != "origin" || parsed.Commit == "" || parsed.SourceCommit == "" {
+		if parsed.TargetBranch != "main" || parsed.Remote != "origin" || parsed.Commit == "" || len(parsed.Skipped) != 0 {
 			t.Fatalf("unexpected result: %+v", parsed)
+		}
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" || parsed.Landed[0].SourceCommit == "" || parsed.Landed[0].Commit != parsed.Commit {
+			t.Fatalf("unexpected landed sources: %+v", parsed.Landed)
 		}
 		if branch := strings.TrimSpace(captureGit(t, setup.Cwd, "rev-parse", "--abbrev-ref", "HEAD")); branch != "main" {
 			t.Fatalf("expected the worktree to land on main, got %q", branch)
@@ -1378,7 +1415,127 @@ func TestExec(t *testing.T) {
 		}
 	})
 
-	t.Run("gate_merge_conflict_real_run_leaves_the_worktree_mid_conflict", func(t *testing.T) {
+	t.Run("gate_merge_real_run_batch_lands_multiple_sources", func(t *testing.T) {
+		// Two independent branches, both squashed onto one working tree by one
+		// gate-merge call — the batching this generalization exists for: a
+		// caller no longer has to reset from the target and repeat the call per
+		// branch, which would discard every landed branch but the last.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "a")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "a.txt"), "a\n")
+		fixture.RunGit(t, setup.Cwd, "add", "a.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "a commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "a")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "b")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "b.txt"), "b\n")
+		fixture.RunGit(t, setup.Cwd, "add", "b.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "b commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "b")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "a", "--source", "b", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\x00Add b"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 2 || len(parsed.Skipped) != 0 {
+			t.Fatalf("expected both sources to land with nothing skipped: %+v", parsed)
+		}
+		if parsed.Landed[0].SourceBranch != "a" || parsed.Landed[1].SourceBranch != "b" {
+			t.Fatalf("expected sources to land in the order given, got: %+v", parsed.Landed)
+		}
+		if parsed.Commit != parsed.Landed[1].Commit {
+			t.Fatalf("expected the result's tip commit to be the last landed source's commit: %+v", parsed)
+		}
+		for _, name := range []string{"a.txt", "b.txt"} {
+			if _, err := os.Stat(filepath.Join(setup.Cwd, name)); err != nil {
+				t.Fatalf("expected %s to be squash-merged onto main: %v", name, err)
+			}
+		}
+		subjects := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "--format=%s", "main~2..main"))
+		if subjects != "Add b\nAdd a" {
+			t.Fatalf("expected two stacked squash commits, one per source, got: %q", subjects)
+		}
+	})
+
+	t.Run("gate_merge_real_run_batch_skips_a_conflicting_source_and_lands_the_rest", func(t *testing.T) {
+		// The conflict-skip path this generalization exists for: a batch of
+		// three, where the middle source conflicts with what the first source
+		// already landed. It is skipped (merge --abort, recorded with a
+		// reason) rather than failing the whole call, and the third source
+		// still lands against the clean tree the abort left behind.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "a")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "a change\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "a edits readme")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "a")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "b")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "conflicting b change\n")
+		fixture.RunGit(t, setup.Cwd, "add", "README.md")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "b edits readme too")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "b")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "c")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "c.txt"), "c\n")
+		fixture.RunGit(t, setup.Cwd, "add", "c.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "c commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "c")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "a", "--source", "b", "--source", "c", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\x00Add b\x00Add c"})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 — the batch still lands two of three sources:\n%s", result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 2 || parsed.Landed[0].SourceBranch != "a" || parsed.Landed[1].SourceBranch != "c" {
+			t.Fatalf("expected a and c to land, got: %+v", parsed.Landed)
+		}
+		if len(parsed.Skipped) != 1 || parsed.Skipped[0].SourceBranch != "b" {
+			t.Fatalf("expected b to be skipped, got: %+v", parsed.Skipped)
+		}
+		if len(parsed.Skipped[0].ConflictedFiles) != 1 || parsed.Skipped[0].ConflictedFiles[0] != "README.md" {
+			t.Fatalf("expected README.md named as the conflicted file, got: %+v", parsed.Skipped[0])
+		}
+		if !strings.Contains(result.Combined, "Skipped") {
+			t.Fatalf("expected the CLI to report the skip, got:\n%s", result.Combined)
+		}
+		status := strings.TrimSpace(captureGit(t, setup.Cwd, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("expected the working tree to be left clean after the aborted conflict, got status: %q", status)
+		}
+		for _, name := range []string{"README.md", "c.txt"} {
+			if _, err := os.Stat(filepath.Join(setup.Cwd, name)); err != nil {
+				t.Fatalf("expected %s to exist on the landed stack: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("gate_merge_real_run_all_sources_conflict_refuses", func(t *testing.T) {
+		// A single conflicting source (the ordinary one-branch gate) is
+		// skipped like any other, but a batch that lands nothing has nothing
+		// to gate, so the command refuses rather than reporting success on an
+		// unchanged target. The worktree is left clean — the conflict was
+		// backed out with `git merge --abort`, not left mid-conflict.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		seedBareOrigin(t, setup)
@@ -1395,16 +1552,16 @@ func TestExec(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "main edits readme")
 		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
 
-		result := erun.Run(t, []string{"exec", "gate-merge", "feature", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget"})
 		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a conflicted squash merge, got 0:\n%s", result.Combined)
+			t.Fatalf("expected non-zero exit when every source is skipped, got 0:\n%s", result.Combined)
 		}
-		if !strings.Contains(result.Combined, "README.md") || !strings.Contains(result.Combined, "conflicted") {
-			t.Fatalf("expected the conflicted file named in the error, got:\n%s", result.Combined)
+		if !strings.Contains(result.Combined, "conflicted") || !strings.Contains(result.Combined, "no source branch landed") {
+			t.Fatalf("expected the conflict and the no-source-landed refusal, got:\n%s", result.Combined)
 		}
-		status := captureGit(t, setup.Cwd, "status", "--porcelain")
-		if !strings.Contains(status, "UU README.md") {
-			t.Fatalf("expected the worktree to be left mid-conflict, got status: %q", status)
+		status := strings.TrimSpace(captureGit(t, setup.Cwd, "status", "--porcelain"))
+		if status != "" {
+			t.Fatalf("expected the worktree to be left clean (aborted, not mid-conflict), got status: %q", status)
 		}
 	})
 
