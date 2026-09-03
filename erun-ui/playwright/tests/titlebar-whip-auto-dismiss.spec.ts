@@ -29,6 +29,24 @@ async function mockWhipReport(
   });
 }
 
+// scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
+// timer while document.hasFocus() is true -- deliberate, so a toast never
+// silently marks itself seen while the operator is in another window. That
+// pause/resume-on-blur behaviour already has full coverage in
+// transientDismissTimer.test.ts's jsdom unit tests; what these specs need is
+// just the "window is focused" precondition to hold, so the fake clock's
+// fastForward has an armed timer to advance. page.bringToFront() used to
+// supply that by asking the OS/window manager for real focus, but a headless
+// gate container does not reliably grant it -- confirmed by a real 'erun
+// build' run failing here while every standalone run.sh pass went green.
+// Pin document.hasFocus() to true directly instead of hoping the browser
+// wins real focus.
+async function forceDocumentFocused(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hasFocus', { value: () => true, configurable: true });
+  });
+}
+
 // Opens the popover and pushes, landing on the report view (skipping past
 // the target picker every one of these tests starts from). Clicking the
 // primary action leaves the mouse resting on the popover -- exactly like a
@@ -48,16 +66,7 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
-    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
-    // timer while document.hasFocus() is true, and pauses/resumes on real
-    // blur/focus events -- deliberate, so a toast never silently marks
-    // itself seen while the operator is in another window. Under full-suite
-    // parallel load a fresh page is not guaranteed to already have that real
-    // focus, so the timer can end up never armed at all: fastForward then
-    // advances a clock with nothing scheduled on it, and the report never
-    // dismisses within the assertion's timeout. bringToFront forces the real
-    // precondition instead of hoping the page already has it.
-    await app.page.bringToFront();
+    await forceDocumentFocused(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
@@ -74,16 +83,7 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'orchestrator', id: 'pw-orch', name: 'pw-orch', outcome: 'capped' },
     ]);
     await app.page.clock.install();
-    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
-    // timer while document.hasFocus() is true, and pauses/resumes on real
-    // blur/focus events -- deliberate, so a toast never silently marks
-    // itself seen while the operator is in another window. Under full-suite
-    // parallel load a fresh page is not guaranteed to already have that real
-    // focus, so the timer can end up never armed at all: fastForward then
-    // advances a clock with nothing scheduled on it, and the report never
-    // dismisses within the assertion's timeout. bringToFront forces the real
-    // precondition instead of hoping the page already has it.
-    await app.page.bringToFront();
+    await forceDocumentFocused(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Capped', { exact: true })).toBeVisible();
@@ -95,16 +95,7 @@ test.describe('whip report auto-dismiss', () => {
   test('an empty ("nothing was targeted") report is not treated as a success', async ({ app }) => {
     await mockWhipReport(app.page, []);
     await app.page.clock.install();
-    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
-    // timer while document.hasFocus() is true, and pauses/resumes on real
-    // blur/focus events -- deliberate, so a toast never silently marks
-    // itself seen while the operator is in another window. Under full-suite
-    // parallel load a fresh page is not guaranteed to already have that real
-    // focus, so the timer can end up never armed at all: fastForward then
-    // advances a clock with nothing scheduled on it, and the report never
-    // dismisses within the assertion's timeout. bringToFront forces the real
-    // precondition instead of hoping the page already has it.
-    await app.page.bringToFront();
+    await forceDocumentFocused(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Nothing was targeted')).toBeVisible();
@@ -118,16 +109,7 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
-    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
-    // timer while document.hasFocus() is true, and pauses/resumes on real
-    // blur/focus events -- deliberate, so a toast never silently marks
-    // itself seen while the operator is in another window. Under full-suite
-    // parallel load a fresh page is not guaranteed to already have that real
-    // focus, so the timer can end up never armed at all: fastForward then
-    // advances a clock with nothing scheduled on it, and the report never
-    // dismisses within the assertion's timeout. bringToFront forces the real
-    // precondition instead of hoping the page already has it.
-    await app.page.bringToFront();
+    await forceDocumentFocused(app.page);
 
     await openAndWhip(app);
     const heading = app.titlebar.whipReportHeading();
@@ -149,16 +131,7 @@ test.describe('whip report auto-dismiss', () => {
       { kind: 'environment', id: 'pw/alpha', name: 'pw/alpha', outcome: 'pushed' },
     ]);
     await app.page.clock.install();
-    // scheduleTransientDismiss (app/transientDismissTimer.ts) only arms its
-    // timer while document.hasFocus() is true, and pauses/resumes on real
-    // blur/focus events -- deliberate, so a toast never silently marks
-    // itself seen while the operator is in another window. Under full-suite
-    // parallel load a fresh page is not guaranteed to already have that real
-    // focus, so the timer can end up never armed at all: fastForward then
-    // advances a clock with nothing scheduled on it, and the report never
-    // dismisses within the assertion's timeout. bringToFront forces the real
-    // precondition instead of hoping the page already has it.
-    await app.page.bringToFront();
+    await forceDocumentFocused(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
