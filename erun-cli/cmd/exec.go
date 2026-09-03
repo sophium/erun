@@ -439,40 +439,53 @@ func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinde
 
 func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var (
-		target string
-		remote string
+		sources []string
+		target  string
+		remote  string
 	)
 	cmd := &cobra.Command{
-		Use:   "gate-merge SOURCE_BRANCH",
-		Short: "Build the prospective squash merge a merge queue promotion gates",
-		Long: "Fetch --target and SOURCE_BRANCH from the remote, check out a fresh local branch named --target at " +
-			"its own current remote tip, and squash-merge SOURCE_BRANCH onto it as one commit — the commit message " +
-			"read verbatim from stdin, never a shell, so nothing in it is reinterpreted. This is for the " +
-			"environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against the " +
-			"result, then `erun review record-build --gate` and, only on success, `erun exec push` and " +
+		Use:   "gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...]",
+		Short: "Build the prospective merge a merge queue promotion (or batch) gates",
+		Long: "Fetch --target and every --source from the remote, check out a fresh local branch named --target " +
+			"at its own current remote tip, then squash-merge each --source onto it in turn, each as its own " +
+			"commit — leaving a stack of one commit per landed source. Repeat --source to batch several " +
+			"unmerged branches into one prospective merge, so the gate that follows tests whether they compile " +
+			"*together*, not just individually; a single --source is the ordinary one-branch gate. This is for " +
+			"the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against " +
+			"the result, then `erun review record-build --gate` and, only on success, `erun exec push` and " +
 			"`erun review report-merged`.\n\n" +
+			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
+			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
+			"--source needs no separator at all).\n\n" +
 			"The working tree must already be clean: this checks out a different local branch than whatever the " +
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
-			"A conflicted squash is reported as a distinct, named outcome. The worktree is left exactly as git " +
-			"left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back " +
-			"out, before doing anything else.\n\n" +
-			"--dry-run traces the fetch, checkout, squash merge, and commit without running them.",
-		Example: "  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main\n" +
-			"  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main --remote upstream",
-		Args:         cobra.ExactArgs(1),
+			"A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean " +
+			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
+			"tree as it stood before that attempt. A batch where every source is skipped lands nothing and " +
+			"exits non-zero.\n\n" +
+			"--dry-run traces the fetch, checkout, and each squash merge and commit without running them.",
+		Example: "  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main\n" +
+			"  printf 'Add widget\\0Add gadget' | erun exec gate-merge --source feature/add-widget " +
+			"--source feature/add-gadget --target main\n" +
+			"  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main --remote upstream",
+		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, args[0], target, remote)
+			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, sources, target, remote)
 		},
 	}
-	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge lands onto (required)")
+	cmd.Flags().StringArrayVar(&sources, "source", nil, "Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)")
+	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge(s) land onto (required)")
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranch, targetBranch, remote string) error {
+func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote string) error {
+	if len(sourceBranches) == 0 {
+		return fmt.Errorf("at least one --source is required")
+	}
 	if strings.TrimSpace(targetBranch) == "" {
 		return fmt.Errorf("--target is required")
 	}
@@ -483,14 +496,13 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 	if err != nil {
 		return err
 	}
-	message, err := io.ReadAll(ctx.Stdin)
+	sources, err := readGateMergeSources(ctx, sourceBranches)
 	if err != nil {
-		return fmt.Errorf("read commit message from stdin: %w", err)
+		return err
 	}
 	result, err := common.GateMergeWorkingTree(ctx, projectRoot, common.GateMergeWorkingTreeParams{
-		SourceBranch: sourceBranch,
+		Sources:      sources,
 		TargetBranch: targetBranch,
-		Message:      string(message),
 		Remote:       remote,
 	}, common.GateMergeWorkingTreeDependencies{})
 	if err != nil {
@@ -499,7 +511,40 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 	if ctx.DryRun {
 		return nil
 	}
-	ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, result.SourceBranch, result.TargetBranch, result.Commit))
+	return reportGateMergeResult(ctx, result)
+}
+
+// readGateMergeSources reads one NUL-separated commit message per source
+// branch from stdin, in the same order as the --source flags.
+func readGateMergeSources(ctx common.Context, sourceBranches []string) ([]common.GateMergeSource, error) {
+	stdin, err := io.ReadAll(ctx.Stdin)
+	if err != nil {
+		return nil, fmt.Errorf("read commit message(s) from stdin: %w", err)
+	}
+	messages := strings.Split(string(stdin), "\x00")
+	if len(messages) != len(sourceBranches) {
+		return nil, fmt.Errorf("expected %d NUL-separated commit message(s) on stdin (one per --source), got %d", len(sourceBranches), len(messages))
+	}
+	sources := make([]common.GateMergeSource, len(sourceBranches))
+	for i, branch := range sourceBranches {
+		sources[i] = common.GateMergeSource{Branch: branch, Message: messages[i]}
+	}
+	return sources, nil
+}
+
+// reportGateMergeResult prints each landed and skipped source, then refuses
+// if the batch landed nothing at all — there is nothing to gate against an
+// unchanged target.
+func reportGateMergeResult(ctx common.Context, result common.GateMergeWorkingTreeResult) error {
+	for _, landed := range result.Landed {
+		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit))
+	}
+	for _, skipped := range result.Skipped {
+		ctx.Info(fmt.Sprintf("Skipped %s/%s: %s.", result.Remote, skipped.SourceBranch, skipped.Reason))
+	}
+	if len(result.Landed) == 0 {
+		return fmt.Errorf("no source branch landed; every one of %d was skipped", len(result.Skipped))
+	}
 	return ctx.WriteResult(result)
 }
 

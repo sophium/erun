@@ -1,2 +1,2 @@
-audit: erun exec gate-merge feature/add-widget
+audit: erun exec gate-merge --source [feature/add-widget]
 --target is required

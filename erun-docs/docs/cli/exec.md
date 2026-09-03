@@ -15,7 +15,7 @@ erun exec write PATH [flags]
 erun exec commit BRANCH [PATH...] [flags]
 erun exec push BRANCH [flags]
 erun exec merge TARGET_BRANCH [flags]
-erun exec gate-merge SOURCE_BRANCH --target TARGET_BRANCH [flags]
+erun exec gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...] --target TARGET_BRANCH [flags]
 erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --remote-url URL [flags]
 erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
 erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-commit SHA [flags]
@@ -68,15 +68,17 @@ A conflicted merge is reported as a distinct, named outcome rather than a generi
 
 ### `exec gate-merge` {#exec-gate-merge}
 
-Fetches `--target` and SOURCE_BRANCH from a remote (`origin` by default; override with `--remote`), checks out a fresh local branch named `--target` at its own current remote tip, and squash-merges SOURCE_BRANCH onto it as one commit — the message read verbatim from stdin, same shell-avoidance property as `write`/`commit`.
+Fetches `--target` and every `--source` from a remote (`origin` by default; override with `--remote`), checks out a fresh local branch named `--target` at its own current remote tip, then squash-merges each `--source` onto it in turn, each as its own commit — one commit message per source, read verbatim from stdin as NUL-separated fields in the same order as the `--source` flags (a single `--source` needs no separator), the same shell-avoidance property as `write`/`commit`.
+
+Repeat `--source` to batch several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together* — the failure a single-branch gate cannot see, since each branch might pass alone while breaking against another unmerged branch. A single `--source` is the ordinary one-branch gate.
 
 This is the git half of gating a [merge queue](/collaboration/merge-queue) promotion: the environment a review's merge queue promotes to `MERGE` runs `gate-merge`, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
 
 The working tree must already be clean: unlike `merge`, this checks out a **different** local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge or lost.
 
-A conflicted squash is reported as a distinct, named outcome, the same as `merge`. The worktree is left exactly as git left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back out.
+A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with the conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt. A batch where every source is skipped lands nothing and exits non-zero rather than reporting success against an unchanged target.
 
-`--dry-run` traces the fetch, checkout, squash merge, and commit without running them. Reports the target branch, source branch, remote, source commit, and squash merge commit id; add `--output json` for a structured result.
+`--dry-run` traces the fetch, checkout, and each squash merge and commit without running them. Reports the target branch, remote, the resulting tip commit, and the `landed`/`skipped` source lists; add `--output json` for a structured result.
 
 ### `exec report-commit-status` {#exec-report-commit-status}
 

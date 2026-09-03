@@ -70,11 +70,18 @@ func checkDesktopPlaywrightCoverageForGate(ctx Context, params ReviewRecordBuild
 
 // resolveGateSquashChangedPaths lists the paths a gate-merge's squash commit
 // actually changed, by diffing it against its own single parent — the
-// target's pre-squash tip (GateMergeWorkingTree's `git merge --squash` +
-// `git commit` never produces a two-parent merge commit). An inconclusive
-// read (no root, not a git repo, no parent commit) is reported as an error
-// rather than an empty result, so the caller can choose to proceed rather
-// than mistake "could not tell" for "nothing changed".
+// target's pre-squash tip for a single-source gate (GateMergeWorkingTree's
+// `git merge --squash` + `git commit` never produces a two-parent merge
+// commit). A batched gate-merge (more than one landed source) lands a stack
+// of these commits, so HEAD^..HEAD only sees the last-landed source's own
+// diff, not the whole batch's — a real gap, but one that stays latent until
+// a caller reports a GATE build against a multi-source batch's tip, which
+// nothing does yet: batch-reporting for record-build/acceptMerged is exactly
+// the "one-review-per-build off a shared batch build" question
+// erun-backend-api/AGENTS.md § "Merge Queue" records as unresolved. An
+// inconclusive read (no root, not a git repo, no parent commit) is reported
+// as an error rather than an empty result, so the caller can choose to
+// proceed rather than mistake "could not tell" for "nothing changed".
 func resolveGateSquashChangedPaths(root string) ([]string, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("no project root resolved")

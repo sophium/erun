@@ -1,23 +1,27 @@
-Fetch --target and SOURCE_BRANCH from the remote, check out a fresh local branch named --target at its own current remote tip, and squash-merge SOURCE_BRANCH onto it as one commit — the commit message read verbatim from stdin, never a shell, so nothing in it is reinterpreted. This is for the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
+Fetch --target and every --source from the remote, check out a fresh local branch named --target at its own current remote tip, then squash-merge each --source onto it in turn, each as its own commit — leaving a stack of one commit per landed source. Repeat --source to batch several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together*, not just individually; a single --source is the ordinary one-branch gate. This is for the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
+
+Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single --source needs no separator at all).
 
 The working tree must already be clean: this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge.
 
-A conflicted squash is reported as a distinct, named outcome. The worktree is left exactly as git left it, mid-conflict — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else.
+A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict recorded in the result, and the rest of the batch still gates against the tree as it stood before that attempt. A batch where every source is skipped lands nothing and exits non-zero.
 
---dry-run traces the fetch, checkout, squash merge, and commit without running them.
+--dry-run traces the fetch, checkout, and each squash merge and commit without running them.
 
 Usage:
-  erun exec gate-merge SOURCE_BRANCH [flags]
+  erun exec gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...] [flags]
 
 Examples:
-  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
-  echo 'Add widget' | erun exec gate-merge feature/add-widget --target main --remote upstream
+  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main
+  printf 'Add widget\0Add gadget' | erun exec gate-merge --source feature/add-widget --source feature/add-gadget --target main
+  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main --remote upstream
 
 Flags:
-      --dry-run         Resolve and trace mutating actions without executing them.
-  -h, --help            help for gate-merge
-      --remote string   Git remote to fetch and merge from (defaults to origin)
-      --target string   Target branch the squash merge lands onto (required)
+      --dry-run              Resolve and trace mutating actions without executing them.
+  -h, --help                 help for gate-merge
+      --remote string        Git remote to fetch and merge from (defaults to origin)
+      --source stringArray   Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)
+      --target string        Target branch the squash merge(s) land onto (required)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
