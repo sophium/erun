@@ -1,0 +1,4 @@
+Dry run: erun exec gate-run start planned.
+audit: erun exec gate-run start --dry-run --failing-step erun build --log-ref failed to solve: failed to resolve source metadata for ghcr.io/sophium/erun-devops:<VERSION>: failed to authorize: failed to fetch oauth token: Post "https://ghcr.io/token": net/http: TLS handshake timeout --source-branch feature/add-widget --source-commit sourcesha0000000000000000000000000000000 --status failed --target-branch main
+gate-run: "failed to resolve source metadata" matches a known infrastructure failure signature -- reporting inconclusive instead of failed
+platform: POST https://api.example.test/v1/gate-runs (sourceBranch=feature/add-widget, targetBranch=main, sourceCommit=sourcesha0000000000000000000000000000000, status=inconclusive, failingStep=erun build)

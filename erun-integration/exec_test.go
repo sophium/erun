@@ -1707,6 +1707,26 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_run_start_no_alias_configured_exits_127", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_run_start_dry_run_immediate_failure_classified_inconclusive", func(t *testing.T) {
+		// The exact shape that bit a real merge-queue session: a build failing
+		// on a ghcr.io TLS handshake timeout is a statement about the network,
+		// not the change -- reported failed here should come back inconclusive.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "start",
+			"--source-branch", "feature/add-widget", "--target-branch", "main",
+			"--source-commit", "sourcesha0000000000000000000000000000000",
+			"--status", "failed", "--failing-step", "erun build",
+			"--log-ref", "failed to solve: failed to resolve source metadata for ghcr.io/sophium/erun-devops:1.0.246: failed to authorize: failed to fetch oauth token: Post \"https://ghcr.io/token\": net/http: TLS handshake timeout",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_dry_run_immediate_failure_classified_inconclusive", normalize.Apply(result.Combined))
+	})
+
 	t.Run("gate_run_start_dry_run_immediate_failure_no_merge_commit", func(t *testing.T) {
 		// A squash conflict before any build starts has no trackable running
 		// phase at all: --status failed is set directly, with no --merge-commit.
@@ -1775,6 +1795,64 @@ func TestExec(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "exec/gate_run_report_dry_run_failed_with_failing_step_and_log_ref", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_no_alias_configured_exits_127", func(t *testing.T) {
+		// gate-run start already had this regression scenario; report
+		// resolves the platform client through the exact same shared function,
+		// but nothing proved it before now -- the roughly twenty gate-run start
+		// calls that failed invisibly in a real merge-queue session could just
+		// as easily have been report calls instead.
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "gate-run-1", "--status", "passed", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 127 {
+			t.Fatalf("exit %d, want 127: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_no_alias_configured_exits_127", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_dry_run_failed_classified_inconclusive", func(t *testing.T) {
+		// The same known-infrastructure-signature classification as
+		// gate-run start: a registry or the network giving up is a statement
+		// about the network, not the change, and must not read as a red
+		// verdict just because the caller reported it as failed.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "gate-run-1",
+			"--status", "failed", "--failing-step", "erun build",
+			"--log-ref", "failed to solve: failed to resolve source metadata for ghcr.io/sophium/erun-devops:1.0.246: failed to authorize: failed to fetch oauth token: Post \"https://ghcr.io/token\": net/http: TLS handshake timeout",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_dry_run_failed_classified_inconclusive", normalize.Apply(result.Combined))
+	})
+
+	t.Run("gate_run_report_dry_run_failed_log_ref_file_classified_inconclusive", func(t *testing.T) {
+		// The merge-queue-drive skill's own rung 4 points --log-ref at a saved
+		// `erun build --output json` capture, a file path, never the failure
+		// text inline -- so the classifier must read that file's content, not
+		// only the literal --log-ref string, or it would never fire on the
+		// exact flow it exists to protect.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		logPath := filepath.Join(setup.Cwd, "build.json")
+		if err := os.WriteFile(logPath, []byte(`{"error":"failed to solve: failed to resolve source metadata for ghcr.io/sophium/erun-devops:1.0.246: failed to authorize: failed to fetch oauth token: Post \"https://ghcr.io/token\": net/http: TLS handshake timeout"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "report", "gate-run-1",
+			"--status", "failed", "--failing-step", "erun build", "--log-ref", logPath,
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_report_dry_run_failed_log_ref_file_classified_inconclusive", normalize.Apply(result.Combined))
 	})
 
 	t.Run("gate_run_report_dry_run_missing_gate_run_id_traces_then_refuses", func(t *testing.T) {

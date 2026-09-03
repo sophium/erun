@@ -1,0 +1,4 @@
+Dry run: erun exec gate-run report planned.
+audit: erun exec gate-run report --dry-run --failing-step erun build --log-ref <TMP> --status failed gate-run-1
+gate-run: "failed to resolve source metadata" matches a known infrastructure failure signature -- reporting inconclusive instead of failed
+platform: PATCH https://api.example.test/v1/gate-runs/gate-run-1 (status=inconclusive, failingStep=erun build, logRef=<TMP>

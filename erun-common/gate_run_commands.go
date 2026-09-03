@@ -22,7 +22,9 @@ type GateRunStartParams struct {
 	ReviewID     string
 	// Status defaults to RUNNING when empty. A caller with no trackable
 	// running phase (a squash conflict before any build starts) sets this to
-	// FAILED or INCONCLUSIVE directly and leaves MergeCommit empty.
+	// FAILED or INCONCLUSIVE directly and leaves MergeCommit empty. A FAILED
+	// whose FailingStep/LogRef names a known infrastructure signature (see
+	// gate_run_failure_classifier.go) is reported as INCONCLUSIVE instead.
 	Status      string
 	FailingStep string
 	LogRef      string
@@ -35,6 +37,7 @@ func RunGateRunStart(ctx Context, store CloudReadStore, alias string, params Gat
 	if err != nil {
 		return PlatformGateRun{}, err
 	}
+	params.Status = reclassifyKnownInfrastructureGateFailure(ctx, params.Status, params.FailingStep, params.LogRef)
 	details := []string{
 		"sourceBranch=" + params.SourceBranch,
 		"targetBranch=" + params.TargetBranch,
@@ -63,7 +66,9 @@ func RunGateRunStart(ctx Context, store CloudReadStore, alias string, params Gat
 // be PASSED, FAILED, or INCONCLUSIVE — never RUNNING, which only Start ever
 // assigns. FAILED requires FailingStep; a wrapper that never reached a real
 // verdict (its own timeout, an environment fault) reports INCONCLUSIVE, not
-// FAILED — see AGENTS.md "Gate Runs".
+// FAILED — see AGENTS.md "Gate Runs". A FAILED whose FailingStep/LogRef
+// names a known infrastructure signature (see gate_run_failure_classifier.go)
+// is reported as INCONCLUSIVE regardless of what the caller passed.
 type GateRunReportParams struct {
 	GateRunID   string
 	Status      string
@@ -82,6 +87,7 @@ func RunGateRunReport(ctx Context, store CloudReadStore, alias string, params Ga
 	if err != nil {
 		return PlatformGateRun{}, err
 	}
+	params.Status = reclassifyKnownInfrastructureGateFailure(ctx, params.Status, params.FailingStep, params.LogRef)
 	details := []string{"status=" + params.Status}
 	if strings.TrimSpace(params.FailingStep) != "" {
 		details = append(details, "failingStep="+params.FailingStep)
