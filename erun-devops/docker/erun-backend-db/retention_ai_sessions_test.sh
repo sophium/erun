@@ -17,7 +17,11 @@
 #      quiet environment in the same tenant is untouched by a noisy one's
 #      count.
 #
-# It also proves dry_run=true reports the same counts but deletes nothing.
+# It also proves dry_run=true reports the same counts but deletes nothing,
+# and that both runs record their outcome in retention_runs (eligible_count
+# and deleted_count, tagged with dry_run) -- ai_sessions.sql previously
+# computed this count for its own report but never persisted it, unlike
+# comments_releases.sql; this test locks the fix.
 #
 # Lives beside retention_test.sh and follows the same shape: a real docker
 # daemon runs postgres, the real migrations are applied via the atlas CLI,
@@ -140,8 +144,20 @@ printf '%s\n' "${report}" | grep -E '^\s*ai_sessions\s*\|\s*6\s*$' >/dev/null ||
 
 [ "$(count_query "select count(*) from ai_sessions;")" = "${initial_sessions}" ] || fail "dry run must not delete any ai_sessions"
 
+# --- The dry run recorded its outcome: eligible count, zero deleted ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='ai_sessions' and table_name='ai_sessions' and dry_run=true order by created_at desc limit 1;")" = "6" ] ||
+    fail "the dry run must record 6 ai_sessions eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='ai_sessions' and table_name='ai_sessions' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 ai_sessions deleted in retention_runs"
+
 # --- Real run deletes exactly the eligible rows ---
 psql_as -d erun -v "dry_run=false" -f /tmp/ai_sessions.sql >/dev/null
+
+# --- The real run recorded its outcome: eligible count, matching deleted count ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='ai_sessions' and table_name='ai_sessions' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 ai_sessions eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='ai_sessions' and table_name='ai_sessions' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 ai_sessions deleted in retention_runs"
 
 # 1. age-tenant: the 30-day-old exit is gone; the 1-day-old exit and the
 #    30-day-old non-exit both survive.

@@ -32,7 +32,10 @@
 #      row is well within the age bound.
 #
 # It also proves dry_run=true reports the same counts but deletes and
-# nulls nothing.
+# nulls nothing, and that both runs record their outcome in retention_runs
+# (eligible_count and deleted_count, tagged with dry_run) -- reviews.sql
+# previously computed these counts for its own report but never persisted
+# them, unlike comments_releases.sql; this test locks the fix.
 #
 # Lives beside retention_test.sh and follows the same shape: a real docker
 # daemon runs postgres, the real migrations are applied via the atlas CLI,
@@ -250,8 +253,28 @@ printf '%s\n' "${report}" | grep -E '^\s*review_reviewers\s*\|\s*1\s*$' >/dev/nu
 [ "$(count_query "select last_failed_build_id is null from reviews where review_id = '00000000-0000-0000-0000-000000000301';")" = "f" ] ||
     fail "dry run must not null the stale pin either"
 
+# --- The dry run recorded its outcome: eligible counts, zero deleted ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='reviews' and table_name='reviews' and dry_run=true order by created_at desc limit 1;")" = "6" ] ||
+    fail "the dry run must record 6 reviews eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='reviews' and table_name='reviews' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 reviews deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='reviews' and table_name='review_reviewers' and dry_run=true order by created_at desc limit 1;")" = "1" ] ||
+    fail "the dry run must record 1 review_reviewers eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='reviews' and table_name='review_reviewers' and dry_run=true order by created_at desc limit 1;")" = "0" ] ||
+    fail "the dry run must record 0 review_reviewers deleted in retention_runs"
+
 # --- Real run deletes/nulls exactly the eligible rows ---
 psql_as -d erun -v "dry_run=false" -f /tmp/reviews.sql >/dev/null
+
+# --- The real run recorded its outcome: eligible counts, matching deleted counts ---
+[ "$(count_query "select eligible_count from retention_runs where policy_name='reviews' and table_name='reviews' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 reviews eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='reviews' and table_name='reviews' and dry_run=false order by created_at desc limit 1;")" = "6" ] ||
+    fail "the real run must record 6 reviews deleted in retention_runs"
+[ "$(count_query "select eligible_count from retention_runs where policy_name='reviews' and table_name='review_reviewers' and dry_run=false order by created_at desc limit 1;")" = "1" ] ||
+    fail "the real run must record 1 review_reviewers eligible in retention_runs"
+[ "$(count_query "select deleted_count from retention_runs where policy_name='reviews' and table_name='review_reviewers' and dry_run=false order by created_at desc limit 1;")" = "1" ] ||
+    fail "the real run must record 1 review_reviewers deleted in retention_runs"
 
 # 1: clean is gone, its reviewer is gone.
 [ "$(count_query "select count(*) from reviews where review_id = '00000000-0000-0000-0000-000000000101';")" = "0" ] ||

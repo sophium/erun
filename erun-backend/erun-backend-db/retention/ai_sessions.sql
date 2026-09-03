@@ -23,6 +23,25 @@ SELECT 'ai_sessions' AS table_name, count(*) AS eligible_for_deletion
 FROM exited_ranked
 WHERE rn > 500 OR occurred_at < now() - interval '14 days';
 
+-- Record the run: eligible count, tagged with the dry_run flag this
+-- invocation ran under. deleted_count is 0 for a dry run or the same
+-- eligible count for a real run -- the delete below uses the identical
+-- predicate, and retention.sh holds a session-scoped advisory lock for the
+-- whole sweep, so nothing else can change eligibility between this count and
+-- that delete.
+WITH exited_ranked AS (
+  SELECT tenant_id, environment_id, session_id, occurred_at,
+         row_number() OVER (PARTITION BY tenant_id, environment_id ORDER BY occurred_at DESC) AS rn
+  FROM ai_sessions
+  WHERE event = 'exit'
+),
+ai_sessions_eligible AS (
+  SELECT count(*) AS n FROM exited_ranked
+  WHERE rn > 500 OR occurred_at < now() - interval '14 days'
+)
+INSERT INTO retention_runs (policy_name, table_name, dry_run, eligible_count, deleted_count)
+SELECT 'ai_sessions', 'ai_sessions', :dry_run, n, CASE WHEN :dry_run THEN 0 ELSE n END FROM ai_sessions_eligible;
+
 \if :dry_run
 \else
 BEGIN;
