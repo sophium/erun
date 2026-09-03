@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -11,6 +12,33 @@ import (
 // cloud alias a call targets, builds a PlatformClient that mints a fresh
 // bearer token per call from that alias, and traces the resolved HTTP call so
 // --dry-run (CLI) and a preview path (MCP) never need to reach the network.
+
+// ErrPlatformAliasUnusable is the sentinel a caller checks via errors.Is to
+// tell "this call cannot even resolve a usable erun platform alias" (none
+// configured, an incomplete one, or the wrong alias type) apart from a
+// failure that only happens once a client already exists (a network error,
+// a non-2xx from the platform, a refresh token that can no longer mint a
+// bearer token). ResolveERunPlatformAlias and newPlatformClientForAlias wrap
+// every error they return with this before any HTTP client is built, so a
+// caller that only checks the process exit code -- the one channel that
+// survives a script redirecting stderr away, unlike improving the error text
+// -- can still branch on it.
+var ErrPlatformAliasUnusable = errors.New("erun platform alias could not be resolved")
+
+type platformAliasUnusableError struct{ err error }
+
+func (e platformAliasUnusableError) Error() string { return e.err.Error() }
+func (e platformAliasUnusableError) Unwrap() error { return e.err }
+func (e platformAliasUnusableError) Is(target error) bool {
+	return target == ErrPlatformAliasUnusable
+}
+
+func markPlatformAliasUnusable(err error) error {
+	if err == nil {
+		return nil
+	}
+	return platformAliasUnusableError{err: err}
+}
 
 // ResolveERunPlatformAlias resolves which "erun"-type cloud provider alias a
 // platform command targets: the explicit alias when given (verified to be an
@@ -22,16 +50,16 @@ func ResolveERunPlatformAlias(store CloudReadStore, alias string) (CloudProvider
 	if alias != "" {
 		provider, err := ResolveCloudProvider(store, alias)
 		if err != nil {
-			return CloudProviderConfig{}, err
+			return CloudProviderConfig{}, markPlatformAliasUnusable(err)
 		}
 		if provider.Provider != CloudProviderERun {
-			return CloudProviderConfig{}, fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider)
+			return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider))
 		}
 		return provider, nil
 	}
 	providers, err := ListCloudProviders(store)
 	if err != nil {
-		return CloudProviderConfig{}, err
+		return CloudProviderConfig{}, markPlatformAliasUnusable(err)
 	}
 	erunProviders := make([]CloudProviderConfig, 0, len(providers))
 	for _, provider := range providers {
@@ -41,11 +69,11 @@ func ResolveERunPlatformAlias(store CloudReadStore, alias string) (CloudProvider
 	}
 	switch len(erunProviders) {
 	case 0:
-		return CloudProviderConfig{}, fmt.Errorf("no erun platform cloud provider alias is configured; run `erun cloud init erun --api-url <url>` first")
+		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("no erun platform cloud provider alias is configured; run `erun cloud init erun --api-url <url>` first"))
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return CloudProviderConfig{}, fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one")
+		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one"))
 	}
 }
 
@@ -64,7 +92,7 @@ func newPlatformClientForAlias(ctx Context, store CloudReadStore, alias string, 
 		// config.yaml write from a component that doesn't know this field exists
 		// Point at re-login rather than `cloud init`, which would
 		// read as "start over" and paper over the real defect.
-		return nil, CloudProviderConfig{}, fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias)
+		return nil, CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias))
 	}
 	client := NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
 		token, err := CloudProviderBearerToken(ctx, store, CloudBearerParams{Alias: provider.Alias}, deps)

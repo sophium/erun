@@ -1688,6 +1688,25 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_run_start_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_run_start_no_alias_configured_exits_127", func(t *testing.T) {
+		// No erun-type cloud provider alias configured at all -- the exact
+		// shape that bit a real merge-queue script: it discarded stderr and
+		// had nothing else to detect the failure with. Exit code 127 is the
+		// signal that survives that, distinct from an ordinary failure (1).
+		setup := env.New(t)
+		result := erun.Run(t, []string{
+			"exec", "gate-run", "start",
+			"--source-branch", "feature/add-widget", "--target-branch", "main",
+			"--source-commit", "sourcesha0000000000000000000000000000000",
+			"--merge-commit", "mergesha00000000000000000000000000000000",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 127 {
+			t.Fatalf("exit %d, want 127: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/gate_run_start_no_alias_configured_exits_127", normalize.Apply(result.Combined))
+	})
+
 	t.Run("gate_run_start_dry_run_immediate_failure_no_merge_commit", func(t *testing.T) {
 		// A squash conflict before any build starts has no trackable running
 		// phase at all: --status failed is set directly, with no --merge-commit.
