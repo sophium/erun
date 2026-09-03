@@ -703,6 +703,30 @@ func (c *PlatformClient) DeclineInviteRequest(ctx context.Context, inviteRequest
 	return request, err
 }
 
+// ProbeRoute issues a plain, authenticated GET against path and reports the
+// raw HTTP status and body, treating no status as an error -- unlike every
+// typed method above, which funnels through do and maps a non-2xx to a
+// PlatformStatusError. A route-liveness check needs to tell "the plane
+// answered, whatever it said" apart from "the request never reached the
+// plane at all", and it needs that for arbitrary, often-parameterized
+// paths with no typed response shape -- so this bypasses status-to-error
+// mapping and response decoding entirely. It never sends a body and always
+// uses GET regardless of what method the probed route is actually
+// registered under, which is what keeps a liveness probe read-only.
+func (c *PlatformClient) ProbeRoute(ctx context.Context, path string) (status int, body []byte, err error) {
+	req, err := c.buildRequest(ctx, http.MethodGet, path, nil, true)
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("call platform api GET %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, respBody, nil
+}
+
 // do is the single request path every method above funnels through: build,
 // authenticate (unless authenticate is false), send, and decode — or map the
 // status to a typed error.

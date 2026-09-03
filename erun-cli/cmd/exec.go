@@ -34,6 +34,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecGateRunCmd(store, deps),
 		newExecReconcileBypassCmd(store, deps),
 		newExecPlanRulesetBypassCmd(),
+		newExecRouteCheckCmd(store, deps),
 		jobCmd,
 	)
 }
@@ -828,6 +829,112 @@ func orUnknown(value string) string {
 		return "(unknown)"
 	}
 	return value
+}
+
+// newExecRouteCheckCmd builds `erun exec route-check`: proves every route
+// erun-backend-api's router registers is actually reachable on a deployed
+// plane. A route can merge, get unit-tested, and close its issue while
+// still 404ing on the live control plane for months, because nothing but a
+// human running the CLI by hand had ever exercised the deployed route.
+func newExecRouteCheckCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+	var (
+		routesDir string
+		alias     string
+	)
+	cmd := &cobra.Command{
+		Use:   "route-check",
+		Short: "Prove every registered API route is reachable on a deployed plane",
+		Long: "Reads erun-backend-api's own registered routes straight out of its source (never a hand-maintained " +
+			"list) and GETs each one against the plane --erun-alias resolves. It first sanity-probes GET /v1/whoami " +
+			"and refuses outright if that does not answer, so a down or misconfigured plane is never reported as " +
+			"every route missing. Every probe is a plain GET regardless of a route's own registered method -- Go's " +
+			"router reports 405 for a path it knows under a different method, so this never risks creating, " +
+			"updating, or deleting anything -- and only the plane's own unmodified \"404 page not found\" means a " +
+			"route was never registered at all; an application-level 404 (a well-formed request for an id that " +
+			"doesn't exist) always looks different and is reported reachable.\n\n" +
+			"Exits non-zero, after printing the full report, when the plane cannot be reached at all or when any " +
+			"registered route comes back missing.\n\n" +
+			"--dry-run traces the resolved plane and the route inventory without sending any request.",
+		Example:      "  erun exec route-check --erun-alias erun+api.erunpaas.com@erun",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runExecRouteCheckCommand(commandContext(cmd), store, alias, common.RouteCheckParams{
+				RoutesDir: routesDir,
+			}, deps)
+		},
+	}
+	cmd.Flags().StringVar(&routesDir, "routes-dir", "",
+		"Path to erun-backend-api/internal/routes (defaults to that path under the current checkout's project root)")
+	cmd.Flags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runExecRouteCheckCommand(ctx common.Context, store common.CloudReadStore, alias string, params common.RouteCheckParams, deps common.CloudDependencies) error {
+	result, err := common.RunRouteCheck(ctx, store, alias, params, deps)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec route-check planned.")
+		return err
+	}
+	if ctx.Output != common.OutputJSON {
+		if err := writeRouteCheckReport(ctx, result); err != nil {
+			return err
+		}
+	}
+	if err := ctx.WriteResult(result); err != nil {
+		return err
+	}
+	return routeCheckExitError(result)
+}
+
+// writeRouteCheckReport prints one line per missing route -- the loud
+// failure this command exists to surface -- and a summary line always, so a
+// clean run is visibly clean rather than silent.
+func writeRouteCheckReport(ctx common.Context, result common.RouteCheckResult) error {
+	if !result.PlaneReachable {
+		_, err := fmt.Fprintf(ctx.Stdout, "%s did not answer the sanity probe (%s); no routes were checked.\n",
+			result.APIURL, result.UnreachableReason)
+		return err
+	}
+	for _, missing := range result.Missing {
+		if _, err := fmt.Fprintf(ctx.Stdout, "MISSING  %-7s %s\n", missing.Method, missing.Path); err != nil {
+			return err
+		}
+	}
+	for _, probeErr := range result.Errors {
+		if _, err := fmt.Fprintf(ctx.Stdout, "ERROR    %-7s %s: %s\n", probeErr.Method, probeErr.Path, probeErr.Detail); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "%d/%d route(s) reachable on %s.\n",
+		result.RoutesChecked-len(result.Missing)-len(result.Errors), result.RoutesChecked, result.APIURL)
+	return err
+}
+
+// routeCheckExitError makes a missing route (or a probe that could not even
+// complete) a non-zero exit, after the full report has already printed --
+// the same "print everything, then fail loudly" shape reconcileBypassExitError
+// uses.
+func routeCheckExitError(result common.RouteCheckResult) error {
+	if !result.PlaneReachable {
+		return fmt.Errorf("route-check: %s did not answer the sanity probe (%s); refusing to report on an unreachable plane",
+			result.APIURL, result.UnreachableReason)
+	}
+	var problems []string
+	if len(result.Missing) > 0 {
+		problems = append(problems, fmt.Sprintf("%d registered route(s) are missing on the deployed plane", len(result.Missing)))
+	}
+	if len(result.Errors) > 0 {
+		problems = append(problems, fmt.Sprintf("%d route probe(s) could not complete", len(result.Errors)))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("of %d route(s) checked on %s: %s", result.RoutesChecked, result.APIURL, strings.Join(problems, "; "))
 }
 
 func runExecReconcileBypassCommand(ctx common.Context, store common.CloudReadStore, alias string, params common.ReconcileBypassParams, deps common.CloudDependencies) error {
