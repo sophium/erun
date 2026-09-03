@@ -1,0 +1,6 @@
+Version drift for tenant erun:
+  max version: <VERSION>
+  environments:
+    - build version=<VERSION> [behind max]
+    - code4 version=<VERSION>
+audit: erun list --tenant erun

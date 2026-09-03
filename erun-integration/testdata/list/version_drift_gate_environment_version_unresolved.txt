@@ -1,0 +1,10 @@
+Version drift for tenant team:
+  max version: <VERSION>
+  environments:
+    - gate version=none
+    - peer version=<VERSION>
+  gate:
+    environment: gate
+    version: none
+    behind: unknown (gate's own erun version could not be resolved from config)
+audit: erun list --gate-environment gate --tenant team

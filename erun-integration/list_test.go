@@ -25,6 +25,108 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/help", normalize.Apply(result.Combined))
 	})
 
+	// erun#1985: `erun list --tenant` reports erun-version drift across a
+	// tenant's own environments instead of the full listing, and
+	// --gate-environment additionally flags whether the environment driving
+	// that tenant's merge-queue gate runs an older erun version than any
+	// environment it gates -- the concrete defect this exists to catch.
+
+	t.Run("version_drift_gate_environment_requires_tenant", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"list", "--gate-environment", "build"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --gate-environment with no --tenant, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_gate_environment_requires_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_tenant_not_found", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"list", "--tenant", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unknown tenant, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_tenant_not_found", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_reports_every_environment_and_the_max", func(t *testing.T) {
+		// erun's own reported incident: two environments in one tenant on
+		// different erun versions, with nothing surfacing the drift. build
+		// stays behind at 1.0.246 while code4 already runs 1.0.247.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_reports_every_environment_and_the_max", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_gate_environment_behind_flags_what_it_gates", func(t *testing.T) {
+		// The real defect: the gate environment (build) is older than an
+		// environment it gates (code4), and that must read as behind=yes,
+		// naming code4.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "build"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_gate_environment_behind_flags_what_it_gates", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_gate_environment_up_to_date", func(t *testing.T) {
+		// The counterpart: the gate environment already carries the newest
+		// version observed, so behind must read no.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "code4"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_gate_environment_up_to_date", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_gate_environment_not_found", func(t *testing.T) {
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unknown gate environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_gate_environment_not_found", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_gate_environment_version_unresolved", func(t *testing.T) {
+		// The gate environment has never recorded a resolved runtime image, so
+		// its own erun version cannot be read from config alone -- behind must
+		// read "unknown", never a silent "no" that would misreport an unknown
+		// gate as safely current.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "gate")
+		seedTenantEnvOnErunLine(t, setup, "team", "peer", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "team", "--gate-environment", "gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_gate_environment_version_unresolved", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_json_output", func(t *testing.T) {
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "build", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_json_output", normalize.Apply(result.Combined))
+	})
+
 	t.Run("empty_config", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -740,6 +842,30 @@ func writeListEnvConfig(t testing.TB, root, tenant, environment, repoPath, kubeC
 		body += "containerregistry: " + registry + "\n"
 	}
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), body)
+}
+
+// seedTenantEnvOnErunLine seeds tenant/environment (calling this again for a
+// second environment under an already-seeded tenant is fine -- each call
+// only writes its own env directory, plus the tenant/root config every
+// SeedTenantEnv call already rewrites identically) with a resolved
+// erun-devops runtime image recorded at version, which is what makes
+// ResolveErunVersion read version off RuntimeVersion rather than reporting
+// the environment as unresolved. Rewrites the env config wholesale rather
+// than appending, since SeedTenantEnv already writes a runtimeversion of its
+// own and yaml.v3 refuses a duplicate mapping key.
+func seedTenantEnvOnErunLine(t testing.TB, setup env.Setup, tenant, environment, version string) {
+	t.Helper()
+	fixture.SeedTenantEnv(t, setup, tenant, environment)
+	envConfigPath := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
+	mustWrite(t, envConfigPath,
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"type: local-agent\n"+
+			"runtimeversion: "+version+"\n"+
+			"runtimerunningimage: ghcr.io/sophium/erun-devops:"+version+"\n",
+	)
 }
 
 func mustWrite(t testing.TB, path, contents string) {

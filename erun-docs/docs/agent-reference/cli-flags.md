@@ -610,6 +610,46 @@ Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) v
 
 ---
 
+## `erun list` {#erun-list}
+
+For the Operator view, see [`erun list`](/cli/list). With no flags, `list` prints the full listing (every configured tenant and environment) and never mutates state.
+
+### Version drift across a tenant {#version-drift}
+
+Pass `--tenant` to switch the command into a distinct read: erun-version drift across that one tenant's own environments, instead of the full listing.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <name>` | string | none | Switches the command to a version-drift report for this tenant. Errors `tenant "<name>" not found` if the tenant has no config. |
+| `--gate-environment <name>` | string | none | Requires `--tenant`. Names the environment driving that tenant's merge-queue gate (erun has no stored concept of which environment gates a tenant's merges — see [merge-queue § the gate](/collaboration/merge-queue#the-gate) — so the caller states it). Errors `--gate-environment requires --tenant` when passed alone, or `gate environment "<name>" not found in tenant "<tenant>"` when the named environment doesn't exist in the tenant. |
+
+The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone.
+
+Each environment's version comes from the same `ResolveErunVersion` config-only resolution the full listing's `runtime-version:` line uses (see [Release lines](/cli/list#release-lines)) — nil (rendered `version=none`) whenever it can't be read from config alone, e.g. a deploy that never recorded a resolved runtime image.
+
+```
+Version drift for tenant erun:
+  max version: 1.0.247
+  environments:
+    - build version="1.0.246" [behind max]
+    - code4 version="1.0.247"
+  gate:
+    environment: build
+    version: 1.0.246
+    behind: yes -- outdated relative to code4
+```
+
+`max version` is the newest version observed among the tenant's *own* environments, not the newest erun has ever published — that's `erun version`'s/`erun upgrade`'s registry-latest concern. `[behind max]` marks an environment whose version parses lower than the max; an unparseable or missing version is shown bare (never guessed at) and excluded from the max computation. The `gate:` block only prints when `--gate-environment` is given, and `behind:` has three readings: `no` (the gate carries the max, or ties it), `yes -- outdated relative to <envs>` (naming every environment running a newer version), and `unknown (gate's own erun version could not be resolved from config)` when the gate's own version can't be read — reported explicitly rather than folded into a silent `no`, since a gate older than the code it gates can pass a change that would fail on current code.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Full listing, or version-drift report resolved. |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`. |
+
+---
+
 ## `erun observe` {#erun-observe}
 
 Reports an environment's Kubernetes state, read-only: every underlying call is `kubectl [--context <ctx>] --namespace <ns> get <resource> [name] -o json`, never anything that mutates. Same operation as the MCP `observe` tool (see [MCP overview § `observe`](/mcp/overview#observe)).

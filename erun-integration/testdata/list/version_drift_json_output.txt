@@ -1,0 +1,22 @@
+{
+  "tenant": "erun",
+  "environments": [
+    {
+      "environment": "build",
+      "version": "<VERSION>",
+      "behindMax": true
+    },
+    {
+      "environment": "code4",
+      "version": "<VERSION>"
+    }
+  ],
+  "maxVersion": "<VERSION>",
+  "gateEnvironment": "build",
+  "gateVersion": "<VERSION>",
+  "gateBehind": true,
+  "gateOutdatedBy": [
+    "code4"
+  ]
+}
+audit: erun list --gate-environment build --output json --tenant erun

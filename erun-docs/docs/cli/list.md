@@ -142,6 +142,42 @@ there is no history there to read. Ask the environment (over
 
 A newly created environment prints nothing either, until its monitor has taken a sample.
 
+## Version drift across a tenant {#version-drift}
+
+Pass `--tenant` to switch `list` from the full listing into a focused check: which erun version every environment in that tenant is running, and the newest version observed among them.
+
+```bash
+erun list --tenant my-tenant
+```
+
+```
+Version drift for tenant my-tenant:
+  max version: 1.0.247
+  environments:
+    - build version="1.0.246" [behind max]
+    - code4 version="1.0.247"
+```
+
+Add `--gate-environment` to name the environment that drives that tenant's merge-queue gate — erun doesn't track this on its own, so you say which one it is — and the report additionally flags whether that environment is running an older erun version than any environment it gates:
+
+```bash
+erun list --tenant my-tenant --gate-environment build
+```
+
+```
+Version drift for tenant my-tenant:
+  max version: 1.0.247
+  environments:
+    - build version="1.0.246" [behind max]
+    - code4 version="1.0.247"
+  gate:
+    environment: build
+    version: 1.0.246
+    behind: yes -- outdated relative to code4
+```
+
+A gate older than the code it gates can pass a change that would fail on current code — this is what catches that before a bad merge slips through. See [collaboration › merge queue](/collaboration/merge-queue#the-gate) for what the gate does. For the exact flag contract and JSON shape, see [Agent reference › CLI flags](/agent-reference/cli-flags#version-drift).
+
 ## Common usages
 
 ```bash
@@ -159,3 +195,6 @@ erun list | grep "effective"      # what ERun targets right now
 | No config yet. | Prints the sections with `none` placeholders; not an error. |
 | Current directory isn't a configured project. | `effective target: none` (or `unavailable (…)` with the reason); the rest still prints. |
 | Config file unreadable. | Errors with the read failure; nothing is printed. |
+| `--gate-environment` passed without `--tenant`. | Errors `--gate-environment requires --tenant`; nothing is printed. |
+| `--tenant` names a tenant with no config. | Errors `tenant "<name>" not found`. |
+| `--gate-environment` names an environment not in that tenant. | Errors `gate environment "<name>" not found in tenant "<tenant>"`. |
