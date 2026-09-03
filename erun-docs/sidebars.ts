@@ -207,6 +207,7 @@ const sidebars: SidebarsConfig = {
         'deployment/deploy-platform',
         'deployment/release-flow',
         'deployment/cloud-setup',
+        'deployment/data-retention',
       ],
     },
   ],
