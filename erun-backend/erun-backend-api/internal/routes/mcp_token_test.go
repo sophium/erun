@@ -215,6 +215,37 @@ func TestMintMCPTokenRefusesAdminWithoutEntitlement(t *testing.T) {
 	}
 }
 
+// TestMintMCPTokenRefusesAdminWithClearReason pins the actual refusal body a
+// console operator sees when they pick "Admin" in the scope selector without
+// holding the delete-environment entitlement: a bare ErrForbidden renders as
+// the generic "Forbidden" through writeRepositoryError's shared mapping,
+// which erun-console's httpBaseQuery would then show verbatim as "Could not
+// mint an MCP token: Forbidden" -- indistinguishable from a broken request.
+// This is the one call site where the reason is always the same one, so it
+// is named instead.
+func TestMintMCPTokenRefusesAdminWithClearReason(t *testing.T) {
+	routes := MCPTokenRoutes{
+		environments: &stubEnvironmentRepository{environment: model.Environment{EnvironmentID: "env-1", Name: "prod"}},
+		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		signer:       testSigner(t),
+		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
+	}
+	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	var envelope errorEnvelope
+	if err := json.NewDecoder(rec.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if envelope.Code != "MCP_ADMIN_SCOPE_FORBIDDEN" {
+		t.Fatalf("code = %q, want MCP_ADMIN_SCOPE_FORBIDDEN", envelope.Code)
+	}
+	if !strings.Contains(envelope.Message, "erun:operate") {
+		t.Fatalf("message = %q, want it to name the narrower scope as the alternative", envelope.Message)
+	}
+}
+
 // TestMintMCPTokenNoEntitlementCheckerRefusesAdmin proves the fail-closed
 // default: a deployment with no permission backend wired (entitlement is nil)
 // must refuse erun:admin rather than mint it unconditionally, the exact

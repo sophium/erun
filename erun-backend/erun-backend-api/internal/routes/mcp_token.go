@@ -106,6 +106,19 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 	}
 	ctx := req.Context()
 	if err := r.authorizeScope(ctx, scope); err != nil {
+		// A bare ErrForbidden renders as the generic "Forbidden" through
+		// writeRepositoryError's shared mapping -- indistinguishable, to the
+		// console operator reading it, from a broken request. This is the one
+		// call site where the caller chose a specific escalation (the scope
+		// selector's "Admin" option) and the specific reason it was refused is
+		// always the same one (see authorizeScope's doc comment), so naming it
+		// costs nothing and saves an operator from reporting a bug that is
+		// actually a missing permission.
+		if errors.Is(err, repository.ErrForbidden) {
+			writeErrorCode(w, http.StatusForbidden, "MCP_ADMIN_SCOPE_FORBIDDEN",
+				"minting an erun:admin MCP token requires permission to delete this environment; ask your tenant admin for that access, or request erun:operate instead")
+			return
+		}
 		writeRepositoryError(w, req, err)
 		return
 	}
