@@ -15,6 +15,7 @@ import { KeyRound } from 'lucide-react';
 import * as React from 'react';
 
 import { type AISessionStatus, useListAISessionsQuery } from '../app/api/aiSessionsApi';
+import { MCP_ADMIN_SCOPE, MCP_OPERATE_SCOPE } from '../app/api/mcpApi';
 import type { AttachSessionState, McpTokenState, McpToolCallState } from './controller';
 import {
   useAttachSessionController,
@@ -81,6 +82,26 @@ function DriveToolForm({
       </Button>
       <DriveToolResult state={state} />
     </form>
+  );
+}
+
+// OperateScopeNote replaces DriveToolForm's smoke test when the minted token
+// is erun:operate-scoped. `version` requires erun:read, which erun:operate
+// deliberately does not imply (the same isolation erun:attach already has),
+// so calling it here would always be refused -- correct enforcement, but a
+// confusing "broken" reading for an operator who asked for this narrower
+// scope on purpose. The operate tools themselves (deploy/context_start/
+// context_stop/resize) are all side-effecting, so there is no harmless
+// smoke test to offer in their place; the token is handed over for the
+// operator's own MCP client to drive them.
+function OperateScopeNote(): React.ReactElement {
+  return (
+    <p className="border-t border-border pt-3 text-sm text-muted-foreground">
+      This token is scoped to <code>erun:operate</code>: it can deploy an already-published version,
+      start or stop the cloud context, and resize the runtime pod. It cannot call read/observe tools
+      or anything reserved for <code>erun:admin</code>. Present it to your own MCP client to drive
+      those actions.
+    </p>
   );
 }
 
@@ -364,7 +385,11 @@ function TokenResult({
           rows={4}
           readOnly
         />
-        <DriveToolForm mcpToken={state.token.token} exposedHostname={exposedHostname} />
+        {state.token.scope === MCP_OPERATE_SCOPE ? (
+          <OperateScopeNote />
+        ) : (
+          <DriveToolForm mcpToken={state.token.token} exposedHostname={exposedHostname} />
+        )}
         <AttachSessionForm
           consoleToken={consoleToken}
           environmentId={environmentId}
@@ -408,6 +433,14 @@ export function MCPAccessPanel({
 }): React.ReactElement {
   const { state, requestToken } = useMcpTokenController(token);
   const [selected, setSelected] = React.useState(environments[0]?.environmentId ?? '');
+  // Defaults to the narrower tier: requesting erun:admin needs the
+  // delete-environment entitlement (see erun-docs/agent-reference/
+  // api-protocol.md#mint-mcp-token-endpoint), which an ordinary tenant member
+  // does not hold, so defaulting to it would 403 for most operators clicking
+  // this button. erun:operate needs no additional entitlement and covers
+  // deploy/context_start/context_stop/resize; admin stays one selection away
+  // for whoever genuinely needs full capability.
+  const [scope, setScope] = React.useState(MCP_OPERATE_SCOPE);
 
   if (environments.length === 0) {
     return <EmptyPanel />;
@@ -419,7 +452,7 @@ export function MCPAccessPanel({
   const submit = (event: React.SyntheticEvent): void => {
     event.preventDefault();
     if (selected !== '') {
-      requestToken(selected);
+      requestToken(selected, scope);
     }
   };
 
@@ -436,6 +469,19 @@ export function MCPAccessPanel({
             value={selected}
             options={environments.map((env) => ({ value: env.environmentId, label: env.name }))}
             onChange={setSelected}
+          />
+          <SelectField
+            id="mcp-scope"
+            label="Token capability"
+            value={scope}
+            options={[
+              {
+                value: MCP_OPERATE_SCOPE,
+                label: 'Operate — deploy, start/stop, resize only',
+              },
+              { value: MCP_ADMIN_SCOPE, label: 'Admin — full capability, including exec/delete' },
+            ]}
+            onChange={setScope}
           />
           <Button
             type="submit"

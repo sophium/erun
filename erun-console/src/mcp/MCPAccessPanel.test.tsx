@@ -51,12 +51,12 @@ afterEach(() => {
 });
 
 describe('MCPAccessPanel', () => {
-  it('POSTs to the env mcp-token endpoint requesting admin scope and surfaces the token and audience', async () => {
+  it('defaults to erun:operate -- no delete-environment entitlement needed -- and surfaces the token and audience', async () => {
     const calls = mockFetch(() =>
       jsonResponse({
         token: 'signed.jwt.value',
         audience: 'erun-mcp:acme/prod',
-        scope: 'erun:admin',
+        scope: 'erun:operate',
       }),
     );
     renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
@@ -69,7 +69,35 @@ describe('MCPAccessPanel', () => {
 
     const post = calls.find((c) => c.method === 'POST');
     expect(post?.url).toBe('/v1/environments/env-1/mcp-token');
+    expect(post?.body).toBe(JSON.stringify({ scope: 'erun:operate' }));
+
+    // The version smoke test would always be refused under erun:operate
+    // (it needs erun:read, which erun:operate deliberately does not imply),
+    // so it is replaced by an explanatory note instead of a button that
+    // would always fail.
+    expect(screen.queryByRole('button', { name: 'Call the version tool' })).toBeNull();
+    expect(screen.getByText(/it can deploy an already-published/)).toBeInTheDocument();
+  });
+
+  it('mints erun:admin when that scope is explicitly selected, restoring the version smoke test', async () => {
+    const calls = mockFetch(() =>
+      jsonResponse({
+        token: 'admin.jwt.value',
+        audience: 'erun-mcp:acme/prod',
+        scope: 'erun:admin',
+      }),
+    );
+    renderWithStore(<MCPAccessPanel token="dev-token" environments={ENVIRONMENTS} />);
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Token capability' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Admin —/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate MCP token' }));
+
+    expect(await screen.findByText('erun-mcp:acme/prod')).toBeInTheDocument();
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/v1/environments/env-1/mcp-token');
     expect(post?.body).toBe(JSON.stringify({ scope: 'erun:admin' }));
+    expect(screen.getByRole('button', { name: 'Call the version tool' })).toBeInTheDocument();
   });
 
   it('surfaces a 501 when the backend has no signing key configured', async () => {
