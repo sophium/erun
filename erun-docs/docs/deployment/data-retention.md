@@ -4,7 +4,7 @@ title: Data retention
 
 # Data retention
 
-The `erun-backend-db` component runs a daily sweep that deletes old rows from a handful of high-growth tables (reviews, comments, releases, AI sessions, invites) so a tenant's database doesn't grow forever. It's fully automatic once `erun-backend-db` is deployed — most of the time there's nothing to do. This page is for the moments there is: previewing what a sweep would remove before it runs for real, checking or changing the bounds it enforces, and confirming what a scheduled run actually did.
+The `erun-backend-db` component can run a daily sweep that deletes old rows from a handful of high-growth tables (reviews, comments, releases, AI sessions, invites) so a tenant's database doesn't grow forever. **It's off by default** — deploying or upgrading `erun-backend-db` never starts deleting rows on its own — and turning it on drops you into a report-only mode first, so you see what a sweep would remove before anything is actually deleted. This page covers turning it on safely: previewing a sweep, enabling it, checking or changing the bounds it enforces, and confirming what a scheduled run actually did.
 
 Not to be confused with [registry image retention](/deployment/registries#hosted-registry) — a separate mechanism that expires unused container images, on its own schedule and its own configuration.
 
@@ -12,7 +12,7 @@ Not to be confused with [registry image retention](/deployment/registries#hosted
 
 | Tables | Status |
 |---|---|
-| `reviews`, `review_reviewers`, `comments`, `releases`, `ai_sessions`, `invites`, `invite_requests` | **Enforced** — a daily sweep deletes eligible rows in every tenant running `erun-backend-db` |
+| `reviews`, `review_reviewers`, `comments`, `releases`, `ai_sessions`, `invites`, `invite_requests` | **Enforced, opt-in** — a daily sweep deletes eligible rows in every tenant that has [turned retention on](#turning-retention-on-and-off); it's off by default |
 | `builds`, `gate_runs` | **Designed, not enforced.** Rows accumulate with no bound today ([#1956](https://github.com/sophium/erun/issues/1956)) — porting the design onto the sweep below is the remaining work, not a technical blocker. |
 | `audit_events`, `usage_events` | **Designed, not enforced — deliberately.** Whether erun has a compliance/contractual obligation on audit-log retention, and if so what window, is an unanswered business question ([#1959](https://github.com/sophium/erun/issues/1959)). Until it's answered, these two tables keep growing without limit on purpose: guessing a window and deleting an audit row that turns out to matter is worse than the storage cost of keeping it. |
 
@@ -48,29 +48,32 @@ kubectl -n <tenant>-prod delete job retention-dry-run
 
 ## Turning retention on and off
 
-**On.** Retention ships bundled with the `erun-backend-db` component — there's no separate switch. Deploying that component installs the retention CronJob alongside the schema-migration Job:
+**Off is the default, and stays the default through an upgrade.** Deploying or upgrading `erun-backend-db` renders no retention CronJob at all unless you explicitly ask for one — an existing tenant that upgrades to a version carrying this mechanism doesn't inherit scheduled deletion, and a fresh install doesn't either. Both chart values below are real Helm values (`retention.enabled`, `retention.dryRun`), not a `kubectl`-side workaround, so they survive every future `erun deploy`/`helm upgrade` of the component instead of needing to be reapplied by hand.
+
+**Turning it on** takes two explicit steps, deliberately not one:
+
+1. Enable the CronJob. This alone does not delete anything:
+
+   ```bash
+   erun deploy --version <version> --components erun-backend-db \
+     --set retention.enabled=true
+   ```
+
+   This installs the retention CronJob (`<tenant>-backend-db-retention`), running daily at 03:00 UTC — but `retention.dryRun` defaults to `true` the moment `retention.enabled=true` is set, so every run at this point only reports what it would delete (see "Confirming a scheduled run happened" below). Read a few days of those reports before trusting the bounds on your data.
+
+2. Once you're satisfied with what the reports show, opt into real deletion:
+
+   ```bash
+   erun deploy --version <version> --components erun-backend-db \
+     --set retention.enabled=true --set retention.dryRun=false
+   ```
+
+**Turning it off** — set `retention.enabled` back to `false` (or omit it) and redeploy the component; the CronJob is removed on the next `helm upgrade`:
 
 ```bash
-erun deploy --version <version> --components erun-backend-db
+erun deploy --version <version> --components erun-backend-db \
+  --set retention.enabled=false
 ```
-
-If a tenant runs `erun-backend-db` at all, its retention sweep runs daily at 03:00 UTC. There's no way to deploy the component without it.
-
-**Off.** There is no chart value for this yet — the retention CronJob renders unconditionally whenever `erun-backend-db` is deployed (the chart's own test suite locks this down explicitly). The lever available today is suspending the CronJob object directly:
-
-```bash
-kubectl -n <tenant>-prod patch cronjob <tenant>-backend-db-retention \
-  --type merge -p '{"spec":{"suspend":true}}'
-```
-
-and to resume it:
-
-```bash
-kubectl -n <tenant>-prod patch cronjob <tenant>-backend-db-retention \
-  --type merge -p '{"spec":{"suspend":false}}'
-```
-
-`spec.suspend` isn't part of the chart's own manifest, so a later `erun deploy`/`helm upgrade` of `erun-backend-db` won't reset it back to running — the suspension holds until you flip it again by hand. This is a stopgap, not a first-class feature: there's no `retention.enabled`-style value wired into the chart.
 
 ## Bounds per table, and where to change one
 
@@ -119,3 +122,15 @@ kubectl -n <tenant>-prod logs job/<tenant>-backend-db-retention-<timestamp>
 ```
 
 Every policy file reports before it deletes, so the log is a per-run audit trail: a line naming the file it's about to run, then a `table_name` / `eligible_for_deletion` count for every table-and-predicate combination in that file — the same count the delete then acts on. There's no separate report of exactly *which* rows were removed, only how many, per table, per run.
+
+Pod logs are capped (only the last three successful and three failed Jobs are kept) and need cluster access to read. The `retention_runs` table is the durable, queryable record of the same information — one row per `(policy_name, table_name)` per run, recording `dry_run`, `eligible_count`, and `deleted_count` (always `0` for a dry run). Only `erun_operations` can read it (`SET ROLE erun_operations` before querying), and it's platform-wide rather than tenant-scoped — a sweep runs once for every tenant `erun-backend-db` serves, not per tenant:
+
+```sql
+SET ROLE erun_operations;
+SELECT created_at, policy_name, table_name, dry_run, eligible_count, deleted_count
+FROM retention_runs
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+This is what to check first if you enabled retention and want to confirm whether last night's run was still in report-only mode or actually deleted rows, without needing a kubectl session.
