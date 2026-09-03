@@ -1,6 +1,9 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	common "github.com/sophium/erun/erun-common"
+	"github.com/spf13/cobra"
+)
 
 // CommandTreeForAudit returns the same fully-wired command tree Execute()
 // runs. It exists for tooling that needs to walk every registered command —
@@ -10,6 +13,31 @@ import "github.com/spf13/cobra"
 // Hidden or Deprecated).
 func CommandTreeForAudit() *cobra.Command {
 	return newRootDependencies().rootCommand()
+}
+
+// ContextSensitiveTopLevelCommands returns the top-level commands whose very
+// presence in CommandTreeForAudit's tree is conditional on filesystem state at
+// construction time: optionalBuildCommand/optionalPushCommand (root.go) omit
+// "build"/"push" entirely — not just some of their flags — when no docker
+// build context, build script, or linux package context resolves from the
+// process's current working directory. A tree built from a cwd where neither
+// resolves (an audit tool's own process cwd, a test binary's package
+// directory) omits both nodes, which would make any other command's own
+// Example/Long/Short text that cross-references `erun build ...`/
+// `erun push ...` resolve against the root command instead and report every
+// one of their flags as unregistered.
+//
+// Constructing them here with no real dependencies is safe because nothing
+// calls RunE — only the same flag registration newBuildCmd/newRootPushCmd
+// always run at construction time, unconditionally, regardless of the
+// dependencies passed in. That registration is what a caller needs to
+// recover each command's real, always-identical flag vocabulary even from a
+// tree where the optional variant did not attach.
+func ContextSensitiveTopLevelCommands() map[string]*cobra.Command {
+	return map[string]*cobra.Command{
+		"build": newBuildCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, common.CloudDependencies{}),
+		"push":  newRootPushCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, common.CloudDependencies{}),
+	}
 }
 
 // cliOnlyAgentFacingCommands declares CLI commands that have no matching MCP

@@ -261,6 +261,26 @@ func proseInvocationCandidates(text string) [][]string {
 	return all
 }
 
+// auditCommandTree returns CommandTreeForAudit's tree with "build" and
+// "push" patched in from cmd.ContextSensitiveTopLevelCommands whenever this
+// test binary's own process context (its package directory as cwd, not
+// necessarily a directory with a docker build context) caused
+// optionalBuildCommand/optionalPushCommand to omit them -- see
+// ContextSensitiveTopLevelCommands' doc comment in erun-cli/cmd for why
+// their presence, unlike every other command's, depends on that context.
+// Patching them back in with their real flag vocabulary is what makes
+// resolution below deterministic regardless of the cwd this test happens to
+// run from.
+func auditCommandTree() *cobra.Command {
+	root := cmd.CommandTreeForAudit()
+	for name, fallback := range cmd.ContextSensitiveTopLevelCommands() {
+		if commandChild(root, name) == nil {
+			root.AddCommand(fallback)
+		}
+	}
+	return root
+}
+
 // invocationProblem renders one flag-drift finding in a form that names the
 // exact source (the command whose help text carries the bad reference), the
 // literal text a reader would have copied, the bad token, and where
@@ -287,7 +307,7 @@ func checkInvocation(root *cobra.Command, sourceCmd *cobra.Command, field string
 // never actually registered on the command the example invokes, or on any
 // command it passes through on the way there.
 func TestCLIExampleInvocationsUseRegisteredFlags(t *testing.T) {
-	root := cmd.CommandTreeForAudit()
+	root := auditCommandTree()
 	var problems []string
 	seen := 0
 	walkCLICommands(root, func(c *cobra.Command) {
@@ -312,7 +332,7 @@ func TestCLIExampleInvocationsUseRegisteredFlags(t *testing.T) {
 // because these are cross-references between commands rather than a
 // command's own worked example.
 func TestCLIProseInvocationsUseRegisteredFlags(t *testing.T) {
-	root := cmd.CommandTreeForAudit()
+	root := auditCommandTree()
 	var problems []string
 	seen := 0
 	walkCLICommands(root, func(c *cobra.Command) {
