@@ -14,6 +14,7 @@ import (
 
 func TestWhip(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"whip", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -23,6 +24,7 @@ func TestWhip(t *testing.T) {
 	})
 
 	t.Run("dry_run_no_targets_configured", func(t *testing.T) {
+		t.Parallel()
 		// No environments and no orchestrators configured at all: the report
 		// has nothing to name, and the command still exits clean.
 		setup := env.New(t)
@@ -117,6 +119,7 @@ func TestWhip(t *testing.T) {
 	})
 
 	t.Run("dry_run_only_tenant_given_refuses", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"whip", "--tenant", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

@@ -15,6 +15,7 @@ import (
 )
 
 func TestIdle(t *testing.T) {
+	t.Parallel()
 	t.Run("invalid_working_hours_format_errors", func(t *testing.T) {
 		setup := env.New(t)
 		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 9to5\n")

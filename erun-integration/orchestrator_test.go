@@ -31,6 +31,7 @@ import (
 // (grep erun-mcp for "orchestrator" or "set-role" -- neither exists), so
 // there is no second transport to keep in sync here.
 func TestOrchestrator(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"orchestrator", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

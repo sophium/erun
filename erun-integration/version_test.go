@@ -29,6 +29,7 @@ func writeRuntimeRegistryConfig(t testing.TB, setup env.Setup, body string) {
 }
 
 func TestVersion(t *testing.T) {
+	t.Parallel()
 	t.Run("no_registry", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"version", "--no-registry"}, erun.RunOptions{

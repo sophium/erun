@@ -13,16 +13,58 @@
 # rather than silently comparing nothing while still reporting a green gate.
 #
 # Environment:
-#   COVERAGE_THRESHOLD   default 75 (percent). See note below.
-#   GOCOVERDIR           override the directory used for raw counter files;
-#                        defaults to a fresh, unique temp directory per
-#                        invocation (see note below on why not a fixed path).
+#   COVERAGE_THRESHOLD             default 75 (percent). See note below.
+#   GOCOVERDIR                     override the directory used for raw
+#                                  counter files; defaults to a fresh, unique
+#                                  temp directory per invocation (see note
+#                                  below on why not a fixed path).
+#   INTEGRATION_TEST_PARALLELISM   override the `go test -parallel` value
+#                                  outright, skipping the width calculation
+#                                  below.
 #
 # Notes:
 #   - The instrumented binary is rebuilt each run so signatures stay aligned
 #     with whatever code is being tested. The build uses the same -coverpkg
 #     selector as the binary helper in internal/erun, so the merged profile
 #     reflects exactly the production packages we want to gate on.
+#   - Most scenarios are independent: each gets its own tempdir-rooted
+#     HOME/XDG/cwd (internal/env.New) and, where a scenario needs one, its own
+#     dynamically-ported httptest server, so they run under `t.Parallel()`.
+#     The exception is every scenario that binds a real, hardcoded TCP port
+#     (the `skipIfPortsBusy`-guarded real-run scenarios in mcp_test.go,
+#     open_test.go, app_test.go, whip_test.go, and
+#     environment_half_scenarios_test.go, plus
+#     job_off_environment_agent_test.go's single top-level test) — those stay
+#     serial (no `t.Parallel()` call anywhere in their own top-level Test
+#     function), so two scenarios can never collide on the same literal port.
+#     Go's test driver never interleaves a non-parallel top-level test with
+#     any other top-level test, so this is a hard guarantee, not a scheduling
+#     accident: every serial top-level test runs to completion, one at a
+#     time, in file order, before any parallel-marked top-level test's body
+#     starts executing.
+#   - `go test -parallel` defaults to GOMAXPROCS, which (like `nproc`) reads
+#     the CPU affinity mask rather than the container's CPU quota — the same
+#     blind spot scripts/parallel-gate.sh's own header documents for the
+#     erun-devops test stage's sibling cgroup. On the pod this was measured
+#     on, that blind spot is real: `nproc` reports 24, but cgroup cpu.max
+#     quotes only 6. test_parallelism below reuses parallel-gate.sh's `width`
+#     mode to read the real quota instead of trusting GOMAXPROCS.
+#   - Unlike the shell-dispatched fleets `width` was built for (N independent
+#     lint or helm-chart-test processes, each with its own roughly-fixed
+#     memory cost), this suite's memory use does not scale linearly with
+#     -parallel: five consecutive runs at the unthrottled GOMAXPROCS=24
+#     default peaked at 4.0-4.5GiB RSS, and five more at the quota-derived
+#     -parallel=6 peaked at 4.7-5.1GiB -- a wash, not a 4x drop, because a
+#     compiled-once instrumented binary, Go's own test-cache/coverage
+#     bookkeeping, and per-scenario tempdirs already alive from earlier
+#     scenarios dominate over the marginal cost of one more concurrent
+#     subprocess. Dividing an assumed per-job cost into the memory ceiling
+#     would therefore invent a number this workload doesn't obey, so `width`
+#     is called with no memory term (job-count cap and CPU quota only) and
+#     the real ceiling is a documented fact instead: erun-devops/AGENTS.md's
+#     Runtime Chart Rules names the erun-dind sidecar's memory limit as "up
+#     to 20GiB" by default, comfortably above every measured peak here with
+#     room to spare.
 #   - The default threshold tracks what the suite actually reaches, minus a
 #     small margin for cross-host variance. The historical gap families
 #     (interactive prompts, subprocess launchers, port-forward workers, IDE
@@ -96,15 +138,17 @@ fi
 
 export GOCOVERDIR="$cover_dir"
 
+test_parallelism="${INTEGRATION_TEST_PARALLELISM:-$("$here/../scripts/parallel-gate.sh" width 32 "")}"
+
 if [[ "$update_golden" -eq 1 ]]; then
     echo ">> reseeding golden files (comparisons disabled, coverage gate skipped)"
-    UPDATE_GOLDEN=1 go test -count=1 ./...
+    UPDATE_GOLDEN=1 go test -count=1 -parallel="$test_parallelism" ./...
     echo ">> golden files reseeded; inspect the testdata diff, then re-run without --update-golden to gate"
     exit 0
 fi
 
-echo ">> running integration suite (cover dir: $cover_dir)"
-go test -count=1 ./...
+echo ">> running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)"
+go test -count=1 -parallel="$test_parallelism" ./...
 
 echo ">> merging coverage counters into $profile"
 go tool covdata textfmt -i="$cover_dir" -o="$profile"

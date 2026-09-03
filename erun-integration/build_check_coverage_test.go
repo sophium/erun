@@ -145,6 +145,7 @@ var skipDirNames = map[string]bool{
 // the Makefile's real text is what stops the answer from silently going
 // stale, the same way tenantScopeClassification's staleness check does.
 func TestBuildCheckGateCoversEveryTestSuite(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 
 	found := append(goModulesWithTests(t, root), jsPackagesWithTests(t, root)...)

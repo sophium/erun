@@ -64,6 +64,7 @@ var dryRunPurityCases = []struct {
 }
 
 func TestDryRunNeverTouchesTheConfigDirectory(t *testing.T) {
+	t.Parallel()
 	for _, tc := range dryRunPurityCases {
 		t.Run(tc.name, func(t *testing.T) {
 			setup := env.New(t)

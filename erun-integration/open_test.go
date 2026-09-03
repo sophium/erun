@@ -252,6 +252,7 @@ func stubKubectlRunStateWithFailingWait(t *testing.T, stubsDir string, desired, 
 
 func TestOpen(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"open", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -261,6 +262,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("refuses_host_environment", func(t *testing.T) {
+		t.Parallel()
 		// A host env has no pod and no cluster to open a kubectl-exec shell
 		// into — its worktree is already the operator's own directory, so open
 		// refuses and points there instead of resolving a kubernetes context
@@ -272,6 +274,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_dry_run", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
@@ -280,6 +283,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_tty_dry_run_falls_back_to_no_shell", func(t *testing.T) {
+		t.Parallel()
 		// The stale-forward recovery advice names bare `erun open <tenant>
 		// <env>`, which a non-interactive caller (an MCP client, an
 		// orchestrator, a script) runs with no TTY on stdin — this harness's
@@ -296,6 +300,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_tty_dry_run_falls_back_to_no_shell_stdin_dev_null", func(t *testing.T) {
+		t.Parallel()
 		// The scenario above already runs with stdin unset, which erun.Run
 		// binds to an in-memory pipe — never a character device, so it cannot
 		// reproduce a stat-based TTY check confusing a non-terminal character
@@ -317,6 +322,7 @@ func TestOpen(t *testing.T) {
 	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
 
 	t.Run("alias_prompt_dry_run_accept_traces_append", func(t *testing.T) {
+		t.Parallel()
 		// ERUN_FORCE_TTY=1 lifts the stdout-TTY gate so the alias-setup flow
 		// runs in the piped harness; SHELL=/bin/zsh pins the startup file to
 		// ~/.zshrc. Accepting in --dry-run must trace the append but leave
@@ -343,6 +349,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_prompt_decline_prints_hint", func(t *testing.T) {
+		t.Parallel()
 		// Declining ("n") must print the alias hint and write no file.
 		// ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh pins ~/.zshrc.
 		setup := env.New(t)
@@ -463,6 +470,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_real_run_with_deploy_requires_shell_deploy_errors", func(t *testing.T) {
+		t.Parallel()
 		// open is pure: it does not deploy. --deploy is the
 		// operator-convenience shortcut, but an IDE launch has no shell to
 		// host the deploy progress, so even `open --deploy --vscode` must
@@ -482,6 +490,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_real_run_not_deployed_errors", func(t *testing.T) {
+		t.Parallel()
 		// open is a pure primitive and does not deploy. A port-forward that
 		// can't bind is no longer fatal, so a genuinely undeployed runtime is
 		// caught up front by deployment presence — the run fails fast with an
@@ -500,6 +509,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_real_run_check_unreachable_errors_without_claiming_absence", func(t *testing.T) {
+		t.Parallel()
 		// The deployment presence check can fail without ever getting an
 		// answer — no context, an unreachable API server, credentials or
 		// permissions refused. That is not evidence the deployment is absent,
@@ -523,6 +533,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_real_run_check_unreachable_sanitizes_klog_framed_error", func(t *testing.T) {
+		t.Parallel()
 		// erun#1766: the same unreachable-cluster path above, but with the
 		// exact klog "Unhandled Error" shape client-go actually emits
 		// (severity, timestamp, goroutine id, Go source location wrapping
@@ -545,6 +556,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
+		t.Parallel()
 		// When ~/.zshrc already carries the team-dev alias,
 		// detectOpenNoShellAliasStartupFile reports it configured
 		// (startupFileHasAlias true branch) and the whole prompt is skipped:
@@ -597,6 +609,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_powershell_dialect_prints_function_hint", func(t *testing.T) {
+		t.Parallel()
 		// SHELL=/bin/pwsh resolves the PowerShell dialect:
 		// detectOpenNoShellAliasStartupFile refuses a startup file, so the
 		// flow takes the hint-lines-only arm — "one-liner function:" plus the
@@ -611,6 +624,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("snapshot_env_config_drives_local_build", func(t *testing.T) {
+		t.Parallel()
 		// A local env whose config carries the legacy snapshot=true key
 		// migrates to type=local-agent on read, so BuildsHere() is true and
 		// `erun open` reaches the local-build branch. allowLocalBuilds is
@@ -626,6 +640,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("version_override_skips_local_build", func(t *testing.T) {
+		t.Parallel()
 		// --version pins the runtime chart to a specific version; the
 		// builder branch must be skipped (no docker build) and the helm
 		// upgrade must reference the override version explicitly.
@@ -638,6 +653,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("runtime_image_override_uses_default_chart", func(t *testing.T) {
+		t.Parallel()
 		// --runtime-image rewrites the runtime release to use the
 		// embedded default-devops chart with the chosen image. There is
 		// no local devops module seeded, so the path exercises
@@ -651,6 +667,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_without_sshd_errors_with_guidance", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -658,6 +675,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("intellij_without_sshd_errors_with_guidance", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -665,6 +683,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_and_intellij_conflict", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -675,6 +694,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_dry_run_traces_port_forwards", func(t *testing.T) {
+		t.Parallel()
 		// Exercises cmd/api_port_forward.go and cmd/mcp_port_forward.go:
 		// for a remote environment, --dry-run must trace the kubectl
 		// port-forward commands that would be started for both API and
@@ -689,6 +709,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_dry_run_aws_alias_propagates_host_credentials", func(t *testing.T) {
+		t.Parallel()
 		// Locks the deploy plumbing that ships host AWS credentials into a
 		// remote runtime: attaching an AWS cloud alias to the env (the operator
 		// opting it into acting on their behalf) makes the helm command include
@@ -708,6 +729,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_configured_aws_alias_refreshes_host_credentials", func(t *testing.T) {
+		t.Parallel()
 		// Injected host credentials are temporary and nothing else renews them,
 		// so open refreshes them at the moment the operator declares they are
 		// about to use the env. The plan must show the wait and the exec that
@@ -728,6 +750,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {
+		t.Parallel()
 		// open is a pure primitive: it does not deploy. The
 		// desktop composes build→push→deploy on create / via the Deploy
 		// button and spawns tabs that just open the shell, so the default
@@ -747,6 +770,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_deploys_runtime_before_opening", func(t *testing.T) {
+		t.Parallel()
 		// --deploy is the operator-convenience shortcut: open
 		// deploys the runtime before opening. The kubectl NotFound stub is the
 		// deployment-check decision input so the resolver picks the deploy
@@ -768,6 +792,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_wakes_stopped_runtime_before_forwarding", func(t *testing.T) {
+		t.Parallel()
 		// The load-bearing wake: kubectl port-forward cannot attach to a
 		// Deployment with zero replicas, so a stopped environment must be scaled
 		// back up and waited for BEFORE the forwards are traced. The run-state
@@ -784,6 +809,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
+		t.Parallel()
 		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
 		// wake plan must stay byte-identical to the subprocess-mode golden
 		// (dry_run_wakes_stopped_runtime_before_forwarding) even with
@@ -802,6 +828,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("reconnect_dry_run_refuses_to_start_a_stopped_runtime", func(t *testing.T) {
+		t.Parallel()
 		// The other half of the wake contract. A supervisor respawning `open` to
 		// re-establish a dropped session is not the operator opening the
 		// environment — and a stop is exactly what drops every session — so the
@@ -818,6 +845,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_wakes_a_stopped_runtime", func(t *testing.T) {
+		t.Parallel()
 		// Proves the wake path's dispatch (WaitRuntimeAvailable, stop.go)
 		// engages the library path too, not just open.go's/doctor.go's: it
 		// bypasses RunRawCommand entirely in library mode rather than
@@ -886,6 +914,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("reconnect_dry_run_reattaches_a_running_runtime", func(t *testing.T) {
+		t.Parallel()
 		// A reconnect against a running environment is the common case and must
 		// stay a normal open: forwards rebound, no scale, and — the part that
 		// matters — no config write, so an intent recorded from elsewhere is not
@@ -901,6 +930,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_running_runtime_wake_is_quiet", func(t *testing.T) {
+		t.Parallel()
 		// The common path must stay silent: an environment already running gets
 		// one run-state read and no scale call, so `open` does not churn the
 		// cluster on every invocation. The negative is the point of the golden.
@@ -915,6 +945,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_clears_stop_intent_before_rendering_the_chart", func(t *testing.T) {
+		t.Parallel()
 		// stop → deploy → open, third leg. The recorded stop must be cleared
 		// BEFORE helm renders, or the rollout would re-apply replicas: 0 and the
 		// wake would have to undo its own deploy. The golden therefore shows the
@@ -934,6 +965,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_fresh_env_requires_runtime_version", func(t *testing.T) {
+		t.Parallel()
 		// The fresh-env coverage gap that hid the regression: an env with
 		// no persisted runtimeversion and no local/published chart. With
 		// --deploy, the published-chart resolver bails with the "runtime
@@ -952,6 +984,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {
+		t.Parallel()
 		// The desktop AI tab runs `erun open --app-session ai --ai`. Without
 		// --no-shell the dry-run reaches traceShellPreview, so the bootstrap-script
 		// block locks that the remote program is wrapped in a persistent dtach
@@ -968,6 +1001,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", func(t *testing.T) {
+		t.Parallel()
 		// When the env config sets a default Claude model that is in
 		// the env's available models, and opts in to verbose+debug, the AI
 		// session's create-time program must carry `--model <m> --verbose
@@ -988,6 +1022,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_falls_back_to_available_when_default_dropped", func(t *testing.T) {
+		t.Parallel()
 		// A chosen default no longer among the env's available models is
 		// dropped; the session falls back to the first available model rather
 		// than starting on none.
@@ -1003,6 +1038,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_gateway_auth_disables_remote_control", func(t *testing.T) {
+		t.Parallel()
 		// The managed AI session enables Claude Code Remote Control by default
 		// (named <tenant>/<env>) so it is drivable from the Claude iOS app — but
 		// Remote Control pairs through the claude.ai account relay, which the
@@ -1020,6 +1056,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
+		t.Parallel()
 		// The ERun and custom "Terminal N" tabs run `erun open --app-session open-N`:
 		// the same persistent dtach session but running a plain interactive shell —
 		// no claude launch and no contribute prelude in the launcher body.
@@ -1032,6 +1069,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_contribute_ai_dry_run_preludes_clone", func(t *testing.T) {
+		t.Parallel()
 		// The contribute-AI tab runs `erun open --app-session contribute-ai
 		// --contribute --ai`. The persistent dtach launcher must prepend the
 		// contribute prelude (contribute toolchain on PATH, cd into the cloned
@@ -1046,6 +1084,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_dry_run", func(t *testing.T) {
+		t.Parallel()
 		// VSCode against an sshd-enabled remote env: dry-run must reach
 		// past validateIDEOptions and emit the redeploy / port-forward /
 		// IDE-launch traces. The launchVSCode dependency is a no-op in
@@ -1062,6 +1101,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("intellij_dry_run", func(t *testing.T) {
+		t.Parallel()
 		// See vscode_dry_run for the host-OS pinning rationale; IntelliJ
 		// has its own platform-conditional code paths (Gateway lookup,
 		// installed-app fallback) that diverge by OS, so the golden
@@ -1430,6 +1470,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("default_tenant_environment_resolves_from_root_config", func(t *testing.T) {
+		t.Parallel()
 		// `erun open` without args must pick up defaulttenant +
 		// defaultenvironment from $XDG_CONFIG_HOME/erun. Exercises
 		// resolveOpenParams' "no args" branch and OpenParamsForArgs.
@@ -1441,6 +1482,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("kubectl_error_assumes_not_deployed", func(t *testing.T) {
+		t.Parallel()
 		// kubectl stub exits non-zero with a non-NotFound error. In
 		// dry-run, shouldDeployRuntime traces "assuming not deployed" and
 		// proceeds with the helm upgrade. Locks the dry-run fallback in
@@ -1453,6 +1495,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("not_initialized_triggers_init_retry", func(t *testing.T) {
+		t.Parallel()
 		// `erun open team dev` with no config triggers
 		// resolveOpenWithInitStopForParams' init-fired branch:
 		// resolveOpen errors with ErrNotInitialized, shouldRunInitForOpenCommand
@@ -1466,6 +1509,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("tenant_cloud_provider_issuers_flow_into_runtime_deploy", func(t *testing.T) {
+		t.Parallel()
 		// Exercises ResolveTenantCloudProviderIssuers +
 		// CloudProviderOIDCIssuerURL: when the tenant config names cloud
 		// provider aliases and the root config carries their OIDC issuer
@@ -1508,6 +1552,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("default_env_not_configured_runs_init_with_tenant", func(t *testing.T) {
+		t.Parallel()
 		// `erun open` (no args) against a tenant whose config lacks
 		// defaultenvironment: resolveOpen fails with
 		// ErrDefaultEnvironmentNotConfigured, the init-retry path resolves
@@ -1537,6 +1582,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("tenant_flag_only_resolves_default_env", func(t *testing.T) {
+		t.Parallel()
 		// `erun open --tenant team` (flag, no positional args) lands in
 		// resolveOpenParams' "tenant set, environment empty" switch case
 		// (open.go:172-174), with UseDefaultEnvironment=true so the env
@@ -1551,6 +1597,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("environment_positional_resolves_default_tenant", func(t *testing.T) {
+		t.Parallel()
 		// `erun open dev` (single positional arg) lands in
 		// resolveOpenParams' "tenant empty, environment set" switch case
 		// (open.go:169-171), with UseDefaultTenant=true so the tenant
@@ -1564,6 +1611,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_runtime_image_override", func(t *testing.T) {
+		t.Parallel()
 		// Remote env + --runtime-image rewrites the runtime release to
 		// use the embedded default-devops chart with the chosen image.
 		// Locks the RemoteRepo() branch in applyRuntimeDeployImageOverride
@@ -1577,6 +1625,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("persisted_local_port_range_is_honoured", func(t *testing.T) {
+		t.Parallel()
 		// EnvConfig.LocalPortRangeStart is the durable per-env port
 		// contract. When it is already set on disk, open must derive every
 		// service port from it (MCP 17500, API 17533, SSH 17522) and must
@@ -1590,6 +1639,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("walker_skips_index_claimed_by_other_tenant", func(t *testing.T) {
+		t.Parallel()
 		// When a second env on the host has already persisted
 		// localportrangestart=17000, the alphabetical walker must skip
 		// that index when allocating an unpersisted env. team/dev sorts
@@ -1606,6 +1656,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("overlapping_persisted_ranges_fail_with_pointer", func(t *testing.T) {
+		t.Parallel()
 		// Two envs that persist the same localportrangestart must surface
 		// an ErrLocalPortRangeOverlap pointing at both. The CLI should
 		// fail with a non-zero exit and a message naming both envs and the
@@ -1620,6 +1671,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("misaligned_persisted_range_fails_with_pointer", func(t *testing.T) {
+		t.Parallel()
 		// localportrangestart must align to EnvironmentPortRangeSize=100
 		// boundaries from LowerServicePort=17000. A value like 17050
 		// would make MCP/API/SSH offsets bleed into another env's range,
@@ -1873,6 +1925,7 @@ exit 1
 	})
 
 	t.Run("refuses_to_bind_when_foreign_process_holds_port", func(t *testing.T) {
+		t.Parallel()
 		// When the port is held by a process whose argv does not look like
 		// the kubectl port-forward erun would start, adoption is unsafe.
 		// erun must trace what is holding the port (PID + argv) so the
@@ -1891,6 +1944,7 @@ exit 1
 	})
 
 	t.Run("deployment_match_ignores_missing_api_port", func(t *testing.T) {
+		t.Parallel()
 		// Regression for the --intellij short-circuit on tenant-owned
 		// devops charts. The runtime-pod identity matcher must accept a
 		// deployment whose containers expose ERUN_REPO_PATH,
@@ -2054,6 +2108,7 @@ exit 1
 	})
 
 	t.Run("dry_run_unaffected_by_kubectl_deployment_get_library_execution_mode", func(t *testing.T) {
+		t.Parallel()
 		// Locks the dry-run/audit contract for kubectl-deployment-get: the
 		// plan must stay byte-identical to the subprocess-mode golden
 		// (intellij_dry_run, which already exercises the API-deployment

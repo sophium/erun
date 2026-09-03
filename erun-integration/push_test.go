@@ -16,6 +16,7 @@ import (
 )
 
 func TestPush(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		// The root `erun push` shorthand only registers when a Dockerfile is
 		// present in cwd; without the seed, `push --help` falls through to root
