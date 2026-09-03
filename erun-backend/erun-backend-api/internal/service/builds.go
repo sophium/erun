@@ -38,6 +38,29 @@ func (e *MissingFailureDetailError) Error() string {
 
 func (e *MissingFailureDetailError) Unwrap() error { return repository.ErrInvalidInput }
 
+// GateBuildRequiresReviewError refuses a GATE build reported with no review:
+// a gate build always gates a specific review's merge, so one with nothing to
+// gate is a caller error, not a new kind of build.
+type GateBuildRequiresReviewError struct{}
+
+func (e *GateBuildRequiresReviewError) Error() string {
+	return "a GATE build must be reported against a review; use kind RECORDED for an unattached build"
+}
+
+func (e *GateBuildRequiresReviewError) Unwrap() error { return repository.ErrInvalidInput }
+
+// UnattachedBuildRequiresEnvironmentError refuses a build reported with
+// neither a review nor an environment: tenant + review is one identity a
+// build can report against, tenant + environment is the other, and a build
+// naming neither has no identity at all.
+type UnattachedBuildRequiresEnvironmentError struct{}
+
+func (e *UnattachedBuildRequiresEnvironmentError) Error() string {
+	return "a build with no review must report the environment it ran in"
+}
+
+func (e *UnattachedBuildRequiresEnvironmentError) Unwrap() error { return repository.ErrInvalidInput }
+
 type BuildRepository interface {
 	Create(ctx context.Context, build model.Build) (model.Build, error)
 }
@@ -70,22 +93,42 @@ func (s *BuildService) Create(ctx context.Context, build model.Build) (model.Bui
 	if build.Kind == "" {
 		build.Kind = model.BuildKindRecorded
 	}
-	switch build.Kind {
-	case model.BuildKindRecorded:
-		if !buildVersionPattern.MatchString(build.Version) {
-			return model.Build{}, &InvalidVersionError{Version: build.Version}
-		}
-	case model.BuildKindGate:
-		if !build.Successful && strings.TrimSpace(build.FailureDetail) == "" {
-			return model.Build{}, &MissingFailureDetailError{}
-		}
+	if strings.TrimSpace(build.ReviewID) == "" && strings.TrimSpace(build.EnvironmentID) == "" {
+		return model.Build{}, &UnattachedBuildRequiresEnvironmentError{}
+	}
+	if err := validateBuildByKind(build); err != nil {
+		return model.Build{}, err
 	}
 	created, err := s.builds.Create(ctx, build)
 	if err != nil {
 		return model.Build{}, err
 	}
+	// A build with no review has no review status to transition.
+	if created.ReviewID == "" {
+		return created, nil
+	}
 	if _, _, err := s.reviews.MarkBuildResult(ctx, created.ReviewID, created.BuildID, created.Successful); err != nil {
 		return model.Build{}, err
 	}
 	return created, nil
+}
+
+// validateBuildByKind applies the checks that differ between a RECORDED and
+// a GATE build -- version grammar for the former, review linkage and a
+// failure reason for the latter.
+func validateBuildByKind(build model.Build) error {
+	switch build.Kind {
+	case model.BuildKindRecorded:
+		if !buildVersionPattern.MatchString(build.Version) {
+			return &InvalidVersionError{Version: build.Version}
+		}
+	case model.BuildKindGate:
+		if strings.TrimSpace(build.ReviewID) == "" {
+			return &GateBuildRequiresReviewError{}
+		}
+		if !build.Successful && strings.TrimSpace(build.FailureDetail) == "" {
+			return &MissingFailureDetailError{}
+		}
+	}
+	return nil
 }

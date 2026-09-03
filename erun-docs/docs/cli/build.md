@@ -94,6 +94,10 @@ An image whose Dockerfile builds `FROM` another image the same build produces re
 
 `erun build --dry-run` streams the same `audit:` and `trace:` lines a real run would: the resolved build scope (project root, tenant, environment, version, registry), the per-component fingerprint-cache decision, and the `docker build` (one per architecture), `docker tag`, and — with `--release` — `docker push` / manifest commands it would run, without executing any of them. Values matching secret patterns are redacted. The trace is otherwise identical to the real run. Redaction follows the rules in [Agent reference · Dry-run redaction](/agent-reference/dry-run-redaction).
 
+## Reporting to the platform
+
+When the environment has an erun platform alias configured (`erun cloud init erun` / `erun cloud login`), `erun build` reports its own outcome — commit, version, success or failure — after it finishes, so the tenant dashboard's Builds tab shows it even with no review involved. This is automatic and best-effort: a build with no platform alias configured behaves exactly as before, and a build never fails (or changes its own result) because the report itself could not go through. See [Builds · Builds with no review](/collaboration/builds#builds-with-no-review) for the full contract.
+
 ## Error behaviour
 
 | Failure | Behaviour |

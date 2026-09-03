@@ -99,9 +99,13 @@ var Routes = map[string]Class{
 	"DELETE /v1/reviews/{review_id}/reviewers/{user_id}": TenantUserClass,
 
 	// builds.go — reporting/reading a review's builds is part of driving it.
+	// GET/POST /v1/builds is the same build-history surface, tenant-wide
+	// rather than review-nested (erun#1954).
 	"GET /v1/reviews/{review_id}/builds":            TenantUserClass,
 	"POST /v1/reviews/{review_id}/builds":           TenantUserClass,
 	"GET /v1/reviews/{review_id}/builds/{build_id}": TenantUserClass,
+	"GET /v1/builds":                                TenantUserClass,
+	"POST /v1/builds":                               TenantUserClass,
 
 	// gate_runs.go — reading and driving gate runs is part of the same
 	// merge-queue workflow TenantUser already drives for reviews and builds.

@@ -189,16 +189,66 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 	}
 }
 
-func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
+// RunBuildExecution runs a plain `erun build`. store/deps are the cloud
+// alias reader and dependencies ReportBuildOutcome uses to self-report this
+// run to the erun platform, best-effort, once it finishes (erun#1954) --
+// pass a nil store from a caller that has none (build never fails or
+// changes its own output because reporting is unavailable).
+func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
 
-func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
+// RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart;
+// see its doc comment for store/deps.
+func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
+}
+
+// reportBuildExecutionOutcome self-reports one `erun build` run's outcome to
+// the erun platform, best-effort -- see ReportBuildOutcome. RunReleaseExecution
+// (the standalone `erun release` command) does not call this: a release
+// records itself against a review through the release queue instead (see
+// erun-docs/docs/collaboration/builds.md's "Release queue" section), so an
+// automatic unattached report here would duplicate that record for no
+// benefit. `erun build --release` (a snapshot vs. stable version choice, not
+// a different command) still goes through RunBuildExecution above and does
+// get reported, same as any other build.
+func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, store CloudReadStore, deps CloudDependencies, err error) {
+	if store == nil {
+		return
+	}
+	projectRoot, environment := buildExecutionProjectRootAndEnvironment(execution)
+	failureDetail := ""
+	if err != nil {
+		failureDetail = err.Error()
+	}
+	ReportBuildOutcome(ctx, store, deps, ReportBuildOutcomeParams{
+		ProjectRoot:   projectRoot,
+		Environment:   environment,
+		Version:       NewBuildResult(execution).Version,
+		Successful:    err == nil,
+		FailureDetail: failureDetail,
+	})
+}
+
+// buildExecutionProjectRootAndEnvironment reads the project root and
+// environment name build already resolved off the first image in the
+// execution -- every image in one execution shares both, since they are
+// resolved once for the whole build. Both are empty for a project build
+// script execution, which builds no docker images at all.
+func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (string, string) {
+	for _, build := range execution.dockerBuilds {
+		if build.Image.ProjectRoot != "" || build.Image.Environment != "" {
+			return build.Image.ProjectRoot, build.Image.Environment
+		}
+	}
+	return "", ""
 }
 
 // RunReleaseExecution is a standalone `erun release`: the same build → publish →

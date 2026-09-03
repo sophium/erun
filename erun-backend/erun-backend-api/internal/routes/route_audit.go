@@ -25,6 +25,12 @@ var InternalAPIRoutes = map[string]bool{
 	// flow (advancing the queue, closing a review) already has a real
 	// desktop surface, which is what actually needs one.
 	"POST /v1/reviews/{review_id}/builds": true,
+	// Same self-report shape as the route above, for a build with no review
+	// attached -- an ordinary `erun build` run in an environment (erun#1954).
+	// GET /v1/builds is not listed here: it has a real operator surface (the
+	// desktop tenant dashboard's Builds tab, extended to include unattached
+	// builds alongside review builds -- see erun-ui/tenant_dashboard.go).
+	"POST /v1/builds": true,
 	// Starts (POST) or reports the outcome of (PATCH) a gate run -- the
 	// environment driving the gate reports its own attempt, never something
 	// an operator clicks, the same self-report shape as the build-result

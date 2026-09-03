@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,7 @@ const (
 	tenantDashboardReadMergeQueue     = "GET /v1/reviews/merge-queue"
 	tenantDashboardReadGateRuns       = "GET /v1/gate-runs"
 	tenantDashboardReadBuilds         = "GET /v1/reviews/{review_id}/builds"
+	tenantDashboardReadAllBuilds      = "GET /v1/builds"
 	tenantDashboardReadComments       = "GET /v1/reviews/{review_id}/comments"
 	tenantDashboardWriteComment       = "POST /v1/reviews/{review_id}/comments"
 	tenantDashboardReadReviewers      = "GET /v1/reviews/{review_id}/reviewers"
@@ -287,7 +289,51 @@ func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformC
 			dashboard.Builds = builds
 		}
 	}
+	appendUnattachedTenantDashboardBuilds(ctx, client, capabilities, dashboard, &panel)
 	dashboard.Panels = append(dashboard.Panels, panel)
+}
+
+// appendUnattachedTenantDashboardBuilds merges GET /v1/builds' unattached
+// (no-review) builds into the same Builds panel the review-linked read above
+// populates -- an ordinary `erun build` self-reports here now too
+// (erun#1954), not only a build recorded against a review. Best-effort: a
+// caller who cannot read this newer route, or a read that fails, does not
+// blank builds the review-side read already found; it only becomes the
+// panel's own restriction/error when the review-side had none of its own to
+// report.
+func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, panel *uiTenantDashboardPanel) {
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAllBuilds); restricted != "" {
+		if panel.Restricted == "" && panel.Error == "" {
+			panel.Restricted = restricted
+		}
+		return
+	}
+	page, err := client.ListAllBuilds(ctx, eruncommon.PlatformBuildListFilter{})
+	if err != nil {
+		if panel.Restricted == "" && panel.Error == "" {
+			panel.Error = tenantDashboardReadError(tenantDashboardReadAllBuilds, err)
+		}
+		return
+	}
+	for _, build := range page.Builds {
+		if strings.TrimSpace(build.ReviewID) != "" {
+			continue // already covered by the review-linked read above
+		}
+		dashboard.Builds = append(dashboard.Builds, uiTenantDashboardBuild{
+			BuildID:         build.BuildID,
+			TenantID:        build.TenantID,
+			EnvironmentID:   build.EnvironmentID,
+			EnvironmentName: build.EnvironmentName,
+			Successful:      build.Successful,
+			CommitID:        build.CommitID,
+			Version:         build.Version,
+			CreatedAt:       tenantDashboardTime(build.CreatedAt),
+			UpdatedAt:       tenantDashboardTime(build.UpdatedAt),
+		})
+	}
+	sort.Slice(dashboard.Builds, func(i, j int) bool {
+		return dashboard.Builds[i].CreatedAt > dashboard.Builds[j].CreatedAt
+	})
 }
 
 // loadTenantDashboardReviewThreadCounts enriches each review row with its

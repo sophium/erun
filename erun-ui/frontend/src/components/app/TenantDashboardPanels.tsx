@@ -58,8 +58,8 @@ function BuildsPanel({ data }: { data: TenantDashboardData }): React.ReactElemen
         tab="builds"
         empty={
           <EmptyState
-            heading="No review builds yet"
-            body="Builds appear here as they are recorded against this tenant's reviews."
+            heading="No builds yet"
+            body="Builds appear here as they are recorded against this tenant's reviews, or reported by an environment's own `erun build` runs."
           />
         }
       >
@@ -102,13 +102,25 @@ function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactE
   );
 }
 
+function buildSourceLabel(build: UITenantDashboardBuild): string {
+  if (build.reviewId?.trim()) {
+    return build.reviewName?.trim() ? build.reviewName : build.reviewId;
+  }
+  if (build.environmentId?.trim()) {
+    return build.environmentName?.trim()
+      ? `env: ${build.environmentName}`
+      : `env: ${build.environmentId}`;
+  }
+  return '—';
+}
+
 function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.ReactElement {
   return (
-    <DataTable headers={['Build', 'Review', 'Result', 'Commit', 'Version', 'Created']}>
+    <DataTable headers={['Build', 'Source', 'Result', 'Commit', 'Version', 'Created']}>
       {builds.map((build) => (
         <tr key={build.buildId}>
           <DataCell strong>{build.buildId}</DataCell>
-          <DataCell>{build.reviewName?.trim() ? build.reviewName : build.reviewId}</DataCell>
+          <DataCell>{buildSourceLabel(build)}</DataCell>
           <DataCell>
             <StatusBadge
               tone={build.successful ? 'success' : 'destructive'}
