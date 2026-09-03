@@ -8,7 +8,21 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
+
+type stubGateRunRepository struct {
+	listFilter apirepository.GateRunFilter
+}
+
+func (s *stubGateRunRepository) Get(_ context.Context, gateRunID string) (model.GateRun, error) {
+	return model.GateRun{GateRunID: gateRunID}, nil
+}
+
+func (s *stubGateRunRepository) List(_ context.Context, filter apirepository.GateRunFilter) ([]model.GateRun, error) {
+	s.listFilter = filter
+	return nil, nil
+}
 
 type stubGateRunService struct {
 	startedStatus  model.GateRunStatus
@@ -65,5 +79,28 @@ func TestReportGateRunOutcomeNormalizesLowercaseStatus(t *testing.T) {
 	}
 	if svc.reportedStatus != model.GateRunStatusInconclusive {
 		t.Fatalf("service received status = %q, want %q", svc.reportedStatus, model.GateRunStatusInconclusive)
+	}
+}
+
+// TestListGateRunsNormalizesLowercaseStatusFilter: startGateRun/reportGateRunOutcome
+// already normalize a lowercase status so a caller following `erun exec
+// gate-run report`'s own lowercase examples is accepted -- every status this
+// API ever stores is therefore uppercase. listGateRuns must normalize its own
+// `?status=` filter the same way, or `GET /v1/gate-runs?status=failed`
+// silently returns zero rows against real, uppercase-stored data instead of
+// matching them.
+func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=failed", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if repo.listFilter.Status != model.GateRunStatusFailed {
+		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
 	}
 }

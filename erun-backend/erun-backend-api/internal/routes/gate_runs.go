@@ -39,7 +39,7 @@ func (r GateRunRoutes) listGateRuns(w http.ResponseWriter, req *http.Request) {
 	filter := apirepository.GateRunFilter{
 		TargetBranch: query.Get("targetBranch"),
 		SourceBranch: query.Get("sourceBranch"),
-		Status:       model.GateRunStatus(query.Get("status")),
+		Status:       model.GateRunStatus(strings.ToUpper(strings.TrimSpace(query.Get("status")))),
 	}
 	runs, err := r.gateRuns.List(req.Context(), filter)
 	if err != nil {
