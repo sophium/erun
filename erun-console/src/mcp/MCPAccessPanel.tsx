@@ -16,21 +16,15 @@ import * as React from 'react';
 
 import { type AISessionStatus, useListAISessionsQuery } from '../app/api/aiSessionsApi';
 import { MCP_ADMIN_SCOPE, MCP_OPERATE_SCOPE } from '../app/api/mcpApi';
-import type { AttachSessionState, McpTokenState, McpToolCallState } from './controller';
+import type { AttachSessionState, McpTokenState } from './controller';
 import {
   useAttachSessionController,
   useMcpTokenController,
   useMcpToolCallController,
 } from './controller';
-
-// hostnameFieldLabel says whether a hostname field is prefilled from a known,
-// discovered edge (still editable, to override) or falls back to plain
-// manual entry because the environment has never been successfully exposed.
-function hostnameFieldLabel(prefix: string, exposedHostname: string | undefined): string {
-  return exposedHostname !== undefined
-    ? `${prefix} (discovered — edit to override)`
-    : `${prefix} (not yet exposed — enter one)`;
-}
+import { hostnameFieldLabel } from './hostnameFieldLabel';
+import { DriveToolResult } from './mcpFormShared';
+import { OperateToolForm } from './OperateToolForm';
 
 // DriveToolForm is the console's first caller of an environment's live MCP
 // edge, not just the token-minting half of it. The hostname prefills from the
@@ -83,52 +77,6 @@ function DriveToolForm({
       <DriveToolResult state={state} />
     </form>
   );
-}
-
-// OperateScopeNote replaces DriveToolForm's smoke test when the minted token
-// is erun:operate-scoped. `version` requires erun:read, which erun:operate
-// deliberately does not imply (the same isolation erun:attach already has),
-// so calling it here would always be refused -- correct enforcement, but a
-// confusing "broken" reading for an operator who asked for this narrower
-// scope on purpose. The operate tools themselves (deploy/context_start/
-// context_stop/resize) are all side-effecting, so there is no harmless
-// smoke test to offer in their place; the token is handed over for the
-// operator's own MCP client to drive them.
-function OperateScopeNote(): React.ReactElement {
-  return (
-    <p className="border-t border-border pt-3 text-sm text-muted-foreground">
-      This token is scoped to <code>erun:operate</code>: it can deploy an already-published version,
-      start or stop the cloud context, and resize the runtime pod. It cannot call read/observe tools
-      or anything reserved for <code>erun:admin</code>. Present it to your own MCP client to drive
-      those actions.
-    </p>
-  );
-}
-
-function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactElement | null {
-  if (state.status === 'ready') {
-    return (
-      <pre
-        role="status"
-        aria-live="polite"
-        className={
-          state.result.isError
-            ? 'whitespace-pre-wrap text-sm text-destructive'
-            : 'whitespace-pre-wrap text-sm text-muted-foreground'
-        }
-      >
-        {state.result.text}
-      </pre>
-    );
-  }
-  if (state.status === 'error') {
-    return (
-      <p className="text-sm text-destructive" role="alert">
-        Could not call the tool: {state.message}
-      </p>
-    );
-  }
-  return null;
 }
 
 // sessionFieldLabel mirrors hostnameFieldLabel's discovered-vs-manual wording
@@ -386,7 +334,7 @@ function TokenResult({
           readOnly
         />
         {state.token.scope === MCP_OPERATE_SCOPE ? (
-          <OperateScopeNote />
+          <OperateToolForm mcpToken={state.token.token} exposedHostname={exposedHostname} />
         ) : (
           <DriveToolForm mcpToken={state.token.token} exposedHostname={exposedHostname} />
         )}

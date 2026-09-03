@@ -109,6 +109,7 @@ async function requestToolCall(
   token: string,
   sessionId: string,
   toolName: string,
+  args: Record<string, unknown>,
 ): Promise<unknown> {
   const response = await postMcp({
     url,
@@ -118,7 +119,7 @@ async function requestToolCall(
       jsonrpc: '2.0',
       id: 2,
       method: 'tools/call',
-      params: { name: toolName, arguments: {} },
+      params: { name: toolName, arguments: args },
     },
   });
   return readJsonRpcResult(response, url);
@@ -147,17 +148,20 @@ function parseToolResult(result: unknown): McpToolResult {
   return { isError: result.isError === true, text: toolResultText(result) };
 }
 
-// callMcpTool drives one read-only tool call against a deployed environment's
-// exposed MCP edge, from the browser, using a bearer token the console
-// already minted (see mcpApi.ts). It is the one function that actually
-// exercises that token; everything upstream only requests and displays it.
+// callMcpTool drives one tool call against a deployed environment's exposed
+// MCP edge, from the browser, using a bearer token the console already
+// minted (see mcpApi.ts). It is the one function that actually exercises
+// that token; everything upstream only requests and displays it. args
+// defaults to an empty object for the read-only smoke-test caller
+// (DriveToolForm's `version` call), which takes no input.
 export async function callMcpTool(
   hostname: string,
   token: string,
   toolName: string,
+  args: Record<string, unknown> = {},
 ): Promise<McpToolResult> {
   const url = mcpEdgeUrl(hostname);
   const sessionId = await initializeSession(url, token);
   await confirmInitialized(url, token, sessionId);
-  return parseToolResult(await requestToolCall(url, token, sessionId, toolName));
+  return parseToolResult(await requestToolCall(url, token, sessionId, toolName, args));
 }
