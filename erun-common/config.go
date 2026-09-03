@@ -220,6 +220,30 @@ func (t EnvironmentType) IsValid() bool {
 	return false
 }
 
+// UsesDindSidecar reports whether an environment of this type carries the
+// erun-dind sidecar every image build actually runs in -- mirrors
+// $dindEnabled in erun-devops/k8s/erun-devops/templates/service.yaml (`ne
+// $envType "runtime"`), narrowed by the one case that chart condition doesn't
+// cover: a host env renders no pod at all. This is the one signal that tells
+// a runtime-container-scoped reading (RunRuntimeUsage) whether it is leaving
+// out a real, separate cgroup where builds spend CPU/memory -- see
+// environmentUsesDindSidecar in
+// erun-ui/frontend/src/components/app/Sidebar.helpers.ts, which this mirrors;
+// keep both in sync.
+func (t EnvironmentType) UsesDindSidecar() bool {
+	if !t.IsValid() {
+		return false
+	}
+	switch t {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
+		return true
+	case EnvironmentTypeRuntime, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("UsesDindSidecar: unhandled EnvironmentType %q", t))
+	}
+}
+
 func (c SSHDWorkspaceSyncConfig) IsZero() bool {
 	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
 }

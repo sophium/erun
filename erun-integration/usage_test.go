@@ -105,6 +105,78 @@ func TestUsage(t *testing.T) {
 		golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
 	})
 
+	// real_run_runtime_env_omits_builds_caveat is the negative case: a
+	// runtime-type env has no erun-dind sidecar (every image build for it
+	// happens elsewhere, never in this pod), so the reading is the whole
+	// story and must not carry the "excludes builds" caveat that a
+	// build-capable env's own reading (the scenario above) does carry. Locks
+	// EnvironmentType.UsesDindSidecar's runtime=false branch end-to-end
+	// through the real command, not just the unit-level predicate.
+	t.Run("real_run_runtime_env_omits_builds_caveat", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=1027301376",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=581511501",
+			"cpu_usage_after=581611501",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"cpu_periods=376556",
+			"cpu_throttled_periods=425",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "excludesBuilds") {
+			t.Fatalf("a runtime-type env has no dind sidecar and must not report excludesBuilds, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_runtime_env_omits_builds_caveat", normalize.Apply(result.Combined))
+	})
+
+	// real_run_local_agent_env_states_the_builds_caveat is the positive
+	// sibling: a build-capable env (local-agent/remote-agent) carries the
+	// erun-dind sidecar every image build actually runs in, a separate cgroup
+	// this reading cannot see, so the JSON output must say so rather than let
+	// a busy build read as an idle environment.
+	t.Run("real_run_local_agent_env_states_the_builds_caveat", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=1027301376",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=581511501",
+			"cpu_usage_after=581611501",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"cpu_periods=376556",
+			"cpu_throttled_periods=425",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun-dind sidecar") {
+			t.Fatalf("a build-capable env must state the builds-excluded caveat, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_cgroup_v1_reports_unavailable_not_an_error", func(t *testing.T) {
 		// A cluster whose runtime image predates cgroup v2 (or any host where
 		// /sys/fs/cgroup is not cgroup2fs) must still succeed: CPU and memory

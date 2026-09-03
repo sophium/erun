@@ -13,10 +13,28 @@ func writeUsageResult(ctx common.Context, usage common.RuntimeUsage) error {
 	if err := writeUsageMemory(ctx, usage.Memory); err != nil {
 		return err
 	}
+	if err := writeUsageBuildsCaveat(ctx, usage.ExcludesBuilds); err != nil {
+		return err
+	}
 	if err := writeUsageDisk(ctx, usage.Disk); err != nil {
 		return err
 	}
 	return writeUsageWarnings(ctx, usage.Warnings)
+}
+
+// writeUsageBuildsCaveat names the gap CPU/Memory above cannot close on a
+// build-capable environment: an image build runs in the erun-dind sidecar, a
+// separate cgroup this reading cannot see, so it can read idle while a build
+// saturates the sidecar. Matches the desktop hover card's "-- excludes
+// builds" caveat (Sidebar.EnvHoverCard.tsx) so the two transports never
+// disagree about whether this reading covers builds.
+func writeUsageBuildsCaveat(ctx common.Context, excludesBuilds bool) error {
+	if !excludesBuilds {
+		return nil
+	}
+	_, err := fmt.Fprintln(ctx.Stdout,
+		"Note: CPU/Memory above exclude the erun-dind sidecar where builds run -- its usage is not visible from inside this container; see `erun observe` for the sidecar's own limits.")
+	return err
 }
 
 func writeUsageCPU(ctx common.Context, cpu common.RuntimeCPUUsage) error {

@@ -15,6 +15,7 @@
       "usedBytes": 91142750208,
       "percentUsed": 44.899735520796746
     }
-  ]
+  ],
+  "excludesBuilds": true
 }
 audit: erun usage --output json

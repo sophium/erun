@@ -41,6 +41,17 @@ import (
 //     downstream may depend on pressure stall information. nr_throttled over
 //     nr_periods (RuntimeCPUUsage.ThrottledPeriods / .Periods) is the
 //     CPU-starvation signal that is actually available wherever cgroup v2 is.
+//  3. A build-capable environment's real build work never happens in this
+//     container -- every image build runs in the erun-dind sidecar, a
+//     separate cgroup this reading cannot see: the sidecar's build containers
+//     are cgroup siblings, not descendants, so there is no path from inside
+//     this container to their usage, and the one place that view is
+//     reachable is a host-wide path shared by every build-capable pod on the
+//     node, not attributable to one environment. RuntimeUsage.ExcludesBuilds
+//     (EnvironmentType.UsesDindSidecar) names this instead of letting the
+//     reading imply the environment is idle while a build saturates the
+//     sidecar -- see erun-cli/cmd/usage_render.go and the desktop's matching
+//     Sidebar.EnvHoverCard.tsx caveat.
 //
 // RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
 // script below into the container over kubectl, for an on-demand `erun usage`
@@ -121,6 +132,15 @@ type RuntimeUsage struct {
 	// Warnings are named threshold crossings a caller can branch on without
 	// parsing prose -- see the RuntimeUsage*WarnPercent constants.
 	Warnings []string `json:"warnings,omitempty"`
+	// ExcludesBuilds is true when this environment carries the erun-dind
+	// sidecar (EnvironmentType.UsesDindSidecar) -- i.e. CPU and Memory above
+	// are scoped to the runtime container alone and cannot see a build
+	// actually running in the sidecar's own cgroup. Mirrors the desktop
+	// hover card's usageExcludesBuilds/excludesBuilds caveat so both
+	// transports disclose the same limitation instead of one silently
+	// under-reporting relative to the other. See the file-level comment for
+	// why the sidecar's own cgroup cannot be read as a fix instead.
+	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
 }
 
 // HasCounters reports whether the read found anything worth retaining. A host
@@ -196,7 +216,7 @@ func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 		return RuntimeUsage{}, err
 	}
 	if ctx.DryRun {
-		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment}, nil
+		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}, nil
 	}
 	return parseRuntimeUsage(req, result.Stdout, interval), nil
 }
@@ -252,7 +272,7 @@ func runtimeUsageScript(interval time.Duration) string {
 
 func parseRuntimeUsage(req ShellLaunchParams, output string, interval time.Duration) RuntimeUsage {
 	values := parseRuntimeUsageValues(output)
-	usage := RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment}
+	usage := RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}
 	usage.CPU = runtimeCPUUsageFromValues(values, interval)
 	usage.Memory = runtimeMemoryUsageFromValues(values)
 	usage.Disk = []RuntimeDiskUsage{runtimeDiskUsageFromValues(values)}
