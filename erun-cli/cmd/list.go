@@ -19,7 +19,7 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Requires network access to each configured plane and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -151,17 +151,7 @@ func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) er
 	if drift.PublishedVersionError != "" {
 		problems = append(problems, "the published version could not be resolved: "+drift.PublishedVersionError)
 	}
-	var unreachable, behind, ahead []string
-	for _, plane := range drift.Planes {
-		switch {
-		case !plane.Reachable:
-			unreachable = append(unreachable, plane.Alias)
-		case plane.Behind:
-			behind = append(behind, plane.Alias)
-		case plane.Ahead:
-			ahead = append(ahead, plane.Alias)
-		}
-	}
+	unreachable, behind, ahead := classifyControlPlaneVersionDrift(drift.Planes)
 	if len(unreachable) > 0 {
 		problems = append(problems, fmt.Sprintf("%d plane(s) unreachable: %s", len(unreachable), strings.Join(unreachable, ", ")))
 	}
@@ -175,6 +165,33 @@ func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) er
 		return nil
 	}
 	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
+}
+
+// classifyControlPlaneVersionDrift buckets every plane, and its linked
+// console when one was checked, into unreachable/behind/ahead -- a console's
+// own label gets a " (console)" suffix so the two stay distinguishable in the
+// --fail-on-drift summary.
+func classifyControlPlaneVersionDrift(planes []common.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
+	for _, plane := range planes {
+		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
+		if plane.Console == nil {
+			continue
+		}
+		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias+" (console)", plane.Console.Reachable, plane.Console.Behind, plane.Console.Ahead)
+	}
+	return unreachable, behind, ahead
+}
+
+func appendControlPlaneVersionVerdict(unreachable, behind, ahead []string, label string, reachable, isBehind, isAhead bool) ([]string, []string, []string) {
+	switch {
+	case !reachable:
+		unreachable = append(unreachable, label)
+	case isBehind:
+		behind = append(behind, label)
+	case isAhead:
+		ahead = append(ahead, label)
+	}
+	return unreachable, behind, ahead
 }
 
 func writeVersionDriftReport(ctx common.Context, drift common.TenantVersionDrift) error {
@@ -273,6 +290,29 @@ func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlane
 	case plane.Behind:
 		line += " [behind published -- roll it]"
 	case plane.Ahead:
+		line += " [ahead of published -- running an unpublished version]"
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+		return err
+	}
+	if plane.Console == nil {
+		return nil
+	}
+	return writeControlPlaneConsoleEntry(ctx, *plane.Console)
+}
+
+func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVersionStatus) error {
+	line := "    console: url=" + quotedValueOrNone(console.URL)
+	if !console.Reachable {
+		line += " reachable=no reason=" + quotedValueOrNone(console.UnreachableReason)
+		_, err := fmt.Fprintln(ctx.Stdout, line)
+		return err
+	}
+	line += " reachable=yes version=" + quotedValueOrNone(console.Version)
+	switch {
+	case console.Behind:
+		line += " [behind published -- roll it]"
+	case console.Ahead:
 		line += " [ahead of published -- running an unpublished version]"
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)

@@ -23,10 +23,12 @@ type ListInput struct {
 	// ControlPlanes, when set, additionally reports every configured
 	// erun-hosted control plane's deployed version (GET /v1/platform)
 	// against the newest version erun's own registry has actually
-	// published -- deployed-vs-published, not deployed-vs-main. Requires
-	// network access to each plane and to erun's registry; Preview traces
-	// what would be checked instead of making either call.
-	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
+	// published -- deployed-vs-published, not deployed-vs-main -- and each
+	// plane's linked console the same way (GET /version.json, discovered
+	// from the plane's own reported consoleUrl), nested under it. Requires
+	// network access to each plane and console, and to erun's registry;
+	// Preview traces what would be checked instead of making either call.
+	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
 	Preview       bool `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
 }
 

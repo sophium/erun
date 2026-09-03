@@ -3,3 +3,4 @@ audit: erun list --control-planes --dry-run --fail-on-drift
 erun list
 list: would resolve the published version from erun's own registry
 list: would GET <PLANE_API>/v1/platform for control plane erun+test@erun
+list: would also probe erun+test@erun's console at /version.json, using the consoleUrl that GET /v1/platform discloses
