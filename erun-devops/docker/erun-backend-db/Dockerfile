@@ -16,7 +16,7 @@ RUN apk add --no-cache ca-certificates curl && \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates && \
+RUN apk add --no-cache ca-certificates postgresql16-client && \
     addgroup -S erun && \
     adduser -S -G erun -h /home/erun erun && \
     mkdir -p /opt/erun-backend-db /home/erun && \
@@ -25,6 +25,7 @@ RUN apk add --no-cache ca-certificates && \
 COPY --from=atlas-fetcher /atlas /usr/local/bin/atlas
 COPY erun-backend/erun-backend-db /opt/erun-backend-db
 COPY --chmod=0755 erun-devops/docker/erun-backend-db/migrate.sh /usr/local/bin/erun-backend-db-migrate
+COPY --chmod=0755 erun-devops/docker/erun-backend-db/retention.sh /usr/local/bin/erun-backend-db-retention
 
 RUN chown -R erun:erun /opt/erun-backend-db
 
