@@ -275,6 +275,70 @@ func TestClipboardStoresInMemory(t *testing.T) {
 	}
 }
 
+// TestEmitReplacesDroppedEventWithGapMarker fills a subscriber's channel to
+// capacity, then emits one more event. Silently discarding it would leave the
+// subscriber unable to tell "nothing happened" apart from "I missed one" —
+// instead the oldest queued event must be evicted and replaced with an
+// eventsDroppedName marker carrying the miss count, so the subscriber always
+// has an explicit, actionable trace of the gap.
+func TestEmitReplacesDroppedEventWithGapMarker(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	sub := &subscriber{ch: make(chan event, 64)}
+	srv.subsMu.Lock()
+	srv.subs[srv.nextID.Add(1)] = sub
+	srv.subsMu.Unlock()
+
+	for i := 0; i < 64; i++ {
+		sub.ch <- event{Name: "filler", Args: []any{i}}
+	}
+
+	srv.Emit("overflow")
+
+	if got := len(sub.ch); got != 64 {
+		t.Fatalf("channel length = %d, want 64 (still full, no blocking)", got)
+	}
+
+	events := drainAll(sub.ch, 64)
+	assertFillerRange(t, events[:63], 1) // filler #0 was evicted to make room for the marker.
+	assertGapMarker(t, events[63], 1)
+
+	if got := sub.missed.Load(); got != 1 {
+		t.Fatalf("missed = %d, want 1", got)
+	}
+}
+
+func drainAll(ch <-chan event, n int) []event {
+	out := make([]event, n)
+	for i := range out {
+		out[i] = <-ch
+	}
+	return out
+}
+
+// assertFillerRange checks a contiguous run of filler events starting at
+// startArg, proving the dropped "overflow" event was replaced rather than
+// silently queued alongside the survivors.
+func assertFillerRange(t *testing.T, events []event, startArg int) {
+	t.Helper()
+	for i, ev := range events {
+		want := startArg + i
+		if ev.Name != "filler" || ev.Args[0].(int) != want {
+			t.Fatalf("event %d = %+v, want filler #%d", i, ev, want)
+		}
+	}
+}
+
+func assertGapMarker(t *testing.T, ev event, wantMissed int64) {
+	t.Helper()
+	if ev.Name != eventsDroppedName {
+		t.Fatalf("event = %+v, want the %q gap marker", ev, eventsDroppedName)
+	}
+	if len(ev.Args) != 1 || ev.Args[0].(int64) != wantMissed {
+		t.Fatalf("gap marker args = %+v, want missed count %d", ev.Args, wantMissed)
+	}
+}
+
 func bufioReaderForSSE(r io.Reader) *lineReader {
 	return &lineReader{r: r}
 }

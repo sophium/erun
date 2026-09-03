@@ -31,17 +31,30 @@ type Server struct {
 	shimJS     string
 
 	subsMu sync.Mutex
-	subs   map[int64]chan event
+	subs   map[int64]*subscriber
 	nextID atomic.Int64
 
 	clipMu sync.Mutex
 	clip   string
 }
 
+// subscriber pairs a subscriber's SSE channel with its own drop counter so a
+// full channel can be reported back to that subscriber rather than silently
+// discarded.
+type subscriber struct {
+	ch     chan event
+	missed atomic.Int64
+}
+
 type event struct {
 	Name string `json:"name"`
 	Args []any  `json:"args"`
 }
+
+// eventsDroppedName is the reserved event name Emit sends in place of an
+// event a full subscriber channel could not hold, so the subscriber learns it
+// missed something instead of reading silence as "nothing happened".
+const eventsDroppedName = "erun:events-dropped"
 
 // New builds a Server whose target — typically *main.App — is bound by exact
 // method name the same way Wails binds window.go.main.App.<Name>, so the
@@ -50,7 +63,7 @@ func New(target any, bundle fs.FS) *Server {
 	s := &Server{
 		target: reflect.ValueOf(target),
 		bundle: bundle,
-		subs:   make(map[int64]chan event),
+		subs:   make(map[int64]*subscriber),
 	}
 	s.methods, s.methodList = collectExportedMethods(s.target)
 	s.shimJS = buildShimJS(s.methodList)
@@ -60,16 +73,38 @@ func New(target any, bundle fs.FS) *Server {
 // Emit fans an event out to every active SSE subscriber; the headless main
 // wires it in as the App's emitter so EventsEmit-style calls reach the browser
 // without Wails.
+//
+// A subscriber that falls behind never has an event silently discarded: a
+// full channel would leave the subscriber unable to tell "nothing happened"
+// apart from "I missed it", which is unacceptable for a transport whose only
+// job is Playwright/CI test reliability. Instead the emitter evicts the
+// oldest queued event to make room and replaces it with an explicit
+// eventsDroppedName marker carrying the subscriber's running miss count, so
+// the subscriber always has a trace that a gap occurred and can resync.
 func (s *Server) Emit(name string, args ...any) {
 	ev := event{Name: name, Args: args}
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
-	for _, ch := range s.subs {
-		// Best-effort delivery: a subscriber that can't keep up drops events
-		// rather than blocking the emitter.
+	for _, sub := range s.subs {
 		select {
-		case ch <- ev:
+		case sub.ch <- ev:
+			continue
 		default:
+		}
+		missed := sub.missed.Add(1)
+		log.Printf("headlessserver: subscriber channel full, dropped event %q (missed=%d)", name, missed)
+		// Evict the oldest queued event to guarantee room for the gap
+		// marker below — Emit is the sole producer and holds subsMu for the
+		// whole call, so no concurrent send can refill the slot this frees.
+		select {
+		case <-sub.ch:
+		default:
+		}
+		gap := event{Name: eventsDroppedName, Args: []any{missed}}
+		select {
+		case sub.ch <- gap:
+		default:
+			log.Printf("headlessserver: dropped gap marker for subscriber (missed=%d)", missed)
 		}
 	}
 }
@@ -79,8 +114,8 @@ func (s *Server) Emit(name string, args ...any) {
 func (s *Server) Close() {
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
-	for id, ch := range s.subs {
-		close(ch)
+	for id, sub := range s.subs {
+		close(sub.ch)
 		delete(s.subs, id)
 	}
 }
@@ -256,10 +291,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch := make(chan event, 64)
+	sub := &subscriber{ch: make(chan event, 64)}
+	ch := sub.ch
 	id := s.nextID.Add(1)
 	s.subsMu.Lock()
-	s.subs[id] = ch
+	s.subs[id] = sub
 	s.subsMu.Unlock()
 
 	defer func() {
