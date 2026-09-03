@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
@@ -63,6 +64,7 @@ func (r GateRunRoutes) startGateRun(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
+	run.Status = model.GateRunStatus(strings.ToUpper(strings.TrimSpace(string(run.Status))))
 	run, err := r.service.Start(req.Context(), run)
 	if err != nil {
 		writeGateRunError(w, req, err)
@@ -84,6 +86,7 @@ func (r GateRunRoutes) reportGateRunOutcome(w http.ResponseWriter, req *http.Req
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
+	input.Status = model.GateRunStatus(strings.ToUpper(strings.TrimSpace(string(input.Status))))
 	run, err := r.service.ReportOutcome(req.Context(), req.PathValue("gate_run_id"), input.Status, input.FailingStep, input.LogRef, input.MergeCommit)
 	if err != nil {
 		writeGateRunError(w, req, err)
