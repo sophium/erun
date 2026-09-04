@@ -49,7 +49,7 @@ func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps commo
 				return err
 			}
 			if ctx.Output != common.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s, user %s)\n", quotedValueOrNone(whoami.Username), whoami.TenantID, whoami.UserID); err != nil {
+				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", quotedValueOrNone(whoami.Username), whoami.TenantID, quotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
 					return err
 				}
 			}

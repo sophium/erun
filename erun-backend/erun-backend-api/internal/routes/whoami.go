@@ -14,6 +14,17 @@ type WhoamiUserRepository interface {
 	RoleNames(ctx context.Context, userID string) ([]string, error)
 }
 
+// WhoamiTenantRepository resolves the caller's own tenant record off the
+// exact same tenants.name column and TenantRepository.Current method that
+// GET /v1/tenants reads (erun#2083: whoami used to carry no tenant name at
+// all, and its plain-text line put the caller's own username where an
+// operator naturally reads a tenant name, which is what made an ordinary
+// username look like a tenant list disagreement). Reusing the identical read
+// path is what makes the two answers structurally unable to diverge.
+type WhoamiTenantRepository interface {
+	Current(ctx context.Context) (model.Tenant, error)
+}
+
 // WhoamiCapabilityResolver narrows a candidate route set to the ones the caller
 // may reach. The authorization middleware's own authorizer implements it, so
 // the capability set a client renders from is computed by the code that
@@ -28,20 +39,24 @@ type WhoamiRouteCatalog func() []eruncommon.PlatformCapability
 
 type WhoamiRoutes struct {
 	users        WhoamiUserRepository
+	tenants      WhoamiTenantRepository
 	capabilities WhoamiCapabilityResolver
 	catalog      WhoamiRouteCatalog
 }
 
-func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository, capabilities WhoamiCapabilityResolver, catalog WhoamiRouteCatalog) {
-	routes := WhoamiRoutes{users: users, capabilities: capabilities, catalog: catalog}
+func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository, tenants WhoamiTenantRepository, capabilities WhoamiCapabilityResolver, catalog WhoamiRouteCatalog) {
+	routes := WhoamiRoutes{users: users, tenants: tenants, capabilities: capabilities, catalog: catalog}
 	register(http.MethodGet, "/v1/whoami", http.HandlerFunc(routes.handleWhoami))
 }
 
 type whoamiResponse struct {
-	TenantID string   `json:"tenantId"`
-	UserID   string   `json:"userId"`
-	Username string   `json:"username,omitempty"`
-	Roles    []string `json:"roles,omitempty"`
+	TenantID string `json:"tenantId"`
+	// TenantName is the tenant's name exactly as GET /v1/tenants reports it
+	// for this same TenantID -- see WhoamiTenantRepository.
+	TenantName string   `json:"tenantName,omitempty"`
+	UserID     string   `json:"userId"`
+	Username   string   `json:"username,omitempty"`
+	Roles      []string `json:"roles,omitempty"`
 	// Capabilities is what a client gates its surfaces on. Roles is
 	// descriptive: a role's name says nothing about what a tenant granted it.
 	//
@@ -65,6 +80,14 @@ func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) 
 		UserID:   securityContext.ErunUserID,
 		Issuer:   securityContext.ExternalIssuer,
 		Subject:  securityContext.ExternalUserID,
+	}
+	if routes.tenants != nil {
+		tenant, err := routes.tenants.Current(r.Context())
+		if err != nil {
+			writeRepositoryError(w, r, err)
+			return
+		}
+		response.TenantName = tenant.Name
 	}
 	if routes.users != nil {
 		user, err := routes.users.Get(r.Context(), securityContext.ErunUserID)
