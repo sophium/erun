@@ -276,3 +276,88 @@ func TestOrchestratorShellActivityStartHookCapturesTheSessionID(t *testing.T) {
 		t.Fatalf("the start hook must record the writing session's id: %q", orchestratorShellActivityStartHookCommand())
 	}
 }
+
+// erun#2144: a transient orchestrator id (investigate-<nanos>, report-bug-
+// <nanos>) is minted once and never reused, so once its session ends nothing
+// will ever call readOrchestratorShellActivity for it again —
+// reconcileOrchestratorActivity only visits ids currently in a.orchestrators.
+// A "running: true" report such a session never got to clear would otherwise
+// sit on disk asserting that forever. This is also exactly the ungraceful
+// case: the session was killed rather than cleanly stopped, so no exit hook
+// ever ran for it either, and a.orchestrators never held this id in the first
+// place in this test — the sweep must not depend on either happening.
+func TestReconcileOrphanedOrchestratorShellActivityReapsAnEphemeralIDNoOneWillEverAskAbout(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+	id := "report-bug-1788508309225841000"
+
+	writeOrchestratorShellActivity(t, id, orchestratorShellActivity{
+		Running: true, Command: "nc -z -w 4 host 22", TaskID: "task-1",
+		AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
+	})
+
+	a := &App{}
+	a.reconcileOrphanedOrchestratorShellActivity(now)
+
+	if _, ok := readOrchestratorShellActivity(id, now, false, ""); ok {
+		t.Fatal("an orphaned running:true report must not survive the sweep")
+	}
+	if _, err := os.Stat(orchestratorShellActivityPath(id)); !os.IsNotExist(err) {
+		t.Fatalf("the orphaned report file itself must be removed, got err=%v", err)
+	}
+}
+
+// A record too young to be implausible must survive: the sweep must not race
+// ahead of a session that simply hasn't written its next report yet.
+func TestReconcileOrphanedOrchestratorShellActivityLeavesAFreshOrphanAlone(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+	id := "report-bug-1788508309225841000"
+
+	writeOrchestratorShellActivity(t, id, orchestratorShellActivity{
+		Running: true, TaskID: "task-1", AtUnix: now.Unix(),
+	})
+
+	a := &App{}
+	a.reconcileOrphanedOrchestratorShellActivity(now)
+
+	if _, err := os.Stat(orchestratorShellActivityPath(id)); err != nil {
+		t.Fatalf("a fresh report must not be reaped: %v", err)
+	}
+}
+
+// A session the desktop is still genuinely holding open gets the same
+// generous safety bound the read path already applies — the sweep must not
+// reap a legitimate long-running background shell out from under a live
+// orchestrator just because it also happens to be transient.
+func TestReconcileOrphanedOrchestratorShellActivityRespectsALiveSessionsSafetyBound(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	now := time.Now()
+	id := "investigate-1788508309225841000"
+
+	writeOrchestratorShellActivity(t, id, orchestratorShellActivity{
+		Running: true, TaskID: "task-1",
+		AtUnix: now.Add(-orchestratorActivityTTL - time.Minute).Unix(),
+	})
+
+	a := &App{
+		orchestrators: map[string]*orchestratorSession{id: {id: id, transient: true}},
+		sessions:      map[string]*managedTerminal{orchestratorSessionKey(id): {session: newStubTerminalSession()}},
+	}
+	a.reconcileOrphanedOrchestratorShellActivity(now)
+	if _, err := os.Stat(orchestratorShellActivityPath(id)); err != nil {
+		t.Fatalf("a live session's shell may run well past the short bound: %v", err)
+	}
+
+	writeOrchestratorShellActivity(t, id, orchestratorShellActivity{
+		Running: true, TaskID: "task-1",
+		AtUnix: now.Add(-orchestratorShellActivitySafetyBound - time.Minute).Unix(),
+	})
+	a.reconcileOrphanedOrchestratorShellActivity(now)
+	if _, err := os.Stat(orchestratorShellActivityPath(id)); !os.IsNotExist(err) {
+		t.Fatalf("even a live session's report must eventually age out, got err=%v", err)
+	}
+}
