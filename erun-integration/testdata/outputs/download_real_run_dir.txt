@@ -1,3 +1,3 @@
 audit: erun outputs download results
 outputs: downloading <HOME>/.erun/outputs/results
-Downloaded results.tar.gz (13B, sha256 <HEX>) to results.tar.gz
+Downloaded results.tar.gz (146B, sha256 <HEX>) to results.tar.gz
