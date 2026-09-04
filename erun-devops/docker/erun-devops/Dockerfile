@@ -224,7 +224,7 @@ ARG DIND_CPU_LIMIT=4
 # anything upstream (COPY layers) or the BuildKit --mount cache mounts, so
 # repeated validation runs stay fast. Remove this ARG and the echo once the
 # 3 runs are recorded.
-ARG CACHE_BUST_RUN=1
+ARG CACHE_BUST_RUN=4
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
