@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -65,6 +66,18 @@ func (c Context) WriteResult(v any) error {
 }
 
 type KubernetesContextPreflightFunc func(Context, string) error
+
+// stderrOnlyContext is for internal status checks that have no caller-supplied
+// Context to thread through (e.g. a background token-verify probe) but still
+// call into code that traces via Context.Trace. A zero-value Context leaves
+// Logger's stdout writer unset, which falls back to the real os.Stdout -- so a
+// diagnostic line lands ahead of a command's own stdout result instead of
+// beside its other diagnostics on stderr. This mirrors how a real transport
+// context is wired (Logger's stdout pointed at stderr) without requiring a
+// caller-supplied Context to exist yet.
+func stderrOnlyContext() Context {
+	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
+}
 
 // Trace is the audit channel for decisions, inputs, and outputs; it stays
 // visible at default verbosity so a user can audit a command's plan without
