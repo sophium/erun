@@ -1202,6 +1202,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         h.ttl,
+		Holder:      environmentJobHolder(h.tenant),
 	})
 	h.renewExclusiveClaim(job, name)
 	h.leaseName = name
@@ -1232,7 +1233,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 		TTL:         h.ttl,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")), Tenant: h.tenant},
+		Holder:      environmentJobHolder(h.tenant),
 	})
 }
 
@@ -1353,6 +1354,7 @@ func AttachEnvironmentJob(ctx Context, params AttachEnvironmentJobParams) (Envir
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         ttl,
+		Holder:      environmentJobHolder(params.Tenant),
 	}); err != nil {
 		return EnvironmentJob{}, err
 	}

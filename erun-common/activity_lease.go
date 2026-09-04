@@ -640,6 +640,43 @@ func loadEnvironmentActivityLease(path string) (EnvironmentActivityLease, error)
 	return lease, nil
 }
 
+// FormatLeaseHolders renders held leases as one clause per distinct holder,
+// naming every lease behind that holder rather than repeating the same holder
+// once per lease it happens to hold. A job's own plain presence lease and, when
+// --exclusive, its environment-scope claim carry an identical Holder for
+// exactly this reason: one piece of work, reported once instead of twice under
+// two different-looking lease names (erun#2119).
+func FormatLeaseHolders(leases []EnvironmentActivityLease) string {
+	type leaseHolderGroup struct {
+		holder EnvironmentActivityLeaseHolder
+		names  []string
+	}
+	var groups []leaseHolderGroup
+	index := make(map[EnvironmentActivityLeaseHolder]int)
+	for _, lease := range leases {
+		i, ok := index[lease.Holder]
+		if !ok {
+			i = len(groups)
+			index[lease.Holder] = i
+			groups = append(groups, leaseHolderGroup{holder: lease.Holder})
+		}
+		groups[i].names = append(groups[i].names, lease.Name)
+	}
+	clauses := make([]string, 0, len(groups))
+	for _, group := range groups {
+		quoted := make([]string, len(group.names))
+		for i, name := range group.names {
+			quoted[i] = fmt.Sprintf("%q", name)
+		}
+		noun := "lease"
+		if len(quoted) > 1 {
+			noun = "leases"
+		}
+		clauses = append(clauses, fmt.Sprintf("%s (%s %s)", group.holder.String(), noun, strings.Join(quoted, ", ")))
+	}
+	return strings.Join(clauses, "; ")
+}
+
 // leaseIdleMarker folds the held leases into the same marker shape every other
 // activity signal reports through, so a held lease blocks idle-stop without the
 // stop predicate needing to know leases exist.

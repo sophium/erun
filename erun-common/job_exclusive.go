@@ -338,19 +338,23 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 		TTL:         params.LeaseTTL,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      environmentJobExclusivityHolder(params),
+		Holder:      environmentJobHolder(params.Tenant),
 		Now:         now,
 	})
 }
 
-// environmentJobExclusivityHolder names who to go ask when this claim refuses
-// someone. The orchestrator id is read from the environment rather than taken as
-// input for the same reason the lease store never takes a holder's tenant from
-// caller input: a claim must not be able to name someone else as its holder.
-func environmentJobExclusivityHolder(params StartEnvironmentJobParams) EnvironmentActivityLeaseHolder {
+// environmentJobHolder names who a job's own leases belong to, so a refusal
+// naming them can say who to go ask instead of naming an unnamed holder. The
+// orchestrator id is read from the environment rather than taken as input for
+// the same reason the lease store never takes a holder's tenant from caller
+// input: a claim must not be able to name someone else as its holder. Shared
+// by every lease a job takes on its own behalf — the exclusive claim and the
+// plain presence lease alike — so a refusal against either names the same
+// initiator.
+func environmentJobHolder(tenant string) EnvironmentActivityLeaseHolder {
 	return EnvironmentActivityLeaseHolder{
 		Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")),
-		Tenant:       params.Tenant,
+		Tenant:       tenant,
 	}
 }
 
