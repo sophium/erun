@@ -25,27 +25,33 @@ server {
     # never makes a cross-origin request — the API sets no CORS headers by
     # design (erun-console/vite.config.ts documents this as the production
     # shape; erun-console/AGENTS.md's dev proxy is the same idea in yarn dev).
-    location /v1/ {
+    # `^~` gives this the longest-prefix match unconditionally, so the static
+    # regex location below never has to reason about API paths.
+    location ^~ /v1/ {
         proxy_pass http://${API_PROXY_HOST}:${API_PROXY_PORT}/v1/;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
-    # Vite's content-hashed build output (dist/assets/*.js|css). These never
-    # change content under a fixed name, so a request for one that 404s is
-    # always a stale cached index.html asking for a hash a newer deploy no
-    # longer has — never a client route. Excluded from the SPA fallback below
-    # so that case is a real 404 the browser's own asset-reload handling can
-    # react to, instead of a 200 HTML response that then fails to load as a
-    # script/stylesheet with a confusing MIME-type error.
-    location /assets/ {
+    # Any request whose final path segment carries a file extension is a
+    # static asset request, never a client-side app route (erun-console names
+    # no route with a dot) — Vite's content-hashed dist/assets/*.js|css,
+    # anything copied from public/ (dist/favicon.svg), or a browser/crawler
+    # probing a conventional path that was never built (/favicon.ico,
+    # /robots.txt). A miss here must 404, not fall into the SPA shell below:
+    # a hashed asset a newer deploy no longer has is exactly what a browser
+    # holding a stale cached index.html requests after every deploy that
+    # rotates a hash, and a 200 HTML response for it fails to load as a
+    # script/stylesheet with a confusing MIME-type error instead of the clean
+    # 404 the browser's own asset-reload handling can react to.
+    location ~ \.[^./]+$ {
         try_files $uri =404;
     }
 
     # SPA fallback: any non-file route resolves to index.html so client-side
     # routing (and a browser refresh mid-route) doesn't 404 against nginx.
-    # Scoped to app routes only — content-hashed assets are carved out above.
+    # Scoped to app routes only — static assets are carved out above.
     location / {
         try_files $uri $uri/ /index.html;
     }
