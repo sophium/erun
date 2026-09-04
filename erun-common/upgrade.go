@@ -523,7 +523,7 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 			result.UpToDate = append(result.UpToDate, item)
 			continue
 		}
-		ctx.Info(fmt.Sprintf("==> Upgrading %s/%s %s -> %s (%s)", item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel))
+		ctx.Info(upgradeItemAnnouncement(ctx.DryRun, item))
 		if err := deploy(ctx, item); err != nil {
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s failed: %s", item.Tenant, item.Environment, err.Error()))
 			result.Failed = append(result.Failed, UpgradeItemFailure{Item: item, Error: err.Error()})
@@ -531,8 +531,29 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 		}
 		result.Upgraded = append(result.Upgraded, item)
 	}
-	ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
+	ctx.Info(upgradeCompletionSummary(ctx.DryRun, result))
 	return result
+}
+
+// upgradeItemAnnouncement reports one member's roll. Under --dry-run nothing
+// has deployed yet, so the wording stays conditional ("would upgrade") rather
+// than asserting a rollout that never happened.
+func upgradeItemAnnouncement(dryRun bool, item UpgradePlanItem) string {
+	verb := "Upgrading"
+	if dryRun {
+		verb = "Would upgrade"
+	}
+	return fmt.Sprintf("==> %s %s/%s %s -> %s (%s)", verb, item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel)
+}
+
+// upgradeCompletionSummary is the final tally. Under --dry-run it stays in the
+// conditional so the summary can never be mistaken for a real rollout's
+// "N upgraded" report.
+func upgradeCompletionSummary(dryRun bool, result UpgradeResult) string {
+	if dryRun {
+		return fmt.Sprintf("==> Dry run: would upgrade %d, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
+	}
+	return fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
 }
 
 func unresolvedReasonSuffix(item UpgradePlanItem) string {

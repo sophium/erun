@@ -1,3 +1,4 @@
+Dry run: erun upgrade planned.
 audit: erun upgrade --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 upgrade: tenant=team environment=dev version-override=<VERSION> force=false fleet=false gate-environment=
@@ -5,7 +6,7 @@ upgrade: team/dev opted in, channel=stable current=
 upgrade: team/dev using version override <VERSION> for all channels
 ==> Upgrade plan: 1 member(s), 1 lagging, in this order:
     1. team/dev [stable] (unset) -> <VERSION>  (will upgrade)
-==> Upgrading team/dev (unset) -> <VERSION> (stable)
+==> Would upgrade team/dev (unset) -> <VERSION> (stable)
 upgrade: team/dev failed: kubernetes context is not configured: team/dev
-==> Upgrade complete: 0 upgraded, 0 up to date, 0 unresolved, 1 failed
+==> Dry run: would upgrade 0, 0 up to date, 0 unresolved, 1 failed
 upgrade: 1 environment(s) failed: team/dev

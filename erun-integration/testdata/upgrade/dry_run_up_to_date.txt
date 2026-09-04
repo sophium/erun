@@ -1,3 +1,4 @@
+Dry run: erun upgrade planned.
 audit: erun upgrade --dry-run --version <VERSION> team dev
 trace-log: would append the full trace to <TMP>
 upgrade: tenant=team environment=dev version-override=<VERSION> force=false fleet=false gate-environment=
@@ -6,4 +7,4 @@ upgrade: team/dev using version override <VERSION> for all channels
 ==> Upgrade plan: 1 member(s), 0 lagging, in this order:
     1. team/dev [stable] <VERSION> -> <VERSION>  (up to date)
 upgrade: team/dev up to date at <VERSION>, skipping
-==> Upgrade complete: 0 upgraded, 1 up to date, 0 unresolved, 0 failed
+==> Dry run: would upgrade 0, 1 up to date, 0 unresolved, 0 failed
