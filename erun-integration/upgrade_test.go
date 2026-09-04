@@ -70,6 +70,28 @@ func TestUpgrade(t *testing.T) {
 		// confirms erun-devops published so it upgrades instead of refusing.
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// erun#2053: a dry run must be unmistakable from a real rollout. The
+		// terminal summary must carry an explicit "Dry run:" marker and speak
+		// in the conditional ("would upgrade"), and no line may claim a
+		// deploy/rollout/watch action as already performed.
+		if !strings.Contains(result.Combined, "Dry run: erun upgrade planned.") {
+			t.Fatalf("expected an explicit dry-run marker, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Would upgrade team/dev") {
+			t.Fatalf("expected the per-environment banner to speak in the conditional, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Dry run: would upgrade 1, 0 up to date, 0 unresolved, 0 failed") {
+			t.Fatalf("expected the completion summary to speak in the conditional with a dry-run marker, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "==> Upgrading") || strings.Contains(result.Combined, "==> Upgrade complete") {
+			t.Fatalf("expected no line to assert the upgrade as performed, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "deploy: would watch pods") {
+			t.Fatalf("expected the pod-watch trace to speak in the conditional, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "deploy: watching pods") {
+			t.Fatalf("expected no line to assert pods are being watched, got:\n%s", result.Combined)
+		}
 		golden.Equal(t, "upgrade/dry_run_version_override_lagging", normalize.Apply(result.Combined))
 	})
 
