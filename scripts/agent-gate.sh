@@ -55,6 +55,33 @@
 # other than success has no value. Only a stale pass could plausibly be
 # mistaken for a real one, and only for that case does the tree+command key
 # above have to carry the whole safety burden.
+#
+# A bounded wait timing out (exit 124, "still running") is not this gate's
+# verdict, and nothing here may report it as one -- but the exit code that
+# means that clearly to a caller checking it directly stops meaning anything
+# once `make` is between them and it: GNU Make collapses any nonzero recipe
+# exit to its own generic exit 2, so a caller that only sees `make check`'s
+# own exit status (an outer job supervisor polling this whole invocation as
+# one unit, rather than re-invoking it or querying the named inner job id
+# itself) cannot tell a timeout from a real failure -- both read back as the
+# same exit 2, and a bounded wait that expired has already been reported as a
+# gate failure this way once. The default behaviour for a live,
+# foreground-constrained caller (a coding agent's own shell tool call, which
+# is exactly what this whole detach mechanism exists to protect, see the file
+# header above) must not change to fix that: it cannot safely block past its
+# own bounded wait without risking the exact foreground-timeout trap this
+# script exists to avoid. `ERUN_JOB_ID` being set is not a safe signal to
+# tell the two kinds of caller apart either -- it is set on a coding agent's
+# own foreground call just as often as on an asynchronous orchestrator's,
+# whenever the agent's own session is itself supervised as a job. So a caller
+# that is *not* foreground-constrained -- an external orchestrator polling
+# this environment asynchronously over its own MCP edge, a human at a
+# terminal, or CI with a generous budget -- opts in explicitly with
+# AGENT_GATE_AWAIT_VERDICT=1: this keeps re-awaiting the same job across
+# repeated bounded `job await` calls (each still capped the same way) until
+# it reaches a real verdict (pass or fail), so `make check`'s own exit status
+# is only ever a genuine 0 or a genuine failure -- never a swallowed timeout.
+# Without it, behaviour is unchanged: a single bounded wait, 124 on timeout.
 
 set -eu
 
@@ -233,15 +260,23 @@ else
 	printf '%s\n' "$start_output" >&2
 fi
 
-await_status=0
-erun exec job await \
-	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$resolved_job_id" --timeout "$await_timeout" >&2 || await_status=$?
+while :; do
+	await_status=0
+	erun exec job await \
+		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+		--id "$resolved_job_id" --timeout "$await_timeout" >&2 || await_status=$?
 
-if [ "$await_status" -eq 124 ]; then
-	printf 'agent-gate: %s is still running after %s; run this command again to keep waiting\n' "$job_name" "$await_timeout" >&2
-	exit 124
-fi
+	if [ "$await_status" -ne 124 ]; then
+		break
+	fi
+
+	if [ "${AGENT_GATE_AWAIT_VERDICT:-}" != "1" ]; then
+		printf 'agent-gate: %s is still running after %s; run this command again to keep waiting\n' "$job_name" "$await_timeout" >&2
+		exit 124
+	fi
+
+	printf 'agent-gate: %s is still running after %s; AGENT_GATE_AWAIT_VERDICT=1 is set, so waiting again for a real verdict instead of reporting the bounded wait itself as a failure\n' "$job_name" "$await_timeout" >&2
+done
 
 erun exec job output \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
