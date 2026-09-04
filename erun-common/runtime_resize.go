@@ -284,11 +284,7 @@ type RuntimeResizeOccupancyError struct {
 }
 
 func (e *RuntimeResizeOccupancyError) Error() string {
-	names := make([]string, 0, len(e.Holders))
-	for _, lease := range e.Holders {
-		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
-	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", strings.Join(names, "; "))
+	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", FormatLeaseHolders(e.Holders))
 }
 
 // checkRuntimeResizeOccupancy loads every currently held lease (plain and
@@ -376,11 +372,7 @@ func traceRuntimeResizeOverriddenLeases(ctx Context, tenant, environment string,
 	if len(leases) == 0 {
 		return
 	}
-	holders := make([]string, 0, len(leases))
-	for _, lease := range leases {
-		holders = append(holders, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), strings.Join(holders, "; ")))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), FormatLeaseHolders(leases)))
 }
 
 // applyRuntimeResize persists the new sizing and rolls the runtime pod onto it.

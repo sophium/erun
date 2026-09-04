@@ -82,6 +82,40 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 }
 
+// TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases is the regression test
+// for erun#2119's second complaint: a job's plain presence lease and its
+// exclusive environment claim are one piece of work, but a refusal that lists
+// every lease separately reported them as two unrelated claimants. Once both
+// leases carry the same Holder, the refusal must say so once.
+func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
+	sameHolder := EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
+	leases := []EnvironmentActivityLease{
+		{Name: "release erun 1.0.248", Holder: sameHolder},
+		{Name: "release 1.0.248", Holder: sameHolder},
+	}
+	got := FormatLeaseHolders(leases)
+	want := `orchestrator erun-devops, tenant erun (leases "release erun 1.0.248", "release 1.0.248")`
+	if got != want {
+		t.Errorf("FormatLeaseHolders() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatLeaseHoldersKeepsDistinctHoldersSeparate guards the other side of
+// the same fix: leases genuinely held by different people must still be
+// reported as separate claimants, never merged just because both happen to be
+// unnamed.
+func TestFormatLeaseHoldersKeepsDistinctHoldersSeparate(t *testing.T) {
+	leases := []EnvironmentActivityLease{
+		{Name: "gradle-build", Holder: EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
+		{Name: "agent-run"},
+	}
+	got := FormatLeaseHolders(leases)
+	want := `orchestrator eng-42 (lease "gradle-build"); an unnamed holder (lease "agent-run")`
+	if got != want {
+		t.Errorf("FormatLeaseHolders() = %q, want %q", got, want)
+	}
+}
+
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
 	// releasing a lease that was never taken is success.
