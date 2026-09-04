@@ -961,7 +961,7 @@ Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1
 | `--dest <local-path>` | path | current directory | Local file or directory to write to. (`--dest`, not `--output`, which is the global mode flag.) |
 | `--force` | bool | `false` | Overwrite an existing local destination. |
 
-A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+A file streams as base64; a folder is staged in the pod as a `tar.gz` archive first and saved as `<name>.tar.gz`. The transfer is read in bounded ranges (8 MiB of payload per `kubectl exec`, gzip-compressed when the pod has gzip), because one exec stream breaks probabilistically as the volume it carries grows — so a whole-file stream fails on anything the size of a real cross-built binary. A range whose stream breaks is retried; a range that never arrives fails the download with the byte count it reached out of the total, and writes no partial file. The reassembled payload is checked against the digest the pod computed before the transfer started. It is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + scripts and the planned destination; no I/O).
 
 ---
 
