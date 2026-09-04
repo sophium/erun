@@ -112,9 +112,22 @@ async function installHoverDiagnostics(page: import('@playwright/test').Page): P
 // that, `hovered` stays true from the click itself and the auto-dismiss
 // timer (which pauses while hovered) never starts at all, which is the
 // pause/resume feature working correctly, not something to route around.
+const DIAG_DELAY_MS = Number(process.env.DIAG_DELAY_MS ?? '0');
+
 async function openAndWhip(app: import('../pages/index.js').AppShell): Promise<void> {
   await app.titlebar.whipButton().click();
   await app.titlebar.whipRunButton().click();
+  if (DIAG_DELAY_MS > 0) {
+    // Synchronously busy-loop the renderer main thread right after the click,
+    // before moving the mouse -- simulates the main-thread contention a
+    // loaded gate pod creates, to see whether it opens the race window.
+    await app.page.evaluate((ms) => {
+      const end = performance.now() + ms;
+      while (performance.now() < end) {
+        /* busy */
+      }
+    }, DIAG_DELAY_MS);
+  }
   console.log(`[DIAG] node about to move t=${await app.page.evaluate(() => performance.now())}`);
   await app.page.mouse.move(0, 0);
   console.log(`[DIAG] node after move t=${await app.page.evaluate(() => performance.now())}`);
