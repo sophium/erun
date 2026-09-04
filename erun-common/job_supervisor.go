@@ -916,7 +916,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 			reason = reason + " (" + note + ")"
 		}
 	}
-	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
+	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot(), recorder.dir)
 	// Captured once resolveEnvironmentJobOutcome returns, before the reclaim
 	// decision runs, so EndedAt reflects when this job's own outcome was
 	// actually settled — which, for a job that waited out one it started (see
