@@ -102,11 +102,20 @@ export class TerminalPane {
   // it. Callers that need to wait for that resolution (a pointer-cursor
   // decoration, or the backend call the resolution makes) do so between this
   // and clickFirstRow.
+  //
+  // Moves off the terminal first, then onto the target -- xterm's Linkifier
+  // only re-asks its link providers when the resolved buffer cell actually
+  // changes from the last one it saw (Linkifier._handleMouseMove's
+  // _lastBufferCell comparison), so hovering the exact same pixel twice in a
+  // row is a silent no-op that never re-triggers resolution. Moving away
+  // first guarantees every call is a real position change, the same reason
+  // Sidebar.hoverEnvironmentRow moves to (0, 0) before re-hovering a row.
   async hoverFirstRow(): Promise<void> {
     const box = await this.screen().boundingBox();
     if (!box) {
       throw new Error('terminal screen is not rendered');
     }
+    await this.page.mouse.move(0, 0);
     await this.page.mouse.move(box.x + 4, box.y + 4);
   }
 
