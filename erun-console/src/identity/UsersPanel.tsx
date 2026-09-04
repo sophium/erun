@@ -26,11 +26,12 @@ import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityA
 import { TenantTargetSelect } from '../shell/TenantTargetSelect';
 import { useTenantTargetSelection } from '../shell/useTenantTargetSelection';
 import type { EnrollState, UsersState } from './controller';
-import { useUsersController } from './controller';
+import { resolveUsersScope, useUsersController } from './controller';
 import { useEnrollOrgTarget } from './enrollOrgTargetController';
 import { EnrollUserForm } from './EnrollUserForm';
 import { EnrollBasicFields, OrgTargetStatus } from './PlatformEnrollFields';
 import { UserRolesDialog } from './UserRolesDialog';
+import { ScopedUsersStatus, UsersScopeBadge } from './usersScope';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
 // backend actually took: with mail configured, the identity provider emails
@@ -429,13 +430,25 @@ export function UsersPanel({
   token,
   ownTenantId,
   tenantType,
+  scopeTenantId,
 }: {
   token: string;
   ownTenantId: string;
   tenantType: string;
+  // Set once shell/ScopeSelector.tsx points this OPERATIONS caller at
+  // another tenant; undefined means "my own tenant", today's unchanged
+  // default.
+  scopeTenantId?: string;
 }): React.ReactElement {
+  const targetTenantId = scopeTenantId ?? ownTenantId;
+  const { tenants: scopeTenants, orgTarget } = useEnrollOrgTarget(
+    token,
+    ownTenantId,
+    targetTenantId,
+  );
+  const { scope, ready: scopeReady } = resolveUsersScope(orgTarget, targetTenantId);
   const { usersState, enrollState, enroll, setActive, dismissTemporaryPassword } =
-    useUsersController(token);
+    useUsersController(token, scope, !scopeReady);
   const temporaryPassword =
     enrollState.status === 'enrolled' ? enrollState.result.temporaryPassword : undefined;
   const [pendingDeactivate, setPendingDeactivate] = React.useState<IdentityUser | undefined>(
@@ -446,14 +459,19 @@ export function UsersPanel({
     <Card aria-labelledby="identity-users-heading">
       <CardHeader>
         <CardTitle id="identity-users-heading">Users</CardTitle>
+        <UsersScopeBadge scopeTenantId={scopeTenantId} tenants={scopeTenants} />
       </CardHeader>
       <CardContent className="grid gap-6">
-        <UsersBody
-          usersState={usersState}
-          onSetActive={setActive}
-          onRequestDeactivate={setPendingDeactivate}
-          onManageRoles={setManagingRoles}
-        />
+        {scopeReady ? (
+          <UsersBody
+            usersState={usersState}
+            onSetActive={setActive}
+            onRequestDeactivate={setPendingDeactivate}
+            onManageRoles={setManagingRoles}
+          />
+        ) : (
+          <ScopedUsersStatus target={orgTarget} tenants={scopeTenants} tenantId={targetTenantId} />
+        )}
         <EnrollForm
           token={token}
           ownTenantId={ownTenantId}

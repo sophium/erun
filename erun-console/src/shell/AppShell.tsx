@@ -38,17 +38,26 @@ function OperationsSectionContent({
   token,
   docsUrl,
   tenant,
+  scopeTenantId,
 }: {
   active: 'tenants' | 'users' | 'org-settings' | 'smtp-settings';
   token: string;
   docsUrl: string | undefined;
   tenant: TenantConfigView['tenant'];
+  scopeTenantId: string | undefined;
 }): React.ReactElement {
   switch (active) {
     case 'tenants':
       return <TenantsPanel token={token} docsUrl={docsUrl} />;
     case 'users':
-      return <UsersPanel token={token} ownTenantId={tenant.tenantId} tenantType={tenant.type} />;
+      return (
+        <UsersPanel
+          token={token}
+          ownTenantId={tenant.tenantId}
+          tenantType={tenant.type}
+          scopeTenantId={scopeTenantId}
+        />
+      );
     case 'org-settings':
       return <OrgSettingsPanel token={token} />;
     case 'smtp-settings':
@@ -126,6 +135,7 @@ function SectionContent({
           token={token}
           docsUrl={docsUrl}
           tenant={config.tenant}
+          scopeTenantId={scopeTenantId}
         />
       );
   }

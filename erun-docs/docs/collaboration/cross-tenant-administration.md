@@ -4,7 +4,7 @@ title: Administering another tenant
 
 # Administering another tenant
 
-Signed in as an Operator on an **OPERATIONS** tenant, the console's **scope selector** lets you administer a **COMPANY** tenant's resources — its environments and its quota today — without switching who you're signed in as.
+Signed in as an Operator on an **OPERATIONS** tenant, the console's **scope selector** lets you administer a **COMPANY** tenant's resources — its environments, its quota, and its users today — without switching who you're signed in as.
 
 For the full endpoint spec, see [Agent reference · erun API protocol](/agent-reference/api-protocol#post-v1environments).
 
@@ -29,6 +29,12 @@ The **Tenants** panel's per-tenant **Set quota** action lets you write another t
 
 The read-only **Quota** panel on your overview page, by contrast, *is* wired to the scope selector: point it at a `COMPANY` tenant and the panel's caps swap to that tenant's own, with a badge next to the **Quota** heading naming which tenant you're looking at — the same "never render another tenant's row unlabeled" rule the Environments panel's per-row badges follow. It defaults to your own tenant, shown with no badge, exactly as it always has.
 
+## Administering users
+
+The **Users** view is wired to the scope selector too: point it at a `COMPANY` tenant and the identities listed swap to that tenant's own organization in the platform's IdP, with the same tenant-naming badge next to the **Users** heading the Quota panel uses. Membership (the **Tenant member** badge and **Manage roles** button) is judged against the target tenant, not your own — a genuine member of the tenant you're viewing renders correctly as a tenant member, not as an unenrolled stranger.
+
+A tenant whose organization mapping hasn't resolved yet, or that has none at all, says so plainly in place of the table — a scoped read never silently falls back to listing your own tenant's identities under the target tenant's name. See [Administering identity](/collaboration/identity-administration) and [Agent reference · Identity administration](/agent-reference/identity-administration#get-v1identityusers) for the underlying `orgId`/`tenantId` parameters.
+
 ## What's audited
 
 Every request you make while scoped to another tenant still carries your own identity — nothing about the scope selector changes who is calling. A write that actually lands in the target tenant (for example registering an environment there directly, via the API) is recorded in a second, explicit audit event naming the target tenant, you as the operator, and your own home tenant, on top of the ordinary per-request event every API call gets. See [Operator in the loop](/collaboration/operator-in-the-loop) for where those events live and how long they're retained.
@@ -39,6 +45,7 @@ Every request you make while scoped to another tenant still carries your own ide
 - It does not let you act *as* the other tenant's own Operators — you're still your own identity, administering another tenant's resources with your own OPERATIONS-tenant reach.
 - Resources without a supported cross-tenant capability aren't affected: builds, comments, reviews, releases, and audit events stay scoped to your own tenant regardless of the scope selector's setting (a deliberate boundary, not an oversight — see [Agent reference · erun API protocol](/agent-reference/api-protocol#post-v1environments) for which resources do support it).
 - The **Set quota** write dialog above is deliberately not wired to the scope selector — it always targets whichever tenant's row you opened the dialog from, never "whichever tenant the selector currently shows." The read-only Quota panel is the opposite: it *is* wired to the selector, as described above.
+- **The selector renders on every console section, but its "Viewing another tenant's rows" note only appears on the sections that actually honor it** (Overview's Quota panel, Environments, and Users). Every other section — Cloud contexts, MCP access, Invites, Requests, Gate runs, Tenants, Org settings, and Outbound mail — always reads and acts on your own tenant regardless of the selector's setting, and the selector says so plainly instead of implying a reach it does not have. Org settings and Outbound mail administer the platform's own IdP instance rather than a per-tenant resource, so they are deliberately out of scope for cross-tenant targeting altogether, not just unwired yet.
 
 ## Where next
 
