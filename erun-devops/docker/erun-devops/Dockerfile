@@ -193,10 +193,45 @@ COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-ref
 # A tenant image built from a `<tenant>-devops` Dockerfile with a different
 # sidecar memory default should override this ARG to match.
 ARG DIND_MEMORY_LIMIT_MIB=20480
+# DIND_CPU_LIMIT is the same blind-cgroup problem as DIND_MEMORY_LIMIT_MIB
+# above, for CPU instead of memory. playwright.config.ts's own worker-count
+# derivation reads os.availableParallelism() -- quota-aware everywhere else --
+# but this RUN step is a sibling of the erun-dind sidecar's own limited
+# cgroup, not a descendant of it, so cpu.max reads "max" here regardless of
+# the sidecar's configured limit and the derivation falls through to the
+# node's real core count (24 on the pod #2081 was measured on), oversized for
+# an environment that does not own that many cores exclusively -- 6 workers
+# (6 Go backends + 6 headless Chromiums) contending with everything else
+# scheduled on the node produced a different spec failing every run (#2081).
+# Default mirrors runtime.dind.resources.limits.cpu / eruncommon.DefaultRuntimeDindCPU
+# ("4"), the same source DIND_MEMORY_LIMIT_MIB's default mirrors for memory --
+# the CPU budget the operator actually provisioned for this environment's
+# build work, rather than the node's raw core count. ERUN_PLAYWRIGHT_WORKERS
+# applies the config's own "two cores per worker" rule (a worker is a Go
+# backend *and* a headless Chromium, and they compete) to that budget instead
+# of to the unbounded node, floored at 1 and capped at 4 -- one more than the
+# config comment's own "2 workers clean on 4 cores" data point, kept as a
+# ceiling rather than raised further without new measurement. A tenant image
+# built from a `<tenant>-devops` Dockerfile with a different sidecar CPU
+# default should override this ARG to match, same as DIND_MEMORY_LIMIT_MIB.
+ARG DIND_CPU_LIMIT=4
+# TEMPORARY, for the #2081 3x-in-a-row validation only: erun build's own
+# fingerprint promotion and BuildKit's ordinary layer cache would otherwise
+# make the 2nd/3rd `erun build` skip this RUN entirely since nothing else in
+# the Dockerfile changes between them. Referencing this ARG inside the RUN
+# command forces a real cache miss (and therefore a real re-run of the gate,
+# including test-playwright) each time its value changes, without touching
+# anything upstream (COPY layers) or the BuildKit --mount cache mounts, so
+# repeated validation runs stay fast. Remove this ARG and the echo once the
+# 3 runs are recorded.
+ARG CACHE_BUST_RUN=1
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" make check && touch /test-ok
+    echo "#2081 validation run ${CACHE_BUST_RUN}/3" && \
+    PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
+    ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
+    make check && touch /test-ok
 
 # Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit
 # GOOS/GOARCH with CGO disabled, so the compiler itself can run natively on
