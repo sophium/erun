@@ -288,8 +288,32 @@ function parseAcceptInviteResult(raw: unknown): AcceptInviteResult {
 
 export const identityApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    listIdentityUsers: builder.query<IdentityUser[], string>({
-      query: (token) => ({ url: '/v1/identity/users', token, label: 'list identity users' }),
+    // orgId picks which Zitadel org's identities to list; tenantId picks
+    // which tenant's erun users they are cross-referenced against for
+    // Enrolled/erunUserId (erun-backend-api's identity.go listUsers) --
+    // independent knobs, both required to administer another tenant's
+    // Users view honestly rather than rendering its own org against the
+    // caller's own membership. Omitting both keeps today's behaviour: the
+    // caller's own org and tenant.
+    listIdentityUsers: builder.query<
+      IdentityUser[],
+      { token: string; orgId?: string; tenantId?: string }
+    >({
+      query: ({ token, orgId, tenantId }) => {
+        const params = new URLSearchParams();
+        if (orgId !== undefined && orgId !== '') {
+          params.set('orgId', orgId);
+        }
+        if (tenantId !== undefined && tenantId !== '') {
+          params.set('tenantId', tenantId);
+        }
+        const query = params.toString();
+        return {
+          url: query === '' ? '/v1/identity/users' : `/v1/identity/users?${query}`,
+          token,
+          label: 'list identity users',
+        };
+      },
       transformResponse: parseIdentityUserList,
       providesTags: ['IdentityUsers'],
     }),
@@ -313,12 +337,18 @@ export const identityApi = platformApi.injectEndpoints({
       invalidatesTags: ['IdentityUsers'],
     }),
 
+    // orgId reaches the same tenant's org the scoped list read used, so a
+    // scoped Deactivate/Reactivate acts on the target tenant's own credential
+    // rather than the one living in the caller's own org -- silently acting
+    // on the wrong account would be worse than the stale read this fixes.
     setIdentityUserActive: builder.mutation<
       NoValue,
-      { token: string; externalId: string; active: boolean }
+      { token: string; externalId: string; active: boolean; orgId?: string }
     >({
-      query: ({ token, externalId, active }) => ({
-        url: `/v1/identity/users/${encodeURIComponent(externalId)}/${active ? 'reactivate' : 'deactivate'}`,
+      query: ({ token, externalId, active, orgId }) => ({
+        url: `/v1/identity/users/${encodeURIComponent(externalId)}/${active ? 'reactivate' : 'deactivate'}${
+          orgId !== undefined && orgId !== '' ? `?orgId=${encodeURIComponent(orgId)}` : ''
+        }`,
         method: 'POST',
         token,
         label: active ? 'reactivate identity user' : 'deactivate identity user',

@@ -102,6 +102,7 @@ export function ConsoleSidebar({
         tenants={tenants}
         ownTenant={currentTenant}
         value={scopeTenantId}
+        active={active}
         onChange={onScopeChange}
       />
       <nav aria-label="Console sections">
