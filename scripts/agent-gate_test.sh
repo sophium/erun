@@ -58,6 +58,18 @@ case "$1 $2 $3" in
 	exit "${STUB_START_STATUS:-0}"
 	;;
 "exec job await")
+	# A test that sets STUB_AWAIT_STATUS_QUEUE (one exit status per line) gets a
+	# different answer on each successive await call, popped in order -- this is
+	# what lets a test prove the AGENT_GATE_AWAIT_VERDICT=1 retry loop actually
+	# re-awaits the same job across multiple calls instead of trusting the
+	# first one. Falls back to the fixed STUB_AWAIT_STATUS every existing case
+	# already uses when no queue is set.
+	if [ -n "${STUB_AWAIT_STATUS_QUEUE:-}" ] && [ -s "$STUB_AWAIT_STATUS_QUEUE" ]; then
+		line=$(head -n1 "$STUB_AWAIT_STATUS_QUEUE")
+		tail -n +2 "$STUB_AWAIT_STATUS_QUEUE" >"${STUB_AWAIT_STATUS_QUEUE}.tmp"
+		mv "${STUB_AWAIT_STATUS_QUEUE}.tmp" "$STUB_AWAIT_STATUS_QUEUE"
+		exit "$line"
+	fi
 	exit "${STUB_AWAIT_STATUS:-0}"
 	;;
 "exec job output")
@@ -753,6 +765,91 @@ stub_erun "${case_dir}/bin"
 	if grep -q 'exec job output' "$STUB_ARGV_FILE"; then
 		fail "still running: must not read job output before the job finishes"
 	fi
+)
+
+# --- with AGENT_GATE_AWAIT_VERDICT=1, a gate whose wait times out twice
+# before it actually passes must report the real pass, not the intermediate
+# timeout -- `make` collapses any nonzero recipe exit to its own generic exit
+# 2, so a caller reading only `make check`'s own exit status (rather than
+# re-invoking this script or the named inner job id) cannot tell a timeout
+# from a real failure once this script reports 124 for a job that was,
+# moments later, actually green.
+case_dir="${work_root}/await-verdict-eventual-pass"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export AGENT_GATE_AWAIT_VERDICT=1
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n124\n0\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	export STUB_JOB_OUTPUT='job finished output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "await verdict eventual pass: expected the real pass (exit 0), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job finished output"*) ;;
+	*) fail "await verdict eventual pass: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"AGENT_GATE_AWAIT_VERDICT=1 is set"*) ;;
+	*) fail "await verdict eventual pass: expected the keep-waiting notice, got: $OUT" ;;
+	esac
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 3 ] || fail "await verdict eventual pass: expected 3 await calls (2 timeouts + 1 real verdict), got $awaits, argv was: $(cat "$STUB_ARGV_FILE")"
+)
+
+# --- with AGENT_GATE_AWAIT_VERDICT=1, a gate whose wait times out once
+# before it genuinely fails must still report that failure -- the previous
+# case's fix must not over-correct into swallowing a real red as a pass.
+case_dir="${work_root}/await-verdict-eventual-failure"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export AGENT_GATE_AWAIT_VERDICT=1
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n7\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	export STUB_JOB_OUTPUT='job failed output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 7 ] || fail "await verdict eventual failure: expected the real failure's own exit code (7), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job failed output"*) ;;
+	*) fail "await verdict eventual failure: expected the failed job's captured output, got: $OUT" ;;
+	esac
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 2 ] || fail "await verdict eventual failure: expected 2 await calls (1 timeout + 1 real verdict), got $awaits, argv was: $(cat "$STUB_ARGV_FILE")"
+)
+
+# --- without AGENT_GATE_AWAIT_VERDICT=1, a timeout must still bail out
+# immediately even when a later await in the same sequence would have shown a
+# real pass -- the opt-in must never change the default, foreground-safe
+# behaviour that protects a coding agent's own bounded tool-call window.
+case_dir="${work_root}/await-verdict-not-set-still-bails-immediately"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n0\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 124 ] || fail "await verdict not set: expected exit 124 without opting in, got $STATUS ($OUT)"
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 1 ] || fail "await verdict not set: must not peek at a later await result, expected 1 call, got $awaits"
 )
 
 # --- erun missing from PATH: degrade to running the command directly rather
