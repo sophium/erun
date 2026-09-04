@@ -453,7 +453,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 		return RuntimeResizeResult{}, fmt.Errorf("resize: %w", err)
 	}
 	defer func() {
-		_ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
+		_, _ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, lease.Scope, lease.ID)
 	}()
 
 	if err := applyRuntimeResize(ctx, deps, tenant, environment, target, plan); err != nil {

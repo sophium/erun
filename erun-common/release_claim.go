@@ -144,7 +144,7 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 	return func() {
 		close(stop)
 		stopped.Wait()
-		_ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		_, _ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		releaseRepoClaimIfHeld(ctx, spec, repo)
 	}, nil
 }

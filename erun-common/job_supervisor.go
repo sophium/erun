@@ -1159,7 +1159,7 @@ func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecor
 		// The release must not race a tick that is already renewing, or the lease
 		// would outlive the supervisor and keep the environment reading as busy.
 		stopped.Wait()
-		_ = ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
+		_, _ = ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
 		if exclusive {
 			// Releasing the environment promptly is what lets the next gate
 			// start immediately rather than waiting out a TTL. Best-effort like
