@@ -47,6 +47,64 @@ async function forceDocumentFocused(page: import('@playwright/test').Page): Prom
   });
 }
 
+// TEMPORARY DIAGNOSTIC -- installs capture-phase listeners plus a
+// MutationObserver over the whip panel, logging everything to console.debug
+// so a job run can capture it. Removed once the root cause is confirmed.
+async function installHoverDiagnostics(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __diagSeq?: WeakMap<Node, number>; __diagNext?: number };
+    w.__diagSeq = new WeakMap();
+    w.__diagNext = 1;
+    const stamp = (n: Node): number => {
+      const seq = w.__diagSeq;
+      if (!seq) return -1;
+      let id = seq.get(n);
+      if (id === undefined) {
+        id = w.__diagNext ?? 1;
+        w.__diagNext = id + 1;
+        seq.set(n, id);
+      }
+      return id;
+    };
+    const describeNode = (n: EventTarget | null): string => {
+      if (!(n instanceof Element)) return n instanceof Node ? n.nodeName : 'non-node';
+      return `<${n.tagName.toLowerCase()}#${String(stamp(n))} role=${n.getAttribute('role') ?? ''} text="${(n.textContent ?? '').slice(0, 24)}">`;
+    };
+    for (const type of ['mouseenter', 'mouseleave', 'mouseover', 'mouseout', 'mousemove']) {
+      document.addEventListener(
+        type,
+        (e) => {
+          const me = e as MouseEvent;
+          console.debug(
+            `[DIAG] ${type} t=${performance.now().toFixed(1)} target=${describeNode(e.target)} related=${describeNode(me.relatedTarget)} xy=${String(me.clientX)},${String(me.clientY)}`,
+          );
+        },
+        true,
+      );
+    }
+    const panel = document.querySelector('[role="region"][aria-label="Whip"]');
+    if (panel?.parentElement) {
+      new MutationObserver((records) => {
+        for (const r of records) {
+          r.removedNodes.forEach((n) => {
+            console.debug(
+              `[DIAG] removed t=${performance.now().toFixed(1)} node=${describeNode(n)}`,
+            );
+          });
+          r.addedNodes.forEach((n) => {
+            console.debug(`[DIAG] added t=${performance.now().toFixed(1)} node=${describeNode(n)}`);
+          });
+        }
+      }).observe(panel.parentElement, { subtree: true, childList: true });
+    }
+  });
+  page.on('console', (msg) => {
+    if (msg.text().startsWith('[DIAG]')) {
+      console.log(msg.text());
+    }
+  });
+}
+
 // Opens the popover and pushes, landing on the report view (skipping past
 // the target picker every one of these tests starts from). Clicking the
 // primary action leaves the mouse resting on the popover -- exactly like a
@@ -57,7 +115,9 @@ async function forceDocumentFocused(page: import('@playwright/test').Page): Prom
 async function openAndWhip(app: import('../pages/index.js').AppShell): Promise<void> {
   await app.titlebar.whipButton().click();
   await app.titlebar.whipRunButton().click();
+  console.log(`[DIAG] node about to move t=${await app.page.evaluate(() => performance.now())}`);
   await app.page.mouse.move(0, 0);
+  console.log(`[DIAG] node after move t=${await app.page.evaluate(() => performance.now())}`);
 }
 
 test.describe('whip report auto-dismiss', () => {
@@ -67,6 +127,7 @@ test.describe('whip report auto-dismiss', () => {
     ]);
     await app.page.clock.install();
     await forceDocumentFocused(app.page);
+    await installHoverDiagnostics(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
