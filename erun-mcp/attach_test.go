@@ -14,6 +14,21 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
+// attachTestIOTimeout bounds how long these tests wait for a PTY byte or an
+// outcome message. This suite forks a real shell under a real PTY (dtach,
+// pgrep, several /proc reads) for every scenario, and every one of those
+// forks queues behind whatever else the host scheduler is running -- an
+// agent pod is frequently sharing its node with other pods' CPU-heavy work
+// (release builds, other suites) that this suite has no way to see or wait
+// out. Measured on a contended pod (~2x CPU oversubscription from unrelated
+// load, several repeated runs), the slowest of these scenarios still
+// completed within 23s; a shorter deadline turns ordinary scheduler
+// contention into a spurious failure indistinguishable from a real hang,
+// which is what happened here before this constant existed. A genuine hang
+// (the bridge never closing, the shell never producing output) still fails
+// the test, just later.
+const attachTestIOTimeout = 45 * time.Second
+
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
 // RemoteAppSessionSocketPath resolves to a socket path no other test (or real
 // environment) can collide with. It also ensures the socket directory itself
@@ -100,7 +115,7 @@ func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) 
 // ever runs -- is guaranteed to already be in place).
 func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
 	for {
 		kind, _, err := conn.ReadMessage()
 		if err != nil {
@@ -116,7 +131,7 @@ func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 // want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
 	var accumulated strings.Builder
 	for {
 		kind, data, err := conn.ReadMessage()
@@ -134,7 +149,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 
 func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
 	for {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
@@ -149,6 +164,52 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 		}
 		return msg
 	}
+}
+
+// TestAttachReadHelpersToleratePastThePriorDeadline is the regression test
+// for the specific failure mode this suite hit under a contended host: every
+// subprocess-spawning scenario missed the outcome message by roughly 100ms
+// past a hardcoded 10s deadline -- the signature of a deadline too tight for
+// the host, not of a broken bridge (confirmed separately: the same scenarios
+// passed reliably once given a longer deadline under the same load). This
+// test proves the fix without depending on inducing real host contention: a
+// minimal websocket server with no PTY, no dtach, and no shell delays its one
+// binary frame past that old boundary, and the read helper these tests
+// actually use must still see it.
+func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
+	const priorDeadline = 10 * time.Second
+	const delay = priorDeadline + 2*time.Second
+	if delay >= attachTestIOTimeout {
+		t.Fatalf("test setup: delay %s must stay below attachTestIOTimeout %s", delay, attachTestIOTimeout)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		time.Sleep(delay)
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("SLOW_MARKER"))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	u.Scheme = "ws"
+	u.Path = "/slow"
+
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	waitForBinaryContaining(t, conn, "SLOW_MARKER")
 }
 
 // TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade is the mandatory proof
