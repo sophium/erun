@@ -3,8 +3,13 @@ kubectl --context test-context --namespace team-dev exec -c erun-devops deployme
 usage:
   set -eu
   cg=/sys/fs/cgroup
+  cg_rel=$(awk -F: '$1=="0"{print $3; exit}' /proc/1/cgroup 2>/dev/null || true)
+  case "$cg_rel" in
+    ""|"/") ;;
+    *) cg="$cg$cg_rel" ;;
+  esac
   cg_type=""
-  [ -d "$cg" ] && cg_type=$(stat -fc %T "$cg" 2>/dev/null || true)
+  [ -f "$cg/cgroup.controllers" ] && cg_type=cgroup2fs
   printf 'cgroup_type=%s\n' "$cg_type"
   read_value() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
   printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
@@ -13,10 +18,40 @@ usage:
   printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
   printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
   cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-  time_before=$(date +%s%N)
+  time_before=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
   sleep 2.5
   cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-  time_after=$(date +%s%N)
+  time_after=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
+  printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
+  printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
+  printf 'cpu_time_before_ns=%s\n' "$time_before"
+  printf 'cpu_time_after_ns=%s\n' "$time_after"
+  printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
+  printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
+  printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"
+kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
+usage-dind:
+  set -eu
+  cg=/sys/fs/cgroup
+  cg_rel=$(awk -F: '$1=="0"{print $3; exit}' /proc/1/cgroup 2>/dev/null || true)
+  case "$cg_rel" in
+    ""|"/") ;;
+    *) cg="$cg$cg_rel" ;;
+  esac
+  cg_type=""
+  [ -f "$cg/cgroup.controllers" ] && cg_type=cgroup2fs
+  printf 'cgroup_type=%s\n' "$cg_type"
+  read_value() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
+  printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
+  printf 'memory_max=%s\n' "$(read_value $cg/memory.max)"
+  printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
+  printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
+  printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
+  cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
+  time_before=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
+  sleep 2.5
+  cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
+  time_after=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
   printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
   printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
   printf 'cpu_time_before_ns=%s\n' "$time_before"

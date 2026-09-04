@@ -41,17 +41,24 @@ import (
 //     downstream may depend on pressure stall information. nr_throttled over
 //     nr_periods (RuntimeCPUUsage.ThrottledPeriods / .Periods) is the
 //     CPU-starvation signal that is actually available wherever cgroup v2 is.
-//  3. A build-capable environment's real build work never happens in this
-//     container -- every image build runs in the erun-dind sidecar, a
-//     separate cgroup this reading cannot see: the sidecar's build containers
-//     are cgroup siblings, not descendants, so there is no path from inside
-//     this container to their usage, and the one place that view is
-//     reachable is a host-wide path shared by every build-capable pod on the
-//     node, not attributable to one environment. RuntimeUsage.ExcludesBuilds
-//     (EnvironmentType.UsesDindSidecar) names this instead of letting the
-//     reading imply the environment is idle while a build saturates the
-//     sidecar -- see erun-cli/cmd/usage_render.go and the desktop's matching
-//     Sidebar.EnvHoverCard.tsx caveat.
+//  3. A build-capable environment's real build work never happens in the
+//     runtime container -- every image build runs in the erun-dind sidecar, a
+//     separate cgroup the runtime container's own reading cannot see: the
+//     sidecar's build containers are cgroup siblings, not descendants, so
+//     there is no path from inside the runtime container to their usage.
+//     RunRuntimeUsage closes most of that gap directly: on an environment
+//     that carries the sidecar (EnvironmentType.UsesDindSidecar), it execs
+//     the same reading script into the erun-dind container too (the doctor
+//     inspection's own target, runtimeDindContainerName) and reports it as
+//     RuntimeUsage.Dind, so a busy build no longer reads as an idle
+//     environment. RuntimeUsage.ExcludesBuilds still names the runtime
+//     container's own CPU/Memory as excluding the sidecar's contribution --
+//     that stays true regardless of whether Dind could be read -- see
+//     erun-cli/cmd/usage_render.go and the desktop's matching
+//     Sidebar.EnvHoverCard.tsx caveat. What no reading anywhere in this
+//     process can produce is one host-wide figure spanning every
+//     build-capable pod on the node; that view exists only outside any one
+//     environment's own container set.
 //
 // RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
 // script below into the container over kubectl, for an on-demand `erun usage`
@@ -83,9 +90,21 @@ const (
 	minRuntimeUsageInterval     = 100 * time.Millisecond
 	maxRuntimeUsageInterval     = 30 * time.Second
 
-	// cgroupV2FSType is what `stat -fc %T /sys/fs/cgroup` reports on a cgroup
-	// v2 host; anything else (a v1 hierarchy, or the path missing) means the
-	// files this reader depends on do not exist.
+	// cgroupV2FSType is the sentinel the reading script prints when
+	// $cg/cgroup.controllers exists -- the portable systemd-style cgroup v2
+	// test (a cgroup2 mount always has this file at its root, delegated
+	// subtree or not; a v1 hierarchy never does). The script used to test
+	// `stat -fc %T "$cg"` = "cgroup2fs" instead, which depends on the local
+	// `stat` binary recognising the cgroup2 magic number by name -- true for
+	// GNU coreutils (the erun-devops runtime container) but not for BusyBox
+	// (the erun-dind sidecar's own shell), which reports every filesystem
+	// type as "UNKNOWN" regardless of what is actually mounted. That silently
+	// made every dind-sidecar reading report "cgroup v2 not detected" on a
+	// real cluster even though cgroup v2 was genuinely mounted there,
+	// confirmed live by exec'ing into erun-dind directly (busybox stat's
+	// docstring has no filesystem-type table at all). The file-existence test
+	// has no such binary dependency: `[ -f ... ]` means the same thing
+	// everywhere.
 	cgroupV2FSType = "cgroup2fs"
 
 	// DefaultCgroupRoot is the container's own cgroup v2 directory, read
@@ -138,9 +157,30 @@ type RuntimeUsage struct {
 	// actually running in the sidecar's own cgroup. Mirrors the desktop
 	// hover card's usageExcludesBuilds/excludesBuilds caveat so both
 	// transports disclose the same limitation instead of one silently
-	// under-reporting relative to the other. See the file-level comment for
-	// why the sidecar's own cgroup cannot be read as a fix instead.
+	// under-reporting relative to the other. Stays true even when Dind below
+	// was read successfully -- it describes CPU/Memory above, which never
+	// change meaning regardless of what else this reading also carries.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
+	// Dind is the erun-dind sidecar's own CPU/memory reading, populated only
+	// on an environment that carries the sidecar (ExcludesBuilds true) and
+	// only when its cgroup could actually be read -- nil on any other
+	// environment, and nil (not a zero value) when the exec into the sidecar
+	// failed, so a caller cannot mistake "could not read it" for "read as
+	// zero usage". See the file-level comment for why this exists instead of
+	// treating the sidecar as permanently unreadable.
+	Dind *RuntimeDindUsage `json:"dind,omitempty"`
+}
+
+// RuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading, sampled
+// by exec'ing the exact same script RunRuntimeUsage runs against the runtime
+// container into the sidecar container instead. It deliberately carries no
+// Disk field: the sidecar mounts the same workspace volume the runtime
+// container's RuntimeUsage.Disk already reports on, so a second disk reading
+// here would just repeat that figure under a name that invites reading it as
+// a second, independent filesystem.
+type RuntimeDindUsage struct {
+	CPU    RuntimeCPUUsage    `json:"cpu"`
+	Memory RuntimeMemoryUsage `json:"memory"`
 }
 
 // HasCounters reports whether the read found anything worth retaining. A host
@@ -208,6 +248,15 @@ type RuntimeDiskUsage struct {
 // RunRuntimeUsage execs the reading script into the runtime container and
 // parses its output. Dry-run traces the exec and returns an empty reading,
 // matching RunObservation's dry-run contract.
+//
+// On an environment that carries the erun-dind sidecar, it execs the same
+// script into that container too (runtimeDindContainerName -- doctor's own
+// inspection target) and attaches the parsed result as Dind. That second exec
+// fails soft, deliberately unlike the runtime container's own exec above: an
+// environment whose sidecar cannot be reached today (an older runtime image,
+// a sidecar mid-restart) must still get a usable runtime-container reading
+// rather than losing the whole call over a container this reading has always
+// been unable to see anyway.
 func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
@@ -215,10 +264,21 @@ func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 	if err != nil {
 		return RuntimeUsage{}, err
 	}
-	if ctx.DryRun {
-		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}, nil
+	usesDind := req.Type.UsesDindSidecar()
+	var dindResult RemoteCommandResult
+	var dindErr error
+	if usesDind {
+		dindResult, dindErr = RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeDindContainerName, "usage-dind", script)
 	}
-	return parseRuntimeUsage(req, result.Stdout, interval), nil
+	if ctx.DryRun {
+		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: usesDind}, nil
+	}
+	usage := parseRuntimeUsage(req, result.Stdout, interval)
+	if usesDind && dindErr == nil {
+		usage.Dind = parseRuntimeDindUsage(dindResult.Stdout, interval)
+		usage.Warnings = runtimeUsageWarnings(usage)
+	}
+	return usage, nil
 }
 
 func clampRuntimeUsageInterval(interval time.Duration) time.Duration {
@@ -240,10 +300,29 @@ func clampRuntimeUsageInterval(interval time.Duration) time.Duration {
 // so a missing file (cgroup v1, no PSI, an already-removed pod) prints an
 // empty value instead of aborting the script under `set -eu` -- the "fail
 // soft, report per-field" contract lives here as much as in the Go parser.
+//
+// $cg resolves to the running process's OWN cgroup rather than assuming
+// /sys/fs/cgroup already is it, via /proc/1/cgroup's unified ("0:...")
+// entry -- "/" for a normally cgroup-namespaced container (the erun-devops
+// runtime container: PID 1's own path is exactly the mount's root, so this
+// is a no-op there), but NOT "/" for erun-dind, confirmed live: that sidecar
+// runs privileged (service.yaml) and its /sys/fs/cgroup is the host's real
+// cgroup2 root, not a namespace scoped to the container -- so a bare
+// /sys/fs/cgroup/cpu.max there is either absent (the safe "unavailable" this
+// script already reports) or, worse, would be some ancestor slice's own
+// limit misattributed to this one environment, and cpu.stat at that same
+// bare root aggregates the entire node, not this container. PID 1's cgroup
+// path is what actually names this container's own leaf cgroup regardless of
+// which of those two shapes /sys/fs/cgroup itself turned out to be.
 const runtimeUsageScriptTemplate = `set -eu
 cg=/sys/fs/cgroup
+cg_rel=$(awk -F: '$1=="0"{print $3; exit}' /proc/1/cgroup 2>/dev/null || true)
+case "$cg_rel" in
+  ""|"/") ;;
+  *) cg="$cg$cg_rel" ;;
+esac
 cg_type=""
-[ -d "$cg" ] && cg_type=$(stat -fc %T "$cg" 2>/dev/null || true)
+[ -f "$cg/cgroup.controllers" ] && cg_type=cgroup2fs
 printf 'cgroup_type=%s\n' "$cg_type"
 read_value() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
 printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
@@ -252,10 +331,10 @@ printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
 printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
 printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
 cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-time_before=$(date +%s%N)
+time_before=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
 sleep __RUNTIME_USAGE_INTERVAL_SECONDS__
 cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-time_after=$(date +%s%N)
+time_after=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
 printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
 printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
 printf 'cpu_time_before_ns=%s\n' "$time_before"
@@ -465,37 +544,56 @@ func parseRuntimeDFUsage(line string) (totalBytes, usedBytes int64, ok bool) {
 }
 
 func runtimeUsageWarnings(u RuntimeUsage) []string {
-	warnings := runtimeMemoryUsageWarnings(u.Memory)
+	warnings := runtimeMemoryUsageWarnings("", u.Memory)
 	for _, d := range u.Disk {
 		if d.Unavailable == "" && d.PercentUsed >= RuntimeUsageDiskWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%s is at %.0f%% disk usage (warns at %.0f%%)", d.Mount, d.PercentUsed, RuntimeUsageDiskWarnPercent))
 		}
 	}
+	if u.Dind != nil {
+		warnings = append(warnings, runtimeMemoryUsageWarnings("erun-dind: ", u.Dind.Memory)...)
+	}
 	return warnings
 }
 
-func runtimeMemoryUsageWarnings(memory RuntimeMemoryUsage) []string {
+// runtimeMemoryUsageWarnings takes a scope label ("" for the runtime
+// container, "erun-dind: " for the sidecar) so the same threshold logic
+// produces warnings an operator can tell apart when both containers cross
+// one -- the exact "builds being OOM-killed" signal the runtime container's
+// own reading can never carry on its own.
+func runtimeMemoryUsageWarnings(scope string, memory RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
 		if memory.PercentOfLimit >= RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
-				"memory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
+				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
+				scope, memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)
 			if peakPercent >= RuntimeUsageMemoryPeakWarnPercent {
 				warnings = append(warnings, fmt.Sprintf(
-					"memory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
-					peakPercent, RuntimeUsageMemoryPeakWarnPercent))
+					"%smemory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
+					scope, peakPercent, RuntimeUsageMemoryPeakWarnPercent))
 			}
 		}
 	}
 	if memory.OOMKillsObserved && memory.OOMKills > 0 {
-		warnings = append(warnings, fmt.Sprintf("the cgroup recorded %d OOM kill(s)", memory.OOMKills))
+		warnings = append(warnings, fmt.Sprintf("%sthe cgroup recorded %d OOM kill(s)", scope, memory.OOMKills))
 	}
 	return warnings
+}
+
+// parseRuntimeDindUsage mirrors parseRuntimeUsage's CPU/memory parsing
+// exactly (same values map shape, same underlying helpers) since the sidecar
+// is exec'd with the identical script -- only the container differs.
+func parseRuntimeDindUsage(output string, interval time.Duration) *RuntimeDindUsage {
+	values := parseRuntimeUsageValues(output)
+	return &RuntimeDindUsage{
+		CPU:    runtimeCPUUsageFromValues(values, interval),
+		Memory: runtimeMemoryUsageFromValues(values),
+	}
 }
 
 func formatMebibytes(bytes int64) string {

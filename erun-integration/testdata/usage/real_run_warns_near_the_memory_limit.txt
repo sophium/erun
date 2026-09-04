@@ -25,8 +25,26 @@
   "warnings": [
     "memory is at 90% of its 2048Mi limit (warns at 85%)",
     "memory.peak reached 98% of the limit (warns at 95%) -- this environment came close to an OOM kill",
-    "the cgroup recorded 1 OOM kill(s)"
+    "the cgroup recorded 1 OOM kill(s)",
+    "erun-dind: memory is at 90% of its 2048Mi limit (warns at 85%)",
+    "erun-dind: memory.peak reached 98% of the limit (warns at 95%) -- this environment came close to an OOM kill",
+    "erun-dind: the cgroup recorded 1 OOM kill(s)"
   ],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "dind": {
+    "cpu": {
+      "quotaCores": 1,
+      "intervalSeconds": 1
+    },
+    "memory": {
+      "currentBytes": 1932735283,
+      "peakBytes": 2100000000,
+      "peakObserved": true,
+      "limitBytes": 2147483648,
+      "percentOfLimit": 89.99999999068677,
+      "oomKills": 1,
+      "oomKillsObserved": true
+    }
+  }
 }
 audit: erun usage --output json
