@@ -35,73 +35,16 @@ async function mockWhipReport(
 // pause/resume-on-blur behaviour already has full coverage in
 // transientDismissTimer.test.ts's jsdom unit tests; what these specs need is
 // just the "window is focused" precondition to hold, so the fake clock's
-// fastForward has an armed timer to advance. page.bringToFront() used to
-// supply that by asking the OS/window manager for real focus, but a headless
-// gate container does not reliably grant it -- confirmed by a real 'erun
-// build' run failing here while every standalone run.sh pass went green.
-// Pin document.hasFocus() to true directly instead of hoping the browser
-// wins real focus.
+// fastForward has an armed timer to advance. Pin document.hasFocus() to true
+// directly rather than asking the OS/window manager for it via
+// page.bringToFront() -- deterministic either way, and it removes focus as a
+// variable entirely. A real 'erun build' run once failed here while every
+// standalone run.sh pass went green; instrumentation traced that to a
+// hover/mouseleave race in openAndWhip below (armIfFocused itself logged
+// hasFocus:true on every call), not to focus.
 async function forceDocumentFocused(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() => {
     Object.defineProperty(document, 'hasFocus', { value: () => true, configurable: true });
-  });
-}
-
-// TEMPORARY DIAGNOSTIC -- installs capture-phase listeners plus a
-// MutationObserver over the whip panel, logging everything to console.debug
-// so a job run can capture it. Removed once the root cause is confirmed.
-async function installHoverDiagnostics(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __diagSeq?: WeakMap<Node, number>; __diagNext?: number };
-    w.__diagSeq = new WeakMap();
-    w.__diagNext = 1;
-    const stamp = (n: Node): number => {
-      const seq = w.__diagSeq;
-      if (!seq) return -1;
-      let id = seq.get(n);
-      if (id === undefined) {
-        id = w.__diagNext ?? 1;
-        w.__diagNext = id + 1;
-        seq.set(n, id);
-      }
-      return id;
-    };
-    const describeNode = (n: EventTarget | null): string => {
-      if (!(n instanceof Element)) return n instanceof Node ? n.nodeName : 'non-node';
-      return `<${n.tagName.toLowerCase()}#${String(stamp(n))} role=${n.getAttribute('role') ?? ''} text="${(n.textContent ?? '').slice(0, 24)}">`;
-    };
-    for (const type of ['mouseenter', 'mouseleave', 'mouseover', 'mouseout', 'mousemove']) {
-      document.addEventListener(
-        type,
-        (e) => {
-          const me = e as MouseEvent;
-          console.debug(
-            `[DIAG] ${type} t=${performance.now().toFixed(1)} target=${describeNode(e.target)} related=${describeNode(me.relatedTarget)} xy=${String(me.clientX)},${String(me.clientY)}`,
-          );
-        },
-        true,
-      );
-    }
-    const panel = document.querySelector('[role="region"][aria-label="Whip"]');
-    if (panel?.parentElement) {
-      new MutationObserver((records) => {
-        for (const r of records) {
-          r.removedNodes.forEach((n) => {
-            console.debug(
-              `[DIAG] removed t=${performance.now().toFixed(1)} node=${describeNode(n)}`,
-            );
-          });
-          r.addedNodes.forEach((n) => {
-            console.debug(`[DIAG] added t=${performance.now().toFixed(1)} node=${describeNode(n)}`);
-          });
-        }
-      }).observe(panel.parentElement, { subtree: true, childList: true });
-    }
-  });
-  page.on('console', (msg) => {
-    if (msg.text().startsWith('[DIAG]')) {
-      console.log(msg.text());
-    }
   });
 }
 
@@ -112,22 +55,9 @@ async function installHoverDiagnostics(page: import('@playwright/test').Page): P
 // that, `hovered` stays true from the click itself and the auto-dismiss
 // timer (which pauses while hovered) never starts at all, which is the
 // pause/resume feature working correctly, not something to route around.
-const DIAG_DELAY_MS = Number(process.env.DIAG_DELAY_MS ?? '0');
-
 async function openAndWhip(app: import('../pages/index.js').AppShell): Promise<void> {
   await app.titlebar.whipButton().click();
   await app.titlebar.whipRunButton().click();
-  if (DIAG_DELAY_MS > 0) {
-    // Synchronously busy-loop the renderer main thread right after the click,
-    // before moving the mouse -- simulates the main-thread contention a
-    // loaded gate pod creates, to see whether it opens the race window.
-    await app.page.evaluate((ms) => {
-      const end = performance.now() + ms;
-      while (performance.now() < end) {
-        /* busy */
-      }
-    }, DIAG_DELAY_MS);
-  }
   await app.page.mouse.move(0, 0);
 }
 
@@ -138,11 +68,18 @@ test.describe('whip report auto-dismiss', () => {
     ]);
     await app.page.clock.install();
     await forceDocumentFocused(app.page);
-    await installHoverDiagnostics(app.page);
 
     await openAndWhip(app);
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
 
+    // Force a real mouseenter then a real mouseleave on the popover:
+    // useWhipAutoDismiss only schedules the dismiss once `hovered` returns to
+    // false, and an explicit hover() first guarantees the following
+    // mouse.move(0, 0) actually crosses the popover's boundary outward,
+    // rather than starting from an already-outside pointer where no leave
+    // event fires at all.
+    await app.titlebar.whipReportBody().hover();
+    await app.page.mouse.move(0, 0);
     await app.page.clock.fastForward(TRANSIENT_DISMISS_MS + 200);
     await expect(app.titlebar.whipReportHeading()).toBeHidden();
   });
