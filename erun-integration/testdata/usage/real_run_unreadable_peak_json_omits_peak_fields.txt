@@ -19,6 +19,18 @@
       "percentUsed": 44.899735520796746
     }
   ],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "dind": {
+    "cpu": {
+      "quotaCores": 1,
+      "intervalSeconds": 1
+    },
+    "memory": {
+      "currentBytes": 413589504,
+      "limitBytes": 2147483648,
+      "percentOfLimit": 19.259262084960938,
+      "oomKillsObserved": true
+    }
+  }
 }
 audit: erun usage --output json

@@ -35,11 +35,11 @@ type UsageOutput struct {
 // the exec runs a single fixed diagnostic script, never caller-supplied argv,
 // so it is safe to grant an orchestrator that must never reach `exec raw`.
 //
-// On a build-capable environment, this reading cannot see the erun-dind
-// sidecar an image build actually runs in -- a separate cgroup, not a
-// descendant of this container's -- so `excludesBuilds` is true in the
-// output on every environment that carries one, naming the gap instead of
-// letting the reading imply the environment is idle.
+// On a build-capable environment, `excludesBuilds` is true because every
+// image build actually runs in the erun-dind sidecar, a separate cgroup, not
+// a descendant of this container's -- but eruncommon.RunRuntimeUsage also
+// execs the same reading into that sidecar and returns it as `dind`, so the
+// output states the sidecar's own usage instead of only naming the gap.
 func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 		target, err := resolveUsageOpenResult(runtime, input)

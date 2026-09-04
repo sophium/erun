@@ -25,11 +25,14 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"usage cross a fixed threshold. Every field reports its own unavailability\n" +
 			"(cgroup v1, an unlimited limit, a file that could not be read) rather than\n" +
 			"failing the call, since those are normal on some clusters, not errors.\n\n" +
-			"On a build-capable environment (local-agent, remote-agent), CPU and memory\n" +
-			"are scoped to this container alone: every image build actually runs in the\n" +
-			"erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build\n" +
-			"can show as idle here. The output states this exclusion explicitly on those\n" +
-			"environments; `erun observe` reports the sidecar's own resource limits.",
+			"On a build-capable environment (local-agent, remote-agent), every image build\n" +
+			"actually runs in the erun-dind sidecar, a separate cgroup from the runtime\n" +
+			"container above -- so this command also reads the sidecar's own CPU and\n" +
+			"memory against its own limit and reports it alongside, with the same named\n" +
+			"warnings if the sidecar itself nears its memory limit or records an OOM kill.\n" +
+			"A busy build no longer reads as an idle environment. If the sidecar's own\n" +
+			"cgroup could not be read, the output says so instead; `erun observe` reports\n" +
+			"its resource limits either way.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,

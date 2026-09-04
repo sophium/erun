@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,6 +414,102 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 	}
 	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
 		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
+	}
+}
+
+// TestRunRuntimeUsageReportsTheDindSidecarSeparately is the regression guard
+// for erun#2120: an environment mid-release can read 0.3% CPU / idle memory
+// from the runtime container while the erun-dind sidecar -- where the actual
+// build runs -- saturates its own cores, and before this fix nothing in the
+// reading let an operator tell a genuinely idle environment apart from one
+// whose build is grinding away in a container this reading could not see at
+// all. The fake runner answers differently per container, exactly like a
+// real busy-build/idle-runtime split, and asserts the busy sidecar reading
+// surfaces on RuntimeUsage.Dind rather than being silently dropped.
+func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
+	idleRuntimeReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=104857600", // ~100Mi
+		"memory_max=24696061952",   // ~23Gi
+		"memory_peak=104857600",
+		"memory_oom_kill=0",
+		"cpu_max=1200000 100000", // 12-core quota
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=1003000", // 3ms burned over 1s: reads as idle
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+	busyDindReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=2040109465", // ~1.9Gi
+		"memory_max=15032385536",    // 14Gi
+		"memory_peak=3435973836",    // ~3.2Gi
+		"memory_oom_kill=0",
+		"cpu_max=400000 100000", // 4-core quota
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=2900000", // 1.9 cores burned over 1s: a real build grinding
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+		if container == runtimeDindContainerName {
+			return RemoteCommandResult{Stdout: busyDindReading}, nil
+		}
+		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+	}
+
+	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	if err != nil {
+		t.Fatalf("RunRuntimeUsage: %v", err)
+	}
+	if !usage.ExcludesBuilds {
+		t.Fatalf("expected ExcludesBuilds=true for a local-agent env, got %+v", usage)
+	}
+	if usage.CPU.UtilizationPercent >= 5 {
+		t.Fatalf("expected the runtime container's own reading to look idle, got %+v", usage.CPU)
+	}
+	if usage.Dind == nil {
+		t.Fatalf("expected a Dind reading for a build-capable environment, got nil (the exact regression: the busy sidecar is invisible)")
+	}
+	if usage.Dind.CPU.UtilizationPercent < 40 {
+		t.Errorf("expected the sidecar's own reading to show the real build load (~47%% of its 4-core quota), got %+v", usage.Dind.CPU)
+	}
+	if usage.Dind.Memory.CurrentBytes != 2040109465 {
+		t.Errorf("expected the sidecar's own memory reading to carry through, got %+v", usage.Dind.Memory)
+	}
+}
+
+// TestRunRuntimeUsageDindExecFailureFailsSoft covers the fail-soft contract:
+// an environment whose sidecar cannot be reached (an older runtime image, a
+// sidecar mid-restart) must still get a usable runtime-container reading
+// instead of losing the whole call over a container this reading has always
+// been unable to see anyway.
+func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
+	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+		if container == runtimeDindContainerName {
+			return RemoteCommandResult{}, errors.New("container not found")
+		}
+		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+	}
+
+	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	if err != nil {
+		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
+	}
+	if usage.Dind != nil {
+		t.Fatalf("expected Dind=nil when the sidecar exec fails, got %+v", usage.Dind)
+	}
+	if !usage.ExcludesBuilds {
+		t.Fatalf("expected ExcludesBuilds=true regardless of whether the sidecar could be read, got %+v", usage)
+	}
+	if usage.Memory.CurrentBytes != 100 {
+		t.Errorf("expected the runtime container's own reading to still come through, got %+v", usage.Memory)
 	}
 }
 
