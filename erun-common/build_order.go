@@ -85,6 +85,26 @@ func dockerfileHasVersionedFrom(dockerfilePath string) bool {
 	return dockerfileVersionedFromPattern.Match(data)
 }
 
+var dockerfileTestStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+test\b`)
+
+var dockerfileCopyFromTestPattern = regexp.MustCompile(`(?im)^\s*COPY\s+--from=test\b`)
+
+// dockerfileHasGateTestStage reports whether a Dockerfile declares a `test`
+// stage that a later stage depends on via `COPY --from=test` — the
+// `erun-devops` convention (see its AGENTS.md "Build Workflow") where the
+// builder stage's `COPY --from=test /test-ok` marker only exists once `make
+// check` has actually run and passed inside the `test` stage. Such a
+// Dockerfile is the build's own merge gate: promoting a cached fingerprint
+// image for it would skip invoking `docker build` at all, so the gate never
+// runs even though the overall build still reports success.
+func dockerfileHasGateTestStage(dockerfilePath string) bool {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return false
+	}
+	return dockerfileTestStagePattern.Match(data) && dockerfileCopyFromTestPattern.Match(data)
+}
+
 func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]DockerBuildSpec) []string {
 	deps := dockerfileLocalBaseImageDeps(dockerfilePath, buildsByTag)
 	tags := make([]string, 0, len(deps))

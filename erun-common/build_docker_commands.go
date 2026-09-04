@@ -14,8 +14,18 @@ import (
 
 const fingerprintTagPrefix = "fp-"
 
+// errGateTestStagePromoted is a defense-in-depth backstop: applyIncrementalPromotion
+// never sets Promote on a GateTestStage build (erun#2090), so this branch should be
+// unreachable. If some future code path ever produces the combination anyway, fail
+// loudly rather than silently skip the build's own gate — an exit-0 build that never
+// ran its test stage is indistinguishable from a passing one otherwise.
+var errGateTestStagePromoted = errors.New("refusing to promote from a cached fingerprint image: this Dockerfile's test stage runs the build's own gate, and promoting would skip it without ever running make check")
+
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	if buildInput.Promote {
+		if buildInput.GateTestStage {
+			return fmt.Errorf("%s: %w", strings.TrimSpace(buildInput.Image.Tag), errGateTestStagePromoted)
+		}
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
