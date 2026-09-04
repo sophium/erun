@@ -3603,15 +3603,20 @@ func isHelmChartNotFoundMessage(output string) bool {
 // tracePodWatchAction records the watcher action in the dry-run trace so the
 // --dry-run contract holds: every action a real run would take must appear
 // in the trace. The watcher itself only fires in real-run mode (DeployHelmChart
-// runs after RunHelmDeploy's DryRun early-return), but the trace here lets a
-// reader audit the plan before executing it.
+// runs after RunHelmDeploy's DryRun early-return), so under --dry-run the
+// wording stays conditional ("would watch") rather than asserting a watch that
+// never started.
 func tracePodWatchAction(ctx Context, releaseName, namespace, kubernetesContext string) {
 	releaseName = strings.TrimSpace(releaseName)
 	namespace = strings.TrimSpace(namespace)
 	if releaseName == "" || namespace == "" {
 		return
 	}
-	descriptor := "deploy: watching pods in " + namespace
+	verb := "watching"
+	if ctx.DryRun {
+		verb = "would watch"
+	}
+	descriptor := "deploy: " + verb + " pods in " + namespace
 	if c := strings.TrimSpace(kubernetesContext); c != "" {
 		descriptor += " on context " + c
 	}
