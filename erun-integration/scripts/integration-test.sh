@@ -94,6 +94,18 @@
 #     explicit GOCOVERDIR opts back into the old shared/reusable-path
 #     behavior (e.g. to inspect counters after the run); only the default
 #     changed.
+#   - GOCOVERDIR (whether the default tempdir or an explicit override) is a
+#     parent directory, not itself where counters land: internal/erun/erun.go
+#     gives every subprocess invocation its own subdirectory under it, so
+#     concurrently-running scenarios never share one GOCOVERDIR. They used
+#     to, and Go's coverage runtime writes meta-data via write-then-rename;
+#     enough simultaneous emits into one directory lost a rename's source
+#     often enough to fail a different golden almost every run (a stray
+#     "error: coverage meta-data emit failed" line captured as part of the
+#     command's output). Per-invocation subdirectories remove the shared
+#     resource instead of serializing around it, so this script still runs
+#     the suite at full parallelism and merges every subdirectory's counters
+#     below.
 
 set -euo pipefail
 
@@ -150,8 +162,15 @@ fi
 echo ">> running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)"
 go test -count=1 -parallel="$test_parallelism" ./...
 
-echo ">> merging coverage counters into $profile"
-go tool covdata textfmt -i="$cover_dir" -o="$profile"
+mapfile -t cover_subdirs < <(find "$cover_dir" -mindepth 1 -maxdepth 1 -type d)
+if [[ ${#cover_subdirs[@]} -eq 0 ]]; then
+    echo "!! no coverage counter directories found under $cover_dir; nothing was instrumented" >&2
+    exit 1
+fi
+cover_input=$(IFS=,; echo "${cover_subdirs[*]}")
+
+echo ">> merging coverage counters from ${#cover_subdirs[@]} invocation(s) into $profile"
+go tool covdata textfmt -i="$cover_input" -o="$profile"
 
 echo ">> coverage by function (last line is the total):"
 go tool cover -func="$profile" | tail -20

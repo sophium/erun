@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -34,10 +35,11 @@ const CoverPkgs = "github.com/sophium/erun," +
 	"github.com/sophium/erun/erun-common"
 
 var (
-	buildOnce  sync.Once
-	binaryPath string
-	buildErr   error
-	coverDir   string
+	buildOnce         sync.Once
+	binaryPath        string
+	buildErr          error
+	coverDir          string
+	invocationCounter int64
 )
 
 // BinaryPath returns the path to the coverage-instrumented erun binary,
@@ -53,12 +55,33 @@ func BinaryPath(t testing.TB) string {
 	return binaryPath
 }
 
-// CoverDir returns the directory where the instrumented binary writes coverage
-// counter files.
+// CoverDir returns the parent directory under which each invocation of the
+// instrumented binary writes its own coverage counter subdirectory (see
+// Run). Coverage tooling that wants every counter file must read this
+// directory's immediate subdirectories, not its own contents.
 func CoverDir(t testing.TB) string {
 	t.Helper()
 	BinaryPath(t)
 	return coverDir
+}
+
+// nextInvocationCoverDir allocates a fresh, never-reused subdirectory of
+// coverDir for one subprocess invocation. Go's coverage runtime writes meta
+// and counter files via write-then-rename; sharing one GOCOVERDIR across
+// concurrently-running subprocesses lets one invocation's rename lose its
+// source to another's, which corrupts nothing on disk but makes the
+// subprocess print an "error: coverage meta-data emit failed" line to
+// stderr that then breaks output-comparing goldens. Giving every invocation
+// its own directory removes the shared resource instead of serializing
+// around it.
+func nextInvocationCoverDir(t testing.TB) string {
+	t.Helper()
+	id := atomic.AddInt64(&invocationCounter, 1)
+	dir := filepath.Join(coverDir, fmt.Sprintf("%08d", id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("erun.Run: create per-invocation cover dir: %v", err)
+	}
+	return dir
 }
 
 func buildBinary() (string, error) {
@@ -198,7 +221,7 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	}
 	env := make([]string, 0, len(opts.Env)+2)
 	env = append(env, opts.Env...)
-	env = append(env, CoverDirEnv+"="+coverDir)
+	env = append(env, CoverDirEnv+"="+nextInvocationCoverDir(t))
 	// So a SIGQUIT on timeout dumps every goroutine's stack, not just the
 	// current one — turning an opaque hang into a report of where it stuck.
 	env = append(env, "GOTRACEBACK=all")
