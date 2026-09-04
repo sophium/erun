@@ -121,11 +121,33 @@ if [ -n "$(git status --porcelain)" ]; then
   # uncommitted work; never invent one for changes you did not make.
   echo "<commit message>" | erun exec commit "$(git rev-parse --abbrev-ref HEAD)"
 fi
+```
+
+A clean tree skips the commit.
+
+**A defect fix names its reproduction before it is pushed.** Root `AGENTS.md`
+§ "A Defect Fix Names Its Reproduction" requires a `bug/` branch to name, in a
+commit trailer, the test case that reproduces the failure the report
+described — or to declare a kind from the closed exemption set. Check it here,
+after the commit and before the push, which is the last point an amend is
+free:
+
+```sh
+node scripts/check-regression-coverage.mjs || exit 1
+```
+
+Skip only when the checkout is not this repository (the script lives in
+`sophium/erun`). When it fails, it prints the exact trailer block to add:
+amend it onto a commit in the range and re-run this rung. Do not push past a
+red here and do not rename the branch to dodge it — the whole point is that a
+fix ships with the case that would have caught the defect.
+
+```sh
 erun exec push "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-A clean tree skips the commit. A push with nothing new is a harmless
-no-op (git reports "up to date"); this rung is always safe to re-run.
+A push with nothing new is a harmless no-op (git reports "up to date"); this
+rung is always safe to re-run.
 
 ### 4. Find or create the review
 

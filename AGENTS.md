@@ -335,9 +335,60 @@ Exceptions are narrow: changes with no live-target surface (pure refactors that 
 
 Probe artifacts the agent leaves behind during verification (injected files, manual patches that diverge from the source of truth, helper processes) are the agent's mess to clean up before declaring done, so the user's environment returns to a clean state.
 
+## A Defect Fix Names Its Reproduction (Mandatory)
+
+**A fix for a reported defect must, in the same change, carry a test that reproduces the failure the report described — and must say which test that is.**
+
+The defect this rule exists to prevent is not "a fix with no tests". It is narrower, and it is what an audit of ~80 closed issues actually found, three times over in three unrelated subsystems (desktop dashboard, desktop dialog, release pipeline): **the fix is correct, the neighbouring states all get tests, and the one state the report described gets none.** In each case a refactor away, the operator-visible bug comes straight back with a green suite beside it.
+
+- `#1932`'s gates tab got tests for "renders returned runs", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for `ListGateRuns` **failing**, which is the state the live platform is actually in.
+- `#1934`'s title is literally "one failed read blanks the other's already-resolved panel", and all nine of its tests stub both reads to the *same* class of outcome. None crosses them.
+- `#1921`'s docker stub is all-or-nothing on `image inspect`, so no scenario has the local answer *present* while the registry answers *missing* — precisely the disagreement that produced the reported `unknown blob`.
+
+So the bar is not "did you add a test". Every one of those three changes added tests. The bar is: **which case is the reproduction of the reported failure?**
+
+- **A test that exercises the changed function is not a reproduction.** The reproduction is the case that fails on the pre-fix code for the reason the report gave, and passes after. If you cannot say which case that is, you have not written it yet.
+- **A probabilistic or load-dependent failure needs a deterministic reproduction constructed on purpose** — a simulated broken transport, a forced overlap, a controllable stand-in process. A single green run of a racy flow proves nothing, and "it passes now" is not a reproduction. Several fixes in this repo needed exactly this; see `erun-integration/AGENTS.md` § "Stubbing rules" and `erun-ui/playwright/AGENTS.md` for the seams that make it possible.
+- **Cross the states the report crossed.** When the report is about two things disagreeing (two panels, two registries, two reads), a scenario that drives both to the same outcome does not reproduce it. Disagree them.
+
+### The declaration
+
+State it as commit trailers on any commit in the branch — the same place `Closes #N` already lives, because provenance belongs in git history (§ "Code Comments"):
+
+```
+Reproduces: <the state, the input, and the wrong behaviour the report described>
+Regression-Test: <path/to/file_test.go>::<name of the case>
+```
+
+`Regression-Test` is repeatable. The named path must be a real test file that **this change adds or modifies**, and the named case string must really be in it — pointing at a pre-existing test somewhere else in the repo is not a reproduction of a defect you just fixed.
+
+When a fix genuinely cannot carry one — and there are real cases — say so explicitly, with a kind from the closed set below and a reason a reviewer can weigh:
+
+```
+Regression-Test: none
+Regression-Test-Exemption: <kind>: <why>
+```
+
+| Kind | Meaning | Checked mechanically? |
+| --- | --- | --- |
+| `docs-only` | prose and images only, nothing executable | yes — the diff must contain no non-documentation file |
+| `revert` | reverts a commit whose own coverage still stands | yes — a commit in the range must carry `This reverts commit <sha>` |
+| `covered-by-existing` | an existing test already reproduces it | partly — also needs `Regression-Test-Existing: <path>::<case>`, which must resolve |
+| `no-reproducible-failure` | no test this repo can run reproduces it (hardware, a third-party outage, human perception) | no — a claim a reviewer accepts or rejects |
+
+**Silence is never how a change opts out.** That is the same discipline `InternalAPIRoutes` and `cliOnlyAgentFacingCommands` already enforce elsewhere, applied to the thing that actually kept regressing.
+
+### What the gate can and cannot decide
+
+`scripts/check-regression-coverage.mjs` enforces this, run by `make fast-check` (see below) and by the `erun-merge` skill before it pushes. It **cannot** decide whether the named test genuinely reproduces the reported failure — no static analysis can read an issue report and judge that, and pretending otherwise would produce a check that is wrong most of the time. What it does decide is that the claim is named, specific, resolvable, and impossible to make by silence, so a reviewer answers one bounded question instead of having to notice an absence. A wrong named claim is a review finding; an absence is what shipped three times.
+
+It also cannot run inside `check-gate`: it reads git history, and `check-gate` runs inside the `erun-devops` image test stage's Docker build context, which has no `.git`. Its pure classifier is unit-tested in `scripts/check-regression-coverage.test.mjs`, which `test-frontend` **does** run inside `check-gate`, so the enforcement logic is gated even though the git-dependent invocation is not.
+
+`--audit` mode answers only the diff-derived half ("does this change carry any test at all?") for commits that predate the convention. Run it over history, not over your branch — on a branch it would let exactly the three shapes above through.
+
 ## Run `make fast-check` Before Pushing
 
-`make fast-check` is a fast, local subset of `check-gate` — golangci-lint, the tracker-reference gate, and prettier formatting — that runs in seconds to under a minute, not the 9-10 minutes a full `make check`/`check-gate` cycle costs. Agents are what push in this repository (see § "Contributing" above), so an agent pushing a branch without having run `fast-check` first is choosing to find out about a lint finding, a tracker reference in a comment, or an unformatted file ten minutes later in the merge gate instead of immediately. Run `make fast-check` before every push; it is cheap enough that there is no reason not to.
+`make fast-check` is a fast, local subset of `check-gate` — golangci-lint, the tracker-reference gate, the regression-coverage gate (§ "A Defect Fix Names Its Reproduction" above), and prettier formatting — that runs in seconds to under a minute, not the 9-10 minutes a full `make check`/`check-gate` cycle costs. Agents are what push in this repository (see § "Contributing" above), so an agent pushing a branch without having run `fast-check` first is choosing to find out about a lint finding, a tracker reference in a comment, an undeclared regression reproduction, or an unformatted file ten minutes later in the merge gate instead of immediately. Run `make fast-check` before every push; it is cheap enough that there is no reason not to.
 
 `fast-check` is **not** a substitute for `make check` / `make check-gate`, and passing it does not mean the branch is ready to merge — it runs no tests, no build, and no integration suite. Still run the full gate (or push and let the merge queue's own gate run it) before merging; `fast-check` only shortens the feedback loop for the narrow class of failure it covers.
 
