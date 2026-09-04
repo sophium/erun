@@ -215,6 +215,16 @@ test-erun-dns01-webhook:
 # the `typescript` package this step's own `yarn install` already resolves,
 # not each package's full type-aware lint setup.
 #
+# Only the *self-test* of the regression-coverage gate (root AGENTS.md § "A
+# Defect Fix Names Its Reproduction") runs here, never the gate itself: the
+# gate reads git history, and this target runs inside the erun-devops image
+# test stage's Docker build context, which has no `.git`. Running its pure
+# classifier here is still the point -- it keeps the enforcement logic itself
+# gated by check-gate, the same split erun-integration's structural gates use
+# (classifier unit-tested on synthetic data, wiring supplies the real state).
+# The gate's real invocation lives in fast-check below, which root AGENTS.md
+# already requires before every push.
+#
 # erun-ui/frontend imports generated Wails bindings (wailsjs/) that are
 # gitignored/dockerignored like any other generated artifact (dist,
 # node_modules), so they are absent both from a fresh checkout and from the
@@ -250,6 +260,8 @@ test-frontend:
 	@echo ">> issue-reference gate (erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
+	@echo ">> regression-coverage gate self-test"
+	@node --test scripts/check-regression-coverage.test.mjs
 	@echo ">> generating erun-ui/frontend wailsjs bindings"
 	@./erun-ui/generate-wailsjs.sh
 	@( \
@@ -459,8 +471,10 @@ check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns0
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
-# tracker-reference gate (root AGENTS.md § "Code Comments"), and prettier
-# formatting. This is NOT a substitute for check/check-gate -- it runs no
+# tracker-reference gate (root AGENTS.md § "Code Comments"), the
+# regression-coverage gate (root AGENTS.md § "A Defect Fix Names Its
+# Reproduction"), and prettier formatting. This is NOT a substitute for
+# check/check-gate -- it runs no
 # tests, no build, and no integration suite, so a green fast-check says
 # nothing about those. It exists purely so a contributor (human or agent)
 # can catch the failures it does cover in seconds locally instead of one
@@ -492,6 +506,16 @@ check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns0
 # elsewhere in the tree replayed a stale cached "ok" and missed it -- caught
 # by hand while validating this target, not theoretical.
 #
+# The regression-coverage gate is the one step here that has no check-gate
+# home to be scoped down from: it reads this branch's own commits and diff,
+# and check-gate runs inside a Docker build context with no `.git`. fast-check
+# is where it belongs anyway -- root AGENTS.md requires fast-check before
+# every push, which is exactly the moment a defect fix either does or does not
+# name the case that reproduces the failure it was filed for. Its own
+# self-test runs immediately before it (and again inside check-gate, via
+# test-frontend) so a broken classifier fails loudly rather than waving every
+# change through.
+#
 # Prettier runs the same `yarn format:check` each workspace's own
 # package.json already defines, across all three workspaces at once via
 # scripts/parallel-gate.sh (same aggregated-output/single-failure-report
@@ -507,6 +531,9 @@ fast-check: lint
 	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
+	@echo ">> regression-coverage gate (this branch)"
+	@node --test scripts/check-regression-coverage.test.mjs
+	@node scripts/check-regression-coverage.mjs
 	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
 	@for d in erun-kit erun-ui/frontend erun-console; do \
 		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \
