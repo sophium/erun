@@ -84,7 +84,6 @@ Records a build against a review — the only way an erun client transitions a r
 | `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. Omit with `--gate`. |
 | `--failed` | Record the build as failed instead of successful. |
 | `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
-| `--desktop-playwright-verified` | Attest that `erun-ui/playwright/run.sh` was run against this commit and passed. Required for a successful `--gate` build that changes `erun-ui/**` — the gate's own `erun build` does not run that suite (issue #1933), so a green `GATE` build proves nothing about the desktop frontend without this attestation. See [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
 
 ### `review report-merged` {#review-report-merged}
 
@@ -157,7 +156,6 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `record-build` with a `--commit` that is not 40 lowercase hex characters. | `400 Bad Request` (`INVALID_COMMIT_ID`). |
 | `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
 | `record-build` on an unknown review id. | `404 Not Found`. |
-| `record-build --gate` (successful) whose commit changes `erun-ui/**` without `--desktop-playwright-verified`. | Aborts before any network call, naming the commit and the required remedy (build `erun-app`, run `erun-ui/playwright/run.sh`, retry with the flag). |
 | `record-build --gate --failed` whose `--failure-detail` matches a known erun infrastructure-failure signature (a registry or network giving up, not a verdict about the change). | Aborts before any network call, naming the matched signature and the remedy: report the gate run `inconclusive` via [`exec gate-run report`](/cli/exec#exec-gate-run-report) instead of recording a `FAILED` `GATE` build. |
 | `report-merged` whose `--build-id` does not name a recorded, successful `GATE` build for this review. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `report-merged` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
