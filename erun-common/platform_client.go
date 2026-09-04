@@ -109,10 +109,15 @@ type PlatformInfo struct {
 // PlatformWhoami mirrors GET /v1/whoami's response. Capabilities is what a
 // client gates its surfaces on; Roles is descriptive only.
 type PlatformWhoami struct {
-	TenantID string   `json:"tenantId"`
-	UserID   string   `json:"userId"`
-	Username string   `json:"username,omitempty"`
-	Roles    []string `json:"roles,omitempty"`
+	TenantID string `json:"tenantId"`
+	// TenantName is the tenant's name -- the same value `platform tenant
+	// list` reports for TenantID, read by the server off the identical
+	// tenants.name column, so the two can never disagree about what a
+	// tenant is called.
+	TenantName string   `json:"tenantName,omitempty"`
+	UserID     string   `json:"userId"`
+	Username   string   `json:"username,omitempty"`
+	Roles      []string `json:"roles,omitempty"`
 	// Capabilities is nil when the platform did not answer with one, and
 	// non-nil but empty when the caller may do nothing. Do not conflate them —
 	// see PlatformCapabilities.Known.
