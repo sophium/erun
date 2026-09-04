@@ -128,9 +128,7 @@ async function openAndWhip(app: import('../pages/index.js').AppShell): Promise<v
       }
     }, DIAG_DELAY_MS);
   }
-  console.log(`[DIAG] node about to move t=${await app.page.evaluate(() => performance.now())}`);
   await app.page.mouse.move(0, 0);
-  console.log(`[DIAG] node after move t=${await app.page.evaluate(() => performance.now())}`);
 }
 
 test.describe('whip report auto-dismiss', () => {
