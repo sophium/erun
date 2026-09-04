@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -74,5 +76,27 @@ func TestGate(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "gate/show_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// erun#2052: /v1/gate-runs merged and closed its issue while every
+	// deployed control plane still predated it, and every real caller of
+	// `erun gate list` saw only an opaque "http 404: 404 page not found" with
+	// nothing distinguishing "the plane's router has never heard of this
+	// path" from an ordinary application-level not-found. This stub registers
+	// no routes at all, so it answers Go's own default 404 body -- exactly
+	// what an undeployed route looks like on a real plane -- and locks in
+	// that the CLI now names the actual cause and the two commands that
+	// confirm it, instead of leaving the operator to rediscover both by hand.
+	t.Run("real_run_route_not_registered_on_plane_reports_deploy_gap_hint", func(t *testing.T) {
+		setup := env.New(t)
+		platform := httptest.NewServer(http.NewServeMux())
+		t.Cleanup(platform.Close)
+		platformAlias(t, setup, platform)
+		result := erun.Run(t, []string{"gate", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a 404 from an unregistered route, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "gate/real_run_route_not_registered_on_plane_reports_deploy_gap_hint",
+			normalize.Apply(result.Combined, stubServerRule(platform, "<PLATFORM_API>")))
 	})
 }

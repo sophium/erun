@@ -840,7 +840,26 @@ func (e *PlatformStatusError) Error() string {
 	if e.sentinel != nil {
 		base += ": " + e.sentinel.Error()
 	}
+	if e.routeNotRegistered() {
+		base += "; the deployed plane's router has no route matching this path at all (not an application-level " +
+			"not-found) -- it likely predates this route; run `erun exec route-check` to confirm, or " +
+			"`erun list --control-planes` to compare its deployed version against what's published"
+	}
 	return base
+}
+
+// routeNotRegistered reports whether this 404's body is exactly the plane's
+// own unmodified "no route matched" body -- the same discriminator
+// route_check.go uses to tell "this route was never registered on the
+// deployed plane" apart from an application-level 404 (a well-formed request
+// for an id that doesn't exist, which always carries erun-backend-api's own
+// JSON error shape instead). A route can merge, get unit-tested, and close
+// its issue while the deployed plane still predates it (erun#2052); every
+// ordinary typed call funnels through do()/platformStatusError, so without
+// this the operator sees only an opaque "http 404: 404 page not found" with
+// nothing distinguishing a genuine not-found from a plane running old code.
+func (e *PlatformStatusError) routeNotRegistered() bool {
+	return e.Status == http.StatusNotFound && strings.TrimSpace(string(e.Body)) == muxDefaultNotFoundBody
 }
 
 func (e *PlatformStatusError) Unwrap() error {
