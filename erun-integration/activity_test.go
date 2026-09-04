@@ -921,6 +921,65 @@ func TestActivity(t *testing.T) {
 		}
 	})
 
+	t.Run("lease_release_with_mismatched_flags_reports_no_match_and_does_not_clear_the_claim", func(t *testing.T) {
+		// erun#2115: an exclusive claim released with the wrong flags (a plain
+		// release of an id actually held exclusively) used to print "lease
+		// released" and clear nothing, hiding a still-held exclusive claim from
+		// the operator. This must still exit 0 (a wrapper's cleanup trap must
+		// never fail over a no-match release), but the message must say plainly
+		// that nothing was released and name the fix, and the claim must
+		// genuinely still be held afterward.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "land-issue-2090", "--id", "land-issue-2090", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+
+		mismatchedRelease := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "land-issue-2090",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if mismatchedRelease.ExitCode != 0 {
+			t.Fatalf("a no-match release must still exit 0 for cleanup traps, got exit %d: %s", mismatchedRelease.ExitCode, mismatchedRelease.Combined)
+		}
+		// Check the release message itself (its first line), not the whole
+		// combined output: "no lease released: ..." contains "lease released: ..."
+		// as a substring, so a substring check against the whole output cannot
+		// tell the two apart.
+		releaseLine := strings.SplitN(mismatchedRelease.Combined, "\n", 2)[0]
+		if !strings.HasPrefix(releaseLine, "no lease released:") {
+			t.Fatalf("must not claim a release that did not happen, got:\n%s", mismatchedRelease.Combined)
+		}
+		if !strings.Contains(releaseLine, "--exclusive") || !strings.Contains(releaseLine, "worktree") {
+			t.Fatalf("expected a no-match message naming --exclusive and the held scope, got:\n%s", mismatchedRelease.Combined)
+		}
+
+		// The claim must genuinely still be held - the whole point of the bug.
+		stillHeld := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if !strings.Contains(stillHeld.Combined, "land-issue-2090") {
+			t.Fatalf("expected the exclusive claim to survive the mismatched release, got:\n%s", stillHeld.Combined)
+		}
+
+		// The matching release actually clears it.
+		matchedRelease := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev",
+			"--id", "land-issue-2090", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if matchedRelease.ExitCode != 0 {
+			t.Fatalf("matched release: exit %d: %s", matchedRelease.ExitCode, matchedRelease.Combined)
+		}
+		if !strings.Contains(matchedRelease.Combined, "lease released: land-issue-2090") {
+			t.Fatalf("expected the matching release to report success, got:\n%s", matchedRelease.Combined)
+		}
+		empty := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if !strings.Contains(empty.Combined, "no leases held") {
+			t.Fatalf("expected the claim gone after the matching release, got:\n%s", empty.Combined)
+		}
+	})
+
 	t.Run("stop_ready_blocked_by_a_held_lease", func(t *testing.T) {
 		// AC6 of the stop work: an otherwise-idle cloud-managed env that holds a
 		// lease must not be stopped, and the refusal must name the lease so an

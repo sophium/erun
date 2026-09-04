@@ -28,6 +28,51 @@ func isolateActivityCache(t *testing.T) {
 func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
+// The helpers below collapse the load-then-compare and result-shape patterns
+// repeated across the release tests, so the tests themselves read as a
+// sequence of assertions rather than a sequence of branches.
+
+func requireNoError(t *testing.T, err error, msg string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", msg, err)
+	}
+}
+
+func requireLeaseHeld(t *testing.T, tenant, environment string, now time.Time, alive func(int) bool, wantID string) {
+	t.Helper()
+	held, err := loadEnvironmentActivityLeases(tenant, environment, now, alive)
+	requireNoError(t, err, "load")
+	if len(held) != 1 || held[0].ID != wantID {
+		t.Fatalf("expected exactly one held lease %q, got %+v", wantID, held)
+	}
+}
+
+func requireNoLeasesHeld(t *testing.T, tenant, environment string, now time.Time, alive func(int) bool) {
+	t.Helper()
+	held, err := loadEnvironmentActivityLeases(tenant, environment, now, alive)
+	requireNoError(t, err, "load")
+	if len(held) != 0 {
+		t.Fatalf("expected no leases held, got %+v", held)
+	}
+}
+
+func requireReleaseResult(t *testing.T, result ReleaseEnvironmentActivityLeaseResult, wantReleased bool) {
+	t.Helper()
+	if result.Released != wantReleased {
+		t.Fatalf("expected Released=%v, got %+v", wantReleased, result)
+	}
+}
+
+func requireNoteContains(t *testing.T, note string, substrings ...string) {
+	t.Helper()
+	for _, s := range substrings {
+		if !strings.Contains(note, s) {
+			t.Fatalf("expected note %q to contain %q", note, s)
+		}
+	}
+}
+
 // TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run
 // purity contract erun#1907 fixed for the config tree: resolving the
 // activity directory is a pure read (job_supervisor.go's environmentJobDir
@@ -52,43 +97,67 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "team", Environment: "dev", Name: "gradle-build", TTL: 10 * time.Minute, Now: now,
 	})
-	if err != nil {
-		t.Fatalf("take: %v", err)
-	}
+	requireNoError(t, err, "take")
 	if lease.ID != "gradle-build" {
 		t.Errorf("expected the id to default to the name, got %q", lease.ID)
 	}
 	if !lease.ExpiresAt.Equal(now.Add(10 * time.Minute)) {
 		t.Errorf("expected the ttl to set the expiry, got %s", lease.ExpiresAt)
 	}
+	requireLeaseHeld(t, "team", "dev", now.Add(time.Minute), alwaysAlive, "gradle-build")
 
-	held, err := loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if len(held) != 1 || held[0].Name != "gradle-build" {
-		t.Fatalf("expected the lease to be held, got %+v", held)
-	}
-
-	if err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build"); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	held, err = loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
-	if err != nil {
-		t.Fatalf("load after release: %v", err)
-	}
-	if len(held) != 0 {
-		t.Fatalf("expected no leases after release, got %+v", held)
-	}
+	result, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
+	requireNoError(t, err, "release")
+	requireReleaseResult(t, result, true)
+	requireNoLeasesHeld(t, "team", "dev", now.Add(time.Minute), alwaysAlive)
 }
 
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
-	// releasing a lease that was never taken is success.
+	// releasing a lease that was never taken is success — but erun#2115 says
+	// the result must still say plainly that nothing was actually released.
 	isolateActivityCache(t)
-	if err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build"); err != nil {
+	result, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
+	if err != nil {
 		t.Errorf("releasing an absent lease must succeed, got %v", err)
 	}
+	if result.Released {
+		t.Errorf("expected Released=false when nothing was held, got %+v", result)
+	}
+	if result.Note != "" {
+		t.Errorf("expected no note when nothing at all is held under this id, got %q", result.Note)
+	}
+}
+
+// erun#2115: releasing a plain lease that does not exist, because the id is
+// actually held as an exclusive claim, used to report identical success to a
+// real release — hiding a still-held exclusive claim from an operator who
+// used the wrong flags. The release must still succeed (never break a
+// cleanup trap), but must say so and name the fix.
+func TestActivityLeaseReleaseNamesAMismatchedExclusiveClaim(t *testing.T) {
+	isolateActivityCache(t)
+	// Release (unlike Take) has no injected clock — it checks liveness against
+	// real time, so this test must take the lease against real time too.
+	now := time.Now()
+	_, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "code3", Name: "land-issue-2090", ID: "land-issue-2090",
+		Exclusive: true, Scope: "worktree", Now: now,
+	})
+	requireNoError(t, err, "take")
+
+	result, err := ReleaseEnvironmentActivityLease("erun", "code3", "land-issue-2090")
+	requireNoError(t, err, "plain release of an exclusive claim's id must not error")
+	requireReleaseResult(t, result, false)
+	requireNoteContains(t, result.Note, "--exclusive", "worktree")
+
+	// The exclusive claim must genuinely still be held — the whole point.
+	requireLeaseHeld(t, "erun", "code3", now.Add(time.Minute), alwaysAlive, "land-issue-2090")
+
+	// Releasing it correctly actually clears it.
+	exclusiveResult, err := ReleaseExclusiveEnvironmentActivityLease("erun", "code3", "worktree", "land-issue-2090")
+	requireNoError(t, err, "exclusive release")
+	requireReleaseResult(t, exclusiveResult, true)
+	requireNoLeasesHeld(t, "erun", "code3", now.Add(time.Minute), alwaysAlive)
 }
 
 func TestActivityLeaseExpiresAndIsReclaimed(t *testing.T) {
@@ -407,42 +476,30 @@ func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
-	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	_, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
 		Exclusive: true, Now: now,
-	}); err != nil {
-		t.Fatalf("take: %v", err)
-	}
+	})
+	requireNoError(t, err, "take")
 
 	// A caller that never held the scope releasing by scope name alone must
 	// not be able to drop the real holder's claim out from under them.
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else"); err != nil {
-		t.Fatalf("mismatched release must be a no-op, not an error: %v", err)
-	}
-	held, err := loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if len(held) != 1 {
-		t.Fatalf("expected the real holder's claim to survive a mismatched release, got %+v", held)
-	}
+	mismatched, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else")
+	requireNoError(t, err, "mismatched release must be a no-op, not an error")
+	requireReleaseResult(t, mismatched, false)
+	requireNoteContains(t, mismatched.Note, "job-fix-1201")
+	requireLeaseHeld(t, "erun", "ux", now.Add(time.Minute), alwaysAlive, "job-fix-1201")
 
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	held, err = loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
-	if err != nil {
-		t.Fatalf("load after release: %v", err)
-	}
-	if len(held) != 0 {
-		t.Fatalf("expected the scope free after its own holder released it, got %+v", held)
-	}
+	released, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
+	requireNoError(t, err, "release")
+	requireReleaseResult(t, released, true)
+	requireNoLeasesHeld(t, "erun", "ux", now.Add(time.Minute), alwaysAlive)
 
 	// Releasing an already-vacated scope is success, matching the shared
-	// lease's idempotence.
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
-		t.Fatalf("expected releasing a vacated scope to succeed, got %v", err)
-	}
+	// lease's idempotence — but Released must say nothing actually happened.
+	vacated, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
+	requireNoError(t, err, "expected releasing a vacated scope to succeed")
+	requireReleaseResult(t, vacated, false)
 }
 
 func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {

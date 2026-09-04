@@ -405,23 +405,78 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 	return lease, nil
 }
 
+// ReleaseEnvironmentActivityLeaseResult reports whether a release call found
+// and removed a matching lease. Before erun#2115, a call that matched nothing
+// and a call that genuinely released something both printed the identical
+// "lease released" success, which hid a still-held exclusive claim from an
+// operator who released it with the wrong flags. Released distinguishes the
+// two without making a no-match an error — that idempotency is deliberate
+// (see ReleaseEnvironmentActivityLease) — and Note explains the no-match when
+// there is something to explain.
+type ReleaseEnvironmentActivityLeaseResult struct {
+	// Released is true only when a matching lease was actually removed.
+	Released bool
+	// Note explains a no-match when the requested id is actually held under a
+	// different shape (plain vs exclusive, or a different scope) than the
+	// caller asked to release, so the caller can construct the release that
+	// will actually match instead of guessing. Empty when nothing at all is
+	// held under this id.
+	Note string
+}
+
 // ReleaseEnvironmentActivityLease drops a shared (non-exclusive) lease.
-// Idempotent: releasing a lease that already expired or was never taken is
-// success, so a wrapper's exit trap never fails a job that already finished
-// cleanly.
-func ReleaseEnvironmentActivityLease(tenant, environment, id string) error {
+// Idempotent: releasing a lease that already expired or was never taken never
+// errors, so a wrapper's exit trap never fails a job that already finished
+// cleanly. The returned result still reports honestly whether anything was
+// actually removed, and names it when the id is actually held as an exclusive
+// claim instead — the exact case erun#2115 reported.
+func ReleaseEnvironmentActivityLease(tenant, environment, id string) (ReleaseEnvironmentActivityLeaseResult, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
 	dir, err := environmentActivityLeaseDir(tenant, environment)
 	if err != nil {
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
-	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil && !os.IsNotExist(err) {
-		return err
+	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil {
+		if os.IsNotExist(err) {
+			return ReleaseEnvironmentActivityLeaseResult{
+				Note: describeUnmatchedLeaseRelease(tenant, environment, resolved, false, ""),
+			}, nil
+		}
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
-	return nil
+	return ReleaseEnvironmentActivityLeaseResult{Released: true}, nil
+}
+
+// describeUnmatchedLeaseRelease explains why a release matched nothing by
+// checking whether id is actually held under a different shape (plain vs
+// exclusive, or a different scope) than the caller asked to release — the
+// exact case erun#2115 reported: an --exclusive claim taken on one scope,
+// released without --exclusive --scope <that scope>, used to report success
+// while the claim it meant to clear stayed held. wantExclusive/wantScope name
+// what the caller actually asked to release. Empty when nothing at all is
+// held under this id, which is the genuine idempotent-cleanup case with
+// nothing left to explain.
+func describeUnmatchedLeaseRelease(tenant, environment, id string, wantExclusive bool, wantScope string) string {
+	held, err := loadEnvironmentActivityLeases(tenant, environment, time.Now(), processAlive)
+	if err != nil {
+		return ""
+	}
+	for _, lease := range held {
+		if lease.ID != id {
+			continue
+		}
+		if lease.Exclusive == wantExclusive && (!wantExclusive || lease.Scope == wantScope) {
+			continue
+		}
+		if lease.Exclusive {
+			return fmt.Sprintf("an exclusive claim with that id is held on scope %q; pass --exclusive --scope %s to release it", lease.Scope, lease.Scope)
+		}
+		return "a plain lease with that id is held; release it without --exclusive"
+	}
+	return ""
 }
 
 // ReleaseExclusiveEnvironmentActivityLease drops an exclusive claim on a
@@ -429,34 +484,38 @@ func ReleaseEnvironmentActivityLease(tenant, environment, id string) error {
 // releasing by scope name alone, without proving you are the holder, could
 // otherwise drop a different holder's exclusivity out from under them (a
 // stale release call racing a new legitimate claim). A mismatched or already
-// vacated scope is success, matching the shared release's idempotence.
-func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) error {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = defaultEnvironmentActivityLeaseScope
-	}
+// vacated scope never errors, matching the shared release's idempotence, but
+// the returned result says plainly that nothing was released and — when the
+// scope is held by someone else, or this id is held under a different shape —
+// names what actually holds it.
+func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (ReleaseEnvironmentActivityLeaseResult, error) {
+	scope = NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
 	path, err := exclusiveEnvironmentActivityLeasePath(tenant, environment, scope)
 	if err != nil {
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
 	existing, err := loadEnvironmentActivityLease(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return ReleaseEnvironmentActivityLeaseResult{
+				Note: describeUnmatchedLeaseRelease(tenant, environment, resolvedID, true, scope),
+			}, nil
 		}
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
 	if existing.ID != resolvedID {
-		return nil
+		return ReleaseEnvironmentActivityLeaseResult{
+			Note: fmt.Sprintf("scope %q is held by a different claim (id %s), not %s", scope, existing.ID, resolvedID),
+		}, nil
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
+		return ReleaseEnvironmentActivityLeaseResult{}, err
 	}
-	return nil
+	return ReleaseEnvironmentActivityLeaseResult{Released: true}, nil
 }
 
 // LoadEnvironmentActivityLeases returns the leases still holding the
