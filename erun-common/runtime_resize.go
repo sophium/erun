@@ -297,8 +297,24 @@ func (e *RuntimeResizeOccupancyError) Error() string {
 // refuses unless the caller overrides. It does not itself claim anything: the
 // caller takes its own exclusive lease afterward, which is what actually
 // guards against a second, concurrent resize racing this one.
-func checkRuntimeResizeOccupancy(tenant, environment string, now time.Time, override bool) ([]EnvironmentActivityLease, error) {
-	leases, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+//
+// load is the caller's own lease reader rather than always calling
+// LoadEnvironmentActivityLeases directly: that function reads whatever
+// filesystem this process itself is running on, which is only the
+// environment's own lease store when this process runs inside that
+// environment's pod (the MCP resize tool always does). A host-side CLI
+// invocation runs on the operator's own machine, a different filesystem
+// entirely — reading locally there always finds zero leases regardless of
+// what the environment actually holds, which is what let a resize roll a
+// leased pod silently. RuntimeResizeDependencies.LoadActivityLeases lets the
+// CLI transport supply a loader that dispatches to the environment's own
+// edge instead; RunRuntimeResize falls back to the direct, in-pod-correct
+// read when the caller leaves it nil.
+func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error), tenant, environment string, now time.Time, override bool) ([]EnvironmentActivityLease, error) {
+	if load == nil {
+		load = LoadEnvironmentActivityLeases
+	}
+	leases, err := load(tenant, environment, now)
 	if err != nil {
 		return nil, fmt.Errorf("resize: reading activity leases: %w", err)
 	}
@@ -329,6 +345,13 @@ type RuntimeResizeDependencies struct {
 	ResolveKubernetesDeployContext DeployContextResolverFunc
 	Now                            NowFunc
 	DeployHelmChart                HelmChartDeployerFunc
+	// LoadActivityLeases reads the leases currently held on the target
+	// environment. Nil means "read the local lease store directly", correct
+	// for the MCP resize tool (always running inside the environment's own
+	// pod); the CLI transport supplies a dispatching implementation for a
+	// host-side invocation targeting a remote environment (see
+	// checkRuntimeResizeOccupancy).
+	LoadActivityLeases func(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error)
 }
 
 // RuntimeResizeResult reports what a resize did (or would do), for both
@@ -434,7 +457,7 @@ func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params Runtim
 	if deps.Now != nil {
 		now = deps.Now()
 	}
-	leases, err := checkRuntimeResizeOccupancy(tenant, environment, now, params.OverrideLease)
+	leases, err := checkRuntimeResizeOccupancy(deps.LoadActivityLeases, tenant, environment, now, params.OverrideLease)
 	if err != nil {
 		return RuntimeResizeResult{}, err
 	}

@@ -1,0 +1,6 @@
+audit: erun resize --cpu 6 --dry-run --environment dev --tenant team
+resize: team/dev cpu 4 -> 6
+resize: team/dev this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC
+mcp: team/dev edge resolved to http://<LOOPBACK>:26600/mcp
+mcp tools/call http://<LOOPBACK>:26600/mcp activity_lease_list '{"environment":"dev","tenant":"team"}'
+resize refused: this environment is held by orchestrator eng-42 (lease "exec_job_attach") — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes
