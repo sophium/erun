@@ -236,9 +236,39 @@ func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []st
 // read like stubKubectlRunState, but fails loudly and distinctively for the
 // "wait --for=condition=Available" argv shape instead of silently succeeding,
 // so a fallback to the subprocess path surfaces as a recognizable failure.
+//
+// It also answers any `port-forward` invocation with a real listener, the
+// same technique fixture.StubKubectlDeployed uses: open --no-shell has no
+// shell to fall back on (erun#2104), so the post-wake MCP/API forwards this
+// scenario's own run depends on must actually become reachable rather than
+// the run timing out waiting on them. Spawned listener PIDs are recorded in
+// stubsDir/portsim-pids so the returned cleanup can reap them.
 func stubKubectlRunStateWithFailingWait(t *testing.T, stubsDir string, desired, ready int) {
 	t.Helper()
+	portsim := filepath.ToSlash(fixture.PortSimBinary(t))
+	pidFile := filepath.ToSlash(filepath.Join(stubsDir, "portsim-pids"))
 	script := strings.Join([]string{
+		`is_port_forward=0`,
+		`local_port=""`,
+		`for arg in "$@"; do`,
+		`  case "$arg" in`,
+		`    port-forward) is_port_forward=1 ;;`,
+		`    *:*)`,
+		`      if [ "$is_port_forward" = "1" ]; then`,
+		`        case "$arg" in`,
+		`          *[!0-9:]*) : ;;`,
+		`          *) local_port="${arg%%:*}" ;;`,
+		`        esac`,
+		`      fi ;;`,
+		`  esac`,
+		`done`,
+		`if [ "$is_port_forward" = "1" ] && [ -n "$local_port" ]; then`,
+		`  ` + portsim + ` --port "$local_port" >/dev/null 2>&1 &`,
+		`  pid=$!`,
+		`  printf '%s %s\n' "$local_port" "$pid" >> '` + pidFile + `'`,
+		`  wait "$pid"`,
+		`  exit 0`,
+		`fi`,
 		`case "$*" in`,
 		`  *jsonpath=*) printf '%s' '` + strconv.Itoa(desired) + `/` + strconv.Itoa(ready) + `'; exit 0 ;;`,
 		`  *"wait --for=condition=Available"*)`,
@@ -248,6 +278,29 @@ func stubKubectlRunStateWithFailingWait(t *testing.T, stubsDir string, desired, 
 		`exit 0`,
 	}, "\n")
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+	t.Cleanup(func() {
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			port, portErr := strconv.Atoi(fields[0])
+			pid, pidErr := strconv.Atoi(fields[1])
+			if pidErr != nil || pid <= 0 {
+				continue
+			}
+			if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Kill()
+			}
+			if portErr == nil && port > 0 {
+				fixture.StalePortHolderStopped(port, 3*time.Second)
+			}
+		}
+	})
 }
 
 func TestOpen(t *testing.T) {
@@ -845,7 +898,6 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_wakes_a_stopped_runtime", func(t *testing.T) {
-		t.Parallel()
 		// Proves the wake path's dispatch (WaitRuntimeAvailable, stop.go)
 		// engages the library path too, not just open.go's/doctor.go's: it
 		// bypasses RunRawCommand entirely in library mode rather than
@@ -856,8 +908,23 @@ func TestOpen(t *testing.T) {
 		// and the scale call still succeed), so a fallback to the
 		// subprocess path surfaces as a recognizable failure instead of
 		// silently passing.
+		//
+		// Pinned to the 26100 range (not the default, and not t.Parallel(),
+		// per the port-bound-scenario rules) because the stub now runs a
+		// real port-forward simulator for the post-wake MCP/API forwards:
+		// open --no-shell has no shell to fall back on, so those forwards
+		// must actually answer or the run fails (erun#2104).
+		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
-		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("stopped: true\n")...), 0o644); err != nil {
+			t.Fatalf("write stopped env config: %v", err)
+		}
 		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
 		stubs := filepath.Join(setup.Cwd, "stubs")
 		stubKubectlRunStateWithFailingWait(t, stubs, 0, 0)
@@ -1791,6 +1858,45 @@ func TestOpen(t *testing.T) {
 		if strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, holderPID)) {
 			t.Errorf("expected the state file to record a fresh forward, still claims the dead PID %d:\n%s", holderPID, stateBody)
 		}
+	})
+
+	t.Run("no_shell_real_run_refuses_success_when_a_stale_forward_cannot_be_stopped", func(t *testing.T) {
+		// Regression for erun#2104: erun's own error already names this exact
+		// shape ("127.0.0.1:PORT is held but the edge never answers -- a
+		// stale port-forward") and tells the operator to run `erun open`,
+		// but running it silently warned and exited 0 while the edge stayed
+		// unreachable -- the reported failure, verbatim. The detect-and-
+		// replace machinery (adoptForeignMCPPortForward /
+		// replaceStalePortForwardHolder) is tried regardless, and when the
+		// stale holder genuinely cannot be stopped, `open --no-shell` has no
+		// shell to fall back on, so it must fail loudly instead of reporting
+		// success on a port nothing is serving.
+		//
+		// The lsof/ps probes present a PID that names no real process, so
+		// production's kill of it fails with ESRCH -- simulating a holder
+		// erun cannot actually stop -- while a real listener (a different
+		// PID, from StartStalePortHolder) keeps the port bound and silent so
+		// the initial reachability probe genuinely observes "held but dead".
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		fixture.StartStalePortHolder(t, 26100)
+		const unkillablePID = 999999999
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: unkillablePID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the stale port-forward could not be replaced, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_refuses_success_when_a_stale_forward_cannot_be_stopped", normalize.Apply(result.Combined))
 	})
 
 	t.Run("previews_reaping_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
