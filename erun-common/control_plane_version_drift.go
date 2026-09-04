@@ -2,7 +2,11 @@ package eruncommon
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 )
 
@@ -39,6 +43,14 @@ type ConsoleVersionStatus struct {
 	Reachable         bool   `json:"reachable"`
 	UnreachableReason string `json:"unreachableReason,omitempty"`
 	Version           string `json:"version,omitempty"`
+	// Reason explains a Version of "unknown" on an otherwise-reachable
+	// console: GET /version.json answered, but not with the expected JSON
+	// document (most often an SPA's index.html fallback for a route the
+	// deployed nginx config doesn't yet exact-match). Distinct from
+	// UnreachableReason -- the console did answer, so this is a content
+	// problem, not a reachability problem, and must never be reported as
+	// Reachable=false.
+	Reason string `json:"reason,omitempty"`
 	// Behind/Ahead carry the same meaning as ControlPlaneVersionStatus's own
 	// fields, evaluated against the identical published baseline.
 	Behind bool `json:"behind,omitempty"`
@@ -183,6 +195,18 @@ func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchCon
 	ctx.Trace("list: GET " + consoleURL + "/version.json (console version check for " + alias + ")")
 	version, err := fetchConsoleVersion(ctx, consoleURL)
 	if err != nil {
+		var contentErr *consoleUnexpectedContentError
+		if errors.As(err, &contentErr) {
+			// The console answered -- reporting it unreachable would send an
+			// operator toward DNS/ingress/TLS when the real fault is the
+			// console serving the wrong document (root AGENTS.md's "Advice
+			// that cannot work" dead end).
+			status.Reachable = true
+			status.Version = "unknown"
+			status.Reason = contentErr.Error()
+			ctx.Trace("list: console for " + alias + " reachable but did not serve the expected document: " + contentErr.Error())
+			return status
+		}
 		status.UnreachableReason = err.Error()
 		ctx.Trace("list: console for " + alias + " unreachable: " + err.Error())
 		return status
@@ -214,20 +238,56 @@ func versionVerdict(version string, publishedSemver semver, publishedOK bool) (b
 	return false, false
 }
 
+// consoleUnexpectedContentError reports that a console answered GET
+// /version.json but did not serve the expected JSON document -- most
+// commonly an SPA's index.html, served by a wildcard nginx fallback for a
+// route the deployed config doesn't yet exact-match. It is deliberately a
+// distinct type from a transport error: the console did answer, so a
+// caller must never treat this as unreachable.
+type consoleUnexpectedContentError struct {
+	statusCode  int
+	contentType string
+}
+
+func (e *consoleUnexpectedContentError) Error() string {
+	contentType := strings.TrimSpace(e.contentType)
+	if contentType == "" {
+		contentType = "(no content-type)"
+	}
+	return fmt.Sprintf("/version.json returned %d %s (expected application/json)", e.statusCode, contentType)
+}
+
 // defaultFetchConsoleVersion resolves a deployed console's own build version
 // via its unauthenticated GET /version.json -- the console's counterpart to
-// defaultFetchPlatformInfo's GET /v1/platform.
+// defaultFetchPlatformInfo's GET /v1/platform. It makes the request directly
+// rather than through fetchJSON so it can tell a transport failure
+// (connection refused, DNS, TLS, timeout -- the request never got an answer)
+// apart from a content failure (an answer arrived, but not the expected
+// JSON document): the two point an operator at completely different first
+// moves, and collapsing them into one "unreachable" verdict misdirects.
 func defaultFetchConsoleVersion(ctx Context, consoleURL string) (string, error) {
 	target := strings.TrimRight(strings.TrimSpace(consoleURL), "/") + "/version.json"
 	ctx.Trace("GET " + target)
 	if ctx.DryRun {
 		return "", nil
 	}
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return "", fmt.Errorf("fetch console version: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := (&http.Client{Timeout: erunHTTPTimeout}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch console version: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
 	var body struct {
 		Version string `json:"version"`
 	}
-	if err := fetchJSON(target, &body); err != nil {
-		return "", fmt.Errorf("fetch console version: %w", err)
+	if err := json.Unmarshal(respBody, &body); err != nil {
+		return "", &consoleUnexpectedContentError{statusCode: resp.StatusCode, contentType: resp.Header.Get("Content-Type")}
 	}
 	return body.Version, nil
 }

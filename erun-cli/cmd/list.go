@@ -309,6 +309,9 @@ func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVer
 		return err
 	}
 	line += " reachable=yes version=" + quotedValueOrNone(console.Version)
+	if console.Reason != "" {
+		line += " reason=" + quotedValueOrNone(console.Reason)
+	}
 	switch {
 	case console.Behind:
 		line += " [behind published -- roll it]"
