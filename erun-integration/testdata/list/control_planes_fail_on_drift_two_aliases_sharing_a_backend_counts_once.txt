@@ -1,0 +1,12 @@
+  published version: <VERSION>
+Control planes (1 backend, 2 aliases):
+  - erun+alias@erun api-url=<ALIAS_API> reachable=yes version=<VERSION> [behind published -- roll it]
+      also reachable as: erun+canonical@erun api-url=<PLANE_API>
+audit: erun list --control-planes --fail-on-drift
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <ALIAS_API>/v1/platform (control plane version check for erun+alias@erun)
+GET <ALIAS_API>/v1/platform
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+canonical@erun)
+GET <PLANE_API>/v1/platform
+control plane version drift: 1 plane(s) behind published: erun+alias@erun

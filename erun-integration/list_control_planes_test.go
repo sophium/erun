@@ -45,8 +45,38 @@ func controlPlaneRegistryStub(t testing.TB, tags ...string) *httptest.Server {
 // response's consoleUrl field -- erun#2070's discovery mechanism: a plane and
 // its console are never configured as separate aliases, so the console
 // version check finds its target here, the same call that reports the
-// plane's own version.
+// plane's own version. Reports its own listener address as apiUrl, the same
+// as a real erun-backend-api reporting its own configured PlatformAPIURL --
+// this is what lets erun#2089's duplicate-alias collapsing key on it instead
+// of falling back to DNS in the common single-alias case.
 func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httptest.Server {
+	t.Helper()
+	console := ""
+	if len(consoleURL) > 0 {
+		console = consoleURL[0]
+	}
+	var server *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		apiURL := ""
+		if server != nil {
+			apiURL = server.URL
+		}
+		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s"}`, version, apiURL, console)
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// controlPlaneStubAt is like controlPlaneStub but reports identityAPIURL as
+// its own self-declared /v1/platform apiUrl instead of its own listener
+// address -- modeling a backend reachable through more than one
+// hostname/alias that always reports the same canonical apiUrl regardless of
+// which alias a client dialed (erun#2089). Passing another stub's own URL as
+// identityAPIURL simulates two configured aliases resolving to one backend.
+func controlPlaneStubAt(t testing.TB, identityAPIURL, version string, consoleURL ...string) *httptest.Server {
 	t.Helper()
 	console := ""
 	if len(consoleURL) > 0 {
@@ -55,7 +85,7 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"version":"%s","consoleUrl":"%s"}`, version, console)
+		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s"}`, version, identityAPIURL, console)
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -82,8 +112,30 @@ func consoleStub(t testing.TB, version string) *httptest.Server {
 // address nothing listens on to model an unreachable plane) and the
 // registry override -- both sections live in the same file, so they must be
 // written together rather than via the single-purpose helpers list_test.go
-// and pin_test.go already use for each half alone.
+// and pin_test.go already use for each half alone. A plain map is fine here
+// because no scenario using it configures more than one alias; a scenario
+// that needs an ordered, multi-alias list (erun#2089's duplicate-alias
+// collapsing, where which alias is configured first decides which one
+// becomes the collapsed plane's primary entry) uses
+// seedControlPlaneConfigOrdered instead, since Go map iteration order is
+// randomized.
 func seedControlPlaneConfig(t testing.TB, setup env.Setup, planes map[string]string, registryURL string) {
+	t.Helper()
+	ordered := make([]controlPlaneAliasSeed, 0, len(planes))
+	for alias, apiURL := range planes {
+		ordered = append(ordered, controlPlaneAliasSeed{Alias: alias, APIURL: apiURL})
+	}
+	seedControlPlaneConfigOrdered(t, setup, ordered, registryURL)
+}
+
+// controlPlaneAliasSeed is one configured erun-type cloud provider alias for
+// seedControlPlaneConfigOrdered.
+type controlPlaneAliasSeed struct {
+	Alias  string
+	APIURL string
+}
+
+func seedControlPlaneConfigOrdered(t testing.TB, setup env.Setup, planes []controlPlaneAliasSeed, registryURL string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -92,11 +144,11 @@ func seedControlPlaneConfig(t testing.TB, setup env.Setup, planes map[string]str
 	var body strings.Builder
 	if len(planes) > 0 {
 		body.WriteString("cloudproviders:\n")
-		for alias, apiURL := range planes {
-			body.WriteString("  - alias: " + alias + "\n")
+		for _, plane := range planes {
+			body.WriteString("  - alias: " + plane.Alias + "\n")
 			body.WriteString("    provider: erun\n")
 			body.WriteString("    erun:\n")
-			body.WriteString("      apiurl: " + apiURL + "\n")
+			body.WriteString("      apiurl: " + plane.APIURL + "\n")
 			body.WriteString("      clientid: cli-test-client\n")
 		}
 	}
@@ -399,5 +451,87 @@ func TestListControlPlanes(t *testing.T) {
 		}
 		golden.Equal(t, "list/control_planes_fail_on_drift_dry_run_never_fails",
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	// erun#2089: two configured aliases that resolve to the same backend must
+	// be reported as one plane, not two -- pointing two aliases at one plane
+	// is legitimate configuration, but reporting it as two double-counts
+	// drift an operator would only ever act on once. Identity is keyed on
+	// each alias's own self-declared GET /v1/platform apiUrl (see
+	// controlPlaneBackendIdentity in erun-common); controlPlaneStubAt models
+	// two distinct listeners that both report that same canonical apiUrl,
+	// the same as one real backend answering on two hostnames/ingresses.
+
+	t.Run("real_run_two_aliases_sharing_a_backend_collapse_into_one_plane", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
+			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
+			{Alias: "erun+alias@erun", APIURL: alias.URL},
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Control planes (1 backend, 2 aliases):") {
+			t.Fatalf("expected the two aliases to collapse into one reported backend:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun+canonical@erun") || !strings.Contains(result.Combined, "erun+alias@erun") {
+			t.Fatalf("expected both configured aliases to remain visible:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_two_aliases_sharing_a_backend_collapse_into_one_plane",
+			normalize.Apply(result.Combined, stubServerRule(canonical, "<PLANE_API>"), stubServerRule(alias, "<ALIAS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_two_aliases_sharing_a_backend_counts_once", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
+		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
+			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
+			{Alias: "erun+alias@erun", APIURL: alias.URL},
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a plane behind published, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1 plane(s) behind published") {
+			t.Fatalf("expected drift to count one deployment, not one per alias:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "2 plane(s) behind published") {
+			t.Fatalf("two aliases of the same backend must not double-count as two planes behind published:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_two_aliases_sharing_a_backend_counts_once",
+			normalize.Apply(result.Combined, stubServerRule(canonical, "<PLANE_API>"), stubServerRule(alias, "<ALIAS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_json_output_two_aliases_sharing_a_backend_does_not_double_count", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
+			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
+			{Alias: "erun+alias@erun", APIURL: alias.URL},
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, `"additionalAliases"`) {
+			t.Fatalf("expected the second alias to appear as an additional alias, not a second plane:\n%s", result.Combined)
+		}
+		if got := strings.Count(result.Combined, `"reachable": true`); got != 1 {
+			t.Fatalf("expected exactly one reachable plane entry in the structured output, got %d:\n%s", got, result.Combined)
+		}
 	})
 }

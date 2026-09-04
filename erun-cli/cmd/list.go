@@ -263,7 +263,7 @@ func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlan
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(ctx.Stdout, "Control planes:"); err != nil {
+	if _, err := fmt.Fprintln(ctx.Stdout, controlPlanesSectionHeader(drift.Planes)); err != nil {
 		return err
 	}
 	if len(drift.Planes) == 0 {
@@ -278,12 +278,37 @@ func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlan
 	return nil
 }
 
+// controlPlanesSectionHeader names both the number of distinct backends
+// found and the number of configured aliases that reach them -- when the two
+// differ, that gap is exactly the signal that two or more aliases were
+// collapsed into one plane (erun#2089), and a bare "Control planes:" header
+// would hide it.
+func controlPlanesSectionHeader(planes []common.ControlPlaneVersionStatus) string {
+	if len(planes) == 0 {
+		return "Control planes:"
+	}
+	aliasCount := 0
+	for _, plane := range planes {
+		aliasCount += 1 + len(plane.AdditionalAliases)
+	}
+	return fmt.Sprintf("Control planes (%s, %s):", pluralCount(len(planes), "backend", "backends"), pluralCount(aliasCount, "alias", "aliases"))
+}
+
+func pluralCount(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
 func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlaneVersionStatus) error {
 	line := "  - " + plane.Alias + " api-url=" + quotedValueOrNone(plane.APIURL)
 	if !plane.Reachable {
 		line += " reachable=no reason=" + quotedValueOrNone(plane.UnreachableReason)
-		_, err := fmt.Fprintln(ctx.Stdout, line)
-		return err
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+		return writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases)
 	}
 	line += " reachable=yes version=" + quotedValueOrNone(plane.Version)
 	switch {
@@ -295,10 +320,25 @@ func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlane
 	if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 		return err
 	}
+	if err := writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases); err != nil {
+		return err
+	}
 	if plane.Console == nil {
 		return nil
 	}
 	return writeControlPlaneConsoleEntry(ctx, *plane.Console)
+}
+
+// writeControlPlaneAdditionalAliases names every other configured alias that
+// resolved to this same backend, so collapsing duplicate aliases into one
+// plane never hides which aliases are actually configured.
+func writeControlPlaneAdditionalAliases(ctx common.Context, aliases []common.ControlPlaneAliasRef) error {
+	for _, alias := range aliases {
+		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, quotedValueOrNone(alias.APIURL)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVersionStatus) error {
