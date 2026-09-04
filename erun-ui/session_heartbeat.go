@@ -64,6 +64,10 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// Runs after reconcileOrchestratorActivity so session.shellRunning is
 			// this tick's fresh report before the pacing decision reads it.
 			a.reconcileOrchestratorPacing()
+			// Reaps shell-activity reports reconcileOrchestratorActivity itself
+			// will never revisit — orphaned or transient orchestrator ids that
+			// are not, or are no longer, in a.orchestrators at all (erun#2144).
+			a.reconcileOrphanedOrchestratorShellActivity(time.Now())
 		}
 	}
 }

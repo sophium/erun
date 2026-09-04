@@ -243,6 +243,83 @@ func orchestratorShellActivityResetHookCommand() string {
 	return `node -e '` + script + `'`
 }
 
+// reconcileOrphanedOrchestratorShellActivity deletes on-disk reports for
+// orchestrator ids the desktop is not currently holding a live session for,
+// once they are stale enough that readOrchestratorShellActivity would have
+// discarded them anyway had anyone asked.
+//
+// Nobody ever asks for a transient id (investigate.go, report_bug.go): each
+// one is minted from a nanosecond timestamp and used exactly once, so once its
+// session ends no future read will ever name that id again —
+// reconcileOrchestratorActivity only visits ids currently in a.orchestrators,
+// and skips transient ones outright even while they are alive. Without this
+// sweep, a "running: true" report a session never got to clear (because it
+// ended without ever checking TaskOutput/TaskStop on its own backgrounded
+// shell) sits on disk asserting that forever, since nothing else will ever
+// read, correct, or delete it (erun#2144). Sweeping the directory itself,
+// rather than only reading on request, is what actually reaps it: the bound
+// applied is exactly the one readOrchestratorShellActivity already uses for a
+// session it can no longer see, just run unconditionally instead of only for
+// an id someone happens to still be watching. This also covers a session
+// killed outright rather than cleanly stopped — the sweep needs no exit hook
+// to have run, only the file's own age.
+func (a *App) reconcileOrphanedOrchestratorShellActivity(now time.Time) {
+	dir := orchestratorShellActivityDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	alive := a.aliveOrchestratorIDs()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		id := strings.TrimSuffix(name, ".json")
+		if id == name {
+			continue
+		}
+		bound := orchestratorActivityTTL
+		if _, ok := alive[id]; ok {
+			bound = orchestratorShellActivitySafetyBound
+		}
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var report orchestratorShellActivity
+		if err := json.Unmarshal(data, &report); err != nil || report.AtUnix <= 0 {
+			continue
+		}
+		if now.Sub(time.Unix(report.AtUnix, 0)) <= bound {
+			continue
+		}
+		_ = os.Remove(path)
+	}
+}
+
+// aliveOrchestratorIDs is every orchestrator id the desktop currently holds a
+// live session for, transient or not. The sweep above needs "is anyone still
+// able to write this id's next report", not "is this a named, persisted
+// orchestrator" — a transient (investigate/report-bug) session still gets the
+// generous safety bound while it is genuinely running, and drops to the short
+// one the moment it ends, exactly like a named orchestrator's session does.
+func (a *App) aliveOrchestratorIDs() map[string]struct{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ids := make(map[string]struct{}, len(a.orchestrators))
+	for id, session := range a.orchestrators {
+		if session == nil {
+			continue
+		}
+		if managed := a.sessions[orchestratorSessionKey(id)]; managed != nil && !managed.closed {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
+}
+
 // orchestratorShellActivityHookBlocks are the two PostToolUse-only hooks the
 // settings file installs, each matcher-scoped so it fires only for the calls
 // it needs to see rather than every tool call.
