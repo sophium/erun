@@ -17,9 +17,12 @@
   "disk": [
     {
       "mount": "<HOME>",
+      "nodeShared": true,
       "totalBytes": 202991730688,
       "usedBytes": 102399998976,
-      "percentUsed": 50.44540416938937
+      "percentUsed": 50.44540416938937,
+      "ownUsedBytes": 10240000000,
+      "ownUsageObserved": true
     }
   ],
   "warnings": [

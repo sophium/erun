@@ -83,6 +83,7 @@ func TestUsage(t *testing.T) {
 			"cpu_periods=376556",
 			"cpu_throttled_periods=425",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+			"disk_own_used_kb=44040192",
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -101,6 +102,12 @@ func TestUsage(t *testing.T) {
 		// since they carry no threshold of their own to warn on.
 		if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
 			t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
+		}
+		// nodeShared and ownUsedBytes: the mount's total/used/percent are the
+		// node's, not this environment's, and ownUsedBytes is the figure
+		// scoped to this environment alone.
+		if !strings.Contains(result.Combined, `"nodeShared": true`) || !strings.Contains(result.Combined, `"ownUsedBytes": 45097156608`) {
+			t.Fatalf("expected nodeShared and ownUsedBytes parsed from du, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
 	})
@@ -130,6 +137,7 @@ func TestUsage(t *testing.T) {
 			"cpu_periods=376556",
 			"cpu_throttled_periods=425",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+			"disk_own_used_kb=44040192",
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -165,6 +173,7 @@ func TestUsage(t *testing.T) {
 			"cpu_periods=376556",
 			"cpu_throttled_periods=425",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+			"disk_own_used_kb=44040192",
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -173,6 +182,11 @@ func TestUsage(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "erun-dind sidecar") {
 			t.Fatalf("a build-capable env must state the builds-excluded caveat, got:\n%s", result.Combined)
+		}
+		// The Disk line names the node-shared scope, and the own-usage line
+		// beneath it is the figure scoped to this environment alone.
+		if !strings.Contains(result.Combined, "Disk (node, shared):") || !strings.Contains(result.Combined, "this environment's own usage:") {
+			t.Fatalf("expected the node-shared disk label and the own-usage line, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
 	})
@@ -194,14 +208,20 @@ func TestUsage(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		// No disk_own_used_kb line was stubbed (e.g. `du`/`timeout` missing or
+		// the walk failed) -- own usage must report unavailable, not a
+		// fabricated zero, independently of cgroup type.
+		if strings.Contains(result.Combined, `"ownUsedBytes"`) || strings.Contains(result.Combined, `"ownUsageObserved"`) {
+			t.Fatalf("an unread own-usage figure must omit both ownUsedBytes and ownUsageObserved, got:\n%s", result.Combined)
+		}
 		golden.Equal(t, "usage/real_run_cgroup_v1_reports_unavailable_not_an_error", normalize.Apply(result.Combined))
 	})
 
 	// real_run_warns_near_the_memory_limit is the "an agent notices it is
-	// heading for an OOM kill before it is killed" case #1233 exists for: a
-	// reading nobody acts on is decoration, so a threshold crossing must show
-	// up as a named warning field rather than requiring the caller to compute
-	// the percentage itself.
+	// heading for an OOM kill before it is killed" case: a reading nobody
+	// acts on is decoration, so a threshold crossing must show up as a named
+	// warning field rather than requiring the caller to compute the
+	// percentage itself.
 	t.Run("real_run_warns_near_the_memory_limit", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -218,6 +238,7 @@ func TestUsage(t *testing.T) {
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
 			"disk_workspace=overlay 198234112 99999999 99117056 95% /home/erun",
+			"disk_own_used_kb=10000000",
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -228,6 +249,41 @@ func TestUsage(t *testing.T) {
 		if !strings.Contains(result.Combined, "\"warnings\"") {
 			t.Fatalf("expected a warnings field in the JSON output, got:\n%s", result.Combined)
 		}
+	})
+
+	// real_run_disk_warning_names_the_node_shared_scope is the disk sibling of
+	// the memory-limit scenario above: the mount's used/total cross the
+	// warning threshold, and the warning text must name the node-shared scope
+	// so an operator does not clean up an environment that is not the real
+	// cause of a shared-node disk pressure warning.
+	t.Run("real_run_disk_warning_names_the_node_shared_scope", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=1027301376",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=0",
+			"cpu_usage_after=0",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			// used/total = 178410701/198234112 = 90.0%, at the warn threshold.
+			"disk_workspace=overlay 198234112 178410701 19823411 90% /home/erun",
+			"disk_own_used_kb=10000000",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "node disk is at 90%") || !strings.Contains(result.Combined, "shared with every environment on this node") {
+			t.Fatalf("expected the disk warning to name the node-shared scope, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_disk_warning_names_the_node_shared_scope", normalize.Apply(result.Combined))
 	})
 
 	// real_run_unreadable_peak_renders_unavailable_not_zero: an unreadable

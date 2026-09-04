@@ -52,6 +52,16 @@ import (
 //     reading imply the environment is idle while a build saturates the
 //     sidecar -- see erun-cli/cmd/usage_render.go and the desktop's matching
 //     Sidebar.EnvHoverCard.tsx caveat.
+//  4. The watched mount's df figures (RuntimeDiskUsage.TotalBytes/UsedBytes/
+//     PercentUsed) describe the node's filesystem, not this environment's own
+//     footprint -- df has no concept of "this container's share", so every
+//     environment scheduled on the same node reports the identical
+//     total/used/percent regardless of which of them actually wrote the
+//     bytes. RuntimeDiskUsage.NodeShared names this explicitly, and
+//     OwnUsedBytes (a `du` of the watched mount, scoped to this environment's
+//     own filesystem tree) is the number an operator can actually act on by
+//     cleaning up this one environment -- see erun-cli/cmd/usage_render.go's
+//     "(node, shared)" label and the own-usage line rendered beneath it.
 //
 // RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
 // script below into the container over kubectl, for an on-demand `erun usage`
@@ -108,6 +118,12 @@ const (
 	// tracks "close calls" the way memory.peak does for RAM), so the warning
 	// threshold sits lower, ahead of ENOSPC rather than reacting to it.
 	RuntimeUsageDiskWarnPercent = 90.0
+
+	// diskOwnUsageTimeoutSeconds bounds the `du` walk of the watched mount so
+	// a huge tree cannot stall the whole reading; a timeout renders as
+	// OwnUsageObserved=false, the same "report unavailability, do not fail
+	// the call" contract every other field here follows.
+	diskOwnUsageTimeoutSeconds = 30
 )
 
 // RuntimeUsageParams configures one usage read.
@@ -196,13 +212,28 @@ type RuntimeMemoryUsage struct {
 }
 
 // RuntimeDiskUsage reports usage for one watched mount (the workspace path,
-// at minimum).
+// at minimum). TotalBytes/UsedBytes/PercentUsed come from a statfs of the
+// whole mount, so they describe the node's filesystem, not this environment's
+// own footprint -- see the file-level comment's point 4. NodeShared names
+// that explicitly; OwnUsedBytes is the one figure scoped to this environment
+// alone.
 type RuntimeDiskUsage struct {
-	Mount       string  `json:"mount"`
-	TotalBytes  int64   `json:"totalBytes,omitempty"`
-	UsedBytes   int64   `json:"usedBytes,omitempty"`
+	Mount      string `json:"mount"`
+	NodeShared bool   `json:"nodeShared,omitempty"`
+	TotalBytes int64  `json:"totalBytes,omitempty"`
+	UsedBytes  int64  `json:"usedBytes,omitempty"`
+	// PercentUsed is the node's own fill level, not this environment's share
+	// of it -- see NodeShared.
 	PercentUsed float64 `json:"percentUsed,omitempty"`
-	Unavailable string  `json:"unavailable,omitempty"`
+	// OwnUsedBytes is a `du` of the watched mount, scoped to this
+	// environment's own filesystem tree rather than the whole node -- the
+	// figure an operator can actually reduce by cleaning up this one
+	// environment. OwnUsageObserved mirrors PeakObserved/OOMKillsObserved:
+	// `du` timing out or being unreadable must render as unavailable, not a
+	// fabricated zero.
+	OwnUsedBytes     int64  `json:"ownUsedBytes,omitempty"`
+	OwnUsageObserved bool   `json:"ownUsageObserved,omitempty"`
+	Unavailable      string `json:"unavailable,omitempty"`
 }
 
 // RunRuntimeUsage execs the reading script into the runtime container and
@@ -263,11 +294,13 @@ printf 'cpu_time_after_ns=%s\n' "$time_after"
 printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
 printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
 printf 'disk_workspace=%s\n' "$(df -Pk ` + runtimeUsageWatchedMount + ` 2>/dev/null | tail -n1 || true)"
+printf 'disk_own_used_kb=%s\n' "$(timeout __RUNTIME_USAGE_DISK_OWN_TIMEOUT_SECONDS__ du -sxk ` + runtimeUsageWatchedMount + ` 2>/dev/null | awk '{print $1}' || true)"
 `
 
 func runtimeUsageScript(interval time.Duration) string {
 	seconds := strconv.FormatFloat(interval.Seconds(), 'f', -1, 64)
-	return strings.Replace(runtimeUsageScriptTemplate, "__RUNTIME_USAGE_INTERVAL_SECONDS__", seconds, 1)
+	script := strings.Replace(runtimeUsageScriptTemplate, "__RUNTIME_USAGE_INTERVAL_SECONDS__", seconds, 1)
+	return strings.Replace(script, "__RUNTIME_USAGE_DISK_OWN_TIMEOUT_SECONDS__", strconv.Itoa(diskOwnUsageTimeoutSeconds), 1)
 }
 
 func parseRuntimeUsage(req ShellLaunchParams, output string, interval time.Duration) RuntimeUsage {
@@ -423,7 +456,11 @@ func parseRuntimeInt64(raw string) (int64, bool) {
 }
 
 func runtimeDiskUsageFromValues(v map[string]string) RuntimeDiskUsage {
-	d := RuntimeDiskUsage{Mount: runtimeUsageWatchedMount}
+	d := RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true}
+	if ownKB, ok := parseRuntimeInt64(v["disk_own_used_kb"]); ok {
+		d.OwnUsedBytes = ownKB * 1024
+		d.OwnUsageObserved = true
+	}
 	total, used, ok := parseRuntimeDFUsage(v["disk_workspace"])
 	if !ok || total <= 0 {
 		d.Unavailable = "df did not report usage for " + runtimeUsageWatchedMount
@@ -469,7 +506,8 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 	for _, d := range u.Disk {
 		if d.Unavailable == "" && d.PercentUsed >= RuntimeUsageDiskWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
-				"%s is at %.0f%% disk usage (warns at %.0f%%)", d.Mount, d.PercentUsed, RuntimeUsageDiskWarnPercent))
+				"node disk is at %.0f%% (warns at %.0f%%) -- shared with every environment on this node",
+				d.PercentUsed, RuntimeUsageDiskWarnPercent))
 		}
 	}
 	return warnings

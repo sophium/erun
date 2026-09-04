@@ -50,7 +50,8 @@ type runtimeUsageReadingCase struct {
 
 func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 	cases := runtimeUsageBaseReadingCases()
-	return append(cases, runtimeUsageMemoryObservationReadingCases()...)
+	cases = append(cases, runtimeUsageMemoryObservationReadingCases()...)
+	return append(cases, runtimeUsageDiskOwnUsageReadingCases()...)
 }
 
 func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
@@ -69,6 +70,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_before_ns=1000000000",
 				"cpu_time_after_ns=2000000000",
 				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
+				"disk_own_used_kb=54000000",
 			}, "\n"),
 			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
 			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
@@ -77,7 +79,11 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
+				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
+			},
 		},
 		{
 			name: "unlimited memory.max reports Unlimited, not a fabricated percentage",
@@ -98,7 +104,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantMemory: RuntimeMemoryUsage{
 				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "an empty df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
 			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
@@ -114,11 +120,16 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_before_ns=",
 				"cpu_time_after_ns=",
 				"disk_workspace=/dev/sda1 100 50 40 55% /home/erun",
+				"disk_own_used_kb=50",
 			}, "\n"),
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
 			// Disk uses statfs via df, not cgroup, so it stays readable regardless.
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50,
+				OwnUsedBytes: 50 * 1024, OwnUsageObserved: true,
+			},
 		},
 		{
 			name: "memory.current missing reports unavailable without a fabricated zero",
@@ -129,7 +140,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			}, "\n"),
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// A long filesystem identifier pushes df's data row onto its own
@@ -138,10 +149,56 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			// neighbor-based lookup exists to survive; the script's
 			// `tail -n1` already selects this line.
 			name:       "wrapped filesystem name still parses by column, not fixed index",
-			output:     "disk_workspace=1000 500 500 50% /home/erun",
+			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50,
+				OwnUsedBytes: 300 * 1024, OwnUsageObserved: true,
+			},
+		},
+	}
+}
+
+// runtimeUsageDiskOwnUsageReadingCases is split out from
+// runtimeUsageBaseReadingCases the same way runtimeUsageMemoryObservationReadingCases
+// is: a dedicated table for a reading facet that must stay independent of the
+// rest of the disk reading, kept in its own function purely to bound the
+// parent table's length.
+func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
+	return []runtimeUsageReadingCase{
+		{
+			// du and df read independent sources (a filesystem walk vs a
+			// statfs), so one being unreadable must not suppress the other --
+			// an operator can still learn their own footprint even when the
+			// node-wide figure is unavailable, and vice versa.
+			name: "own usage is observed independently of df availability",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=1048576",
+				"memory_max=2097152",
+				"memory_peak=1048576",
+				"memory_oom_kill=0",
+				"cpu_max=100000 100000",
+				"cpu_usage_before=0",
+				"cpu_usage_after=0",
+				"cpu_time_before_ns=1000000000",
+				"cpu_time_after_ns=2000000000",
+				"disk_workspace=",
+				"disk_own_used_kb=12345",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 1048576, PeakBytes: 1048576, PeakObserved: true,
+				LimitBytes: 2097152, PercentOfLimit: 50, OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				Unavailable:      "an empty df line should report unavailable even though own usage was read",
+				OwnUsedBytes:     12345 * 1024,
+				OwnUsageObserved: true,
+			},
 		},
 	}
 }
@@ -167,7 +224,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				CurrentBytes: 413589504, LimitBytes: 2147483648,
 				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// memory.events' oom_kill counter can be as unreadable as
@@ -186,7 +243,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 	}
 }
@@ -257,6 +314,13 @@ func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
 	if got.Mount != want.Mount {
 		t.Errorf("Disk.Mount = %q, want %q", got.Mount, want.Mount)
 	}
+	if got.NodeShared != want.NodeShared {
+		t.Errorf("Disk.NodeShared = %t, want %t", got.NodeShared, want.NodeShared)
+	}
+	// Own usage comes from an independent read (du, not df/statfs), so it is
+	// checked before the Unavailable early-return below -- one being
+	// unreadable must not hide the other.
+	assertRuntimeDiskOwnUsage(t, got, want)
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("Disk.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
 		return
@@ -272,6 +336,16 @@ func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
 	}
 	if got.PercentUsed != want.PercentUsed {
 		t.Errorf("Disk.PercentUsed = %v, want %v", got.PercentUsed, want.PercentUsed)
+	}
+}
+
+func assertRuntimeDiskOwnUsage(t *testing.T, got, want RuntimeDiskUsage) {
+	t.Helper()
+	if got.OwnUsageObserved != want.OwnUsageObserved {
+		t.Errorf("Disk.OwnUsageObserved = %t, want %t", got.OwnUsageObserved, want.OwnUsageObserved)
+	}
+	if want.OwnUsageObserved && got.OwnUsedBytes != want.OwnUsedBytes {
+		t.Errorf("Disk.OwnUsedBytes = %d, want %d", got.OwnUsedBytes, want.OwnUsedBytes)
 	}
 }
 
@@ -352,13 +426,24 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 		}
 	})
 
-	t.Run("disk warning fires at the threshold", func(t *testing.T) {
+	t.Run("disk warning fires at the threshold and names the node-shared scope", func(t *testing.T) {
 		output := "disk_workspace=/dev/sda1 1000 900 100 90% /home/erun"
 		usage := parseRuntimeUsage(req, output, interval)
-		if !hasWarningContaining(usage.Warnings, "disk usage") {
-			t.Errorf("90%% disk usage should warn, got %v", usage.Warnings)
-		}
+		assertDiskWarningNamesNodeSharedScope(t, usage.Warnings)
 	})
+}
+
+// assertDiskWarningNamesNodeSharedScope checks both halves of the disk
+// warning's wording, factored out of TestParseRuntimeUsageWarnings so the
+// two conditions don't count against that function's own complexity budget.
+func assertDiskWarningNamesNodeSharedScope(t *testing.T, warnings []string) {
+	t.Helper()
+	if !hasWarningContaining(warnings, "node disk is at 90%") {
+		t.Errorf("90%% disk usage should warn, got %v", warnings)
+	}
+	if !hasWarningContaining(warnings, "shared with every environment on this node") {
+		t.Errorf("the disk warning must name the node-shared scope so an operator does not clean up the wrong environment, got %v", warnings)
+	}
 }
 
 func cgroupMemoryFixture(currentPercent, peakPercent int) string {
