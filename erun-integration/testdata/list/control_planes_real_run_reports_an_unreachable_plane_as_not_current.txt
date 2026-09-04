@@ -7,4 +7,3 @@ list: latest published version is <VERSION>
 list: GET http://<LOOPBACK>:1/v1/platform (control plane version check for erun+test@erun)
 GET http://<LOOPBACK>:1/v1/platform
 list: control plane erun+test@erun unreachable: fetch erun platform info: call platform api GET /v1/platform: Get "http://<LOOPBACK>:1/v1/platform": dial tcp <LOOPBACK>:1: connect: connection refused
-list: erun+test@erun reported no self-declared api url -- resolving DNS for http://<LOOPBACK>:1 to check for a shared backend

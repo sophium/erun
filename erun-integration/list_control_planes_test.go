@@ -534,4 +534,63 @@ func TestListControlPlanes(t *testing.T) {
 			t.Fatalf("expected exactly one reachable plane entry in the structured output, got %d:\n%s", got, result.Combined)
 		}
 	})
+
+	// erun#2089 follow-up: identity must never be guessed from DNS/host alone
+	// when neither alias's own GET /v1/platform self-reports an apiUrl -- an
+	// older platform that predates the field, modeled here via
+	// controlPlaneStubAt with an empty identityAPIURL. Both stubs listen on
+	// 127.0.0.1 (only their ports differ), which is exactly the shape that
+	// used to collapse incorrectly: a DNS-based fallback identity resolved
+	// both hosts to the same loopback address and dropped the port,
+	// silently merging two genuinely distinct backends into one reported
+	// plane. erun-common no longer keys identity on DNS at all when the
+	// self-declared signal is missing, so these must stay two backends.
+
+	t.Run("real_run_two_aliases_with_no_self_declared_identity_stay_separate", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		first := controlPlaneStubAt(t, "", "1.0.245")
+		second := controlPlaneStubAt(t, "", "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
+			{Alias: "erun+first@erun", APIURL: first.URL},
+			{Alias: "erun+second@erun", APIURL: second.URL},
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Control planes (2 backends, 2 aliases):") {
+			t.Fatalf("expected two distinct backends with no self-declared identity to stay separate, not collapse:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "additionalAliases") {
+			t.Fatalf("neither alias should be folded into the other as an additional alias:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_two_aliases_with_no_self_declared_identity_stay_separate",
+			normalize.Apply(result.Combined, stubServerRule(first, "<FIRST_API>"), stubServerRule(second, "<SECOND_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_json_output_two_aliases_with_no_self_declared_identity_stay_separate", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		first := controlPlaneStubAt(t, "", "1.0.245")
+		second := controlPlaneStubAt(t, "", "1.0.245")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
+			{Alias: "erun+first@erun", APIURL: first.URL},
+			{Alias: "erun+second@erun", APIURL: second.URL},
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, `"additionalAliases"`) {
+			t.Fatalf("expected no additional-alias merge between two distinct, unidentified backends:\n%s", result.Combined)
+		}
+		if got := strings.Count(result.Combined, `"reachable": true`); got != 2 {
+			t.Fatalf("expected two reachable plane entries in the structured output, got %d:\n%s", got, result.Combined)
+		}
+	})
 }

@@ -3,9 +3,7 @@ package eruncommon
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/url"
-	"sort"
 	"strings"
 )
 
@@ -206,7 +204,7 @@ func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersion
 	info, err := fetchPlatformInfo(ctx, apiURL)
 	if err != nil {
 		ctx.Trace("list: control plane " + provider.Alias + " unreachable: " + err.Error())
-		identity := controlPlaneBackendIdentity(ctx, provider.Alias, apiURL, "")
+		identity := controlPlaneBackendIdentity(apiURL, "")
 		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{
 			Alias:             provider.Alias,
 			APIURL:            apiURL,
@@ -215,7 +213,7 @@ func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersion
 		return
 	}
 
-	identity := controlPlaneBackendIdentity(ctx, provider.Alias, apiURL, info.APIURL)
+	identity := controlPlaneBackendIdentity(apiURL, info.APIURL)
 	if _, alreadySeen := byIdentity[identity]; alreadySeen {
 		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL})
 		return
@@ -238,19 +236,22 @@ func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersion
 // set once in the backend's own config regardless of which hostname a client
 // dialed to reach it, so two aliases pointed at one physical deployment
 // report the identical value. When the plane never answered, or answered
-// with no apiUrl (an older platform), DNS resolution of the alias's own
-// configured host is the fallback signal (sufficient because it needs
-// nothing server-side), and the configured URL itself is the last resort so
-// two aliases erun cannot actually prove share a backend are never merged by
-// accident. Deliberately never keys on version: two genuinely distinct
-// planes can run the same published release (erun#2089).
-func controlPlaneBackendIdentity(ctx Context, alias, configuredAPIURL, serverReportedAPIURL string) string {
+// with no apiUrl (an older platform), erun falls back to the alias's own
+// configured URL verbatim -- never DNS. Two hostnames resolving to the same
+// address(es) is not proof of a shared backend: a multi-tenant cluster
+// commonly fronts many distinct control planes behind one shared ingress
+// IP:port, routed by hostname/SNI, so a DNS-only match can merge two
+// deployments that happen to sit behind the same load balancer. That is
+// exactly the case where collapsing is most dangerous -- it is taken only
+// when the plane is unreachable or too old to self-report, which is when
+// --fail-on-drift most needs to see it -- so an uncertain signal never
+// collapses. Reporting two rows for one backend is a cosmetic annoyance;
+// reporting one row for two backends hides a stale deployment. Deliberately
+// never keys on version either: two genuinely distinct planes can run the
+// same published release (erun#2089).
+func controlPlaneBackendIdentity(configuredAPIURL, serverReportedAPIURL string) string {
 	if normalized := normalizeControlPlaneIdentityURL(serverReportedAPIURL); normalized != "" {
 		return "url:" + normalized
-	}
-	ctx.Trace("list: " + alias + " reported no self-declared api url -- resolving DNS for " + configuredAPIURL + " to check for a shared backend")
-	if addrs := resolveControlPlaneDNSIdentity(configuredAPIURL); addrs != "" {
-		return "dns:" + addrs
 	}
 	return "url:" + normalizeControlPlaneIdentityURL(configuredAPIURL)
 }
@@ -270,32 +271,6 @@ func normalizeControlPlaneIdentityURL(raw string) string {
 		return strings.ToLower(strings.TrimRight(trimmed, "/"))
 	}
 	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
-}
-
-// resolveControlPlaneDNSIdentity resolves rawURL's host to its set of IP
-// addresses, sorted and joined so two hostnames resolving to the same
-// address(es) -- e.g. one is a CNAME of the other -- compare equal. Returns
-// "" on any failure (unparseable URL, no host, lookup error) so a caller
-// falls back to per-alias identity rather than guessing.
-func resolveControlPlaneDNSIdentity(rawURL string) string {
-	trimmed := strings.TrimSpace(rawURL)
-	if trimmed == "" {
-		return ""
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return ""
-	}
-	host := parsed.Hostname()
-	if host == "" {
-		return ""
-	}
-	addrs, err := net.DefaultResolver.LookupHost(context.Background(), host)
-	if err != nil || len(addrs) == 0 {
-		return ""
-	}
-	sort.Strings(addrs)
-	return strings.Join(addrs, ",")
 }
 
 func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ConsoleVersionStatus {
