@@ -1,0 +1,11 @@
+Version drift for tenant frs:
+  max version: <VERSION>
+  environments:
+    - build version=<VERSION> [behind max]
+    - prod version=<VERSION>
+audit: erun list --fail-on-drift --tenant frs
+list: frs/build has no erun version recorded in config; probing its MCP edge at http://<LOOPBACK>:26100/mcp for the running version
+list: frs/build's MCP edge reports erun version <VERSION>
+list: frs/prod has no erun version recorded in config; probing its MCP edge at http://<LOOPBACK>:26200/mcp for the running version
+list: frs/prod's MCP edge reports erun version <VERSION>
+version drift for tenant frs: 1 environment(s) behind the tenant's max version: build

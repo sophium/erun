@@ -1,0 +1,8 @@
+Version drift for tenant frs:
+  max version: none
+  environments:
+    - build version=none [up but version unresolved]
+audit: erun list --fail-on-drift --tenant frs
+list: frs/build has no erun version recorded in config; probing its MCP edge at http://<LOOPBACK>:26100/mcp for the running version
+list: frs/build's MCP edge answered but reported no version
+version drift for tenant frs: 1 environment(s) are up and answering but their erun version could not be determined: build

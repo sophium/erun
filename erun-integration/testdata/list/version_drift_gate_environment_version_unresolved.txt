@@ -8,3 +8,5 @@ Version drift for tenant team:
     version: none
     behind: unknown (gate's own erun version could not be resolved from config)
 audit: erun list --gate-environment gate --tenant team
+list: team/gate has no erun version recorded in config; probing its MCP edge at http://<LOOPBACK>:26200/mcp for the running version
+list: team/gate's MCP edge is not reachable; its version stays unresolved

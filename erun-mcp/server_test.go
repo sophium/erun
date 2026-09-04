@@ -786,7 +786,7 @@ func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 
 func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	projectRoot := t.TempDir()
-	handler := listTool(normalizeRuntimeConfig(RuntimeConfig{
+	handler := listTool(eruncommon.BuildInfo{}, normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{
 			Tenant:      "tenant-a",
 			Environment: "dev",
