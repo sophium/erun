@@ -221,6 +221,77 @@ func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpoi
 	}
 }
 
+// TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpointed
+// reproduces the misattribution failure mode directly: a job that never
+// wrote anything itself finishes (here, by a plain clean exit rather than a
+// cancellation, since both reach the same finishEnvironmentJob checkpoint
+// path) while a second, still-running job shares its exact worktree with
+// real uncommitted changes. Before the fix, the finishing job's checkpoint
+// read `git status` at large and committed the sibling's work under its own
+// name; this asserts that never happens while the sibling is still alive.
+func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpointed(t *testing.T) {
+	isolateActivityCache(t)
+	repo := newAgentJobTestRepo(t)
+	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
+	dirtyWorkingTree(t, repo)
+
+	const tenant = "worktree-contract"
+	const environment = "concurrent-sibling"
+	const siblingID = "i2083"
+	const id = "land2083"
+
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+	sibling := EnvironmentJob{
+		ID:        siblingID,
+		Name:      siblingID,
+		State:     EnvironmentJobStateRunning,
+		Kind:      EnvironmentJobKindAgent,
+		Dir:       repo,
+		PID:       os.Getpid(),
+		StartedAt: time.Now(),
+	}
+	if err := writeEnvironmentJob(dir, sibling); err != nil {
+		t.Fatalf("writeEnvironmentJob (sibling): %v", err)
+	}
+
+	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          id,
+		Name:        id,
+		Dir:         repo,
+		Agent:       "claude",
+		Command:     []string{"sh", "-c", "exit 0"},
+	}); err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+
+	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+	if !job.WorktreeDirty {
+		t.Fatalf("WorktreeDirty = false, want true: %+v", job)
+	}
+	if job.WorktreeCommit != "" {
+		t.Fatalf("WorktreeCommit = %q, want empty: a job must never checkpoint a tree a still-running sibling shares", job.WorktreeCommit)
+	}
+	if !strings.Contains(job.WorktreeReason, siblingID) {
+		t.Fatalf("WorktreeReason %q does not name the still-running sibling %q", job.WorktreeReason, siblingID)
+	}
+
+	status, err := exec.Command("git", "-C", repo, "status", "--porcelain").Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if len(strings.TrimSpace(string(status))) == 0 {
+		t.Fatalf("the sibling's uncommitted work was committed out from under it")
+	}
+}
+
 func TestCommandJobIgnoresItsWorkingTreeState(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
