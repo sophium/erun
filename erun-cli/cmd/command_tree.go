@@ -157,6 +157,10 @@ var knownUnsurfacedFlags = map[string]bool{
 	// fingerprint-based caching, with no "rebuild everything" escape hatch for
 	// an operator who suspects a stale layer.
 	"build --no-incremental": true,
+	// The compose-e2e-into-build convenience: the desktop's build action runs a
+	// build alone and its deploy is a separate step, so nothing there composes
+	// e2e into the build.
+	"build --e2e": true,
 	// Cloud-provider enrollment inputs. The desktop can sign in to an already
 	// configured alias but does not run the guided init that collects these.
 	"cloud init aws --role-name":         true,
