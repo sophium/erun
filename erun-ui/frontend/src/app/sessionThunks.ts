@@ -16,6 +16,7 @@ import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './n
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
+import { createIsCurrentSelection, isStaleDefaultLandingOpen } from './sessionOpenGuards';
 import { isNewSessionSelection } from './sessionSelection';
 import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
@@ -261,8 +262,14 @@ const showOpenSelectionStatus =
   };
 
 export const openSelection =
-  (selection: UISelection): AppThunk<Promise<void>> =>
+  (
+    selection: UISelection,
+    options: { isDefaultLandingOpen?: boolean } = {},
+  ): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
+    if (isStaleDefaultLandingOpen(getState, options)) {
+      return;
+    }
     const controller = requireController(extra);
     dispatch(resetTenantDashboard());
     const runSelection = { ...selection };
@@ -303,7 +310,11 @@ export const openSelection =
     }
     const shouldSpawnERun = verdict !== 'skip-erun';
 
-    const isCurrentSelection = createIsCurrentSelection(getState, selection);
+    const isCurrentSelection = createIsCurrentSelection(
+      getState,
+      selection,
+      options.isDefaultLandingOpen,
+    );
 
     // The previous click's openSelection is still in flight; reset before the
     // new selection paints its spinner so the sidebar spinner does not linger
@@ -354,22 +365,6 @@ export const openSelection =
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
-
-// Returns a predicate that post-await dispatches poll to decide whether the
-// user is still on this env or has navigated away. It reads getState()
-// afresh each call so it tracks setSelected dispatches that fire between awaits.
-function createIsCurrentSelection(
-  getState: () => import('./store').RootState,
-  selection: UISelection,
-): () => boolean {
-  return () => {
-    const current = getState().selection.selected;
-    if (current === null) {
-      return false;
-    }
-    return current.tenant === selection.tenant && current.environment === selection.environment;
-  };
-}
 
 // When the user has navigated away (isCurrentSelection() === false), the
 // spawned session is recorded for later reuse but not promoted to the visible
