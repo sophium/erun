@@ -176,6 +176,22 @@
        zitadel.oidc.additionalConsoleRedirectUris registers more origins
        alongside zitadel.oidc.consoleRedirectUri/platform.consoleUrl, so
        publishing a second console host is additive rather than a cutover.
+       platform.baseDomain also names the bare apex and "www.<baseDomain>"
+       hosts the erun-console chart's own Ingress 301-redirects to the
+       canonical console origin by default -- but that redirect lives
+       entirely in the console's Ingress/Middleware, a separate Helm release
+       this chart cannot see or depend on. Without this chart registering
+       those same two origins, a visitor who ever reaches the console app
+       directly on the apex or www host -- the console redirect disabled,
+       not yet rolled out to this release, or simply never having reached it
+       -- hits an unregistered-redirect-uri dead end at sign-in instead of
+       completing it. Registering them here too is what makes sign-in work
+       regardless of whether the console-side redirect is doing its job, and
+       costs nothing when it is: an unused registered redirect URI on a
+       public PKCE client is not reachable without the authorization code
+       exchange it already requires. zitadel.oidc.baseDomainRedirectUrisEnabled
+       opts out for a platform whose apex/www genuinely serve something else
+       and must never be registered as console redirect targets.
        zitadel.oidc.mobileRedirectUris is unset (no app) by default: the
        custom URL scheme a mobile client redirects through belongs to whatever
        app actually ships, so this platform mints no client for one until an
@@ -185,12 +201,21 @@
 {{- $oidcConfigMapName := default (printf "%s-zitadel-oidc-clients" $tenant) $oidc.configMapName -}}
 {{- $oidcConsoleRedirectURI := default (default "" $platform.consoleUrl) $oidc.consoleRedirectUri -}}
 {{- $oidcAdditionalConsoleRedirectURIs := default (list) $oidc.additionalConsoleRedirectUris -}}
+{{- $oidcBaseDomain := default "" $platform.baseDomain -}}
+{{- $oidcBaseDomainRedirectURIsEnabled := ne $oidcBaseDomain "" -}}
+{{- if hasKey $oidc "baseDomainRedirectUrisEnabled" -}}
+{{- $oidcBaseDomainRedirectURIsEnabled = $oidc.baseDomainRedirectUrisEnabled -}}
+{{- end -}}
 {{- $oidcConsoleRedirectURIs := list -}}
 {{- if $oidcConsoleRedirectURI -}}
 {{- $oidcConsoleRedirectURIs = append $oidcConsoleRedirectURIs $oidcConsoleRedirectURI -}}
 {{- end -}}
 {{- range $oidcAdditionalConsoleRedirectURIs -}}
 {{- $oidcConsoleRedirectURIs = append $oidcConsoleRedirectURIs . -}}
+{{- end -}}
+{{- if $oidcBaseDomainRedirectURIsEnabled -}}
+{{- $oidcConsoleRedirectURIs = append $oidcConsoleRedirectURIs (printf "https://%s/" $oidcBaseDomain) -}}
+{{- $oidcConsoleRedirectURIs = append $oidcConsoleRedirectURIs (printf "https://www.%s/" $oidcBaseDomain) -}}
 {{- end -}}
 {{- $oidcConsoleRedirectURIs = uniq $oidcConsoleRedirectURIs -}}
 {{- $oidcMobileRedirectURIs := uniq (default (list) $oidc.mobileRedirectUris) -}}
