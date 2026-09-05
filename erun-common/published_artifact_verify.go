@@ -1,7 +1,6 @@
 package eruncommon
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,12 +116,13 @@ func isTransientRegistryReadError(output string) bool {
 // runCommandCapturingOutput keeps a verification read quiet on success — the
 // manifest body is not what the operator asked for — while still surfacing the
 // tool's own diagnostics and capturing everything for failure classification.
+// See commandOutputCapture for why stdout and stderr need separate buffers.
 func runCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
-	capture := new(bytes.Buffer)
+	capture := &commandOutputCapture{}
 	cmd := Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = capture
-	cmd.Stderr = commandOutputWriter(ctx.Stderr, capture)
+	cmd.Stdout = &capture.stdout
+	cmd.Stderr = teeWriter(ctx.Stderr, &capture.stderr)
 	err := cmd.Run()
-	return capture.String(), err
+	return capture.combined(), err
 }
