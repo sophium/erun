@@ -266,20 +266,20 @@ func platformShortSuffix(platform string) string {
 func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
-	output := new(bytes.Buffer)
+	capture := &commandOutputCapture{}
 	if verbosity >= VerbosityDebug {
-		cmd.Stdout = commandOutputWriter(stdout, output)
-		cmd.Stderr = commandOutputWriter(stderr, output)
+		cmd.Stdout = teeWriter(stdout, &capture.stdout)
+		cmd.Stderr = teeWriter(stderr, &capture.stderr)
 	} else {
-		cmd.Stdout = output
-		cmd.Stderr = output
+		cmd.Stdout = &capture.stdout
+		cmd.Stderr = &capture.stderr
 	}
 	err := cmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := output.String()
+	message := capture.combined()
 	if verbosity < VerbosityDebug && stderr != nil {
 		_, _ = io.WriteString(stderr, message)
 	}
@@ -356,7 +356,7 @@ func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
-	cmd.Stderr = commandOutputWriter(stderr, capture)
+	cmd.Stderr = teeWriter(stderr, capture)
 	if err := cmd.Run(); err != nil {
 		return dockerTagError{err: err, message: capture.String()}
 	}
@@ -434,23 +434,6 @@ func DockerManifestExists(tag string, insecure bool) (bool, error) {
 		return false, nil
 	}
 	return false, err
-}
-
-func commandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
-	writers := make([]io.Writer, 0, 2)
-	if primary != nil {
-		writers = append(writers, primary)
-	}
-	if capture != nil {
-		writers = append(writers, capture)
-	}
-	if len(writers) == 0 {
-		return io.Discard
-	}
-	if len(writers) == 1 {
-		return writers[0]
-	}
-	return io.MultiWriter(writers...)
 }
 
 func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
@@ -555,15 +538,15 @@ func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) erro
 func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) error {
 	args := dockerPushArgs(tag, verbosity)
 	pushCmd := Command("docker", args...)
-	output := new(bytes.Buffer)
-	pushCmd.Stdout = commandOutputWriter(stdout, output)
-	pushCmd.Stderr = commandOutputWriter(stderr, output)
+	capture := &commandOutputCapture{}
+	pushCmd.Stdout = teeWriter(stdout, &capture.stdout)
+	pushCmd.Stderr = teeWriter(stderr, &capture.stderr)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := output.String()
+	message := capture.combined()
 	if IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      tag,
