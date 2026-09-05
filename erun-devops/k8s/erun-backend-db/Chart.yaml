@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.248
+appVersion: 1.0.249-pr.3d5fd5bf
 description: ERun backend database migration job
 name: erun-backend-db
 type: application
-version: 1.0.248
+version: 1.0.249-pr.3d5fd5bf

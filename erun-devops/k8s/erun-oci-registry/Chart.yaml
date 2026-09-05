@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.248
+appVersion: 1.0.249-pr.3d5fd5bf
 description: ERun hosted OCI container registry (zot), authenticated by tenant API token
 name: erun-oci-registry
 type: application
-version: 1.0.248
+version: 1.0.249-pr.3d5fd5bf
