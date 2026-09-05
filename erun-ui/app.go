@@ -228,6 +228,11 @@ type App struct {
 	// to (see restart_control.go). nil when the bind failed or startup has not
 	// run yet (unit tests that construct an App directly).
 	restartControl *restartControlServer
+	// desktopControlMarker is this instance's own control marker, kept so the
+	// periodic reconciler (reconcileDesktopControlMarker) can re-assert it
+	// without recomputing pid/port/start time. Zero value when restartControl
+	// is nil.
+	desktopControlMarker eruncommon.DesktopControlMarker
 }
 
 // SetEmitter overrides how the App emits frontend events; the headless server
@@ -633,6 +638,13 @@ func (a *App) startup(ctx context.Context) {
 // cannot expose a restart trigger this launch still works for everything
 // else, and an absent marker is exactly what an external trigger correctly
 // reads as "no running desktop to restart".
+//
+// The marker is claimed, not written outright: if another, currently-alive
+// instance already holds it, this launch leaves it alone rather than
+// stomping the only record that lets anything find the instance that is
+// actually running. A refused claim is logged, not fatal -- this instance's
+// own restart control server still starts and runs, it is simply not the one
+// an external trigger will discover.
 func (a *App) startRestartControl() {
 	server, port := startRestartControlServer(a)
 	if server == nil {
@@ -640,8 +652,29 @@ func (a *App) startRestartControl() {
 	}
 	a.restartControl = server
 	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
-	if err := eruncommon.WriteDesktopControlMarker(a.deps.desktopControlMarkerPath, marker); err != nil {
-		log.Printf("erun-app: write restart control marker: %v", err)
+	a.desktopControlMarker = marker
+	if err := eruncommon.ClaimDesktopControlMarker(a.deps.desktopControlMarkerPath, marker, eruncommon.DesktopProcessAlive); err != nil {
+		log.Printf("erun-app: claim restart control marker: %v", err)
+	}
+}
+
+// reconcileDesktopControlMarker re-asserts this instance's own control marker
+// on every session-heartbeat tick (see session_heartbeat.go). Without this, a
+// marker this instance failed to claim at startup (another instance held it,
+// which has since crashed) would only ever be reclaimed by a fresh launch --
+// and a process that is killed rather than cleanly shut down never runs
+// RemoveDesktopControlMarker/ReleaseDesktopControlMarker at all, so its stale
+// entry would otherwise sit there until somebody else happens to start.
+// Running the same claim this instance already used at startup on the
+// existing reconciler tick means whichever instance is actually alive keeps
+// its own record current, without inventing a second reconcile loop beside
+// session_heartbeat.go's.
+func (a *App) reconcileDesktopControlMarker() {
+	if a.restartControl == nil {
+		return
+	}
+	if err := eruncommon.ClaimDesktopControlMarker(a.deps.desktopControlMarkerPath, a.desktopControlMarker, eruncommon.DesktopProcessAlive); err != nil {
+		log.Printf("erun-app: reconcile restart control marker: %v", err)
 	}
 }
 
@@ -652,8 +685,8 @@ func (a *App) shutdown(context.Context) {
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
-	if err := eruncommon.RemoveDesktopControlMarker(a.deps.desktopControlMarkerPath); err != nil {
-		log.Printf("erun-app: remove restart control marker: %v", err)
+	if err := eruncommon.ReleaseDesktopControlMarker(a.deps.desktopControlMarkerPath, os.Getpid()); err != nil {
+		log.Printf("erun-app: release restart control marker: %v", err)
 	}
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()

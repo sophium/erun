@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -162,6 +163,178 @@ func TestDesktopControlMarker_ReadRejectsIncompleteTarget(t *testing.T) {
 	}
 	if _, err := ReadDesktopControlMarker(path); err == nil {
 		t.Fatal("expected an error for a marker with no control port")
+	}
+}
+
+// TestClaimDesktopControlMarker_RefusesToClobberALiveDifferentInstance is the
+// concurrent-write case: a second instance's own startup write must never
+// take over the discoverable control record of an already-running,
+// verifiably-alive instance.
+func TestClaimDesktopControlMarker_RefusesToClobberALiveDifferentInstance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	live := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 100}
+	if err := WriteDesktopControlMarker(path, live); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	interloper := DesktopControlMarker{PID: 222, ControlPort: 5252, StartedAtUnix: 200}
+	err := ClaimDesktopControlMarker(path, interloper, func(pid int) bool { return pid == live.PID })
+	if !errors.Is(err, ErrDesktopControlMarkerHeld) {
+		t.Fatalf("err = %v, want ErrDesktopControlMarkerHeld", err)
+	}
+
+	got, readErr := ReadDesktopControlMarker(path)
+	if readErr != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", readErr)
+	}
+	if got != live {
+		t.Fatalf("marker = %+v, want unchanged %+v: a live instance's entry must never be clobbered", got, live)
+	}
+}
+
+// TestClaimDesktopControlMarker_AlwaysAllowsSelfToRewriteItsOwnEntry confirms
+// the guard only blocks a DIFFERENT pid: a running instance re-asserting its
+// own entry (e.g. reconcileDesktopControlMarker's periodic tick) must never
+// be refused by its own liveness.
+func TestClaimDesktopControlMarker_AlwaysAllowsSelfToRewriteItsOwnEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	mine := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 100}
+	if err := WriteDesktopControlMarker(path, mine); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	refreshed := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 999}
+	if err := ClaimDesktopControlMarker(path, refreshed, func(int) bool { return true }); err != nil {
+		t.Fatalf("ClaimDesktopControlMarker: %v", err)
+	}
+	got, err := ReadDesktopControlMarker(path)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got != refreshed {
+		t.Fatalf("marker = %+v, want refreshed %+v", got, refreshed)
+	}
+}
+
+// TestClaimDesktopControlMarker_ClaimsFreelyWhenNoMarkerExists confirms a
+// first launch (or one after a clean shutdown removed the marker) claims
+// without ever consulting liveness.
+func TestClaimDesktopControlMarker_ClaimsFreelyWhenNoMarkerExists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	marker := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 100}
+	err := ClaimDesktopControlMarker(path, marker, func(int) bool {
+		t.Fatal("processAlive must not be consulted when no marker exists yet")
+		return false
+	})
+	if err != nil {
+		t.Fatalf("ClaimDesktopControlMarker: %v", err)
+	}
+	got, readErr := ReadDesktopControlMarker(path)
+	if readErr != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", readErr)
+	}
+	if got != marker {
+		t.Fatalf("marker = %+v, want %+v", got, marker)
+	}
+}
+
+// TestClaimDesktopControlMarker_ReclaimsAStaleEntryLeftByACrashedInstance is
+// the accumulation/no-cleanup case: a process that never ran its own
+// shutdown (killed, not cleanly exited) leaves its entry behind forever
+// unless something reclaims it. Reclaiming on the next claim -- reaping
+// rather than relying on an exit hook that does not run when a process is
+// killed -- is what closes that gap here.
+func TestClaimDesktopControlMarker_ReclaimsAStaleEntryLeftByACrashedInstance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	stale := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 100}
+	if err := WriteDesktopControlMarker(path, stale); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	successor := DesktopControlMarker{PID: 222, ControlPort: 5252, StartedAtUnix: 200}
+	if err := ClaimDesktopControlMarker(path, successor, func(int) bool { return false }); err != nil {
+		t.Fatalf("ClaimDesktopControlMarker: %v", err)
+	}
+	got, err := ReadDesktopControlMarker(path)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got != successor {
+		t.Fatalf("marker = %+v, want reclaimed %+v", got, successor)
+	}
+}
+
+// TestClaimDesktopControlMarker_ReclaimsAfterARealProcessExitsWithoutCleanup
+// exercises the real liveness check (DesktopProcessAlive, not a fake) against
+// a genuinely-exited process standing in for the ungraceful/killed path: its
+// own exit code never ran RemoveDesktopControlMarker/ReleaseDesktopControlMarker
+// at all, so only a later claim's own liveness check can tell its entry apart
+// from a real live one's.
+func TestClaimDesktopControlMarker_ReclaimsAfterARealProcessExitsWithoutCleanup(t *testing.T) {
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Skipf("no usable host binary to spawn a short-lived process: %v", err)
+	}
+	deadPID := cmd.Process.Pid
+
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	crashed := DesktopControlMarker{PID: deadPID, ControlPort: 4242, StartedAtUnix: 100}
+	if err := WriteDesktopControlMarker(path, crashed); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	successor := DesktopControlMarker{PID: os.Getpid(), ControlPort: 5252, StartedAtUnix: 200}
+	if err := ClaimDesktopControlMarker(path, successor, DesktopProcessAlive); err != nil {
+		t.Fatalf("ClaimDesktopControlMarker: %v", err)
+	}
+	got, err := ReadDesktopControlMarker(path)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got != successor {
+		t.Fatalf("marker = %+v, want reclaimed %+v", got, successor)
+	}
+}
+
+// TestReleaseDesktopControlMarker_OnlyRemovesOwnEntry is the other half of
+// the concurrent-write fix: an instance whose own claim was refused (see
+// ClaimDesktopControlMarker) never wrote the marker, so its exit must not
+// delete the live instance's entry either.
+func TestReleaseDesktopControlMarker_OnlyRemovesOwnEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	other := DesktopControlMarker{PID: 222, ControlPort: 5252, StartedAtUnix: 200}
+	if err := WriteDesktopControlMarker(path, other); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	if err := ReleaseDesktopControlMarker(path, 111); err != nil {
+		t.Fatalf("ReleaseDesktopControlMarker: %v", err)
+	}
+	got, err := ReadDesktopControlMarker(path)
+	if err != nil {
+		t.Fatalf("expected the other instance's marker to remain: %v", err)
+	}
+	if got != other {
+		t.Fatalf("marker = %+v, want unchanged %+v", got, other)
+	}
+}
+
+func TestReleaseDesktopControlMarker_RemovesOwnEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	mine := DesktopControlMarker{PID: 111, ControlPort: 4242, StartedAtUnix: 100}
+	if err := WriteDesktopControlMarker(path, mine); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+	if err := ReleaseDesktopControlMarker(path, 111); err != nil {
+		t.Fatalf("ReleaseDesktopControlMarker: %v", err)
+	}
+	if _, err := ReadDesktopControlMarker(path); err == nil {
+		t.Fatal("expected the marker to be removed")
+	}
+}
+
+func TestReleaseDesktopControlMarker_NoopWhenMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "desktop-control.json")
+	if err := ReleaseDesktopControlMarker(path, 111); err != nil {
+		t.Fatalf("ReleaseDesktopControlMarker on missing marker: %v", err)
 	}
 }
 

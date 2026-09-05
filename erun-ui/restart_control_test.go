@@ -6,11 +6,184 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
+
+// newDesktopControlTestApp builds an App wired to an isolated marker path
+// under a fresh $HOME, mirroring TestAppStartRestartControl_WritesAndRemovesMarker.
+func newDesktopControlTestApp(t *testing.T, markerPath string) *App {
+	t.Helper()
+	return NewApp(erunUIDeps{
+		store:                    newOrchestratorStubStore(t.TempDir()),
+		orchestratorRestoreDir:   filepath.Join(filepath.Dir(markerPath), orchestratorRestoreDirName),
+		orchestratorOpenPath:     filepath.Join(filepath.Dir(markerPath), "orchestrator-open.json"),
+		relaunchApp:              func() error { return nil },
+		quitApp:                  func() {},
+		desktopControlMarkerPath: markerPath,
+	})
+}
+
+// desktopControlHelperSleepEnv marks a re-exec'd instance of
+// TestAppStartRestartControl_DoesNotClobberALiveDifferentInstance as the
+// long-lived helper half rather than the test driver, the same self-reinvoke
+// idiom TestWriteOrchestratorMCPConfigFromBundledDesktop already uses.
+const desktopControlHelperSleepEnv = "ERUN_TEST_DESKTOP_CONTROL_HELPER_SLEEP"
+
+// TestAppStartRestartControl_DoesNotClobberALiveDifferentInstance is the
+// concurrent-write case: a second, transient launch that starts while a real
+// desktop instance is already running must not take over that instance's
+// discoverable control record — and must not delete it on its own way out
+// either, since it never legitimately owned it.
+func TestAppStartRestartControl_DoesNotClobberALiveDifferentInstance(t *testing.T) {
+	if os.Getenv(desktopControlHelperSleepEnv) != "" {
+		time.Sleep(30 * time.Second)
+		return
+	}
+
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+	markerPath := filepath.Join(home, "state", "desktop-control.json")
+
+	// A real, still-running process stands in for the already-live instance:
+	// re-exec this same test, sentinel env var set so it sleeps instead of
+	// running as a normal test. Portable across platforms since it is the
+	// compiled test binary itself, not a shell tool.
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	other := exec.Command(self, "-test.run", "^"+t.Name()+"$")
+	other.Env = append(os.Environ(), desktopControlHelperSleepEnv+"=1")
+	if err := other.Start(); err != nil {
+		t.Fatalf("start helper process: %v", err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+
+	live := eruncommon.DesktopControlMarker{PID: other.Process.Pid, ControlPort: 9999, StartedAtUnix: 100}
+	if err := eruncommon.WriteDesktopControlMarker(markerPath, live); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	app := newDesktopControlTestApp(t, markerPath)
+	app.startRestartControl()
+	if app.restartControl == nil {
+		t.Fatal("expected the control server to have started")
+	}
+
+	got, err := eruncommon.ReadDesktopControlMarker(markerPath)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got != live {
+		t.Fatalf("marker = %+v, want the still-live other instance's %+v unchanged", got, live)
+	}
+
+	app.shutdown(context.Background())
+	got, err = eruncommon.ReadDesktopControlMarker(markerPath)
+	if err != nil {
+		t.Fatalf("expected the other instance's marker to survive this shutdown: %v", err)
+	}
+	if got != live {
+		t.Fatalf("marker = %+v after shutdown, want unchanged %+v", got, live)
+	}
+}
+
+// TestAppStartRestartControl_ReclaimsAStaleEntryFromACrashedInstance is the
+// no-cleanup/accumulation case: a prior instance that was killed rather than
+// cleanly shut down never ran RemoveDesktopControlMarker, so its dead pid
+// would otherwise sit in the marker forever. The next instance to start
+// reclaims it instead.
+func TestAppStartRestartControl_ReclaimsAStaleEntryFromACrashedInstance(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+	markerPath := filepath.Join(home, "state", "desktop-control.json")
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	// Run-and-exit, guaranteeing the pid is dead by the time this returns —
+	// standing in for an instance that was killed and never cleaned up.
+	crashed := exec.Command(self, "-test.run=^$")
+	if err := crashed.Run(); err != nil {
+		t.Fatalf("run helper process: %v", err)
+	}
+
+	stale := eruncommon.DesktopControlMarker{PID: crashed.Process.Pid, ControlPort: 4242, StartedAtUnix: 100}
+	if err := eruncommon.WriteDesktopControlMarker(markerPath, stale); err != nil {
+		t.Fatalf("seed marker: %v", err)
+	}
+
+	app := newDesktopControlTestApp(t, markerPath)
+	app.startRestartControl()
+	if app.restartControl == nil {
+		t.Fatal("expected the control server to have started")
+	}
+
+	got, err := eruncommon.ReadDesktopControlMarker(markerPath)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got.PID != os.Getpid() {
+		t.Fatalf("marker = %+v, want reclaimed for this instance's own pid %d", got, os.Getpid())
+	}
+	app.shutdown(context.Background())
+}
+
+// TestApp_ReconcileDesktopControlMarker_ReclaimsWhenDisplaced exercises the
+// periodic self-heal wired into session_heartbeat.go's existing reconciler
+// tick: without a fresh launch, this running instance still notices and
+// corrects a marker that no longer names it, as long as whatever it now
+// names is not itself verifiably alive.
+func TestApp_ReconcileDesktopControlMarker_ReclaimsWhenDisplaced(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+	markerPath := filepath.Join(home, "state", "desktop-control.json")
+
+	app := newDesktopControlTestApp(t, markerPath)
+	app.startRestartControl()
+	if app.restartControl == nil {
+		t.Fatal("expected the control server to have started")
+	}
+	defer app.shutdown(context.Background())
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	crashed := exec.Command(self, "-test.run=^$")
+	if err := crashed.Run(); err != nil {
+		t.Fatalf("run helper process: %v", err)
+	}
+
+	// Simulate the marker having been displaced by some intervening writer
+	// that has since crashed, while this instance is still the one actually
+	// running.
+	if err := eruncommon.WriteDesktopControlMarker(markerPath, eruncommon.DesktopControlMarker{
+		PID: crashed.Process.Pid, ControlPort: 1, StartedAtUnix: 1,
+	}); err != nil {
+		t.Fatalf("displace marker: %v", err)
+	}
+
+	app.reconcileDesktopControlMarker()
+
+	got, err := eruncommon.ReadDesktopControlMarker(markerPath)
+	if err != nil {
+		t.Fatalf("ReadDesktopControlMarker: %v", err)
+	}
+	if got.PID != os.Getpid() {
+		t.Fatalf("marker = %+v, want reclaimed for this instance's own pid %d", got, os.Getpid())
+	}
+}
 
 func postRestartControl(t *testing.T, port int, orchestratorID string) restartControlResponse {
 	t.Helper()
