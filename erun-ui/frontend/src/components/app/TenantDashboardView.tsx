@@ -189,13 +189,23 @@ function TenantDashboardReadyBody({
       className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
     >
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
-        {/* h-auto + flex-wrap override the primitive's single-row, fixed-height
-            layout: a narrow <main> has less width than the full tab set
-            needs, so the strip wraps onto a second line instead of pushing
-            tabs (and the actions beside it) off-screen with no way back. */}
-        <TabsList className="h-auto w-full flex-wrap justify-start">
+        {/* The strip wraps rather than truncating: a narrow <main> has less
+            width than the full tab set needs, and a tab an operator cannot
+            reach is a worse answer than a second line.
+
+            The height override has to carry the primitive's own variant, not
+            a bare h-auto. The primitive pins the height under
+            group-data-[orientation=horizontal]/tabs, which both survives
+            tailwind-merge beside an unqualified class and outranks it on
+            specificity — so the tabs wrapped while their box stayed one row
+            tall, and the overflowing row painted over the panel beneath it.
+
+            flex-none likewise overrides the primitive's flex-1: a grown tab
+            fills whatever its row has left, which turns a lone wrapped tab
+            into a full-width bar sitting in dead space instead of a tab. */}
+        <TabsList className="group-data-[orientation=horizontal]/tabs:h-auto w-full flex-wrap justify-start gap-1">
           {visibleTabs.map((descriptor) => (
-            <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
+            <TabsTrigger key={descriptor.tab} value={descriptor.tab} className="h-auto flex-none">
               {descriptor.tab === 'requests' ? requestsTabLabel(dashboard.data) : descriptor.label}
             </TabsTrigger>
           ))}
