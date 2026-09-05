@@ -519,6 +519,32 @@ idle:
 EOF
 }
 
+# Reconciling the agent MCP configuration is pod-lifecycle work, not per-shell
+# work: it rewrites ~/.claude and ~/.codex from the image's baked skills/agents
+# and the container's env, none of which change while the container lives. The
+# claim marker therefore lives in a container-lifetime directory (the same /tmp
+# reasoning the desktop session dir uses), so a rebuilt image or a restarted pod
+# always reconciles again, and every shell after the first in a given container
+# pays nothing. `mkdir` is the claim because it is atomic: a burst of execs
+# racing the entrypoint's own boot run elects exactly one runner rather than
+# each paying the cost.
+agent_config_state_dir() {
+    printf '%s\n' "${ERUN_AGENT_CONFIG_STATE_DIR:-/tmp/erun-agent-config}"
+}
+
+run_agent_config_once() {
+    agent_config_script="${1}"
+    agent_config_name="${2}"
+
+    [ -x "${agent_config_script}" ] || return 0
+
+    agent_config_dir="$(agent_config_state_dir)"
+    mkdir -p "${agent_config_dir}" 2>/dev/null || return 0
+    mkdir "${agent_config_dir}/${agent_config_name}" 2>/dev/null || return 0
+
+    "${agent_config_script}" >/dev/null 2>&1 || true
+}
+
 initialize_codex_config() {
     codex_configure="${HOME}/.erun/configure-codex-mcp.sh"
 
@@ -580,7 +606,7 @@ tool_timeout_sec = 600
 EOF
 CODEX_CONFIG_SCRIPT
     chmod 700 "${codex_configure}"
-    "${codex_configure}" >/dev/null 2>&1 || true
+    run_agent_config_once "${codex_configure}" codex-mcp
     install_shell_profile_hook "${HOME}/.bashrc"
     install_shell_profile_hook "${HOME}/.profile"
     if [ -f "${HOME}/.bash_profile" ]; then
@@ -601,13 +627,22 @@ imds_get() {
     if [ -z "${path}" ]; then
         return
     fi
-    token=$(curl -fsS -m 2 -X PUT "http://169.254.169.254/latest/api/token" \
-        -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+    token_status=0
+    token=$(curl -fsS --connect-timeout 1 -m 2 -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null) || token_status=$?
     if [ -n "${token}" ]; then
-        curl -fsS -m 2 -H "X-aws-ec2-metadata-token: ${token}" "http://169.254.169.254/latest/${path}" 2>/dev/null || true
+        curl -fsS --connect-timeout 1 -m 2 -H "X-aws-ec2-metadata-token: ${token}" "http://169.254.169.254/latest/${path}" 2>/dev/null || true
         return
     fi
-    curl -fsS -m 2 "http://169.254.169.254/latest/${path}" 2>/dev/null || true
+    # Nothing answers the link-local address at all where IMDS is unreachable,
+    # so the probe drains its whole timeout (curl 28) rather than being refused.
+    # Only an IMDSv1-only instance rejects the token and can still serve the
+    # plain read, and it rejects it immediately -- so a timed-out probe means
+    # the fallback would buy a second timeout for an answer that cannot come.
+    if [ "${token_status}" = "28" ]; then
+        return
+    fi
+    curl -fsS --connect-timeout 1 -m 2 "http://169.254.169.254/latest/${path}" 2>/dev/null || true
 }
 
 imds_region() {
@@ -806,7 +841,7 @@ NODE
     chmod 600 "${claude_state}" >/dev/null 2>&1 || true
 CLAUDE_CONFIG_SCRIPT
     chmod 700 "${claude_configure}"
-    "${claude_configure}" >/dev/null 2>&1 || true
+    run_agent_config_once "${claude_configure}" claude-code
     install_shell_profile_hook "${HOME}/.bashrc"
     install_shell_profile_hook "${HOME}/.profile"
     if [ -f "${HOME}/.bash_profile" ]; then
@@ -835,13 +870,26 @@ install_shell_profile_hook() {
 # the shell's stdin via the Wails+PTY reply path.
 export COLORFGBG='15;0'
 
-if [ -x "${HOME}/.erun/configure-codex-mcp.sh" ]; then
-    "${HOME}/.erun/configure-codex-mcp.sh" >/dev/null 2>&1 || true
-fi
-
-if [ -x "${HOME}/.erun/configure-claude-code.sh" ]; then
-    "${HOME}/.erun/configure-claude-code.sh" >/dev/null 2>&1 || true
-fi
+# The entrypoint reconciles the agent MCP configuration once per container boot
+# and records the claim in a container-lifetime directory; this is the same
+# claim, so a shell only pays for it when it is genuinely the first in this
+# container (an exec racing the entrypoint's own boot run). Every ordinary shell
+# start -- including the non-interactive `sh -lc` every remote exec goes through
+# -- reads two directory entries instead of re-running both configure scripts.
+__erun_configure_agents_once() {
+    __erun_state_dir="${ERUN_AGENT_CONFIG_STATE_DIR:-/tmp/erun-agent-config}"
+    mkdir -p "${__erun_state_dir}" 2>/dev/null || return 0
+    for __erun_agent in codex-mcp claude-code; do
+        __erun_script="${HOME}/.erun/configure-${__erun_agent}.sh"
+        if [ -x "${__erun_script}" ] && mkdir "${__erun_state_dir}/${__erun_agent}" 2>/dev/null; then
+            "${__erun_script}" >/dev/null 2>&1 || true
+        fi
+    done
+    unset __erun_state_dir __erun_agent __erun_script
+    return 0
+}
+__erun_configure_agents_once
+unset -f __erun_configure_agents_once
 
 __erun_record_cli_activity() {
     if [ -n "${ERUN_TENANT:-}" ] && [ -n "${ERUN_ENVIRONMENT:-}" ]; then
