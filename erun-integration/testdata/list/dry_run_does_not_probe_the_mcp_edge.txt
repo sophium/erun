@@ -1,0 +1,7 @@
+Version drift for tenant frs:
+  max version: none
+  environments:
+    - build version=none
+audit: erun list --dry-run --tenant frs
+erun list
+list: frs/build has no erun version recorded in config; would probe its MCP edge at http://<LOOPBACK>:26100/mcp for the running version

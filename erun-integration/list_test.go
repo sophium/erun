@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,9 +107,13 @@ func TestList(t *testing.T) {
 		// The gate environment has never recorded a resolved runtime image, so
 		// its own erun version cannot be read from config alone -- behind must
 		// read "unknown", never a silent "no" that would misreport an unknown
-		// gate as safely current.
+		// gate as safely current. Its config-unresolved version now also
+		// triggers a live MCP-edge probe fallback (erun#2093); pin its local
+		// port range off the default 17000 range so that real dial never risks
+		// colliding with a developer's own live erun session, same rule as the
+		// mcp_test.go fake-edge scenarios.
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "gate")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "gate", 26200)
 		seedTenantEnvOnErunLine(t, setup, "team", "peer", "1.0.247")
 		result := erun.Run(t, []string{"list", "--tenant", "team", "--gate-environment", "gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -747,6 +752,145 @@ func TestList(t *testing.T) {
 		}
 		golden.Equal(t, "list/runtime_sizing_withholds_a_shrink_on_a_short_window", normalize.Apply(result.Combined))
 	})
+}
+
+// TestListVersionDriftLiveProbe covers erun#2093: a tenant that ships its own
+// runtime image under its own tag scheme (e.g. frs-devops) has no version
+// erun can parse from config, so `erun list --tenant` used to report
+// "version=none" for every one of its environments and --fail-on-drift
+// passed by being unreachable. Each scenario here binds a real fake MCP
+// edge on a literal port, so -- same rule as mcp_test.go's fakeMCPEdge
+// scenarios -- this whole function stays off t.Parallel() so it is never
+// interleaved with any other top-level test in the suite, and every port is
+// pinned to the 26100+ range, far from erun's default 17000, so a real dial
+// never risks answering a developer's own live erun session.
+func TestListVersionDriftLiveProbe(t *testing.T) {
+	const (
+		frsBuildLocalPort = 26100
+		frsProdLocalPort  = 26200
+	)
+
+	t.Run("live_probe_resolves_version_from_mcp_edge_when_config_cannot", func(t *testing.T) {
+		skipIfPortsBusy(t, frsBuildLocalPort)
+		setup := env.New(t)
+		// frs's own runtime image (frs-devops:1.0.98) and the erun version it
+		// ships (1.0.236) are unrelated numbers -- the whole point of the
+		// live-probe fallback is that it reports the latter, never the former.
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "build", "1.0.98", frsBuildLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"serverInfo":{"name":"erun","version":"1.0.236"}}`,
+		}}
+		edge.start(t, frsBuildLocalPort)
+
+		result := erun.Run(t, []string{"list", "--tenant", "frs"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/live_probe_resolves_version_from_mcp_edge_when_config_cannot", normalize.Apply(result.Combined))
+
+		edge.requestFor(t, "initialize")
+	})
+
+	t.Run("fail_on_drift_flags_environment_behind_via_live_probed_versions", func(t *testing.T) {
+		skipIfPortsBusy(t, frsBuildLocalPort, frsProdLocalPort)
+		setup := env.New(t)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "build", "1.0.98", frsBuildLocalPort)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "prod", "1.0.107", frsProdLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		buildEdge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"serverInfo":{"name":"erun","version":"1.0.236"}}`,
+		}}
+		buildEdge.start(t, frsBuildLocalPort)
+		prodEdge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"serverInfo":{"name":"erun","version":"1.0.245"}}`,
+		}}
+		prodEdge.start(t, frsProdLocalPort)
+
+		result := erun.Run(t, []string{"list", "--tenant", "frs", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an environment behind via a live-probed version, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_flags_environment_behind_via_live_probed_versions", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_stays_zero_when_the_unresolved_environment_is_unreachable", func(t *testing.T) {
+		// The counterpart to the scenario above: nothing is listening on
+		// build's MCP port at all, so it reads as genuinely stopped rather
+		// than a finding -- --fail-on-drift must not fail on that.
+		skipIfPortsBusy(t, frsBuildLocalPort, frsProdLocalPort)
+		setup := env.New(t)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "build", "1.0.98", frsBuildLocalPort)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "prod", "1.0.107", frsProdLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		prodEdge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"serverInfo":{"name":"erun","version":"1.0.245"}}`,
+		}}
+		prodEdge.start(t, frsProdLocalPort)
+
+		result := erun.Run(t, []string{"list", "--tenant", "frs", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for an unresolved but unreachable environment, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_stays_zero_when_the_unresolved_environment_is_unreachable", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_flags_a_reachable_environment_with_no_resolvable_version", func(t *testing.T) {
+		// The edge answers the handshake (it is up) but reports no version at
+		// all -- an environment that is up and unreadable is drift-shaped, so
+		// this must be a finding, not a silent pass.
+		skipIfPortsBusy(t, frsBuildLocalPort)
+		setup := env.New(t)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "build", "1.0.98", frsBuildLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{
+			"initialize": `{"serverInfo":{"name":"erun","version":""}}`,
+		}}
+		edge.start(t, frsBuildLocalPort)
+
+		result := erun.Run(t, []string{"list", "--tenant", "frs", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a reachable environment with no resolvable version, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_flags_a_reachable_environment_with_no_resolvable_version", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_does_not_probe_the_mcp_edge", func(t *testing.T) {
+		// No fake edge is started at all -- if dry-run made a real probe call
+		// it would report unreachable instead of tracing "would probe", and
+		// the port is never touched either way.
+		setup := env.New(t)
+		seedTenantEnvOnCustomRuntimeLine(t, setup, "frs", "build", "1.0.98", frsBuildLocalPort)
+
+		result := erun.Run(t, []string{"list", "--tenant", "frs", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/dry_run_does_not_probe_the_mcp_edge", normalize.Apply(result.Combined))
+	})
+}
+
+// seedTenantEnvOnCustomRuntimeLine seeds tenant/environment running a
+// tenant-owned runtime image under its own release line (e.g.
+// frs-devops:1.0.98), not erun's own erun-devops line -- exactly the shape
+// ResolveErunVersion can never resolve a version out of, since the image tag
+// carries the tenant's own line, not erun's (erun#2093). lineVersion is that
+// tenant-owned number and is deliberately unrelated to whatever erun version
+// the environment's live MCP edge reports in a given scenario.
+func seedTenantEnvOnCustomRuntimeLine(t testing.TB, setup env.Setup, tenant, environment, lineVersion string, rangeStart int) {
+	t.Helper()
+	fixture.SeedTenantEnv(t, setup, tenant, environment)
+	envConfigPath := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
+	mustWrite(t, envConfigPath,
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"type: local-agent\n"+
+			"runtimeversion: "+lineVersion+"\n"+
+			"runtimerunningimage: ghcr.io/sophium/"+tenant+"-devops:"+lineVersion+"\n"+
+			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
+	)
 }
 
 type usageHistorySpec struct {

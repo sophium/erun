@@ -18,7 +18,7 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 		Use:   "list",
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
-			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
+			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code. When an environment's version cannot be read from config alone -- a tenant that ships its own runtime image under its own tag scheme has no version erun can parse from it -- this falls back to a live probe of that environment's own local MCP edge, which always knows the version of the binary actually running there; an environment nobody has opened still reports unresolved rather than making the probe hang.\n\n" +
 			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
@@ -78,7 +78,7 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 }
 
 func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
-	drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
+	drift, err := common.ResolveTenantVersionDrift(ctx, result, versionDriftTenant, gateEnvironment, common.DefaultEnvironmentVersionProbe(currentBuildInfo().Version))
 	if err != nil {
 		return err
 	}
@@ -118,14 +118,20 @@ func runListControlPlanes(ctx common.Context, result common.ListResult, failOnDr
 // opt-in rather than the command's default.
 func versionDriftExitError(drift common.TenantVersionDrift) error {
 	var problems []string
-	var behind []string
+	var behind, unresolved []string
 	for _, env := range drift.Environments {
 		if env.BehindMax {
 			behind = append(behind, env.Environment)
 		}
+		if env.VersionUnresolved {
+			unresolved = append(unresolved, env.Environment)
+		}
 	}
 	if len(behind) > 0 {
 		problems = append(problems, fmt.Sprintf("%d environment(s) behind the tenant's max version: %s", len(behind), strings.Join(behind, ", ")))
+	}
+	if len(unresolved) > 0 {
+		problems = append(problems, fmt.Sprintf("%d environment(s) are up and answering but their erun version could not be determined: %s", len(unresolved), strings.Join(unresolved, ", ")))
 	}
 	if drift.GateEnvironment != "" {
 		switch {
@@ -218,6 +224,9 @@ func writeVersionDriftEnvironments(ctx common.Context, environments []common.Env
 		line := "    - " + env.Environment + " version=" + quotedValueOrNone(env.Version)
 		if env.BehindMax {
 			line += " [behind max]"
+		}
+		if env.VersionUnresolved {
+			line += " [up but version unresolved]"
 		}
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err

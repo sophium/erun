@@ -147,6 +147,44 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 	return result, nil
 }
 
+// mcpInitializeResult is the slice of the initialize handshake's result this
+// package cares about -- the rest negotiates capabilities no caller here
+// needs.
+type mcpInitializeResult struct {
+	ServerInfo struct {
+		Version string `json:"version"`
+	} `json:"serverInfo"`
+}
+
+// ProbeMCPServerVersion performs the initialize handshake against an
+// environment's MCP edge and returns the erun version its serverInfo
+// reports. This is provenance-independent: the edge names the version of the
+// binary actually running, regardless of which image or config shipped it --
+// exactly what config-based version resolution (ResolveErunVersion) cannot
+// do for a tenant that ships its own runtime image under its own tag scheme.
+// It is a bare probe: no notifications/initialized and no session retained,
+// since a caller here only ever wants the one field and makes no further
+// call on the session.
+func ProbeMCPServerVersion(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string) (string, error) {
+	session, err := newMCPSession(endpoint, mintToken, clientVersion, true, false)
+	if err != nil {
+		return "", err
+	}
+	raw, err := session.call(ctx, "initialize", map[string]any{
+		"protocolVersion": mcpClientProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": mcpClientName, "version": session.clientVersion},
+	})
+	if err != nil {
+		return "", err
+	}
+	var result mcpInitializeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("decode MCP initialize result: %w", err)
+	}
+	return strings.TrimSpace(result.ServerInfo.Version), nil
+}
+
 // ListMCPTools returns the tools an environment's MCP edge exposes, with their
 // input schemas.
 func ListMCPTools(ctx context.Context, params MCPToolListParams) (MCPToolListResult, error) {
