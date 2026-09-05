@@ -363,23 +363,12 @@ func (r *resolvedOpenRunner) run() error {
 		return err
 	}
 	r.refreshHostCredentials()
-	r.activateForwarders()
+	forwarderErr := r.activateForwarders()
 	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
 		return err
 	}
-	if r.options.NoShell {
-		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
-		return r.emitNoShellSetup()
-	}
-	if !stdinIsTerminal() {
-		// A non-interactive caller (an MCP client, an orchestrator, a script) is
-		// exactly the shape that hits this: kubectl exec -it reads EOF on a
-		// non-TTY stdin and returns almost instantly, so open would exit right
-		// behind it having done nothing to keep the port-forwards it just started
-		// alive or supervised. Falling back to the --no-shell behavior keeps them
-		// up without gambling a shell that cannot stay open.
-		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
-		return r.emitNoShellSetup()
+	if done, err := r.emitNoShellFallbackIfNeeded(forwarderErr); done {
+		return err
 	}
 
 	r.traceShellPreview(shellReq)
@@ -388,6 +377,34 @@ func (r *resolvedOpenRunner) run() error {
 		return nil
 	}
 	return r.runShellLoop(shellReq)
+}
+
+// emitNoShellFallbackIfNeeded handles --no-shell and the non-interactive
+// fallback (an MCP client, an orchestrator, a script — kubectl exec -it
+// would read EOF on a non-TTY stdin and return almost instantly). Both have
+// no shell to fall back on, so the forwards activateForwarders just
+// attempted are the entire deliverable: a forward that stayed unreachable —
+// including a stale one erun could not replace — must fail the run instead
+// of reading as success (erun#2104; root AGENTS.md § "Smooth, Seamless, No
+// Dead Ends"). done reports whether the caller should return immediately;
+// err may be nil on the plain setup-emitted success path.
+func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (done bool, err error) {
+	switch {
+	case r.options.NoShell:
+		if forwarderErr != nil {
+			return true, forwarderErr
+		}
+		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
+		return true, r.emitNoShellSetup()
+	case !stdinIsTerminal():
+		if forwarderErr != nil {
+			return true, forwarderErr
+		}
+		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
+		return true, r.emitNoShellSetup()
+	default:
+		return false, nil
+	}
 }
 
 func openIDEKindLabel(options openOptions) string {
@@ -673,28 +690,44 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 	r.ctx.Trace(fmt.Sprintf("open: refreshed host AWS credentials for %s into the %s profile", refresh.Alias, refresh.Profile))
 }
 
-// activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API)
-// as best-effort conveniences. None is a prerequisite for the session being
-// opened: the remote shell/AI session runs in-pod via `kubectl exec` and never
-// uses these forwards — they only back local tooling (the desktop app's panels,
-// `erun api`, `erun mcp`). A forward that cannot bind is surfaced as a warning
-// and skipped so a laptop-side convenience never aborts the in-pod session.
-func (r *resolvedOpenRunner) activateForwarders() {
+// activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API).
+// None is a prerequisite for the session being opened: the remote shell/AI
+// session runs in-pod via `kubectl exec` and never uses these forwards — they
+// only back local tooling (the desktop app's panels, `erun api`, `erun mcp`).
+// Every forward is still attempted regardless of an earlier one's failure, and
+// each failure is traced as a warning, so an interactive shell that follows is
+// never aborted by a laptop-side convenience.
+//
+// The returned error carries every failure anyway, because a caller with no
+// shell to fall back on (--no-shell, or the non-TTY fallback) has nothing else
+// to show for the run: the forwards it just attempted are the whole
+// deliverable, and reporting success while one of them stayed unreachable is
+// exactly the "action that succeeds and changes nothing" dead end. run()
+// decides whether that error matters for the branch it is in.
+func (r *resolvedOpenRunner) activateForwarders() error {
+	var failures []string
 	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
 		if err := r.activateSSHD(r.ctx, r.result); err != nil {
 			r.warnForwarderUnavailable("SSH", err)
+			failures = append(failures, fmt.Sprintf("SSH: %s", strings.TrimSpace(err.Error())))
 		}
 	}
 	if r.activateMCP != nil {
 		if err := r.activateMCP(r.ctx, r.result); err != nil {
 			r.warnForwarderUnavailable("MCP", err)
+			failures = append(failures, fmt.Sprintf("MCP: %s", strings.TrimSpace(err.Error())))
 		}
 	}
 	if r.activateAPI != nil {
 		if err := r.activateAPI(r.ctx, r.result); err != nil {
 			r.warnForwarderUnavailable("API", err)
+			failures = append(failures, fmt.Sprintf("API: %s", strings.TrimSpace(err.Error())))
 		}
 	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("open: port-forward setup failed, so there is no local channel to wait on: %s", strings.Join(failures, "; "))
 }
 
 func (r *resolvedOpenRunner) warnForwarderUnavailable(name string, err error) {
