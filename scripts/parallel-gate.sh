@@ -68,6 +68,15 @@
 # Dockerfile threads the sidecar's own configured limit in through this
 # variable instead so the width calculation still has a real number to divide
 # by (see DIND_MEMORY_LIMIT_MIB in that Dockerfile).
+#
+# PARALLEL_GATE_CPU_LIMIT is the same override for the CPU term, for the
+# identical reason: cpu.max/cpu.cfs_quota_us also read unlimited in that
+# sibling cgroup, so cpu_quota() falls through to `nproc`, which reports the
+# host node's real core count (sched_getaffinity, not the sidecar's cgroup
+# quota) -- oversized for an environment that does not own that many cores
+# exclusively (erun#2081). The erun-devops Dockerfile threads the sidecar's
+# own configured CPU limit in through this variable the same way it does for
+# memory (see DIND_CPU_LIMIT in that Dockerfile).
 if [ "${1:-}" = "width" ]; then
 	set -eu
 	job_count=$2
@@ -88,6 +97,10 @@ if [ "${1:-}" = "width" ]; then
 	}
 
 	cpu_quota() {
+		if is_positive_int "${PARALLEL_GATE_CPU_LIMIT:-}"; then
+			echo "$PARALLEL_GATE_CPU_LIMIT"
+			return
+		fi
 		if [ -r "$cgroup_root/cpu.max" ]; then
 			read -r quota period <"$cgroup_root/cpu.max" 2>/dev/null || quota=""
 			if [ "${quota:-}" != "max" ] && is_positive_int "${quota:-}" && is_positive_int "${period:-}"; then

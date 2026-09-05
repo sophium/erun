@@ -35,10 +35,10 @@ func ResolveDockerImageReference(ctx Context, store DockerStore, findProjectRoot
 // declares a matching components: entry, which FindComponentDockerBuildContext
 // (and currentComponentDockerBuildContext's own cwd match) already scope to.
 func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*DockerBuildSpec, error) {
-	_, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+	store, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
-		build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
+		build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
 		if err != nil {
 			return nil, err
 		}
@@ -50,7 +50,7 @@ func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectR
 		return nil, err
 	}
 
-	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
+	build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot Proj
 		return DockerBuildSpec{}, err
 	}
 
-	return newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
+	return newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
 }
 
 func resolveDockerImageReferenceForProject(ctx Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (DockerImageReference, error) {
@@ -169,7 +169,7 @@ func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverri
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
-func newDockerBuildSpec(ctx Context, now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
+func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = DockerBuildContextAtDir(buildContext.Dir)
@@ -198,12 +198,14 @@ func newDockerBuildSpec(ctx Context, now NowFunc, projectRoot, environment strin
 		return DockerBuildSpec{}, err
 	}
 
-	return DockerBuildSpec{
+	build := DockerBuildSpec{
 		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
 		Platforms:      platforms,
-	}, nil
+	}
+	applyDindResourceBuildArgs(store, projectRoot, environment, &build)
+	return build, nil
 }
 
 func (b DockerBuildSpec) traceCommands() []commandSpec {

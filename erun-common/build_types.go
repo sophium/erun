@@ -94,6 +94,18 @@ type DockerBuildSpec struct {
 	// ERUN_VERSION build arg must name the arch being built or the plain version
 	// reference resolves nowhere.
 	LocalBaseTag string
+	// DindCPULimit / DindMemoryLimitMiB carry this build's actual erun-dind
+	// sidecar resource limits (EnvConfig.RuntimeDindPod, normalized) into a
+	// Dockerfile that declares matching DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
+	// ARGs, so an in-build gate (the erun-devops runtime image's own `make
+	// check`) can size its concurrent fan-out against what this build's dind
+	// sidecar is actually entitled to, instead of the Dockerfile's own
+	// hardcoded ARG default or the host node's raw, cgroup-invisible capacity
+	// (erun-devops/AGENTS.md's dind cgroup blind-spot notes). Left empty for a
+	// Dockerfile that declares neither ARG, so an unrelated build's docker
+	// command is unchanged. See applyDindResourceBuildArgs.
+	DindCPULimit       string
+	DindMemoryLimitMiB string
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time and error.
 	// It lets a caller attach per-architecture timing (see Context.
