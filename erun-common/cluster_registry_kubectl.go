@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -71,12 +72,14 @@ func (f *ClusterRegistryForwards) Start(ctx Context, kubeContext, namespace, ser
 		return 0, fmt.Errorf("start port-forward svc/%s: %w", service, err)
 	}
 	f.procs = append(f.procs, cmd)
-	local, err := readForwardingPort(stdout)
-	if err != nil {
+	result := make(chan portForwardResult, 1)
+	go drainPortForwardOutput(stdout, result)
+	found := <-result
+	if found.err != nil {
 		f.Close()
-		return 0, fmt.Errorf("port-forward svc/%s: %w", service, err)
+		return 0, fmt.Errorf("port-forward svc/%s: %w", service, found.err)
 	}
-	return local, nil
+	return found.port, nil
 }
 
 // Close terminates every forward this manager started.
@@ -89,23 +92,47 @@ func (f *ClusterRegistryForwards) Close() {
 	f.procs = nil
 }
 
-// readForwardingPort blocks until kubectl prints its forwarding line, returning
-// the local port it bound.
-func readForwardingPort(r interface{ Read([]byte) (int, error) }) (int, error) {
-	scanner := bufio.NewScanner(r)
+// portForwardResult is what drainPortForwardOutput reports back once it has
+// found (or failed to find) the local port kubectl bound.
+type portForwardResult struct {
+	port int
+	err  error
+}
+
+// drainPortForwardOutput scans kubectl port-forward's stdout for the local
+// port it bound, reports it once, and then keeps reading for the rest of the
+// process's life so a long-running forward's later "Handling connection for
+// ..." lines never fill the pipe. Stopping after the port line — as this used
+// to do by returning from the scan loop early — leaves nothing draining
+// stdout for a forward that can run for the whole build/push; once kubectl's
+// own 64KB pipe buffer fills, it blocks writing and the tunnel it was
+// providing stalls silently -- a parent that stops draining a live child's
+// output, one hop further down the stack than the docker build/push path this
+// same defect shape was found in. The loop ends on its own once the pipe
+// closes (kubectl exits or Close kills it), so no goroutine is leaked.
+func drainPortForwardOutput(stdout io.Reader, result chan<- portForwardResult) {
+	scanner := bufio.NewScanner(stdout)
+	reported := false
 	for scanner.Scan() {
-		if m := forwardingLinePattern.FindStringSubmatch(scanner.Text()); m != nil {
-			port, err := strconv.Atoi(m[1])
-			if err != nil {
-				return 0, err
-			}
-			return port, nil
+		if reported {
+			continue
 		}
+		m := forwardingLinePattern.FindStringSubmatch(scanner.Text())
+		if m == nil {
+			continue
+		}
+		port, err := strconv.Atoi(m[1])
+		result <- portForwardResult{port: port, err: err}
+		reported = true
 	}
-	if err := scanner.Err(); err != nil {
-		return 0, err
+	if reported {
+		return
 	}
-	return 0, fmt.Errorf("port-forward exited before reporting a local port")
+	err := scanner.Err()
+	if err == nil {
+		err = fmt.Errorf("port-forward exited before reporting a local port")
+	}
+	result <- portForwardResult{err: err}
 }
 
 // ClusterRegistryDepsFor builds the live resolver dependencies: an in-cluster
