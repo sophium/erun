@@ -141,13 +141,19 @@ func (f *fakeReviewAudit) LogAuditEvent(_ context.Context, event model.AuditEven
 // (or error) for whatever commit/branch acceptMerged asks about, so a test
 // can drive each of the three verification conditions independently.
 type fakeMergeVerifier struct {
-	onBranch bool
-	parent   string
-	err      error
+	onBranch      bool
+	parent        string
+	err           error
+	isAncestor    bool
+	isAncestorErr error
 }
 
 func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, string, error) {
 	return f.onBranch, f.parent, f.err
+}
+
+func (f fakeMergeVerifier) IsAncestor(_ context.Context, _, _, _, _ string) (bool, error) {
+	return f.isAncestor, f.isAncestorErr
 }
 
 // fakeReleaseTrigger records every release TriggerRelease was asked to start.
@@ -248,21 +254,27 @@ func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
 	}
 }
 
-// TestAcceptMergedRefusesWhenParentDoesNotMatchTheGatedTargetTip is refusal
-// condition 2: the reported commit is on the branch, but its parent is not
-// the target tip this review was gated against (the previous MERGED
-// review's own merge commit on the same branch) — proof the merge was built
-// against the wrong base.
-func TestAcceptMergedRefusesWhenParentDoesNotMatchTheGatedTargetTip(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
-	// A different review already merged onto main at commit "real-tip" before
-	// this one was gated — that is the target tip this review's parent has to
-	// match, and it does not.
+// mergingReviewGatedAgainst wires up mergingReviewWithGateBuild plus a prior
+// MERGED review on the same branch at commit "real-tip" — the target tip
+// this review's gate build has to descend from.
+func mergingReviewGatedAgainst(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
+	reviews, builds := mergingReviewWithGateBuild(commit)
 	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0"}
 	reviews.reviews["review-0"] = &priorMerge
 	builds.builds["gate-0"] = model.Build{BuildID: "gate-0", ReviewID: "review-0", Kind: model.BuildKindGate, Successful: true, CommitID: "real-tip"}
+	return reviews, builds
+}
+
+// TestAcceptMergedRefusesWhenGatedTipIsNotAnAncestorOfTheReportedCommit is
+// refusal condition 2: the reported commit is on the branch, but the target
+// tip this review was gated against (the previous MERGED review's own merge
+// commit on the same branch) is not really its ancestor — proof the merge
+// was built against a history that never included the gated work, such as a
+// force-push replacing it.
+func TestAcceptMergedRefusesWhenGatedTipIsNotAnAncestorOfTheReportedCommit(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
-		fakeMergeVerifier{onBranch: true, parent: "wrong-parent"}, nil)
+		fakeMergeVerifier{onBranch: true, parent: "wrong-parent", isAncestor: false}, nil)
 
 	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
 
@@ -272,6 +284,47 @@ func TestAcceptMergedRefusesWhenParentDoesNotMatchTheGatedTargetTip(t *testing.T
 	}
 	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
 		t.Fatalf("status = %s, want the review left at MERGE, not moved to MERGED", got)
+	}
+}
+
+// TestAcceptMergedSucceedsWhenParentIsTheGatedTip is the ordinary,
+// no-regression case: the reported commit's own parent is exactly the
+// target tip this review was gated against.
+func TestAcceptMergedSucceedsWhenParentIsTheGatedTip(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", updated.Status)
+	}
+}
+
+// TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting
+// is the fix for erun#2250: commits that arrived directly on the target
+// branch between the gated tip and the reported commit — the release flow's
+// `[skip ci]` pushes, for instance — mean the reported commit's immediate
+// parent is no longer the gated tip, but the gated work is still really its
+// ancestor, so the merge is accepted rather than permanently refused.
+func TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "release-prepare-commit", isAncestor: true}, release)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", updated.Status)
+	}
+	if len(release.requests) != 1 {
+		t.Fatalf("release requests = %+v, want exactly one triggered", release.requests)
 	}
 }
 

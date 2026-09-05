@@ -25,6 +25,15 @@ type Verifier interface {
 	// root commit). ok is false, with no error, when the fetch succeeds but
 	// commit is not reachable from branch's tip at all.
 	Contains(ctx context.Context, remoteURL, branch, commit string) (ok bool, parent string, err error)
+
+	// IsAncestor fetches remoteURL and reports whether ancestor is descendant's
+	// own ancestor, or the same commit — never whether it is the *immediate*
+	// parent. This tolerates commits landing on branch between ancestor and
+	// descendant (a release push, for instance) without treating them as
+	// evidence the merge was built on the wrong base. isAncestor is false,
+	// with no error, when the fetch succeeds but ancestor is not reachable
+	// from descendant at all.
+	IsAncestor(ctx context.Context, remoteURL, branch, ancestor, descendant string) (isAncestor bool, err error)
 }
 
 // RemoteVerifier fetches the real remote with go-git, so the API needs no
@@ -62,6 +71,52 @@ func (RemoteVerifier) Contains(ctx context.Context, remoteURL, branch, commit st
 		return false, "", nil
 	}
 	return commitReachesTip(targetCommit, tipCommit)
+}
+
+// normalizeAncestorArgs trims and validates IsAncestor's arguments, kept
+// separate so IsAncestor's own branching stays about the git question, not
+// input hygiene.
+func normalizeAncestorArgs(remoteURL, branch, ancestor, descendant string) (string, string, string, string, error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	branch = strings.TrimSpace(branch)
+	ancestor = strings.TrimSpace(ancestor)
+	descendant = strings.TrimSpace(descendant)
+	if remoteURL == "" || branch == "" || ancestor == "" || descendant == "" {
+		return "", "", "", "", fmt.Errorf("remoteURL, branch, ancestor, and descendant are all required")
+	}
+	if !plumbing.IsHash(ancestor) {
+		return "", "", "", "", fmt.Errorf("commit %q is not a git commit hash", ancestor)
+	}
+	if !plumbing.IsHash(descendant) {
+		return "", "", "", "", fmt.Errorf("commit %q is not a git commit hash", descendant)
+	}
+	return remoteURL, branch, ancestor, descendant, nil
+}
+
+func (RemoteVerifier) IsAncestor(ctx context.Context, remoteURL, branch, ancestor, descendant string) (bool, error) {
+	remoteURL, branch, ancestor, descendant, err := normalizeAncestorArgs(remoteURL, branch, ancestor, descendant)
+	if err != nil {
+		return false, err
+	}
+	if ancestor == descendant {
+		return true, nil
+	}
+
+	repo, err := fetchBranch(ctx, remoteURL, branch)
+	if err != nil {
+		return false, err
+	}
+	ancestorCommit, err := repo.CommitObject(plumbing.NewHash(ancestor))
+	if err != nil {
+		// Not present anywhere in the fetched history: definitely not an
+		// ancestor, not a lookup failure.
+		return false, nil
+	}
+	descendantCommit, err := repo.CommitObject(plumbing.NewHash(descendant))
+	if err != nil {
+		return false, err
+	}
+	return ancestorCommit.IsAncestor(descendantCommit)
 }
 
 // fetchBranch clones branch from remoteURL into a fresh in-memory repository,
