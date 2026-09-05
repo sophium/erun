@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -58,8 +59,13 @@ func TestSyncWorkspaceOnceNeverPublishesAPartialFile(t *testing.T) {
 	}
 	// The one partial state is in a directory that says so by name, and the
 	// source lane refuses to treat it as mirror content.
-	awaitWorkspaceSyncSize(t, filepath.Join(mirror, workspaceSyncStagingSubdir, "app", "big.bin"), 1<<20)
-	if SafeWorkspaceSyncPath(workspaceSyncStagingSubdir + "/app/big.bin") {
+	staging := findWorkspaceSyncStagingDir(t, mirror)
+	awaitWorkspaceSyncSize(t, filepath.Join(staging, "app", "big.bin"), 1<<20)
+	stagingRel, relErr := filepath.Rel(mirror, staging)
+	if relErr != nil {
+		t.Fatalf("relativize staging dir: %v", relErr)
+	}
+	if SafeWorkspaceSyncPath(filepath.ToSlash(stagingRel) + "/app/big.bin") {
 		t.Fatal("staged bytes must not be a path the mirror lanes accept as content")
 	}
 
@@ -130,7 +136,8 @@ func TestSyncWorkspaceOnceLeavesNoDebrisWhenTheContextIsCancelled(t *testing.T) 
 	}()
 
 	awaitWorkspaceSyncFile(t, gate+".reached")
-	awaitWorkspaceSyncSize(t, filepath.Join(mirror, workspaceSyncStagingSubdir, "app", "big.bin"), 1<<20)
+	staging := findWorkspaceSyncStagingDir(t, mirror)
+	awaitWorkspaceSyncSize(t, filepath.Join(staging, "app", "big.bin"), 1<<20)
 	cancel()
 
 	if err := <-done; err == nil {
@@ -198,6 +205,96 @@ func TestSyncOutputsArtifactsPublishesCompletelyAndKeepsItsMarkingAndPruning(t *
 		t.Fatalf("republished artifact is %d bytes, want the complete %d", len(got), len(body))
 	}
 	requireNoWorkspaceSyncStaging(t, artifacts)
+}
+
+// TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass is the regression
+// for erun#2055: a fixed-name staging directory meant every pass started by
+// wiping it, including one a *different*, concurrently-running pass's tar
+// extraction was actively writing into (the desktop's own periodic workspace
+// sync poller and a manually invoked `erun sshd sync` can both reach the same
+// mirror at once). This test parks a real `tar` mid-extraction into the first
+// pass's staging directory, then starts a second pass concurrently and asserts
+// the first pass's extraction is unaffected -- reproducing, with the real tar
+// binary, the exact failure shape reported in the issue: some subdirectories
+// fail to be created ("No such file or directory") and the extraction exits
+// non-zero, on an otherwise-healthy first populate.
+func TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass(t *testing.T) {
+	mirror := t.TempDir()
+
+	files := make(map[string][]byte, 200)
+	paths := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		name := fmt.Sprintf("dir%d/file.bin", i)
+		files[name] = bytes.Repeat([]byte{0x2a}, 4096)
+		paths = append(paths, name)
+	}
+	archive := writeWorkspaceSyncArchive(t, files)
+	gate := filepath.Join(t.TempDir(), "gate")
+
+	stubWorkspaceSyncSSH(t, nil, nil)
+	t.Setenv(workspaceSyncStubArchiveEnv, archive)
+	t.Setenv(workspaceSyncStubGateEnv, gate)
+
+	firstStaging, err := prepareWorkspaceSyncStaging(mirror)
+	if err != nil {
+		t.Fatalf("prepare first pass's staging: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- streamRemoteWorkspaceArchive(context.Background(), "pod", "/workspace", firstStaging, paths)
+	}()
+
+	// The stub only announces once tar has half the archive in hand, so the
+	// first pass has genuinely started extracting -- some of its 200
+	// directories already exist -- before the second pass below can start.
+	awaitWorkspaceSyncFile(t, gate+".reached")
+
+	if _, err := prepareWorkspaceSyncStaging(mirror); err != nil {
+		t.Fatalf("prepare second, concurrent pass's staging: %v", err)
+	}
+
+	writeWorkspaceSyncFile(t, gate, []byte("go"))
+	if err := <-done; err != nil {
+		t.Fatalf("a concurrent pass starting up clobbered this pass's in-flight extraction: %v", err)
+	}
+	for name := range files {
+		full := filepath.Join(firstStaging, filepath.FromSlash(name))
+		if _, statErr := os.Stat(full); statErr != nil {
+			t.Fatalf("first pass's staged file %s is missing after a concurrent pass started: %v", name, statErr)
+		}
+	}
+}
+
+// TestSweepStaleWorkspaceSyncStagingDirsOnlyRemovesTrulyOrphanedOnes proves the
+// sweep this fix adds (to replace the fixed-name wipe every pass used to do)
+// still reclaims debris from a killed pass, without touching a directory a
+// live, in-progress pass could still own.
+func TestSweepStaleWorkspaceSyncStagingDirsOnlyRemovesTrulyOrphanedOnes(t *testing.T) {
+	mirror := t.TempDir()
+
+	stale := filepath.Join(mirror, workspaceSyncStagingSubdir+"-stale")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatalf("create stale staging dir: %v", err)
+	}
+	old := time.Now().Add(-2 * workspaceSyncStagingStaleAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("backdate stale staging dir: %v", err)
+	}
+
+	fresh := filepath.Join(mirror, workspaceSyncStagingSubdir+"-fresh")
+	if err := os.MkdirAll(fresh, 0o755); err != nil {
+		t.Fatalf("create fresh staging dir: %v", err)
+	}
+
+	sweepStaleWorkspaceSyncStagingDirs(mirror)
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale staging dir from a killed pass was not swept: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("fresh staging dir belonging to a live pass was swept: %v", err)
+	}
 }
 
 // writeWorkspaceSyncArchive builds the tar the stub streams. Entries carry a
@@ -284,9 +381,31 @@ func awaitWorkspaceSyncCondition(t *testing.T, what string, ready func() bool) {
 
 func requireNoWorkspaceSyncStaging(t *testing.T, root string) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(root, workspaceSyncStagingSubdir)); !os.IsNotExist(err) {
-		t.Fatalf("staging debris left in %s: %v", root, err)
+	matches, err := filepath.Glob(filepath.Join(root, workspaceSyncStagingSubdir+"*"))
+	if err != nil {
+		t.Fatalf("glob staging debris in %s: %v", root, err)
 	}
+	if len(matches) > 0 {
+		t.Fatalf("staging debris left in %s: %v", root, matches)
+	}
+}
+
+// findWorkspaceSyncStagingDir locates the one staging directory a pass created
+// under root -- its name carries a random suffix (prepareWorkspaceSyncStaging),
+// so a test that wants to observe bytes mid-transfer cannot assume the old
+// fixed name.
+func findWorkspaceSyncStagingDir(t *testing.T, root string) string {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		matches, err := filepath.Glob(filepath.Join(root, workspaceSyncStagingSubdir+"*"))
+		if err == nil && len(matches) > 0 {
+			return matches[0]
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for a staging directory to appear under %s", root)
+	return ""
 }
 
 func requireWorkspaceSyncMirrorFiles(t *testing.T, root string, want []string) {

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Workspace sync mirrors a remote-agent environment's pod worktree onto the
@@ -304,7 +305,7 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 			return relErr
 		}
 		if info.IsDir() {
-			if filepath.ToSlash(rel) == workspaceSyncStagingSubdir {
+			if isWorkspaceSyncStagingPath(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -559,7 +560,7 @@ func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, er
 		}
 		relSlash := filepath.ToSlash(rel)
 		if info.IsDir() {
-			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir || relSlash == workspaceSyncStagingSubdir {
+			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir || isWorkspaceSyncStagingPath(relSlash) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -658,18 +659,55 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	return publishStagedWorkspaceFiles(staging, localPath)
 }
 
-// prepareWorkspaceSyncStaging gives the pass an empty staging dir beside the
-// files it will publish, clearing whatever a killed pass left behind so staged
-// bytes are only ever this pass's.
+// workspaceSyncStagingStaleAge is how old an orphaned staging directory must be
+// before a pass treats it as debris from a killed process rather than a
+// concurrent pass still extracting into it. Even a first, whole-tree populate
+// finishes in minutes, so an hour leaves a wide margin against ever mistaking a
+// slow-but-alive pass for a crash.
+const workspaceSyncStagingStaleAge = time.Hour
+
+// prepareWorkspaceSyncStaging gives this pass its own staging directory, unique
+// so a concurrent pass against the same LocalPath -- the desktop's own 2-second
+// sync poller and a manually invoked `erun sshd sync` can both reach the same
+// mirror -- never shares, and never destroys, another pass's in-flight
+// extraction. Before this, every pass wiped and recreated one fixed-name
+// staging dir at the start of its own run; a concurrent pass mid-extraction
+// into that same directory saw it vanish out from under its still-running tar,
+// which then failed to create the child directories it needed and exited
+// non-zero even though most files had already extracted cleanly (erun#2055).
+// Debris a killed pass leaves behind -- the one case a fixed name used to clean
+// up immediately -- is swept once it is unambiguously stale rather than on
+// every pass, since a fresh directory might belong to a pass still running.
 func prepareWorkspaceSyncStaging(localPath string) (string, error) {
-	staging := filepath.Join(localPath, workspaceSyncStagingSubdir)
-	if err := os.RemoveAll(staging); err != nil {
-		return "", fmt.Errorf("clear workspace sync staging %s: %w", staging, err)
-	}
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		return "", fmt.Errorf("create workspace sync staging %s: %w", staging, err)
+	sweepStaleWorkspaceSyncStagingDirs(localPath)
+	staging, err := os.MkdirTemp(localPath, workspaceSyncStagingSubdir+"-")
+	if err != nil {
+		return "", fmt.Errorf("create workspace sync staging in %s: %w", localPath, err)
 	}
 	return staging, nil
+}
+
+// sweepStaleWorkspaceSyncStagingDirs removes staging directories left behind by
+// a pass that was killed before its own deferred cleanup could run. It is
+// best-effort: a listing failure or a per-entry removal failure is not
+// reported, since a stale directory left in place costs disk space, not
+// correctness (workspaceSyncStagingSubdir-prefixed paths are already excluded
+// from every mirror read).
+func sweepStaleWorkspaceSyncStagingDirs(localPath string) {
+	entries, err := os.ReadDir(localPath)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), workspaceSyncStagingSubdir) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < workspaceSyncStagingStaleAge {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(localPath, entry.Name()))
+	}
 }
 
 // publishStagedWorkspaceFiles moves each staged entry onto its final path with
@@ -823,15 +861,35 @@ func SafeWorkspaceSyncPath(value string) bool {
 	if cleaned != value || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
 		return false
 	}
-	// Three subtrees a lane must never claim: the operator's own .git, the
-	// artifact mirror the outputs lane owns, and the staging subdir, whose
-	// contents are bytes still arriving rather than mirror content.
-	for _, reserved := range []string{".git", WorkspaceSyncArtifactsSubdir, workspaceSyncStagingSubdir} {
+	return !isReservedWorkspaceSyncPath(cleaned)
+}
+
+// isReservedWorkspaceSyncPath reports whether cleaned falls under one of the
+// three subtrees a lane must never claim: the operator's own .git, the
+// artifact mirror the outputs lane owns, and any staging subdir, whose
+// contents are bytes still arriving rather than mirror content. A staging dir
+// carries a random suffix (prepareWorkspaceSyncStaging), so it is matched by
+// prefix rather than an exact name.
+func isReservedWorkspaceSyncPath(cleaned string) bool {
+	if isWorkspaceSyncStagingPath(cleaned) {
+		return true
+	}
+	for _, reserved := range []string{".git", WorkspaceSyncArtifactsSubdir} {
 		if cleaned == reserved || strings.HasPrefix(cleaned, reserved+"/") {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// isWorkspaceSyncStagingPath reports whether cleaned's first path segment is a
+// workspace-sync staging directory.
+func isWorkspaceSyncStagingPath(cleaned string) bool {
+	first := cleaned
+	if idx := strings.IndexByte(cleaned, '/'); idx >= 0 {
+		first = cleaned[:idx]
+	}
+	return strings.HasPrefix(first, workspaceSyncStagingSubdir)
 }
 
 func pathClean(value string) string {
