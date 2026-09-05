@@ -2316,7 +2316,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
-		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		RuntimePod:          NormalizeRuntimePodResources(resolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, DefaultCgroupRoot)),
 		RuntimeDindPod:      NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
