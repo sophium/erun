@@ -301,7 +301,7 @@ func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDepend
 	if deps.CloudSecretStore == nil {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
 	}
-	if _, err := resolveERunAccessToken(Context{}, provider, deps); err != nil {
+	if _, err := resolveERunAccessToken(stderrOnlyContext(), provider, deps); err != nil {
 		status := CloudTokenStatusNotConfigured
 		if provider.ERun.RefreshTokenRef != "" {
 			status = CloudTokenStatusExpired
