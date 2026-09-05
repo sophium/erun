@@ -58,6 +58,23 @@ func TestWhip(t *testing.T) {
 		golden.Equal(t, "whip/dry_run_one_named_environment_not_open_reports_call_failed", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_scoped_environment_excludes_orchestrators", func(t *testing.T) {
+		// erun#2082: an explicit TENANT/ENVIRONMENT scope must narrow every
+		// axis, not just the environment list. With an orchestrator
+		// configured alongside the named environment, a scoped call must
+		// name only that environment -- no orchestrator line at all --
+		// even though the unscoped scenario below would report it.
+		skipIfPortsBusy(t, 26100)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		seedOrchestrator(t, setup, "eng-1", "Eng One")
+		result := erun.Run(t, []string{"whip", "--tenant", "team", "--environment", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "whip/dry_run_scoped_environment_excludes_orchestrators", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_whips_every_configured_environment_and_orchestrator", func(t *testing.T) {
 		// With neither --tenant nor --environment, whip fans out over every
 		// configured environment (across every tenant) plus every persisted

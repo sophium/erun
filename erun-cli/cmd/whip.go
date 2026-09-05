@@ -27,17 +27,20 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 	cmd := &cobra.Command{
 		Use:   "whip [TENANT] [ENVIRONMENT]",
 		Short: "Push every live orchestrator and environment agent to keep moving",
-		Long: "Re-states the pacing contract into every live session it can reach: every\n" +
-			"configured environment's own AI session (over that environment's MCP edge)\n" +
-			"and every persisted orchestrator definition. Reports each target's outcome —\n" +
-			"pushed, or skipped and why — rather than only reporting that it ran.\n\n" +
+		Long: "Re-states the pacing contract into every live session it can reach. Scoped\n" +
+			"to one TENANT/ENVIRONMENT, it pushes only that environment's own AI session\n" +
+			"(over that environment's MCP edge) and targets no orchestrator. Given neither,\n" +
+			"it fans out over every configured environment plus every persisted\n" +
+			"orchestrator definition. Reports each target's outcome — pushed, or skipped\n" +
+			"and why — rather than only reporting that it ran.\n\n" +
 			"A CLI/MCP process has no channel into a desktop-held orchestrator's live PTY,\n" +
-			"so every orchestrator is reported skipped as unreachable from this transport;\n" +
-			"only the desktop's own automatic pass can push those. An environment with no\n" +
-			"currently open MCP edge (nobody has it open in the desktop) reports skipped as\n" +
-			"not alive, since there is no live session there to push.\n\n" +
-			"Pass TENANT and ENVIRONMENT to whip one environment; omit both to whip every\n" +
-			"configured environment plus every persisted orchestrator.",
+			"so an unscoped pass reports every orchestrator skipped as unreachable from\n" +
+			"this transport; only the desktop's own automatic pass can push those. An\n" +
+			"environment with no currently open MCP edge (nobody has it open in the\n" +
+			"desktop) reports skipped as not alive, since there is no live session there\n" +
+			"to push.\n\n" +
+			"Pass TENANT and ENVIRONMENT to whip one environment only; omit both to whip\n" +
+			"every configured environment plus every persisted orchestrator.",
 		Example:       "  erun whip\n  erun whip --tenant team --environment dev\n  erun whip --dry-run",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
@@ -60,6 +63,7 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 }
 
 func runWhipCommand(ctx context.Context, commandCtx common.Context, store common.ListStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
 		return err
@@ -70,12 +74,17 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 		report.Results = append(report.Results, whipOneEnvironment(ctx, commandCtx, resolveOpen, target.tenant, target.environment))
 	}
 
-	globalConfig, _, _ := store.LoadERunConfig()
-	whipConfig := common.ResolveWhipConfig(globalConfig.Whip)
-	now := time.Now()
-	for _, candidate := range common.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
-		decision, reason := common.DecideWhip(candidate, now, whipConfig, true)
-		report.Results = append(report.Results, common.WhipResult{Candidate: candidate, Decision: decision, Reason: reason})
+	// An explicit TENANT/ENVIRONMENT scope narrows every axis, not just the
+	// environment list -- a scoped call must never fan out into every
+	// persisted orchestrator too (erun#2082).
+	if !scoped {
+		globalConfig, _, _ := store.LoadERunConfig()
+		whipConfig := common.ResolveWhipConfig(globalConfig.Whip)
+		now := time.Now()
+		for _, candidate := range common.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
+			decision, reason := common.DecideWhip(candidate, now, whipConfig, true)
+			report.Results = append(report.Results, common.WhipResult{Candidate: candidate, Decision: decision, Reason: reason})
+		}
 	}
 
 	if jsonOutput {
