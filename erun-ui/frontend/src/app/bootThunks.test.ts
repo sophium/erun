@@ -11,8 +11,12 @@ import type { UIState, UITenant } from '@/types';
 
 import { stateApi } from './api/stateApi';
 import { wailsApi } from './api/wailsApi';
-import { reloadStateAfterEnvironmentChange } from './bootThunks';
+import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
+import type { OrchestratorInfo } from './slices/orchestratorsSlice';
+import orchestratorsReducer from './slices/orchestratorsSlice';
+import selectionReducer from './slices/selectionSlice';
 import tenantsReducer from './slices/tenantsSlice';
+import terminalReducer, { setSessionId } from './slices/terminalSlice';
 import type { AppDispatch } from './store';
 
 // Mirrors platformSignInRecovery.test.ts's RPC-boundary stub: every
@@ -109,4 +113,88 @@ test('an invalidation arriving during an in-flight getInitialState still produce
     ['fresh'],
     'the invalidation must land its own fresh data, not the in-flight request’s stale result',
   );
+});
+
+function buildBootTestStore() {
+  return configureStore({
+    reducer: {
+      orchestrators: orchestratorsReducer,
+      selection: selectionReducer,
+      tenants: tenantsReducer,
+      terminal: terminalReducer,
+      [wailsApi.reducerPath]: wailsApi.reducer,
+    },
+    middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(wailsApi.middleware),
+  });
+}
+
+function fakeOrchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorInfo {
+  return {
+    id: 'orch',
+    name: 'orch',
+    environments: [],
+    tenants: [],
+    directories: [],
+    sessionId: 0,
+    status: 'running',
+    busy: false,
+    transient: false,
+    shellRunning: false,
+    shellCommand: '',
+    shellStartedAtUnix: 0,
+    nudgeCount: 0,
+    autoNudgeCount: 0,
+    whipCount: 0,
+    nudgeCapped: false,
+    restartRequired: false,
+    roleChanged: false,
+    ...overrides,
+  };
+}
+
+// getInitialState is a real backend round trip, so an orchestrator session
+// can already have been focused (the headless harness's own reconnect
+// handoff, or a concurrent user action) by the time it resolves. boot() used
+// to dispatch setSelected(loaded.selected) unconditionally at that point --
+// and setSelected's own selection-sync middleware (selectionSyncMiddleware)
+// reconciles terminal.sessionId onto whatever environment that selection
+// names, clobbering the orchestrator's session with a stale or empty one.
+// This is the root cause behind orchestrator-cross-env-diff.spec.ts's flake:
+// the same race the openSelection-side fix in sessionThunks.ts (isDefaultLandingOpen)
+// guards is reachable through this earlier, separate dispatch too.
+test('boot() does not restore the persisted selection once an orchestrator session already owns the terminal', async () => {
+  const pendingLoadState: { resolve: (value: unknown) => void }[] = [];
+  stubWailsBridge({
+    LoadState: () =>
+      new Promise((resolve) => {
+        pendingLoadState.push({ resolve });
+      }),
+    ConsumeInterruptedActivityNotice: () => Promise.resolve(null),
+    ListOrchestrators: () => Promise.resolve([fakeOrchestrator({ id: 'orch', sessionId: 999 })]),
+    ListDeploys: () => Promise.resolve([]),
+    ResolveOrchestratorToReopen: () => Promise.resolve(null),
+  });
+
+  const store = buildBootTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+
+  const booted = dispatch(boot());
+  await waitFor(() => pendingLoadState.length === 1);
+
+  // The orchestrator session claims the terminal while getInitialState is
+  // still in flight -- the same shape focusOrchestratorSession takes.
+  store.dispatch(setSessionId(999));
+
+  pendingLoadState[0]?.resolve({
+    tenants: [],
+    selected: { tenant: 'acme', environment: 'alpha' },
+  });
+  await booted;
+
+  assert.equal(
+    store.getState().selection.selected,
+    null,
+    'boot() must not restore the persisted selection over an orchestrator session that already claimed the terminal',
+  );
+  assert.equal(store.getState().terminal.sessionId, 999, 'the orchestrator must keep the terminal');
 });
