@@ -153,7 +153,11 @@ Three distinct failures, all of them dead ends:
    `erun-ui/frontend/src` fails the gate unless it is declared agent-facing
    (`erun-common/mcp_tools.go`'s `AgentFacing` field, or
    `erun-cli/cmd/command_tree.go`'s `cliOnlyAgentFacingCommands` for a
-   CLI-only command).
+   CLI-only command). **A dead end can also be one flag wide**, so the gate
+   audits every flag on an operator-facing command as its own unit — a
+   capability shipped as new flags on a command that already has a desktop
+   surface used to pass unexamined (`cliOnlyAgentFacingFlags` /
+   `knownUnsurfacedFlags` in the same file are its two declaration sites).
 
 **Distinguish causes before writing copy.** "Unauthorized" from the platform API
 is not one condition. *Session expired*, *identity never enrolled*, *tenant
