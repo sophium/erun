@@ -52,9 +52,20 @@ var (
 	ErrIdentityResolutionFailed = errors.New("identity could not be resolved because of an internal error")
 )
 
+// normalizeNoRows maps a lookup query's driver-level failures onto the
+// repository's sentinel errors so a caller-supplied path value that is
+// syntactically malformed (e.g. "not-a-uuid" against a UUID column) reaches
+// the route layer as ErrInvalidInput (400), the same as any other bad input,
+// rather than falling through to writeRepositoryError's 500 default. Every
+// Get-by-id repository method routes its query error through this so the
+// fix applies once, at the layer that first sees the malformed value,
+// instead of per route.
 func normalizeNoRows(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
+	}
+	if code, ok := pgErrorCode(err); ok && code == pgerrcode.InvalidTextRepresentation {
+		return ErrInvalidInput
 	}
 	return err
 }
